@@ -1,0 +1,22 @@
+# Local environments and editor state
+.env
+.env.*
+.venv/
+venv/
+__pycache__/
+.ipynb_checkpoints/
+.DS_Store
+
+# Independently retained source and derived data
+/data/raw/
+/data/parquet/
+/data/cache/
+*.duckdb
+*.duckdb.wal
+
+# Delivery packages are retained outside analytical code history
+/deliveries/
+
+# Temporary publication outputs
+*.tmp
+*.partial
