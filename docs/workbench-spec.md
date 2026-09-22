@@ -105,6 +105,8 @@ Adapt the skill's interview mechanics to the user's established preference:
 
 Routine implementation choices do not require an interview. The adapted domain-modeling behavior above is embedded in the workflow instructions; it is not a second skill invocation.
 
+The installed `grilling` skill asks its whole frontier in one round and completes only when nothing remains unassumed. The workbench rules above replace that round format and completion criterion: one question per turn, and a material unknown may stay open. The direct invocation supplies grilling's design-tree discipline and environment fact-finding, and the workbench instructions state that their rules win where the two differ.
+
 ## Directory convention
 
 The generated workbench uses the following logical structure. Concrete filenames for executable code and configuration formats may vary by language or backend, but their responsibilities and boundaries must remain recognizable.
@@ -138,7 +140,8 @@ project-root/
 ├── package-format/
 │   ├── journal-template.md
 │   ├── executive-summary-template.md
-│   └── m365-assembly.md
+│   ├── m365-assembly.md
+│   └── manifest-template.md      # Shared manifest field list; serialization is project-specific
 ├── deliveries/
 │   └── <investigation-name>/
 │       └── <package-name>/
@@ -174,6 +177,8 @@ Every release is self-contained and includes:
 - a manifest containing the producing Git commit, input provenance, analytical settings, dataset selection, and unresolved caveats.
 
 The package narrative is authoritative upstream. The approved flow is workbench to M365. M365 formats and beautifies the provided Markdown and datasets into Word and Excel outputs; it does not supply substantive revisions back to the workbench. Reverse synchronization is out of scope.
+
+`deliveries/` is excluded from Git by the generated ignore rules, so a numbered release is retained in local storage only. Preserving releases elsewhere, such as shared storage or backup, is a project responsibility recorded in the project README.
 
 Working analysis uses current data and definitions. A delivered release preserves its exact exported results and provenance so later changes do not alter what it represented. Full database snapshots and exact rerun capability are not retained per release by default. Preserving enough original data for an exact rerun is an explicit choice.
 
@@ -284,7 +289,7 @@ The following choices remain open and must not be silently fixed by the specific
 - the general rule for when a scope change becomes a new investigation rather than an expansion, beyond the accepted population scenarios above;
 - the backend and refresh strategy for the exceptional incremental project; DuckDB over Parquet is the batch default;
 - precise cache identity, freshness detection, invalidation, and refresh mechanics;
-- the exact schema or formatting of the foundation catalog and delivery manifest;
+- the serialization format of the delivery manifest and the exact formatting of the foundation catalog; the manifest field list is fixed by the shared template;
 - implementation language, executable filenames, and configuration serialization format;
 - backend-specific raw-data retention and ignore rules; and
 - which deliveries, if any, warrant preserving original inputs for exact reruns.
