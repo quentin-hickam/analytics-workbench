@@ -5,7 +5,7 @@ This repository contains one shared data foundation and multiple investigations.
 ## Start or resume work
 
 - Resume the active investigation linked from `README.md` unless the user names another one, and briefly identify it. Point that link at `investigations/<name>/state.md` when an investigation is created or the user switches. Read its `brief.md` and `state.md`; consult `history.md` when prior reasoning matters. If a request could belong to more than one investigation, ask before changing their records.
-- A broader population that contains the current population remains the same investigation. A related question about an independent population starts a new investigation with fresh state, history, and findings. Inherit the related investigation's method, settings, and package format as starting points, subject to the user's corrections; prior findings are context for method selection, not evidence about the new population.
+- The same ask about a broader population that contains the current population can remain the same investigation; a different question starts a new one, and an ambiguous boundary goes to the scoping interview. A related question about an independent population starts a new investigation with fresh state, history, and findings. Inherit the related investigation's method, settings, and package format as starting points, subject to the user's corrections; prior findings are context for method selection, not evidence about the new population.
 - Invoke `workbench-init` to establish or repair the workbench structure, to start an investigation, or to resolve a consequential scope change. It owns the scoping interview and the investigation brief.
 
 ## Prepare and analyze data
