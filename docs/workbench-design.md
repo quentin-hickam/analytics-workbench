@@ -79,7 +79,7 @@ The CONTEXT.md in this design workspace is an artifact of the grill-with-docs se
 
 The domain-modeling skill itself introduces CONTEXT.md and ADR conventions; grill-with-docs is the wrapper that invokes it alongside grilling. These software-engineering document conventions are not required analytics deliverables or project records.
 
-The workflow instructions must invoke the grilling skill directly when establishing an investigation's question and scope or resolving a consequential scope change. Do not route this through grill-with-docs. Honor the user's preference for one question at a time, provide a recommendation, and carry forward settled answers rather than reopening them. Keep the interview focused on decisions that affect the analysis; routine implementation choices do not require another interview.
+The workflow instructions must invoke the grilling skill directly when establishing an investigation's question and scope or resolving a consequential scope change. Do not route this through grill-with-docs. Honor the user's preference for one question at a time, provide a recommendation, and carry forward settled answers rather than reopening them. Keep the interview focused on decisions that affect the analysis; routine implementation choices do not require another interview. These rules replace grilling's one-round frontier format and its empty-frontier completion rule; the workbench instructions say so explicitly so the two loaded skills do not compete.
 
 Grilling is an external dependency. Do not include its source in this repository or generated archives; discover the installed skill by name.
 

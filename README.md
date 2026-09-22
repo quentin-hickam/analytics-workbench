@@ -22,7 +22,7 @@ When a package is needed:
 
 > Use workbench-package to prepare a draft for the active investigation.
 
-The skill asks which datasets to include. Subsequent requests revise the same draft. Explicitly marking it delivered preserves the next numbered release; drafting alone does not release it. M365 receives the complete narrative, chosen exports, and assembly instructions for presentation work.
+The skill asks which datasets to include. Subsequent requests revise the same draft. Explicitly marking it delivered preserves the next numbered release; drafting alone does not release it. Releases live under `deliveries/`, which the generated ignore rules exclude from Git, so each project records where released packages are kept. M365 receives the complete narrative, chosen exports, and assembly instructions for presentation work.
 
 ## Design and validation
 
@@ -30,7 +30,7 @@ The [specification](docs/workbench-spec.md) defines the workflow and acceptance 
 
 Validation completed for the first draft:
 
-- Skill frontmatter and relative asset links passed checks. The packaging skill retains the optional `disable-model-invocation: true` hint for hosts that support it; the instructions require an explicit packaging request regardless of host support. The core skill validator was run on a temporary copy without that optional field.
+- Skill frontmatter and relative asset links passed checks. Both skills are model-invocable so that `AGENTS.md` and `workbench-init` can reach `workbench-package`; its description and body require an explicit packaging request, and no vendor-specific frontmatter is used.
 - An isolated agent initialized an empty project without a question or data, then reran initialization after a README customization. The customization survived and the second pass changed no files.
 - Another isolated agent refreshed a synthetic existing package with a finding awaiting revalidation. It updated the same draft, retained the empty dataset selection, added caveats beside the finding in both narratives, and preserved the numbered release, source inputs, code, and investigation records unchanged.
 
