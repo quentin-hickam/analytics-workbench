@@ -382,7 +382,8 @@ The workbench does not:
 - retain mistakes in approaching the data, coding mistakes, or debugging logs as analytical history;
 - create `CONTEXT.md`, `CONTEXT-MAP.md`, or ADRs in initialized workbenches;
 - invoke `grill-with-docs` or the unmodified `domain-modeling` skill;
-- store analytical conclusions in the knowledge vault, mirror system schemas into it, or read prior conclusions on the agent's own initiative before an investigation's own results exist;
+- store analytical conclusions in the knowledge vault or mirror system schemas into it;
+- read other investigations' or projects' conclusions on the agent's own initiative before an investigation's own results exist, except that a related investigation's findings may inform method selection as in scenario 2;
 - require the knowledge vault for project work, write to it without an explicit request, populate it in bulk from system catalogs, or require Git, an Obsidian plugin, REST API, or MCP server to use it; or
 - require a speculative general-purpose analytics framework beyond the current work.
 
