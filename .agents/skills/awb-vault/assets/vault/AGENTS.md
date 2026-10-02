@@ -7,7 +7,7 @@ This file owns the vault's conventions. Read it once per session before consulti
 ## What belongs here
 
 - Record knowledge about data objects and how to read and use them: meaning, grain, coverage, keys and joins, code values and their meanings, refresh behavior, known issues and their handling, and which object to use for which need.
-- Do not record analytical conclusions. Test each statement: would it change if the business changed? "pay_detail excludes contractors" belongs here; "contractor share is rising" does not. A known issue may note that ignoring it once changed a result, without saying which way.
+- Do not record analytical conclusions; read during scoping, they anchor the next analysis. Test each statement: would it change if the business changed? "pay_detail excludes contractors" belongs here; "contractor share is rising" does not. A known issue may note that ignoring it once changed a result, without saying which way.
 - Do not mirror schemas. Leave out exhaustive column lists, types, and row counts; include a structural detail only where it explains meaning or handling, and say on each object page where its full column list can be read.
 - Never record credentials or other secrets, record-level data, or paths that work only on one machine. System, server, and database names, code values, and access instructions are allowed.
 

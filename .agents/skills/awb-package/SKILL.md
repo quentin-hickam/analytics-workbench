@@ -78,4 +78,4 @@ When the user marks the package delivered or requests an equivalent delivery mil
 
 The package narrative and datasets are authoritative upstream. M365 may turn the supplied Markdown and selected datasets into polished Word and Excel files using the included assembly instructions. Make substantive revisions in the upstream draft and send the refreshed package forward again. Word or Excel edits are never reconciled back into the workbench.
 
-Finish by reporting the draft path, included datasets, provenance gaps, and unresolved caveats. When a represented finding is flagged for revalidation without an applicable recorded disposition, note that `awb-release` will ask for a disposition for each before releasing.
+Finish by reporting the draft path, included datasets, provenance gaps, and unresolved caveats. Tell the user it is a working copy that the next revision overwrites; only marking it delivered preserves it as a numbered release. When a represented finding is flagged for revalidation without an applicable recorded disposition, note that `awb-release` will ask for a disposition for each before releasing.

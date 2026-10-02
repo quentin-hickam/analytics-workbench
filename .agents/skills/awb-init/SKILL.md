@@ -71,7 +71,8 @@ Check that every created link is relative and every created record has a clear r
 - the target root;
 - files created and existing files preserved or augmented;
 - unresolved decisions or file conflicts;
-- which lazy directories were intentionally deferred; and
+- which lazy directories were intentionally deferred;
+- how work continues: analysis proceeds through normal requests, and nothing is packaged until the user asks for a package, which `awb-package` creates; and
 - the active investigation, or that none exists, followed by a suggestion to use `awb-status` to see where things stand and what can be asked for next.
 
 Create a Git commit only when the user explicitly requests one. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, the investigation for the user's business question has populated brief/state/history records, and no package or unsolicited analysis has been produced. A project with `Active investigation: none` is a valid completed initialization only when the user explicitly said there is no question yet, or when a repair leaves an existing workbench without one.

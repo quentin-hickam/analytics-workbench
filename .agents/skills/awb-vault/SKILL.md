@@ -16,7 +16,7 @@ Use the path the user names; otherwise the `WORKBENCH_VAULT` environment variabl
 1. Create the directory if it does not exist.
 2. If `AGENTS.md` already exists there, leave it unchanged and report that the vault already exists, then continue at step 4.
 3. Otherwise read the [vault conventions](assets/vault/AGENTS.md) and write that file as `AGENTS.md` at the vault root, unchanged. Create nothing else: system folders, object pages, `choosing.md`, and `glossary.md` are created later, on request, as knowledge is recorded. If the folder already holds other files, such as an existing Obsidian vault, leave them unchanged and tell the user that the conventions now apply alongside them.
-4. Report the vault path and, when `WORKBENCH_VAULT` does not already point there, tell the user to set it or add an equivalent line to their user-level agent instructions so projects can find the vault. Leave their configuration for them to change.
+4. Report the vault path and, when `WORKBENCH_VAULT` does not already point there, tell the user to set it or add an equivalent line to their user-level agent instructions so projects can find the vault. Leave their configuration for them to change. Tell the user the vault fills only when they ask, for example "Use awb-vault to record what we learned about pay_detail".
 
 A repeated create changes nothing.
 
