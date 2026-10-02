@@ -80,7 +80,8 @@ Check that every created link is relative and every created record has a clear r
 - the target root;
 - files created and existing files preserved or augmented;
 - the active investigation, if one was created;
-- unresolved decisions or file conflicts; and
-- which lazy directories were intentionally deferred.
+- unresolved decisions or file conflicts;
+- which lazy directories were intentionally deferred; and
+- how work continues: analysis proceeds through normal requests, and nothing is packaged until the user asks for a package, which `workbench-package` creates.
 
 Create a Git commit only when the user explicitly requests one. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, any first investigation has populated brief/state/history records, and no package or unsolicited analysis has been produced. A project with `Active investigation: none` is a valid completed initialization.
