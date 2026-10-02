@@ -19,6 +19,7 @@ Checked 2026-10-02. Refresh these notes when a host changes behavior, then revis
 ## Uncertain
 
 - Whether VS Code chat renders a Markdown image that points to a workspace-relative path, a remote URL, or a data URI. A community report says remote URLs do not render (<https://github.com/orgs/community/discussions/192581>); no official statement was found for the other two.
+- Which path form each host needs for a local chat image. A PR review reported that Codex desktop displays local images only from absolute filesystem paths; this was not independently confirmed. Absolute paths are the chat default until a host is known to resolve relative ones.
 - What Copilot Chat on github.com renders inline. GitHub documents Mermaid generation in Copilot Chat for use in issues, pull requests, and discussions (<https://docs.github.com/en/copilot/tutorials/copilot-chat-cookbook/communicate-effectively/creating-diagrams>), not inline rendering of Mermaid or images in the chat pane.
 - Whether Word sizes a pasted PNG from its `pHYs` dpi or from pixel dimensions. Check the inserted width and set it to 6.5 in when needed.
 - What a copy from rendered chat Markdown pastes into Word, Outlook, or Google Docs. Raw Markdown pasted into desktop Word stays literal pipe text according to secondary sources; no Microsoft statement was found.

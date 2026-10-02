@@ -27,13 +27,15 @@ Check the draft against the consistency rules in **Assemble the draft** of [awb-
 
 ## Resolve revalidation flags
 
-For each represented finding flagged for revalidation that lacks an applicable recorded disposition, stop and ask the user to choose one outcome per affected conclusion:
+The draft can predate the current flags: a shared-data correction may flag findings in the investigation records after drafting, and record maintenance leaves the draft unchanged. Read the investigation's current `state.md` findings and revalidation flags, and the `foundation/quality.md` entries their reasons cite, then match each flagged finding to the conclusions the draft represents. A flag counts whether or not the draft mentions it. A disposition recorded in the draft manifest applies only while the finding and its evidence remain materially the same as when it was recorded; a flag raised or changed since then reopens it.
+
+For each represented finding currently flagged for revalidation that lacks an applicable recorded disposition, stop and ask the user to choose one outcome per affected conclusion:
 
 1. revalidate it through a separate analytical step;
 2. omit it from the package; or
 3. release it with the caveat explicitly accepted.
 
-Release is never authority to revalidate or rerun analysis. A revalidation choice pauses the release until separate analytical work updates the investigation and the draft; the user then requests the release again. For omission or an accepted caveat, update the draft under awb-package's draft rules, record the disposition in the draft manifest, and re-verify before continuing. A recorded disposition stays applicable while the finding and its evidence remain materially the same.
+Release is never authority to revalidate or rerun analysis. A revalidation choice pauses the release until separate analytical work updates the investigation and the draft; the user then requests the release again. For omission or an accepted caveat, revise the draft through [awb-package](../awb-package/SKILL.md) so it omits the conclusion or carries the caveat beside it and lists the finding as unresolved, record the disposition in the draft manifest, and re-verify before continuing. An applicable disposition whose omission or caveat is missing from the draft also requires that revision before release. A recorded disposition stays applicable while the finding and its evidence remain materially the same.
 
 ## Create the release
 

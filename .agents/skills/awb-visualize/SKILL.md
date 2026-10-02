@@ -16,7 +16,8 @@ Every figure is an opaque white PNG, 6.5 in wide at 200 dpi (1300 px), plus a co
 - **Why opaque white**: a transparent background puts dark text on a dark chat theme and changes with every document background. White reads the same on both.
 - **Why the table**: it carries the result where an image does not display (other hosts, screen readers, plain-text email), and it makes every plotted claim checkable. Values match the figure and the narrative exactly.
 - Write an SVG beside the PNG only when the user wants a vector figure for Word or PowerPoint. Keep PNG for Google Docs and email.
-- In chat, embed the image with `![alt text](relative/path.png)` and also give the path as a link, then show the table. Use workspace files; remote image URLs and data URIs are not confirmed to render.
+- In chat, embed the image in the form the current host displays: an absolute filesystem path unless the host is known to resolve workspace-relative paths, since some hosts display local images only from absolute paths. Also give the path as a link, then show the table. When the image does not display, rely on the link and table and record the host's behavior in the rendering notes. Use local files; remote image URLs and data URIs are not confirmed to render.
+- In saved records and package documents, link figures by paths relative to that document so the files stay portable.
 - Generate figures in answer to an analytical request or for package work. Write additional formats, galleries, or documents only on explicit request.
 
 ## Workbench placement
