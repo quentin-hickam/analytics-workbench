@@ -7,8 +7,12 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 name="$(basename "$root")"
 out="$root/dist/analytics-workbench-skills.zip"
 allowlist="
-.agents/skills/workbench-init
-.agents/skills/workbench-package
+.agents/skills/awb-init
+.agents/skills/awb-package
+.agents/skills/awb-release
+.agents/skills/awb-status
+.agents/skills/awb-vault
+.agents/skills/awb-visualize
 docs
 scripts
 .gitignore

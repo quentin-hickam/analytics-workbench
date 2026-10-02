@@ -14,11 +14,16 @@ Keep the skills as agent-agnostic folders under `.agents/skills/`. Generated pro
 
 The eventual implementation must provide these artifacts:
 
-1. **Initialization skill.** Establishes the project structure, working conventions, shared data foundation, and the first investigation when a business question is available. It directly invokes the `grilling` skill as described below. It does not create a delivery package.
+1. **Initialization skill (`awb-init`).** Establishes the project structure, working conventions, shared data foundation, and the first investigation. A new project starts from a business question; the skill asks for one when none is supplied and completes setup without an investigation only when the user explicitly has none yet. It also starts later investigations and resolves consequential scope changes, directly invoking the `grilling` skill as described below. It does not create a delivery package or a knowledge vault.
 2. **Project `AGENTS.md` template.** Governs daily analytical work, architectural boundaries, automatic record maintenance, source and cache handling, investigation switching, when the knowledge vault is read, and the prohibition on unsolicited deliverables.
-3. **Packaging skill.** Creates or revises a named delivery package only when the user explicitly requests it. It gathers the package's dataset selection, checks revalidation flags, records provenance, and produces a complete upstream narrative plus M365 assembly instructions.
-4. **Supporting templates.** Provide consistent starting formats for the shared source register, data catalog, quality record, glossary, investigation brief, current state, investigation history, package journal, executive summary, M365 assembly instructions, and delivery manifest. Templates should be created or instantiated only when the corresponding artifact is needed.
-5. **Knowledge vault conventions.** One initialization-skill asset: the vault-root `AGENTS.md`, stating the page conventions in **Knowledge vault**. It is written only when the user explicitly asks to create a vault, and never over an existing file.
+3. **Status skill (`awb-status`).** A read-only report of the active investigation, findings and revalidation flags, unresolved issues, package and release state, release storage, and vault configuration, ending with the requests that are relevant now. It changes nothing and makes the workbench's request-gated capabilities discoverable to the analyst.
+4. **Packaging skill (`awb-package`).** Creates or revises a named delivery package's working draft only when the user explicitly requests it. It gathers the package's dataset selection, records provenance, carries caveats for findings awaiting revalidation, and produces a complete upstream narrative plus M365 assembly instructions. It owns the draft layout, shared package format, manifest fields, and draft consistency rules.
+5. **Release skill (`awb-release`).** Preserves a numbered release from the working draft only when the user explicitly marks the package delivered. It verifies the draft against the packaging skill's consistency rules, obtains a disposition for each unresolved revalidation flag, and records the project's release storage location, copying each release there when reachable.
+6. **Knowledge vault skill (`awb-vault`).** Creates a knowledge vault, and records data-estate knowledge in one, only when the user explicitly asks. Its one asset is the vault-root `AGENTS.md`, stating the page conventions in **Knowledge vault**, written only at vault creation and never over an existing file.
+7. **Visualization skill (`awb-visualize`).** Principles for attractive, legible charts, figures, diagrams, and results tables that display correctly inline in the agent chat and when pasted into a document, while keeping presentation logic out of neutral analytical operations.
+8. **Supporting templates.** Provide consistent starting formats for the shared source register, data catalog, quality record, glossary, investigation brief, current state, investigation history, package journal, executive summary, M365 assembly instructions, and delivery manifest. Templates should be created or instantiated only when the corresponding artifact is needed.
+
+Every skill name carries the `awb-` prefix so the workbench's actions group together in hosts that list skills as commands.
 
 The skills may also provide a concise project orientation file and ignore rules appropriate to the selected analytical backend. Those details must support the accepted workflow without introducing another required ledger or documentation system.
 
@@ -119,7 +124,8 @@ project-root/
 ├── src/
 │   ├── preparation/              # Reusable normalization and correction logic
 │   ├── exploration/              # Neutral profiling and analytical operations
-│   └── packaging/                # Shared package assembly logic
+│   ├── packaging/                # Shared package assembly logic
+│   └── presentation/             # Shared figure style and figure builders
 ├── data/
 │   ├── raw/                      # Independently landed originals and provenance
 │   ├── parquet/                  # Validated datasets queried by DuckDB views
@@ -137,7 +143,8 @@ project-root/
 │       ├── history.md            # Meaningful learnings and analytical decisions
 │       ├── <configuration>       # Population and analytical settings
 │       ├── <composition-entry>   # Thin composition of shared operations
-│       └── exploration/          # Local exploratory queries or notebooks
+│       ├── figures/              # Figures cited as evidence for findings
+│       └── exploration/          # Local exploratory queries, notebooks, and figures
 ├── package-format/
 │   ├── journal-template.md
 │   ├── executive-summary-template.md
@@ -151,6 +158,7 @@ project-root/
 │           │   ├── executive-summary.md
 │           │   ├── m365-assembly.md
 │           │   ├── manifest.<format>
+│           │   ├── figures/
 │           │   └── datasets/
 │           └── released/
 │               ├── 001/
@@ -179,7 +187,7 @@ Every release is self-contained and includes:
 
 The package narrative is authoritative upstream. The approved flow is workbench to M365. M365 formats and beautifies the provided Markdown and datasets into Word and Excel outputs; it does not supply substantive revisions back to the workbench. Reverse synchronization is out of scope.
 
-`deliveries/` is excluded from Git by the generated ignore rules, so a numbered release is retained in local storage only. Preserving releases elsewhere, such as shared storage or backup, is a project responsibility recorded in the project README.
+`deliveries/` is excluded from Git by the generated ignore rules, so a numbered release is retained in local storage only. Preserving releases elsewhere, such as shared storage or backup, is a project responsibility. The release skill asks for that location before the first release, records it in the project README, and copies each new release there when the location is reachable from the project; otherwise it states exactly what to copy and where.
 
 Working analysis uses current data and definitions. A delivered release preserves its exact exported results and provenance so later changes do not alter what it represented. Full database snapshots and exact rerun capability are not retained per release by default. Preserving enough original data for an exact rerun is an explicit choice.
 
@@ -221,7 +229,7 @@ Each claim carries, inline, its date and how it was established (documentation, 
 
 Agents read and write the vault through the filesystem; no Obsidian plugin, REST API, or MCP server is required. The vault location is a user-level setting: the `WORKBENCH_VAULT` environment variable or an equivalent line in user-level agent instructions. When it is unset or inaccessible, report that the vault was not consulted and continue from project records.
 
-The project `AGENTS.md` template gains a short **Knowledge vault** section holding the location rule, the read triggers, and the write rule. `workbench-init` applies the read triggers during scoping and, on explicit request, creates a vault at a user-named path by writing only its `AGENTS.md`. Project initialization never creates a vault as a side effect. The vault-root `AGENTS.md` alone owns page conventions.
+The project `AGENTS.md` template gains a short **Knowledge vault** section holding the location rule, the read triggers, and the write rule. `awb-init` applies the read triggers during scoping. `awb-vault` creates a vault on explicit request at a user-named path by writing only its `AGENTS.md`, and records knowledge in it on explicit request. Project initialization never creates a vault as a side effect. The vault-root `AGENTS.md` alone owns page conventions.
 
 Read triggers:
 
