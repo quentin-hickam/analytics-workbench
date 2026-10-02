@@ -71,7 +71,7 @@ Run this only when the user explicitly asks to create a knowledge vault. It need
 1. Use the path the user names; otherwise the configured `WORKBENCH_VAULT` location. If the user named no path and none is configured, ask for one. Create the directory if it does not exist.
 2. If `AGENTS.md` already exists there, leave it unchanged and report that the vault already exists, then continue at step 4.
 3. Otherwise read the [vault conventions](assets/vault/AGENTS.md) and write that file as `AGENTS.md` at the vault root, unchanged. Create nothing else: system folders, object pages, `choosing.md`, and `glossary.md` are created later, on request, as knowledge is recorded. If the folder already holds other files, such as an existing Obsidian vault, leave them unchanged and tell the user that the conventions now apply alongside them.
-4. Report the vault path and, when `WORKBENCH_VAULT` does not already point there, tell the user to set it or add an equivalent line to their user-level agent instructions so projects can find the vault. Do not change their configuration yourself.
+4. Report the vault path and, when `WORKBENCH_VAULT` does not already point there, tell the user to set it or add an equivalent line to their user-level agent instructions so projects can find the vault. Do not change their configuration yourself. Tell the user the vault fills only when they ask, for example "record what we learned about pay_detail in the vault".
 
 ## Complete initialization
 
@@ -80,7 +80,8 @@ Check that every created link is relative and every created record has a clear r
 - the target root;
 - files created and existing files preserved or augmented;
 - the active investigation, if one was created;
-- unresolved decisions or file conflicts; and
-- which lazy directories were intentionally deferred.
+- unresolved decisions or file conflicts;
+- which lazy directories were intentionally deferred; and
+- how work continues: analysis proceeds through normal requests, and nothing is packaged until the user asks for a package, which `workbench-package` creates.
 
 Create a Git commit only when the user explicitly requests one. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, any first investigation has populated brief/state/history records, and no package or unsolicited analysis has been produced. A project with `Active investigation: none` is a valid completed initialization.

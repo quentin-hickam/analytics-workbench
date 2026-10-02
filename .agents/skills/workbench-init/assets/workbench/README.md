@@ -9,7 +9,7 @@ Active investigation: none
 ## Where work belongs
 
 - `foundation/` records sources, canonical datasets and views, shared data quality, and common vocabulary.
-- `investigations/` keeps each question's brief, current state, meaningful history, settings, and local exploration.
+- `investigations/` keeps each question's brief, current state, meaningful history, settings, thin composition code, and local exploration.
 - `src/preparation/` holds reusable normalization and correction logic when such code exists.
 - `src/exploration/` holds neutral analytical operations when such code exists.
 - `src/packaging/` holds shared package assembly code when such code exists.

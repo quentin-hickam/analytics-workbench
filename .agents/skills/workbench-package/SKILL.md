@@ -85,4 +85,4 @@ Choose one greater than the highest existing numeric release, zero-padded to at 
 
 The package narrative and datasets are authoritative upstream. M365 may turn the supplied Markdown and selected datasets into polished Word and Excel files using the included assembly instructions. Make substantive revisions in the upstream draft and send the refreshed package forward again. Word or Excel edits are never reconciled back into the workbench.
 
-Finish by reporting the draft or release path, included datasets, provenance gaps, unresolved caveats, and, when released, the new release number.
+Finish by reporting the draft or release path, included datasets, provenance gaps, unresolved caveats, and, when released, the new release number. When reporting a draft, tell the user it is a working copy that the next revision overwrites; only marking it delivered preserves it as a numbered release.

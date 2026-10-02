@@ -32,4 +32,4 @@ The operation that assembled this package, recorded separately from the producin
 - unresolved caveats and revalidation flags, each with its recorded disposition: revalidate, omit, or release with caveat; and
 - exact-rerun inputs or snapshots included, only when the user chose them.
 
-A field that cannot be determined is recorded as unknown with the reason. A dirty or unknown producing state is never described as reproducible.
+A field that cannot be determined is recorded as unknown with the reason. A dirty or unknown producing state is never described as reproducible. Unless exact-rerun inputs are included, the commit, input identifiers, and settings locate what produced the results but do not guarantee an exact rerun; do not describe such a package as exactly reproducible.
