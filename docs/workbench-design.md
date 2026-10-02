@@ -103,6 +103,24 @@ When a shared data correction could affect investigation findings, flag those fi
 
 When work resumes, continue the last active investigation unless the user indicates a switch, and briefly identify that investigation. If a request could fit multiple investigations, ask before changing their records.
 
+## Knowledge vault
+
+One analyst needs what they learn about the data estate to carry from one project to the next: which systems and tables exist, what their rows mean, how they join, how they refresh, what goes wrong with them, and which to use for which need. The answer is an optional Obsidian vault of plain Markdown, kept outside every project and organized by the estate rather than by project.
+
+Each system the analyst connects to or receives data from gets a folder with a `README.md` recording what the system is and how it is identified in connections. Each table, view, extract, or endpoint the analyst has used or assessed gets one page named by its qualified name within the system. Database and schema pages exist only for facts that apply across their objects. This flat form gives an agent holding a qualified name a predictable path without a folder per database and schema. Pages are created lazily, only for objects actually used or assessed, including rejected ones, because a page per object across an estate would be thousands of empty pages.
+
+The vault holds curated interpretation and handling knowledge, not a copy of system metadata. Column lists, types, and row counts are available from each system's own catalog and would go stale in Markdown, so object pages say where to read them and record structural detail only where it explains meaning or handling.
+
+Comparative preference lives in one `choosing.md`, indexed by need, because an agent choosing a table does not yet know which object page to open. A preference whose recorded coverage does not fit a new question is not recommended as it stands. Business terms that span objects go in one `glossary.md`; a term defined by a single field stays on that object's page.
+
+Each claim carries its date and how it was established, because a date alone does not say whether a claim came from documentation, a query, or the system owner, and refreshing one claim must not make another look current. Vault claims are prior knowledge, not evidence about a project's acquired data: before preparation depends on one, the project checks it against what it acquired. When a project relies on a claim, it copies the claim with its date, basis, and a plain-text `vault:` reference into its own records, so the project stays complete and later vault edits never change it. A Markdown link written inside a project would resolve against the project root, which is why the reference is plain text.
+
+The vault preserves knowledge about the data, not conclusions of analysis. An agent that reads a prior conclusion while scoping looks for it, frames questions around it, and treats agreement as confirmation, which undermines computing before interpreting. The test for inclusion is whether a statement would change if the business changed. The study index and method notes of the earlier team design were dropped as project-level rather than estate knowledge.
+
+Agents use the filesystem only. The workbench bundle is portable and has no runtime, and an Obsidian plugin or MCP server would add a dependency some hosts lack. The vault-root `AGENTS.md` owns page conventions in one place, because copies in each project's `AGENTS.md` would drift. It is the only file a new vault starts with. Frontmatter, templates, tracked Obsidian settings, the root onboarding README, and the vault repair path were dropped as machinery one analyst does not need; system READMEs remain because they identify systems and carry system-wide guidance. Git is optional.
+
+Team sharing is an optional extension in one paragraph of the spec; the solo vault never depends on it. An earlier team design added a Git remote, review policy, team-unique project identifiers, and contact fields, and before that a heavier design used a promotion skill, separate broad and restricted stores, pinned store commits, mandatory review flags, and cross-store checks. Both were rejected as more machinery than the purpose needs.
+
 ## Open design questions
 
 - When a change starts a new investigation rather than expanding an existing one.

@@ -55,5 +55,11 @@ A preserved, numbered revision of a delivery package created at an explicit deli
 **Investigation state**:
 The current understanding of an investigation, including its active question, findings, unresolved issues, and next steps.
 
+**Knowledge vault**:
+An optional Obsidian vault of plain Markdown, kept by one analyst outside every project, that records curated knowledge about the data estate (systems, databases, schemas, and tables) so that what is learned in one project is found when a later project touches the same object. It excludes analytical conclusions and never replaces project records. A team may optionally share it.
+
+**Source choice**:
+An entry in the knowledge vault's `choosing.md` naming the preferred object for a recurring analytical need, its alternatives, objects to avoid, and the coverage and date the preference rests on. A project may depart from it with a recorded reason.
+
 **Investigation history**:
 The record of meaningful findings, analytical decisions, and relevant data limitations accumulated during an investigation, including superseded conclusions. It excludes execution mistakes and routine debugging.
