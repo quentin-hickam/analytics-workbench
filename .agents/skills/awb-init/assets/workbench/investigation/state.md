@@ -13,7 +13,7 @@ Summarize the current question and material scope settings. Link to the brief fo
 
 Use status to distinguish provisional, supported, superseded, and revalidation-needed findings.
 
-For result evidence, record or link the producing code commit and any uncommitted producing changes, input acquisition or publication identifiers, and settings used. Record unknown provenance honestly; a later checkout or packaging date does not identify the state that produced an earlier result.
+For result evidence, record or link the producing code commit and any uncommitted producing changes, input acquisition or publication identifiers, settings used, and the path of any evidence figure under `figures/`. Record unknown provenance honestly; a later checkout or packaging date does not identify the state that produced an earlier result.
 
 ## Unresolved issues
 

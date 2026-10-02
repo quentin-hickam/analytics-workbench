@@ -7,6 +7,8 @@ The Markdown narrative and packaged datasets are the authoritative source. Use M
 - Produce a concise executive-summary document from `executive-summary.md` and a detailed report from `journal.md`, or combine them when the requested deliverable calls for one document.
 - Preserve the heading hierarchy and keep caveats beside the claims they qualify.
 - Format tables for readability, repeat header rows across pages, and use accessible captions for figures or tables.
+- Insert each PNG from `figures/` at 6.5 in width beside the text that cites it, with its caption and alt text. Turn off picture compression for the document, or choose high fidelity, so figures keep their resolution.
+- Convert Markdown tables into Word tables rather than pasting their source.
 - Apply the organization's approved theme, typography, page furniture, and accessibility conventions when available.
 
 ## Excel

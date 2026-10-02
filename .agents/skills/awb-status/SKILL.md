@@ -1,0 +1,78 @@
+---
+name: awb-status
+description: Report where an analytics workbench stands (active investigation, findings by status, revalidation flags, open issues, package and release state, vault configuration) and the requests that fit right now. Use when the user asks where things stand, what is active or flagged, or what they can do next. Read-only; it changes nothing.
+---
+
+# Report workbench status
+
+Give the analyst a read-only snapshot of the project and a short menu of what they can ask for next. Many workbench capabilities run only on an explicit request, and this report is where the analyst learns which of those requests apply now.
+
+This skill is an observer. Read files and run `git status` and `git log`; change no file, run no analysis, refresh no cache, query no source, write no vault page, and make no commit. When the report reveals something to fix, name it under **You can ask for** and leave the fix to the user's next request.
+
+## Confirm the workbench
+
+Use the project root the user names, otherwise the current directory. It is a workbench when its `README.md` has an `Active investigation` line or the root holds `foundation/` or `investigations/`. Otherwise say so, stop, and suggest `awb-init` to create one there.
+
+## Read the minimum
+
+Read only these, in the project root:
+
+- `README.md`: the `Active investigation` line and any `Released packages are kept at:` line.
+- The active investigation's `state.md` (its `Last updated` date, findings table, unresolved issues, next steps) and `brief.md` (business question and material unknowns). Skip `history.md`.
+- The other directories under `investigations/`: each name and its `state.md` `Last updated` date. Leave their findings and conclusions unread; the project instructions forbid reading another investigation's conclusions unprompted.
+- `foundation/quality.md` correction rows, only to explain a revalidation flag whose state-file reason points to a correction.
+- For each package under `deliveries/<active-investigation>/`: whether `draft/` exists, its manifest's revision time and unresolved caveats with dispositions, and the highest numeric `released/NNN` with that manifest's release time.
+- Whether `WORKBENCH_VAULT` or an equivalent user-level instruction names a vault, and whether that path exists. Read no vault page.
+- When a vault is configured, the object names in `foundation/sources.md`, only to name an object in a vault suggestion.
+- `git log -1 --format=%cs -- investigations/<slug>/ ':!investigations/<slug>/state.md'` and `git status --short`, for staleness and uncommitted work.
+
+A record that does not exist is a fact to report, such as "no packages yet", not a gap to fill.
+
+## Assess
+
+- **Staleness**: state is stale when a commit or uncommitted change in the investigation directory is newer than `state.md`'s `Last updated` date. Say which is newer and by how much.
+- **Draft ahead of release**: compare the draft manifest's revision time with the latest release manifest's release time. When either time is missing, compare file modification times and label the result an estimate.
+- **Release storage risk**: a release exists and the README records no storage location, or the recorded location is not reachable from here.
+- **Vault**: configured (path exists), not configured, or inaccessible (named but missing or unreadable).
+
+## Report
+
+Keep the report to one screen. Use the investigation's own wording for findings, shortened; give every revalidation-needed finding its reason. Omit a section that has nothing to say, except the vault line. Follow this shape:
+
+```text
+Active: churn-q3 — Why did Q3 enterprise churn rise? (state updated 2026-09-28; 3 commits since, stale)
+Findings: 2 supported, 1 provisional, 1 superseded, 1 needs revalidation
+  - Revalidate: "Renewal lag drives churn": account-merge correction Q-004 changed the account count
+Open issues: contract-end dates missing for 6% of accounts; scope of reseller accounts undecided
+Next steps: profile reseller accounts; compare lag by region
+Other investigations: pricing-test (updated 2026-07-02)
+Package churn-review: draft revised 2026-09-30, newer than release 002 (2026-09-12); 1 caveat without disposition
+Release storage: not recorded (risk: release 002 exists only in this checkout)
+Vault: configured, reachable
+
+You can ask for:
+  - "Rerun the flagged findings" (analytical work under the project AGENTS.md)
+  - "Mark the churn-review package delivered" (awb-release)
+  - "Record where releases are kept" (awb-release)
+  - "Resolve the reseller scope question" (awb-init)
+```
+
+## You can ask for
+
+End with the handful of requests the current state makes relevant, each phrased as a sentence the user could type, with its handler in parentheses so hosts without a skill menu still route it. Choose from this map and offer nothing else:
+
+| State | Request | Handler |
+| --- | --- | --- |
+| No active investigation | "Start an investigation into <question>" | `awb-init` |
+| A consequential scope or purpose decision is open in the brief or state | "Resolve the <topic> scope change" | `awb-init` |
+| Findings flagged for revalidation | "Rerun the flagged findings" | analytical work under AGENTS.md |
+| Supported findings and no draft | "Prepare a draft package" | `awb-package` |
+| Draft ahead of the latest release, or never released | "Mark the <package> package delivered" | `awb-release` |
+| A release exists and storage is unrecorded or unreachable | "Record where releases are kept" | `awb-release` |
+| Next steps call for preparation beyond the active question | "Prepare <source> more broadly" | analytical work under AGENTS.md |
+| Other investigations exist | "Checkpoint this investigation and switch to <name>" | AGENTS.md record maintenance |
+| Uncommitted analytical code or records | "Commit the current work" | explicit commit request |
+| Vault configured and sources assessed | "Record what we learned about <object> in the vault" | `awb-vault` |
+| State is stale | "Update the investigation state" | AGENTS.md record maintenance |
+
+Limit the list to the four or five requests that matter most, ordered by risk first (revalidation, storage, staleness), then progress.

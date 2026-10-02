@@ -1,13 +1,11 @@
 ---
-name: workbench-init
-description: Initialize an analytics workbench, repair its structure, start an investigation in an existing one, resolve a consequential scope change through the scoping interview, or create a knowledge vault when explicitly asked.
+name: awb-init
+description: Initialize or repair an analytics workbench, start a new investigation in an existing analytics workbench, or resolve a consequential scope change through the scoping interview.
 ---
 
 # Initialize an analytics workbench
 
 Build a project around one shared data foundation and zero or more investigations. Initialization establishes conventions and durable records; broad data preparation, an analytical framework, and delivery packages come later and only on request.
-
-When the user asks only to create a knowledge vault, follow **Create a knowledge vault** and skip the project steps.
 
 ## Resolve the target
 
@@ -18,11 +16,13 @@ When the user asks only to create a knowledge vault, follow **Create a knowledge
 
 A rerun is reconciliation, not a reset: settled records, answered questions, working paths, and customized templates stay as they are.
 
+One rename is migrated during reconciliation. In the project's `AGENTS.md` and `README.md`, rewrite each reference to an earlier workbench skill name to the current one: `workbench-init` becomes `awb-init`, and `workbench-package` becomes `awb-package`, or `awb-release` where the reference is about marking a package delivered or making a numbered release. Report each rewrite. The migration changes nothing else in those files.
+
 Use the existing Git repository when the target is inside one. Otherwise, initialize a local Git repository if Git is available, without creating a commit or configuring a remote. If Git is unavailable, report that limitation rather than claiming code history is established.
 
 ## Decide how much to initialize
 
-Initialization may stop after creating the project and shared foundation. An investigation exists only when the user has supplied a business question.
+An investigation exists only when the user has supplied a business question. A new project starts from one: when the user asks to initialize a new project without supplying a question, ask for the business question before creating any project file. Set up the project and shared foundation without an investigation only when the user explicitly says there is no question yet. Repairing or reconciling an existing workbench needs no new question.
 
 For an existing workbench, read the active investigation's brief before deciding whether to extend it or start another; read its findings only when the new investigation is related, as context for method selection. An expansion of the same ask to a population containing the original group stays in that investigation; the same questions about an independent group start another. Inherit the current method and settings for a related investigation unless corrected, but start fresh findings and progress. Ask about genuinely ambiguous boundaries rather than applying these examples to every scope change.
 
@@ -60,18 +60,9 @@ Land every acquired API response, SQL extract, or other source before canonical 
 
 Create `data/raw/` only for an acquisition, `data/parquet/` only for validated publication, and `data/cache/` only for a deliberate expensive result whose purpose is recorded in the catalog. Create `foundation/views/` when the first canonical definition exists. Let readers query stable published files while new outputs are prepared elsewhere and validated before publication.
 
-Package templates and `deliveries/` remain absent during initialization. If the user explicitly asks for a package, complete initialization and then invoke the sibling [`workbench-package` skill](../workbench-package/SKILL.md); that skill owns `package-format/` and delivery creation.
+Package templates and `deliveries/` remain absent during initialization. If the user explicitly asks for a package, complete initialization and then invoke the sibling [`awb-package` skill](../awb-package/SKILL.md); that skill owns `package-format/` and the package's working draft.
 
-Project initialization never creates or changes a knowledge vault, even when one is configured.
-
-## Create a knowledge vault
-
-Run this only when the user explicitly asks to create a knowledge vault. It needs no project, foundation records, or scoping interview, and the data-project target check above does not apply.
-
-1. Use the path the user names; otherwise the configured `WORKBENCH_VAULT` location. If the user named no path and none is configured, ask for one. Create the directory if it does not exist.
-2. If `AGENTS.md` already exists there, leave it unchanged and report that the vault already exists, then continue at step 4.
-3. Otherwise read the [vault conventions](assets/vault/AGENTS.md) and write that file as `AGENTS.md` at the vault root, unchanged. Create nothing else: system folders, object pages, `choosing.md`, and `glossary.md` are created later, on request, as knowledge is recorded. If the folder already holds other files, such as an existing Obsidian vault, leave them unchanged and tell the user that the conventions now apply alongside them.
-4. Report the vault path and, when `WORKBENCH_VAULT` does not already point there, tell the user to set it or add an equivalent line to their user-level agent instructions so projects can find the vault. Do not change their configuration yourself.
+Project initialization never creates or changes a knowledge vault, even when one is configured. A request to create a vault goes to the sibling [`awb-vault` skill](../awb-vault/SKILL.md).
 
 ## Complete initialization
 
@@ -79,8 +70,8 @@ Check that every created link is relative and every created record has a clear r
 
 - the target root;
 - files created and existing files preserved or augmented;
-- the active investigation, if one was created;
-- unresolved decisions or file conflicts; and
-- which lazy directories were intentionally deferred.
+- unresolved decisions or file conflicts;
+- which lazy directories were intentionally deferred; and
+- the active investigation, or that none exists, followed by a suggestion to use `awb-status` to see where things stand and what can be asked for next.
 
-Create a Git commit only when the user explicitly requests one. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, any first investigation has populated brief/state/history records, and no package or unsolicited analysis has been produced. A project with `Active investigation: none` is a valid completed initialization.
+Create a Git commit only when the user explicitly requests one. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, the investigation for the user's business question has populated brief/state/history records, and no package or unsolicited analysis has been produced. A project with `Active investigation: none` is a valid completed initialization only when the user explicitly said there is no question yet, or when a repair leaves an existing workbench without one.
