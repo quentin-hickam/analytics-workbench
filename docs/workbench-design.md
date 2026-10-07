@@ -33,6 +33,8 @@ Data gathering must always land source records durably and independently before 
 
 Preserve landed originals separately from derived Parquet datasets. Conversion establishes a validated storage representation, not an automatic claim that cleaning is complete. Canonical views apply documented normalization and correction rules. Initial CSV/JSON landing is source acquisition and does not violate the prohibition on intermediate CSV handoffs. The same independent-landing boundary applies to each batch of an incremental project.
 
+`data/raw/` is excluded from Git, like `deliveries/`, and for the same reason the project records where copies are kept. Parquet datasets and caches can be rebuilt from landed originals and Git-managed code, but a landed original often cannot be fetched again: a point-in-time API response or an extract from a system that has since changed is lost with the one disk that holds it, and every release manifest citing that acquisition then points at nothing. The project README therefore records where landed data is kept, the agent copies each completed landing there when the location is reachable and otherwise says what to copy, and the source register records each acquisition's retained copy so status and release can report what exists only in this checkout. The rule lives in the project AGENTS.md rather than a skill, because landing is always-on behavior, not a requested action. It retains landed originals outside the checkout; it does not add inputs to releases, which remains the explicit exact-rerun choice.
+
 Prefer views; cache results when recomputation is expensive. Accumulating materialized tables within one database has caused excessive storage growth.
 
 ## Preparation and exploration boundary

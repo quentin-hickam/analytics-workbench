@@ -12,11 +12,10 @@ Build a project around one shared data foundation and zero or more investigation
 1. Use the project root named by the user. Otherwise, use the current working directory only when it is clearly the intended data project.
 2. A directory holding skill sources, design records, or an unrelated codebase is not a data project. If the current directory is one, obtain a separate target path before writing project files.
 3. Inspect the target before changing it. Read its repository instructions, orientation, ignore rules, foundation records, and investigation records when present.
-4. Merge conservatively. Existing files and project conventions are authoritative. Create missing artifacts, add clearly compatible missing sections when useful, and preserve all existing content. When an existing artifact conflicts with the workbench model, explain the conflict and ask for the project-specific decision instead of overwriting it.
+4. Check whether the target directory or any directory above it holds a host-specific instruction file that the current host reads in preference to `AGENTS.md`. For example, Claude Code reads `CLAUDE.md` and skips `AGENTS.md` when a `CLAUDE.md` or `CLAUDE.local.md` is present. Such a file means the workbench rules in `AGENTS.md` may not be loaded. Never create, edit, or bridge that file; report it at completion.
+5. Merge conservatively. Existing files and project conventions are authoritative. Create missing artifacts, add clearly compatible missing sections when useful, and preserve all existing content. When an existing artifact conflicts with the workbench model, explain the conflict and ask for the project-specific decision instead of overwriting it.
 
 A rerun is reconciliation, not a reset: settled records, answered questions, working paths, and customized templates stay as they are.
-
-One rename is migrated during reconciliation. In the project's `AGENTS.md` and `README.md`, rewrite each reference to an earlier workbench skill name to the current one: `workbench-init` becomes `awb-init`, and `workbench-package` becomes `awb-package`, or `awb-release` where the reference is about marking a package delivered or making a numbered release. Report each rewrite. The migration changes nothing else in those files.
 
 Use the existing Git repository when the target is inside one. Otherwise, initialize a local Git repository if Git is available, without creating a commit or configuring a remote. If Git is unavailable, report that limitation rather than claiming code history is established.
 
@@ -71,6 +70,7 @@ Check that every created link is relative and every created record has a clear r
 - the target root;
 - files created and existing files preserved or augmented;
 - unresolved decisions or file conflicts;
+- any host-specific instruction file found that the host reads in preference to `AGENTS.md`, with a warning that the workbench rules may not be loaded and how that host imports or enables `AGENTS.md` (for `CLAUDE.md`, an `@AGENTS.md` line), leaving that change to the user;
 - which lazy directories were intentionally deferred;
 - how work continues: analysis proceeds through normal requests, and nothing is packaged until the user asks for a package, which `awb-package` creates; and
 - the active investigation, or that none exists, followed by a suggestion to use `awb-status` to see where things stand and what can be asked for next.

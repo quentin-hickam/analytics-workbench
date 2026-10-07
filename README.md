@@ -13,11 +13,30 @@ Every skill name carries the `awb-` prefix, so typing `awb-` in a host that list
 - [awb-vault](.agents/skills/awb-vault/SKILL.md): create a knowledge vault or record data-estate knowledge in it. Its [vault conventions](.agents/skills/awb-vault/assets/vault/AGENTS.md) are the only file a new vault starts with.
 - [awb-visualize](.agents/skills/awb-visualize/SKILL.md): principles, libraries, and style defaults for charts and tables that display inline in agent chat and survive pasting into a document.
 
-External dependency: `grilling` must already be installed and discoverable by the agent. It is not included or redistributed in this bundle. Workbench instructions invoke it directly, one question at a time, preserving settled answers.
+## Requirements
+
+- The `grilling` skill, from the `skills/productivity/grilling` folder of [mattpocock/skills](https://github.com/mattpocock/skills). The workbench was written against the copy in that repository's release v1.3.1, whose `grilling` folder is identical to commit `85f83d3` of 2026-08-20; later commits change its question format and have not been tested here. It is not included or redistributed in this bundle. It must be installed where the host's skill discovery finds it, normally the same user-level skills directory as the `awb-*` folders. Workbench instructions invoke it directly by name, one question at a time, preserving settled answers. Without it, `awb-init` reports the missing dependency and pauses the scoping interview; project setup continues.
+- For figures made under `awb-visualize`, the analysis project's Python environment needs Python 3.10 or later, matplotlib, and seaborn 0.13. The shared style file was tested with matplotlib 3.10.0 and seaborn 0.13.2.
 
 ## Install
 
-Copy the six `awb-*` folders from `.agents/skills/` into your agent host's user-level skills directory, alongside `grilling`. The skills serve every project from there; projects need no local copies. Projects initialized with the earlier `workbench-init` and `workbench-package` names are migrated the next time `awb-init` reconciles them.
+Download `analytics-workbench-skills-vX.Y.Z.zip` from the repository's GitHub releases and unzip it anywhere. It unpacks to one folder, `analytics-workbench-skills/`, holding the six `awb-*` skill folders beside this README, `LICENSE`, `CHANGELOG.md`, and `docs/`. Copy the six `awb-*` folders into your agent host's user-level skills directory, alongside `grilling`, replacing any earlier copies. Do not unzip the archive into the skills directory itself: a host looks for `<skills directory>/<skill name>/SKILL.md`, and the extra folder level hides the skills. In a clone of this repository, the same six folders are under `.agents/skills/`.
+
+The skills serve every project from the user-level directory; projects need no local copies.
+
+User-level skills directories:
+
+- Claude Code: `~/.claude/skills/`. Claude Code does not discover skills in `~/.agents/skills/`. See [Claude Code skills](https://code.claude.com/docs/en/skills).
+- OpenAI Codex: `~/.agents/skills/`. Codex also scans `.agents/skills/` in each directory from the working directory up to the repository root. See [Codex agent skills](https://developers.openai.com/codex/skills).
+- Other hosts: each `awb-*` folder follows the agent skills convention of a folder holding a `SKILL.md` with `name` and `description` frontmatter. Check the host's documentation for its user-level skills directory.
+
+### Project instructions in AGENTS.md
+
+`awb-init` writes the workbench rules into the project's root `AGENTS.md`. Hosts differ in when they read it.
+
+- Claude Code reads a project `AGENTS.md` starting with version 2.1.277, and by default only when no `CLAUDE.md`, `.claude/CLAUDE.md`, or `CLAUDE.local.md` exists in the working directory or any directory above it. When one does, Claude Code reads the `CLAUDE.md` files and skips `AGENTS.md`. Your own `~/.claude/CLAUDE.md` does not count for this check. See [How Claude remembers your project](https://code.claude.com/docs/en/memory#agents-md).
+- So a workbench created inside a repository or folder that already has a `CLAUDE.md` loses the workbench rules in Claude Code without any warning from the host. `awb-init` reports such a file when it finds one but never edits it. To load the rules, add a line reading `@AGENTS.md` to that `CLAUDE.md`, which imports the file, or set Project instructions in `/config` to `claude-md-and-agents-md`, which reads both files. On Claude Code versions before 2.1.277, use the import.
+- OpenAI Codex reads `AGENTS.md` from its home directory (`~/.codex` by default) and then from each directory from the Git root down to the working directory, preferring an `AGENTS.override.md` in the same directory. See [Custom instructions with AGENTS.md](https://developers.openai.com/codex/guides/agents-md).
 
 ## Use
 
@@ -40,6 +59,8 @@ The skill asks which datasets to include. Subsequent requests revise the same dr
 > Use awb-release — mark the package delivered.
 
 That preserves the next numbered release after any outstanding revalidation decisions. Releases live under `deliveries/`, which the generated ignore rules exclude from Git, so before the first release `awb-release` asks where released packages are kept, records it in the project README, and copies each release there when the location is reachable. M365 receives the complete narrative, chosen exports, and assembly instructions for presentation work.
+
+Landed source data gets the same treatment. `data/raw/` is also excluded from Git, and a landed original often cannot be fetched again, so before the first acquisition is landed the agent asks where landed originals are kept outside the checkout, records it on the project README's `Landed data is kept at` line, and copies each completed landing there when the location is reachable. `awb-status` reports landed data that exists only in the checkout.
 
 To carry knowledge about your data estate (systems, databases, schemas, and tables) from one project to the next, optionally create a knowledge vault outside every project:
 
@@ -65,3 +86,11 @@ Validation completed for the knowledge vault, before vault creation moved from `
 - A conformance audit compared the package with the specification. Instruction gaps these checks found were corrected afterwards.
 
 These checks exercised the instructions with agents and local fixtures. No API acquisition, production data conversion, or M365 assembly was performed here.
+
+## Versioning
+
+Releases are Git tags `vX.Y.Z`, each with a zip asset named `analytics-workbench-skills-vX.Y.Z.zip`. `scripts/build-dist.sh` builds the archive as `dist/analytics-workbench-skills.zip`; add the version when attaching it to the release. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).

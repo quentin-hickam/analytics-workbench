@@ -11,7 +11,7 @@ Use stable source IDs in the catalog, quality record, and investigation records.
 
 ## Acquisitions
 
-Record each completed landing independently. A landing is complete only after the source artifact and its acquisition provenance are durable; partial acquisitions remain unpublished.
+Record each completed landing independently. A landing is complete only after the source artifact and its acquisition provenance are durable; partial acquisitions remain unpublished. `data/raw/` is excluded from Git, so record where each landed artifact and its provenance are retained outside this checkout, or `this checkout only`.
 
-| Acquisition ID | Source ID | Acquired at | Source version, query, or request | Landed artifact | Integrity or completeness check | Restrictions | Notes |
-| --- | --- | --- | --- | --- | --- | --- | --- |
+| Acquisition ID | Source ID | Acquired at | Source version, query, or request | Landed artifact | Retained copy | Integrity or completeness check | Restrictions | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |

@@ -19,7 +19,7 @@ The draft lives at `deliveries/<investigation>/<package>/draft/`. If it does not
 
 `deliveries/` is excluded from Git, so a release exists only on this disk until it is copied elsewhere. The project README records the storage location on a line reading `Released packages are kept at: <location>`.
 
-When that line is absent or reads `not yet recorded`, ask the user where released packages are kept before creating the release. Record the answer on that line, adding the line after the README's `deliveries/` entry when absent and preserving every other line, including an older bullet that says to record the location once chosen. If the user declines, record `none chosen` and warn plainly that the release will exist only in this checkout. A recorded `none chosen` is a decision: repeat the warning at each release and record a location whenever the user names one.
+When that line is absent or reads `not yet recorded`, ask the user where released packages are kept before creating the release. Record the answer on that line, adding the line when absent after the README's `Active investigation` line and any `Landed data is kept at` line, and preserving every other line. If the user declines, record `none chosen` and warn plainly that the release will exist only in this checkout. A recorded `none chosen` is a decision: repeat the warning at each release and record a location whenever the user names one.
 
 ## Verify the draft
 
@@ -60,5 +60,6 @@ Finish with:
 - the release path and release number;
 - the included datasets, or none;
 - dispositions recorded during this release and those carried from earlier revisions;
-- provenance gaps carried from the manifest; and
+- provenance gaps carried from the manifest;
+- a warning naming each acquisition the manifest cites whose retained copy in `foundation/sources.md` is blank or `this checkout only`, since its landed original exists only in this checkout; and
 - the storage result: the verified copy path, a conflict or file-list mismatch, the exact copy instruction, or the only-copy warning.
