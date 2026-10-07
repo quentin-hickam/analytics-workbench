@@ -7,7 +7,7 @@ Describe shared datasets, canonical views, and deliberate caches. Keep business-
 | Name | Kind | Grain | Inputs | Definition or location | Preparation rules | Quality constraints | Availability or refresh notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 
-For canonical views, identify the Git-managed definition loaded into each process-local analytical session. Name the publication each view reads, such as `data/parquet/<dataset>/<publication-id>/`; switching a view to a newer publication is a deliberate preparation change recorded here. For published files, identify the validated Parquet location without treating conversion alone as proof of cleanliness.
+For canonical views, identify the Git-managed definition loaded into each process-local analytical session. Name the publication each view reads, such as `data/parquet/<dataset>/<publication-id>/`, whose `publication.json` records its inputs, conversion commit, and file checksums; switching a view to a newer publication is a deliberate preparation change recorded here. For published files, identify the validated Parquet location without treating conversion alone as proof of cleanliness.
 
 ## Deliberate caches
 

@@ -16,6 +16,7 @@ Every skill name carries the `awb-` prefix, so typing `awb-` in a host that list
 
 - The `grilling` skill, from the `skills/productivity/grilling` folder of [mattpocock/skills](https://github.com/mattpocock/skills). The workbench was written against the copy in that repository's release v1.3.1, whose `grilling` folder is identical to commit `85f83d3` of 2026-08-20; later commits change its question format and have not been tested here. It is not included or redistributed in this bundle. It must be installed where the host's skill discovery finds it, normally the same user-level skills directory as the `awb-*` folders. Workbench instructions invoke it directly by name, one question at a time, preserving settled answers. Without it, `awb-init` reports the missing dependency and pauses the scoping interview; project setup continues.
 - For figures made under `awb-visualize`, the analysis project's Python environment needs Python 3.10 or later, matplotlib, and seaborn 0.13. The shared style file was tested with matplotlib 3.10.0 and seaborn 0.13.2.
+- For the landing helper that `awb-init` ships, the analysis project's Python environment needs Python 3.10 or later; its `session()` also needs the `duckdb` package. `land()`, `publish()`, and `retain()` use only the standard library.
 - For result validation under the project `AGENTS.md`, the analysis project's Python environment needs Python 3.10 or later and pandas. The shared validation file was tested with pandas 2.2.
 
 ## Install
