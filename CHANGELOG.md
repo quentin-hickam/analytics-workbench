@@ -4,7 +4,9 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `awb_validate.py`, a shared validation file that `awb-init` ships and the project copies to `src/exploration/validate.py`: `validate()` runs the columns, row-count, join, and null checks and records the scope, metrics, and values judgments in the same list, which is stored with result evidence; `profile()` reports row count and per-column type, null rate, distinct count, and sample values.
 
 ## [0.2.0] - 2026-10-07
 
