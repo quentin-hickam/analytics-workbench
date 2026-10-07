@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 import shutil
@@ -15,6 +16,13 @@ spec.loader.exec_module(manifest)
 ABC = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 EMPTY = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 HELLO = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+
+# Each seam called on one directory with an empty inventory, for checks every seam shares.
+SEAMS = {
+    "inventory": lambda directory: manifest.inventory(directory, manifest_name="manifest.json"),
+    "verify": lambda directory: manifest.verify(directory, [], manifest_name="manifest.json"),
+    "compare_trees": lambda directory: manifest.compare_trees(directory, directory),
+}
 
 
 @pytest.fixture
@@ -37,7 +45,11 @@ def test_inventory_lists_sorted_files_and_manifest_by_path_only(package, manifes
     if not manifest_exists:
         (package / "manifest.json").unlink()
 
-    assert manifest.inventory(package, manifest_name="manifest.json") == [
+    rows = manifest.inventory(package, manifest_name="manifest.json")
+    for row in rows[:-1]:
+        content = (package / row["path"]).read_bytes()
+        assert (row["bytes"], row["sha256"]) == (len(content), hashlib.sha256(content).hexdigest())
+    assert rows == [
         {"path": ".hidden", "bytes": 5, "sha256": HELLO},
         {"path": "datasets/d.csv", "bytes": 5, "sha256": HELLO},
         {"path": "figures/a.png", "bytes": 0, "sha256": EMPTY},
@@ -47,13 +59,11 @@ def test_inventory_lists_sorted_files_and_manifest_by_path_only(package, manifes
 
 
 @pytest.mark.parametrize("seam", ["inventory", "verify"])
-@pytest.mark.parametrize("name", ["/manifest.json", "../manifest.json", "meta/../manifest.json"])
-def test_rejects_absolute_or_parent_manifest_paths(package, name, seam):
-    with pytest.raises(ValueError, match="manifest"):
-        if seam == "inventory":
-            manifest.inventory(package, manifest_name=name)
-        else:
-            manifest.verify(package, [], manifest_name=name)
+@pytest.mark.parametrize("name", ["/manifest.json", "../manifest.json", "meta/../manifest.json", ""])
+def test_rejects_absolute_parent_or_empty_manifest_paths(package, name, seam):
+    call = {"inventory": manifest.inventory, "verify": lambda d, **kw: manifest.verify(d, [], **kw)}[seam]
+    with pytest.raises(ValueError, match="manifest path"):
+        call(package, manifest_name=name)
 
 
 @pytest.mark.parametrize("target", ["journal.md", "empty", "absent"])
@@ -139,16 +149,41 @@ def test_verify_compares_recorded_digests_case_insensitively(package):
     assert manifest.verify(package, rows, manifest_name="manifest.json") == []
 
 
-@pytest.mark.parametrize("field", ["bytes", "sha256"])
+@pytest.mark.parametrize("field, value", [("bytes", ...), ("sha256", ...), ("sha256", None)])
 @pytest.mark.parametrize("file_exists", [True, False])
-def test_verify_rejects_incomplete_non_manifest_rows(package, field, file_exists):
+def test_verify_rejects_incomplete_non_manifest_rows(package, field, value, file_exists):
     rows = manifest.inventory(package, manifest_name="manifest.json")
     journal_row = next(row for row in rows if row["path"] == "journal.md")
-    del journal_row[field]
+    if value is ...:
+        del journal_row[field]
+    else:
+        journal_row[field] = value
     if not file_exists:
         (package / "journal.md").unlink()
     with pytest.raises(ValueError, match="journal.md"):
         manifest.verify(package, rows, manifest_name="manifest.json")
+
+
+@pytest.mark.parametrize("size", ["", "-3", " 3", "3.0", "three", 3.0, True, None, -3])
+def test_verify_rejects_invalid_byte_sizes(package, size):
+    rows = manifest.inventory(package, manifest_name="manifest.json")
+    next(row for row in rows if row["path"] == "journal.md")["bytes"] = size
+    with pytest.raises(ValueError, match="journal.md"):
+        manifest.verify(package, rows, manifest_name="manifest.json")
+
+
+def test_verify_rejects_row_without_path(package):
+    with pytest.raises(ValueError, match="without a path"):
+        manifest.verify(package, [{"bytes": 3, "sha256": ABC}], manifest_name="manifest.json")
+
+
+def test_verify_reports_missing_manifest_as_none_even_with_recorded_digest(package):
+    rows = manifest.inventory(package, manifest_name="manifest.json")
+    rows[-1]["sha256"] = ABC
+    (package / "manifest.json").unlink()
+    assert manifest.verify(package, rows, manifest_name="manifest.json") == [
+        {"path": "manifest.json", "kind": "missing", "expected": None, "actual": None},
+    ]
 
 
 @pytest.mark.parametrize("path", ["journal.md", "manifest.json"])
@@ -186,7 +221,7 @@ def test_compare_trees_reports_sorted_missing_extra_and_checksum(package, tmp_pa
     ]
 
 
-@pytest.mark.parametrize("seam", ["inventory", "verify", "compare_trees"])
+@pytest.mark.parametrize("seam", SEAMS)
 def test_all_seams_reject_symlink_root(package, tmp_path, seam):
     link = tmp_path / "linked-draft"
     try:
@@ -194,12 +229,13 @@ def test_all_seams_reject_symlink_root(package, tmp_path, seam):
     except (OSError, NotImplementedError):
         pytest.skip("symlinks are not supported")
     with pytest.raises(ValueError, match="linked-draft"):
-        if seam == "inventory":
-            manifest.inventory(link, manifest_name="manifest.json")
-        elif seam == "verify":
-            manifest.verify(link, [], manifest_name="manifest.json")
-        else:
-            manifest.compare_trees(package, link)
+        SEAMS[seam](link)
+
+
+@pytest.mark.parametrize("seam", SEAMS)
+def test_all_seams_reject_missing_directory(tmp_path, seam):
+    with pytest.raises(FileNotFoundError):
+        SEAMS[seam](tmp_path / "absent")
 
 
 @pytest.mark.parametrize("seam", ["verify", "compare_trees"])
