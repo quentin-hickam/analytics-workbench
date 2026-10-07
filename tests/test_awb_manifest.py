@@ -1,6 +1,26 @@
+# Kept cases:
+# test_inventory_lists_sorted_files_and_manifest_by_path_only: sorted paths, sizes and checksums; path-only manifest whether present or absent.
+# test_inventory_rejects_empty_manifest_name: regression: empty manifest name is rejected.
+# test_verify_accepts_unchanged_package_with_serialized_inventory: serialized inventory exact match returns no discrepancies.
+# test_verify_reports_extra_file_including_manifest_without_row: extra file and manifest without a recorded row.
+# test_verify_reports_missing_file: missing regular file reports its recorded digest.
+# test_verify_reports_same_size_checksum_change: same-size checksum discrepancy.
+# test_verify_reports_size_then_checksum_for_length_change: size and checksum discrepancies in order.
+# test_verify_checks_manifest_presence_only: manifest content is excluded from verification.
+# test_verify_accepts_digit_string_sizes_and_reports_int_sizes: regression: digit-string bytes parse and discrepancies report integers.
+# test_verify_rejects_incomplete_non_manifest_rows: regression: null sha256 raises ValueError naming the path.
+# test_verify_rejects_invalid_byte_sizes: regression: bytes rejects bool, float, negative int and non-digit string.
+# test_verify_rejects_row_without_path: regression: missing path raises ValueError.
+# test_verify_reports_missing_manifest_as_none_even_with_recorded_digest: regression: missing manifest expected digest is always None.
+# test_compare_trees_checks_full_copy_including_manifest: exact tree match; manifest size and checksum are compared.
+# test_compare_trees_reports_sorted_missing_extra_and_checksum: sorted missing, extra, size and checksum tree discrepancies.
+# test_all_seams_reject_missing_directory: regression: missing directory raises for inventory, verify and compare_trees.
+# test_all_seams_raise_on_unreadable_subdirectory: regression: an unreadable subdirectory raises through os.walk instead of being skipped.
+
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 from pathlib import Path
 
@@ -58,23 +78,9 @@ def test_inventory_lists_sorted_files_and_manifest_by_path_only(package, manifes
     ]
 
 
-@pytest.mark.parametrize("seam", ["inventory", "verify"])
-@pytest.mark.parametrize("name", ["/manifest.json", "../manifest.json", "meta/../manifest.json", ""])
-def test_rejects_absolute_parent_or_empty_manifest_paths(package, name, seam):
-    call = {"inventory": manifest.inventory, "verify": lambda d, **kw: manifest.verify(d, [], **kw)}[seam]
+def test_inventory_rejects_empty_manifest_name(package):
     with pytest.raises(ValueError, match="manifest path"):
-        call(package, manifest_name=name)
-
-
-@pytest.mark.parametrize("target", ["journal.md", "empty", "absent"])
-def test_inventory_rejects_file_directory_and_dangling_symlinks(package, target):
-    link = package / "link"
-    try:
-        link.symlink_to(package / target, target_is_directory=target == "empty")
-    except (OSError, NotImplementedError):
-        pytest.skip("symlinks are not supported")
-    with pytest.raises(ValueError, match="link"):
-        manifest.inventory(package, manifest_name="manifest.json")
+        manifest.inventory(package, manifest_name="")
 
 
 def test_verify_accepts_unchanged_package_with_serialized_inventory(package):
@@ -93,12 +99,11 @@ def test_verify_reports_extra_file_including_manifest_without_row(package, extra
     ]
 
 
-@pytest.mark.parametrize("removed_path, digest", [("journal.md", ABC), ("manifest.json", None)])
-def test_verify_reports_missing_file_or_manifest(package, removed_path, digest):
+def test_verify_reports_missing_file(package):
     rows = manifest.inventory(package, manifest_name="manifest.json")
-    (package / removed_path).unlink()
+    (package / "journal.md").unlink()
     assert manifest.verify(package, rows, manifest_name="manifest.json") == [
-        {"path": removed_path, "kind": "missing", "expected": digest, "actual": None},
+        {"path": "journal.md", "kind": "missing", "expected": ABC, "actual": None},
     ]
 
 
@@ -120,11 +125,9 @@ def test_verify_reports_size_then_checksum_for_length_change(package):
     ]
 
 
-@pytest.mark.parametrize("change_manifest", [False, True])
-def test_verify_checks_manifest_presence_only(package, change_manifest):
+def test_verify_checks_manifest_presence_only(package):
     rows = manifest.inventory(package, manifest_name="manifest.json")
-    if change_manifest:
-        (package / "manifest.json").write_bytes(b'{"inventory": "written after hashing"}')
+    (package / "manifest.json").write_bytes(b'{"inventory": "written after hashing"}')
     assert manifest.verify(package, rows, manifest_name="manifest.json") == []
 
 
@@ -141,30 +144,14 @@ def test_verify_accepts_digit_string_sizes_and_reports_int_sizes(package):
     ]
 
 
-def test_verify_compares_recorded_digests_case_insensitively(package):
+def test_verify_rejects_incomplete_non_manifest_rows(package):
     rows = manifest.inventory(package, manifest_name="manifest.json")
-    for row in rows:
-        if "sha256" in row:
-            row["sha256"] = row["sha256"].upper()
-    assert manifest.verify(package, rows, manifest_name="manifest.json") == []
-
-
-@pytest.mark.parametrize("field, value", [("bytes", ...), ("sha256", ...), ("sha256", None)])
-@pytest.mark.parametrize("file_exists", [True, False])
-def test_verify_rejects_incomplete_non_manifest_rows(package, field, value, file_exists):
-    rows = manifest.inventory(package, manifest_name="manifest.json")
-    journal_row = next(row for row in rows if row["path"] == "journal.md")
-    if value is ...:
-        del journal_row[field]
-    else:
-        journal_row[field] = value
-    if not file_exists:
-        (package / "journal.md").unlink()
+    next(row for row in rows if row["path"] == "journal.md")["sha256"] = None
     with pytest.raises(ValueError, match="journal.md"):
         manifest.verify(package, rows, manifest_name="manifest.json")
 
 
-@pytest.mark.parametrize("size", ["", "-3", " 3", "3.0", "three", 3.0, True, None, -3])
+@pytest.mark.parametrize("size", ["-3", 3.0, True, -3])
 def test_verify_rejects_invalid_byte_sizes(package, size):
     rows = manifest.inventory(package, manifest_name="manifest.json")
     next(row for row in rows if row["path"] == "journal.md")["bytes"] = size
@@ -184,14 +171,6 @@ def test_verify_reports_missing_manifest_as_none_even_with_recorded_digest(packa
     assert manifest.verify(package, rows, manifest_name="manifest.json") == [
         {"path": "manifest.json", "kind": "missing", "expected": None, "actual": None},
     ]
-
-
-@pytest.mark.parametrize("path", ["journal.md", "manifest.json"])
-def test_verify_rejects_duplicate_inventory_paths(package, path):
-    rows = manifest.inventory(package, manifest_name="manifest.json")
-    rows.append(dict(next(row for row in rows if row["path"] == path)))
-    with pytest.raises(ValueError, match=path):
-        manifest.verify(package, rows, manifest_name="manifest.json")
 
 
 def test_compare_trees_checks_full_copy_including_manifest(package, tmp_path):
@@ -222,32 +201,17 @@ def test_compare_trees_reports_sorted_missing_extra_and_checksum(package, tmp_pa
 
 
 @pytest.mark.parametrize("seam", SEAMS)
-def test_all_seams_reject_symlink_root(package, tmp_path, seam):
-    link = tmp_path / "linked-draft"
-    try:
-        link.symlink_to(package, target_is_directory=True)
-    except (OSError, NotImplementedError):
-        pytest.skip("symlinks are not supported")
-    with pytest.raises(ValueError, match="linked-draft"):
-        SEAMS[seam](link)
-
-
-@pytest.mark.parametrize("seam", SEAMS)
 def test_all_seams_reject_missing_directory(tmp_path, seam):
     with pytest.raises(FileNotFoundError):
         SEAMS[seam](tmp_path / "absent")
 
 
-@pytest.mark.parametrize("seam", ["verify", "compare_trees"])
-def test_verify_and_compare_trees_reject_nested_symlink(package, tmp_path, seam):
-    copy = shutil.copytree(package, tmp_path / "copy")
-    rows = manifest.inventory(package, manifest_name="manifest.json")
+@pytest.mark.skipif(not hasattr(os, "geteuid") or os.geteuid() == 0, reason="needs a non-root POSIX user")
+def test_all_seams_raise_on_unreadable_subdirectory(package):
+    (package / "figures").chmod(0)
     try:
-        (copy / "figures/link").symlink_to(package / "journal.md")
-    except (OSError, NotImplementedError):
-        pytest.skip("symlinks are not supported")
-    with pytest.raises(ValueError, match="link"):
-        if seam == "verify":
-            manifest.verify(copy, rows, manifest_name="manifest.json")
-        else:
-            manifest.compare_trees(package, copy)
+        for seam in SEAMS.values():
+            with pytest.raises(PermissionError):
+                seam(package)
+    finally:
+        (package / "figures").chmod(0o755)

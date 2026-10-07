@@ -305,9 +305,9 @@ The following choices remain open and must not be silently fixed by the specific
 - the general rule for when a scope change becomes a new investigation rather than an expansion, beyond the accepted population scenarios above;
 - the backend and refresh strategy for the exceptional incremental project; DuckDB over Parquet is the batch default;
 - precise cache identity, freshness detection, invalidation, and refresh mechanics;
-- the serialization format of the delivery manifest and the exact formatting of the foundation catalog; the manifest field list and field names are fixed by the shared template. Result evidence files, acquisition provenance files, and publication files are not open: they are JSON with fixed schemas;
+- the serialization format of the delivery manifest and the exact formatting of the foundation catalog; the manifest field list and field names are fixed by the shared template;
 - implementation language, executable filenames, and configuration serialization format;
 - backend-specific raw-data retention and ignore rules, beyond the landed-data storage rule in **Question-driven data preparation**; and
 - which deliveries, if any, warrant preserving original inputs for exact reruns.
 
-The acquisition provenance file and the publication file are not open: they are JSON files named `provenance.json` and `publication.json`, with the keys written by the `awb-init` landing helper `awb_landing.py`. The delivery manifest's serialization stays open.
+Result evidence files, acquisition provenance files (`provenance.json`), and publication files (`publication.json`) are JSON with fixed keys written by the shipped `awb-init` helpers `awb_provenance.py` and `awb_landing.py`; the delivery manifest's serialization stays open.

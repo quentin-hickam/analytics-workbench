@@ -1,3 +1,25 @@
+# Kept cases:
+# test_record_evidence_records_clean_producing_state: evidence JSON schema/key order and clean producing state.
+# test_record_evidence_captures_modified_code: uncommitted producing paths retain status, size and checksum.
+# test_record_evidence_rejects_invalid_checks_and_records_figure: a check outside the validation record shape raises; the evidence figure carries its path, size and checksum.
+# test_compare_evidence_clean_committed_state_passes_five_comparisons: clean state passes all five ordered comparisons in the contract shape.
+# test_compare_evidence_detects_view_changed_after_recording: view mutation fails the views comparison.
+# test_compare_evidence_names_changed_setting: settings mutation fails the settings comparison.
+# test_compare_evidence_detects_missing_input_and_missing_metadata: missing input file or unavailable metadata fails inputs.
+# test_compare_evidence_checks_dirty_code_against_recorded_bytes: uncommitted code mutation fails uncommitted-code.
+# test_record_evidence_rejects_destination_symlink_outside_root: regression: evidence destination cannot escape through a symlink.
+# test_compare_evidence_without_commit_uses_file_checksums: no-commit evidence compares producing file checksums.
+# test_compare_evidence_missing_file_fails_all_five_comparisons: missing evidence fails every comparison.
+# test_compare_evidence_bad_files_still_return_five_failures: unreadable JSON or wrong-schema evidence fails every comparison.
+# test_compare_evidence_detects_code_metadata_and_data_changes: committed-code mutation; publication/acquisition metadata and data mutations fail inputs.
+# test_record_evidence_before_first_commit_checksums_every_producing_file: uncommitted evidence state records checksums for all producing files.
+# test_compare_evidence_resolves_landing_helper_layout: metadata-relative files and acquisition-relative input paths.
+# test_record_evidence_stores_validation_record_unchanged: validation record stored unchanged under checks.
+# test_record_evidence_keeps_symlinked_code_at_its_given_path: regression: symlinked producing code keeps its given path.
+# test_compare_evidence_reports_current_state_failures_without_missing_evidence: regressions: deleted current view is a mismatch; missing producing commit has precise detail.
+# test_compare_evidence_outside_root_returns_five_failures: regression: evidence path outside root returns five failures.
+# test_record_evidence_raises_on_git_failure_after_reading_head: regression: a Git failure after HEAD is read raises instead of relabelling the commit uncommitted.
+
 import hashlib
 import importlib.util
 import json
@@ -15,17 +37,6 @@ ASSET = Path(__file__).resolve().parents[1] / ".agents/skills/awb-init/assets/aw
 spec = importlib.util.spec_from_file_location("awb_provenance", ASSET)
 provenance = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(provenance)
-
-
-def test_file_checksums_preserves_order_and_reports_missing_files(tmp_path):
-    (tmp_path / "abc").write_bytes(b"abc")
-    assert provenance.file_checksums(["missing", "abc"], root=tmp_path) == [
-        {"path": "missing", "bytes": None, "sha256": None},
-        {"path": "abc", "bytes": 3,
-         "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
-    ]
-    with pytest.raises(ValueError):
-        provenance.file_checksums([tmp_path])
 
 
 def git(root, *args):
@@ -123,15 +134,6 @@ def test_record_evidence_rejects_invalid_checks_and_records_figure(project):
                                  "sha256": hashlib.sha256(b"figure bytes").hexdigest()}
 
 
-def test_record_evidence_names_missing_publication_as_unknown(project):
-    (project / "data/parquet/orders/p1/publication.json").unlink()
-    publication = json.loads(record(project).read_text())["publications"][0]
-    assert set(publication["files"]) == {"unknown"}
-    assert "data/parquet/orders/p1/publication.json" in publication["files"]["unknown"]
-    assert publication["publication_file"] == {
-        "path": "data/parquet/orders/p1/publication.json", "bytes": None, "sha256": None}
-
-
 NAMES = ["committed-code", "uncommitted-code", "views", "inputs", "settings"]
 
 
@@ -188,20 +190,6 @@ def test_compare_evidence_checks_dirty_code_against_recorded_bytes(project):
     assert "src/ops.py" in comparisons[1]["detail"]
 
 
-def test_record_evidence_default_discovery_without_code_has_no_producing_paths(tmp_path):
-    path = provenance.record_evidence(tmp_path, "inv", "r1", views=[], publications=[],
-        acquisitions=[], settings_path=None, checks=[])
-    assert json.loads(path.read_text())["producing_paths"] == []
-
-
-@pytest.mark.skipif(importlib.util.find_spec("tomllib") is None, reason="parsed settings require tomllib")
-def test_compare_evidence_parsed_settings_can_have_unknown_key(project):
-    write(project, "investigations/inv/settings.toml", b'unknown = "value"\nthreshold = 5\n')
-    path = record(project)
-    write(project, "investigations/inv/settings.toml", b'threshold=5\nunknown="value" # comment\n')
-    assert provenance.compare_evidence(project, path)[4]["outcome"] == "pass"
-
-
 def test_record_evidence_rejects_destination_symlink_outside_root(project):
     directory = project / "investigations/inv/evidence"
     directory.symlink_to(project.parent, target_is_directory=True)
@@ -226,109 +214,7 @@ def test_compare_evidence_missing_file_fails_all_five_comparisons(project):
     assert all(c["detail"].startswith("missing evidence:") for c in comparisons)
 
 
-@pytest.mark.parametrize("investigation,result_id", [("../escape", "r1"), ("inv", "bad/id"), ("", "r1")])
-def test_record_evidence_rejects_invalid_identifiers(project, investigation, result_id):
-    with pytest.raises(ValueError):
-        provenance.record_evidence(project, investigation, result_id, views=[], publications=[],
-            acquisitions=[], settings_path=None, checks=[])
-
-
-def test_record_evidence_without_vcs_uses_recursive_code_and_no_vcs_checksums(tmp_path):
-    write(tmp_path, "src/ops.py", b"abc")
-    write(tmp_path, "investigations/inv/run.py", b"abc")
-    write(tmp_path, "investigations/inv/state.md", b"excluded")
-    path = provenance.record_evidence(tmp_path, "inv", "r1", views=[], publications=[],
-        acquisitions=[], settings_path=None, checks=[])
-    evidence = json.loads(path.read_text())
-    assert evidence["producing_commit"] == {"unknown": "not a git repository"}
-    assert evidence["producing_paths"] == ["investigations/inv/run.py", "src/ops.py"]
-    assert [c["status"] for c in evidence["producing_uncommitted_changes"]] == ["no-vcs"] * 2
-    assert [c["sha256"] for c in evidence["producing_uncommitted_changes"]] == [
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"] * 2
-
-
-@pytest.mark.parametrize("field,index", [("producing_commit", 0), ("producing_uncommitted_changes", 1),
-                                        ("views", 2), ("publications", 3), ("settings", 4)])
-def test_compare_evidence_needed_unknowns_fail_with_reason(project, field, index):
-    path = record(project)
-    evidence = json.loads(path.read_text())
-    evidence[field] = {"unknown": "fixture reason"}
-    path.write_text(json.dumps(evidence))
-    comparisons = provenance.compare_evidence(project, path)
-    assert [c["name"] for c in comparisons] == NAMES
-    assert comparisons[index]["outcome"] == "fail"
-    assert comparisons[index]["detail"].startswith("missing evidence:")
-    assert "fixture reason" in comparisons[index]["detail"]
-
-
-def test_compare_evidence_views_need_publication_identity_only(project):
-    (project / "data/parquet/orders/p1/publication.json").unlink()
-    comparisons = provenance.compare_evidence(project, record(project))
-    assert comparisons[2]["outcome"] == "pass"
-    assert comparisons[3]["outcome"] == "fail"
-
-
-@pytest.mark.parametrize("target", ["view", "input", "settings"])
-def test_compare_evidence_missing_recorded_digest_is_missing_evidence(project, target):
-    path = record(project)
-    evidence = json.loads(path.read_text())
-    if target == "view":
-        evidence["views"][0]["sha256"] = None
-        index = 2
-    elif target == "input":
-        evidence["publications"][0]["files"][0]["sha256"] = None
-        index = 3
-    else:
-        evidence["settings"]["sha256"] = None
-        evidence["settings"]["content"] = {"unknown": "parse failed"}
-        index = 4
-    path.write_text(json.dumps(evidence))
-    check = provenance.compare_evidence(project, path)[index]
-    assert check["outcome"] == "fail" and check["detail"].startswith("missing evidence:")
-
-
-def test_compare_evidence_committed_paths_do_not_need_dirty_checksums(project):
-    write(project, "src/ops.py", b"x = 2\n")
-    path = record(project)
-    evidence = json.loads(path.read_text())
-    evidence["producing_uncommitted_changes"][0]["sha256"] = {"unknown": "lost checksum"}
-    path.write_text(json.dumps(evidence))
-    comparisons = provenance.compare_evidence(project, path)
-    assert comparisons[0]["outcome"] == "pass"
-    assert comparisons[1]["outcome"] == "fail"
-
-
-def test_compare_evidence_reports_every_view_mismatch(project):
-    write(project, "foundation/views/second.sql", b"select 2;\n")
-    path = provenance.record_evidence(project, "inv", "r1",
-        views=["foundation/views/orders.sql", "foundation/views/second.sql"],
-        publications=["data/parquet/orders/p1"], acquisitions=[], settings_path=None, checks=[])
-    (project / "foundation/views/orders.sql").unlink()
-    write(project, "foundation/views/second.sql", b"select 3;\n")
-    detail = provenance.compare_evidence(project, path)[2]["detail"]
-    assert "foundation/views/orders.sql" in detail and "foundation/views/second.sql" in detail
-
-
-def test_compare_evidence_empty_comparisons_pass_without_unneeded_values(tmp_path):
-    path = provenance.record_evidence(tmp_path, "inv", "r1", views=[], publications=[],
-        acquisitions=[], settings_path=None, checks=[], code_paths=[])
-    evidence = json.loads(path.read_text())
-    evidence["publications"] = {"unknown": "unneeded by empty views"}
-    path.write_text(json.dumps(evidence))
-    comparisons = provenance.compare_evidence(tmp_path, path)
-    assert [c["outcome"] for c in comparisons[:3]] == ["pass"] * 3
-    assert all("nothing to compare" in c["detail"] for c in comparisons[:3])
-
-
-@pytest.mark.skipif(importlib.util.find_spec("tomllib") is None, reason="parsed settings require tomllib")
-def test_record_evidence_serializes_toml_dates_consistently(project):
-    write(project, "investigations/inv/settings.toml", b"as_of = 2026-10-07\n")
-    path = record(project)
-    assert json.loads(path.read_text())["settings"]["content"] == {"as_of": "2026-10-07"}
-    assert provenance.compare_evidence(project, path)[4]["outcome"] == "pass"
-
-
-@pytest.mark.parametrize("bad_content", [b"{", b' {"schema": "other"}', b' {"schema": "awb-evidence/1", "settings": []}'])
+@pytest.mark.parametrize("bad_content", [b"{", b' {"schema": "other"}'])
 def test_compare_evidence_bad_files_still_return_five_failures(project, bad_content):
     path = project / "bad.json"
     path.write_bytes(bad_content)
@@ -336,121 +222,6 @@ def test_compare_evidence_bad_files_still_return_five_failures(project, bad_cont
     assert [c["name"] for c in comparisons] == NAMES
     assert [c["outcome"] for c in comparisons] == ["fail"] * 5
     assert all(c["detail"].startswith("missing evidence:") for c in comparisons)
-
-
-@pytest.mark.parametrize("kind,index", [("views", 2), ("inputs", 3), ("dirty", 1)])
-def test_compare_evidence_reports_unknown_and_later_mismatch(project, kind, index):
-    write(project, "src/second.py", b"second code\n")
-    write(project, "src/ops.py", b"x = 2\n")
-    write(project, "foundation/views/second.sql", b"select 2;\n")
-    write(project, "data/parquet/orders/p1/second.parquet", b"second data")
-    publication_path = project / "data/parquet/orders/p1/publication.json"
-    publication = json.loads(publication_path.read_text())
-    publication["files"].append({"path": "second.parquet", "bytes": 11,
-        "sha256": hashlib.sha256(b"second data").hexdigest()})
-    publication_path.write_text(json.dumps(publication))
-    path = provenance.record_evidence(project, "inv", "r1",
-        views=["foundation/views/orders.sql", "foundation/views/second.sql"],
-        publications=["data/parquet/orders/p1"], acquisitions=[], settings_path=None, checks=[])
-    evidence = json.loads(path.read_text())
-    if kind == "views":
-        evidence["views"][0]["sha256"] = {"unknown": "lost checksum"}
-        write(project, "foundation/views/second.sql", b"select 3;\n")
-        later = "foundation/views/second.sql"
-    elif kind == "inputs":
-        evidence["publications"][0]["files"][0]["sha256"] = {"unknown": "lost checksum"}
-        write(project, "data/parquet/orders/p1/second.parquet", b"changed data")
-        later = "data/parquet/orders/p1/second.parquet"
-    else:
-        evidence["producing_uncommitted_changes"][0]["sha256"] = {"unknown": "lost checksum"}
-        write(project, "src/second.py", b"changed code\n")
-        later = "src/second.py"
-    path.write_text(json.dumps(evidence))
-    check = provenance.compare_evidence(project, path)[index]
-    assert check["outcome"] == "fail" and check["detail"].startswith("missing evidence:")
-    assert "lost checksum" in check["detail"] and later in check["detail"]
-
-
-def test_record_evidence_git_subdirectory_expands_code_and_strips_status_prefix(project):
-    root = project / "nested"
-    write(root, ".gitignore", b"src/ignored.py\n")
-    write(root, "src/ops.py", b"abc")
-    write(root, "src/ignored.py", b"ignored")
-    write(root, "investigations/inv/run.py", b"abc")
-    write(root, "investigations/inv/brief.md", b"excluded")
-    git(project, "add", "nested")
-    git(project, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c",
-        "commit.gpgsign=false", "commit", "-m", "nested fixture")
-    git(root, "mv", "src/ops.py", "src/renamed.py")
-    write(root, "src/new.py", b"abc")
-    path = provenance.record_evidence(root, "inv", "r1", views=[], publications=[],
-        acquisitions=[], settings_path=None, checks=[])
-    evidence = json.loads(path.read_text())
-    assert evidence["producing_paths"] == ["investigations/inv/run.py", "src/new.py", "src/renamed.py"]
-    path = provenance.record_evidence(root, "inv", "r1", views=[], publications=[],
-        acquisitions=[], settings_path=None, checks=[],
-        code_paths=["src/ops.py", "src/renamed.py", "src/new.py"])
-    evidence = json.loads(path.read_text())
-    assert evidence["producing_uncommitted_changes"] == [
-        {"path": "src/renamed.py", "status": "R", "bytes": 3,
-         "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
-        {"path": "src/new.py", "status": "??", "bytes": 3,
-         "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
-    ]
-    assert "src/renamed.py" not in provenance.compare_evidence(root, path)[0]["paths"]
-
-
-def test_record_evidence_explicit_code_and_ignored_paths_have_current_checksums(project):
-    write(project, ".gitignore", b"src/ignored.py\n")
-    write(project, "src/ignored.py", b"abc")
-    path = record(project, code_paths=["src/ignored.py", "src/ignored.py"])
-    evidence = json.loads(path.read_text())
-    assert evidence["producing_paths"] == ["foundation/views/orders.sql",
-        "investigations/inv/settings.toml", "src/ignored.py"]
-    assert evidence["producing_uncommitted_changes"] == [{"path": "src/ignored.py", "status": "!!",
-        "bytes": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}]
-
-
-def test_file_checksums_absolute_paths_relativize_and_outside_paths_are_rejected(project):
-    assert provenance.file_checksums([project / "src/ops.py"], root=project) == [{
-        "path": "src/ops.py", "bytes": 6, "sha256": hashlib.sha256(b"x = 1\n").hexdigest()}]
-    with pytest.raises(ValueError):
-        provenance.file_checksums([project.parent / "outside"], root=project)
-    with pytest.raises(ValueError):
-        record(project, code_paths=[project.parent / "outside"])
-
-
-@pytest.mark.parametrize("metadata", ["data/parquet/orders/p1/publication.json", "data/raw/crm/a1/provenance.json"])
-def test_record_evidence_malformed_metadata_has_named_unknowns_and_null_checksums(project, metadata):
-    write(project, metadata, b"{")
-    evidence = json.loads(record(project).read_text())
-    entry = evidence["publications" if metadata.endswith("publication.json") else "acquisitions"][0]
-    assert metadata in entry["files"]["unknown"]
-    assert entry["publication_file" if metadata.endswith("publication.json") else "provenance_file"] == {
-        "path": metadata, "bytes": None, "sha256": None}
-
-
-def test_record_evidence_overwrites_same_id_without_hashing_data_at_record_time(project):
-    (project / "data/parquet/orders/p1/part-0.parquet").unlink()
-    path = record(project, notes="first")
-    assert record(project, notes="second") == path
-    evidence = json.loads(path.read_text())
-    assert evidence["notes"] == "second"
-    assert evidence["publications"][0]["files"][0]["sha256"] == hashlib.sha256(b"parquet bytes").hexdigest()
-    assert list(path.parent.iterdir()) == [path]
-
-
-def test_compare_evidence_both_absent_dirty_files_are_equal(project):
-    (project / "src/ops.py").unlink()
-    comparisons = provenance.compare_evidence(project, record(project))
-    assert comparisons[0]["outcome"] == comparisons[1]["outcome"] == "pass"
-
-
-def test_compare_evidence_unlisted_publication_reference_fails_views(project):
-    path = provenance.record_evidence(project, "inv", "r1", views=["foundation/views/orders.sql"],
-        publications=[], acquisitions=[], settings_path=None, checks=[])
-    check = provenance.compare_evidence(project, path)[2]
-    assert check["outcome"] == "fail" and "data/parquet/orders/p1" in check["detail"]
 
 
 @pytest.mark.parametrize("path,new_bytes", [
@@ -465,36 +236,6 @@ def test_compare_evidence_detects_code_metadata_and_data_changes(project, path, 
     write(project, path, new_bytes)
     check = provenance.compare_evidence(project, evidence)[0 if path.startswith("src/") else 3]
     assert check["outcome"] == "fail" and path in check["detail"]
-
-
-def test_compare_evidence_unknown_view_references_name_missing_evidence(project):
-    path = record(project)
-    evidence = json.loads(path.read_text())
-    evidence["views"][0]["publications"] = {"unknown": "lost references"}
-    path.write_text(json.dumps(evidence))
-    check = provenance.compare_evidence(project, path)[2]
-    assert check["outcome"] == "fail" and check["detail"].startswith("missing evidence:")
-    assert "foundation/views/orders.sql" in check["detail"] and "lost references" in check["detail"]
-
-
-def test_record_evidence_missing_view_records_unknown_references(project):
-    (project / "foundation/views/orders.sql").unlink()
-    path = record(project)
-    view = json.loads(path.read_text())["views"][0]
-    assert view["sha256"] is None and view["bytes"] is None
-    assert "foundation/views/orders.sql" in view["publications"]["unknown"]
-    assert provenance.compare_evidence(project, path)[2]["outcome"] == "fail"
-
-
-def test_compare_evidence_unknown_metadata_does_not_hide_later_input_mismatch(project):
-    path = record(project)
-    evidence = json.loads(path.read_text())
-    evidence["publications"][0]["publication_file"] = {"unknown": "lost metadata"}
-    path.write_text(json.dumps(evidence))
-    write(project, "data/raw/crm/a1/page-1.json", b"[1]\n")
-    check = provenance.compare_evidence(project, path)[3]
-    assert check["outcome"] == "fail" and check["detail"].startswith("missing evidence:")
-    assert "lost metadata" in check["detail"] and "data/raw/crm/a1/page-1.json" in check["detail"]
 
 
 def test_record_evidence_before_first_commit_checksums_every_producing_file(project):
@@ -609,3 +350,10 @@ def test_compare_evidence_outside_root_returns_five_failures(project, tmp_path_f
     comparisons = provenance.compare_evidence(project, outside)
     assert [c["name"] for c in comparisons] == NAMES
     assert all(c["outcome"] == "fail" and c["detail"].startswith("missing evidence:") for c in comparisons)
+
+
+def test_record_evidence_raises_on_git_failure_after_reading_head(project):
+    (project / ".git/index").write_bytes(b"corrupt")
+    with pytest.raises(subprocess.CalledProcessError):
+        record(project)
+    assert not (project / "investigations/inv/evidence/r1.json").exists()

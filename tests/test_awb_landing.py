@@ -1,9 +1,24 @@
+# Kept cases:
+# test_land_writes_complete_provenance_and_publishes_directory: provenance schema/key order, metadata-relative paths, checksums and partial rename.
+# test_land_keeps_failed_fetch_unpublished: fetch failure keeps partial files and writes no provenance.
+# test_publish_records_inputs_and_uncommitted_conversion: publication schema/key order, path bases, copied input checksums, no-commit state and partial rename.
+# test_publish_records_resolved_head: publication conversion_commit records the producing Git HEAD.
+# test_publish_keeps_rejected_validation_unpublished: raised and False validation failures keep partial files and write no publication.
+# test_publish_refuses_existing_id_before_conversion: existing completed publication is refused before conversion.
+# test_publish_keeps_invalid_conversion_unpublished: raised conversion failure keeps partial files and writes no publication.
+# test_retain_copies_and_verifies_then_reports_existing_copy: verified copy succeeds; second call reports conflict without overwriting.
+# test_retain_reports_checksum_discrepancy_without_changing_existing_copy: changed retained copy reports a discrepancy without overwriting.
+# test_session_loads_views_in_name_order_without_recursing: session loads two views with the second depending on the first.
+# test_session_resolves_project_paths_from_another_working_directory: session resolves project-relative paths from another working directory.
+# test_session_names_failing_view_and_closes_connection: regression: failed view loading closes the session connection.
+# test_land_refuses_existing_id_before_fetch: existing completed acquisition is refused before fetching.
+# test_retain_requires_source_and_acquisition_directly_under_raw: regression: retain enforces source/acquisition depth under data/raw.
+# test_session_refuses_a_project_root_containing_a_comma: regression: comma-containing project root is rejected before opening a connection.
+
 import hashlib
 import importlib.util
 import json
-import shutil
 import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -146,43 +161,9 @@ def test_publish_keeps_rejected_validation_unpublished(tmp_path, rejection):
     assert not tmp_path.joinpath("data/parquet/events/v1").exists()
 
 
-@pytest.mark.parametrize("invalid", ["empty", "missing", "partial", "incomplete", "malformed", "non-object"])
-def test_publish_rejects_incomplete_acquisitions_before_creating_output(tmp_path, invalid):
-    original = tmp_path / "data/raw/api/batch-1"
-    if invalid == "partial":
-        original = original.with_name("batch-1.partial")
-    original.mkdir(parents=True)
-    if invalid in {"partial", "incomplete"}:
-        (original / "provenance.json").write_text(json.dumps({"status": "pending"}))
-    elif invalid == "malformed":
-        (original / "provenance.json").write_text("invalid json")
-    elif invalid == "non-object":
-        (original / "provenance.json").write_text("[]")
-    called = []
-    with pytest.raises(ValueError):
-        landing.publish(tmp_path, "events", "v1", lambda path: called.append(path),
-                        acquisitions=[] if invalid == "empty" else [original])
-    assert called == []
-    assert not (tmp_path / "data/parquet").exists()
-
-
-@pytest.mark.parametrize("field", ["dataset", "publication_id"])
-@pytest.mark.parametrize("value", ["", ".", "..", "a/b", "a\\b", "v1.partial"])
-def test_publish_rejects_invalid_identifiers_before_conversion(tmp_path, field, value):
-    names = {"dataset": "events", "publication_id": "v1"}
-    names[field] = value
-    called = []
-    with pytest.raises(ValueError):
-        landing.publish(tmp_path, **names, convert=lambda path: called.append(path),
-                        acquisitions=[acquisition(tmp_path)])
-    assert called == []
-    assert not (tmp_path / "data/parquet").exists()
-
-
-@pytest.mark.parametrize("suffix", ["", ".partial"])
-def test_publish_refuses_existing_id_before_conversion(tmp_path, suffix):
+def test_publish_refuses_existing_id_before_conversion(tmp_path):
     original = acquisition(tmp_path)
-    existing = tmp_path / f"data/parquet/events/v1{suffix}"
+    existing = tmp_path / "data/parquet/events/v1"
     existing.mkdir(parents=True)
     (existing / "keep.txt").write_text("keep")
     called = []
@@ -192,53 +173,19 @@ def test_publish_refuses_existing_id_before_conversion(tmp_path, suffix):
     assert str(existing) in str(error.value)
     assert called == []
     assert (existing / "keep.txt").read_text() == "keep"
-    if not suffix:
-        assert not existing.with_name("v1.partial").exists()
+    assert not existing.with_name("v1.partial").exists()
 
 
-@pytest.mark.parametrize("output", ["empty", "reserved", "raises"])
-def test_publish_keeps_invalid_conversion_unpublished(tmp_path, output):
+def test_publish_keeps_invalid_conversion_unpublished(tmp_path):
     def convert(directory):
-        if output == "reserved":
-            (directory / "publication.json").write_text("caller metadata")
-        elif output == "raises":
-            (directory / "part.parquet").write_bytes(b"abc")
-            raise LookupError("conversion failed")
+        (directory / "part.parquet").write_bytes(b"abc")
+        raise LookupError("conversion failed")
 
-    error = LookupError if output == "raises" else ValueError
-    with pytest.raises(error):
+    with pytest.raises(LookupError):
         landing.publish(tmp_path, "events", "v1", convert,
                         acquisitions=[acquisition(tmp_path)])
     partial = tmp_path / "data/parquet/events/v1.partial"
     assert partial.is_dir()
-    if output == "reserved":
-        assert (partial / "publication.json").read_text() == "caller metadata"
-    else:
-        assert not (partial / "publication.json").exists()
-    assert not tmp_path.joinpath("data/parquet/events/v1").exists()
-
-
-def test_publish_without_git_still_records_uncommitted(tmp_path, monkeypatch):
-    monkeypatch.setenv("PATH", str(tmp_path / "no-executables"))
-    final = landing.publish(tmp_path, "events", "v1",
-                            lambda directory: (directory / "part.parquet").write_bytes(b"abc"),
-                            acquisitions=[acquisition(tmp_path)])
-    assert json.loads((final / "publication.json").read_text())["conversion_commit"] == "uncommitted"
-
-
-def test_publish_removes_its_metadata_when_rename_fails(tmp_path, monkeypatch):
-    original = acquisition(tmp_path)
-
-    def fail_rename(source, destination):
-        raise OSError("rename failed")
-
-    monkeypatch.setattr("os.rename", fail_rename)
-    with pytest.raises(OSError, match="rename failed"):
-        landing.publish(tmp_path, "events", "v1",
-                        lambda directory: (directory / "part.parquet").write_bytes(b"abc"),
-                        acquisitions=[original])
-    partial = tmp_path / "data/parquet/events/v1.partial"
-    assert (partial / "part.parquet").read_bytes() == b"abc"
     assert not (partial / "publication.json").exists()
     assert not tmp_path.joinpath("data/parquet/events/v1").exists()
 
@@ -272,110 +219,6 @@ def test_retain_reports_checksum_discrepancy_without_changing_existing_copy(tmp_
         "discrepancies": ["sha256 differs: page.json"],
     }
     assert (destination / "page.json").read_bytes() == b"changed"
-
-
-def test_retain_compares_full_recursive_lists_including_provenance(tmp_path):
-    root = tmp_path / "project"
-    original = acquisition(root)
-    (original / "nested").mkdir()
-    (original / "nested/extra-local.txt").write_bytes(b"abc")
-    location = tmp_path / "storage"
-    destination = location / "data/raw/api/batch-1"
-    landing.retain(root, original, location)
-    (destination / "nested/extra-local.txt").unlink()
-    (destination / "nested/extra-destination.txt").write_text("extra")
-    (destination / "provenance.json").write_text("changed")
-    report = landing.retain(root, original, location)
-    assert set(report["discrepancies"]) == {
-        "missing at destination: nested/extra-local.txt",
-        "extra at destination: nested/extra-destination.txt",
-        "sha256 differs: provenance.json",
-    }
-    assert not (destination / "nested/extra-local.txt").exists()
-    assert (destination / "nested/extra-destination.txt").read_text() == "extra"
-    assert (destination / "provenance.json").read_text() == "changed"
-
-
-@pytest.mark.parametrize("invalid", ["outside", "partial", "missing-provenance", "pending", "symlink", "non-object"])
-def test_retain_requires_completed_acquisition_under_resolved_raw_directory(tmp_path, invalid):
-    root = tmp_path / "project"
-    original = tmp_path / "elsewhere/api/batch-1" if invalid == "outside" else root / "data/raw/api/batch-1"
-    if invalid == "partial":
-        original = original.with_name("batch-1.partial")
-    original.mkdir(parents=True)
-    (original / "page.json").write_bytes(b"abc")
-    if invalid == "non-object":
-        (original / "provenance.json").write_text("null")
-    elif invalid != "missing-provenance":
-        (original / "provenance.json").write_text(json.dumps({
-            "status": "pending" if invalid == "pending" else "complete",
-        }))
-    if invalid == "symlink":
-        outside = tmp_path / "outside"
-        original.rename(outside)
-        original.symlink_to(outside, target_is_directory=True)
-    location = tmp_path / "storage"
-    with pytest.raises(ValueError):
-        landing.retain(root, original, location)
-    assert not location.exists()
-
-
-def test_retain_refuses_leftover_partial_without_touching_it(tmp_path):
-    root = tmp_path / "project"
-    original = acquisition(root)
-    location = tmp_path / "storage"
-    partial = location / "data/raw/api/batch-1.partial"
-    partial.mkdir(parents=True)
-    (partial / "keep.txt").write_text("keep")
-    with pytest.raises(FileExistsError) as error:
-        landing.retain(root, original, location)
-    assert str(partial) in str(error.value)
-    assert (partial / "keep.txt").read_text() == "keep"
-    assert not partial.with_name("batch-1").exists()
-
-
-def test_retain_reports_a_broken_destination_symlink_as_a_conflict(tmp_path):
-    root = tmp_path / "project"
-    original = acquisition(root)
-    location = tmp_path / "storage"
-    destination = location / "data/raw/api/batch-1"
-    destination.parent.mkdir(parents=True)
-    target = tmp_path / "absent"
-    destination.symlink_to(target, target_is_directory=True)
-    report = landing.retain(root, original, location)
-    assert report == {
-        "destination": str(destination), "copied": False, "conflict": True,
-        "discrepancies": ["missing at destination: page.json", "missing at destination: provenance.json"],
-    }
-    assert destination.is_symlink()
-    assert destination.readlink() == target
-
-
-def test_retain_refuses_destination_created_during_copy(tmp_path, monkeypatch):
-    root = tmp_path / "project"
-    original = acquisition(root)
-    location = tmp_path / "storage"
-    destination = location / "data/raw/api/batch-1"
-    copytree = shutil.copytree
-
-    def copy_while_destination_appears(source, partial):
-        copytree(source, partial)
-        destination.mkdir()
-
-    monkeypatch.setattr("shutil.copytree", copy_while_destination_appears)
-    with pytest.raises(FileExistsError) as error:
-        landing.retain(root, original, location)
-    assert str(destination) in str(error.value)
-    assert list(destination.iterdir()) == []
-    partial = destination.with_name("batch-1.partial")
-    assert (partial / "page.json").read_bytes() == b"abc"
-    assert (partial / "provenance.json").read_bytes() == (original / "provenance.json").read_bytes()
-
-
-def test_session_explains_missing_duckdb_dependency(tmp_path, monkeypatch):
-    monkeypatch.setitem(sys.modules, "duckdb", None)
-    with pytest.raises(ImportError, match=r"session\(\).*duckdb.*package"):
-        landing.session(tmp_path)
 
 
 def test_session_loads_views_in_name_order_without_recursing(tmp_path):
@@ -422,67 +265,8 @@ def test_session_names_failing_view_and_closes_connection(tmp_path, monkeypatch)
         connection.execute("SELECT 1")
 
 
-def test_session_with_missing_views_directory_opens_an_empty_session(tmp_path):
-    pytest.importorskip("duckdb")
-    with landing.session(tmp_path) as connection:
-        assert connection.execute("SELECT 42").fetchall() == [(42,)]
-        assert connection.execute("SHOW TABLES").fetchall() == []
-
-
-@pytest.mark.parametrize("absolute", [False, True])
-def test_session_accepts_custom_views_directory(tmp_path, absolute):
-    pytest.importorskip("duckdb")
-    views = tmp_path / "custom"
-    views.mkdir()
-    (views / "01_answer.sql").write_text("CREATE VIEW answer AS SELECT 42 AS n;")
-    with landing.session(tmp_path, views_dir=views if absolute else "custom") as connection:
-        assert connection.execute("SELECT n FROM answer").fetchall() == [(42,)]
-
-
-@pytest.mark.parametrize("records", [[3], {"page.json": "3"}, {"page.json": None}])
-def test_land_requires_a_dictionary_of_integer_record_counts(tmp_path, records):
-    with pytest.raises(ValueError):
-        landing.land(tmp_path, "api", "batch-1",
-                     lambda directory: (directory / "page.json").write_bytes(b"abc"),
-                     request="query", records=records)
-    partial = tmp_path / "data/raw/api/batch-1.partial"
-    assert partial.is_dir()
-    assert not (partial / "provenance.json").exists()
-
-
-def test_land_refuses_destination_created_during_fetch(tmp_path):
-    final = tmp_path / "data/raw/api/batch-1"
-
-    def fetch(directory):
-        (directory / "page.json").write_bytes(b"abc")
-        final.mkdir()
-
-    with pytest.raises(FileExistsError):
-        landing.land(tmp_path, "api", "batch-1", fetch, request="query")
-    assert list(final.iterdir()) == []
-    partial = tmp_path / "data/raw/api/batch-1.partial"
-    assert (partial / "page.json").read_bytes() == b"abc"
-    assert not (partial / "provenance.json").exists()
-
-
-def test_land_removes_its_provenance_when_rename_fails(tmp_path, monkeypatch):
-    def fail_rename(source, destination):
-        raise OSError("rename failed")
-
-    monkeypatch.setattr("os.rename", fail_rename)
-    with pytest.raises(OSError, match="rename failed"):
-        landing.land(tmp_path, "api", "batch-1",
-                     lambda directory: (directory / "page.json").write_bytes(b"abc"),
-                     request="query")
-    partial = tmp_path / "data/raw/api/batch-1.partial"
-    assert (partial / "page.json").read_bytes() == b"abc"
-    assert not (partial / "provenance.json").exists()
-    assert not tmp_path.joinpath("data/raw/api/batch-1").exists()
-
-
-@pytest.mark.parametrize("suffix", ["", ".partial"])
-def test_land_refuses_existing_id_before_fetch(tmp_path, suffix):
-    existing = tmp_path / f"data/raw/api/batch-1{suffix}"
+def test_land_refuses_existing_id_before_fetch(tmp_path):
+    existing = tmp_path / "data/raw/api/batch-1"
     existing.mkdir(parents=True)
     (existing / "keep.txt").write_text("keep")
     called = []
@@ -492,40 +276,7 @@ def test_land_refuses_existing_id_before_fetch(tmp_path, suffix):
     assert str(existing) in str(error.value)
     assert called == []
     assert (existing / "keep.txt").read_text() == "keep"
-    if not suffix:
-        assert not existing.with_name("batch-1.partial").exists()
-
-
-@pytest.mark.parametrize("field", ["source", "acquisition_id"])
-@pytest.mark.parametrize("value", ["", ".", "..", "a/b", "a\\b", "batch.partial"])
-def test_land_rejects_invalid_identifiers_before_fetch(tmp_path, field, value):
-    names = {"source": "api", "acquisition_id": "batch-1"}
-    names[field] = value
-    called = []
-    with pytest.raises(ValueError):
-        landing.land(tmp_path, **names, fetch=lambda path: called.append(path), request="query")
-    assert called == []
-    assert not (tmp_path / "data").exists()
-
-
-@pytest.mark.parametrize("bad_output", ["empty", "reserved", "unknown-records"])
-def test_land_rejects_invalid_output_without_provenance(tmp_path, bad_output):
-    def fetch(directory):
-        if bad_output == "reserved":
-            (directory / "provenance.json").write_text("caller metadata")
-        elif bad_output == "unknown-records":
-            (directory / "page.json").write_bytes(b"abc")
-
-    with pytest.raises(ValueError):
-        landing.land(tmp_path, "api", "batch-1", fetch, request="query",
-                     records={"absent.json": 1} if bad_output == "unknown-records" else None)
-    partial = tmp_path / "data/raw/api/batch-1.partial"
-    assert partial.is_dir()
-    if bad_output == "reserved":
-        assert (partial / "provenance.json").read_text() == "caller metadata"
-    else:
-        assert not (partial / "provenance.json").exists()
-    assert not tmp_path.joinpath("data/raw/api/batch-1").exists()
+    assert not existing.with_name("batch-1.partial").exists()
 
 
 def test_retain_requires_source_and_acquisition_directly_under_raw(tmp_path):

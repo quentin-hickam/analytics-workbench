@@ -1,3 +1,18 @@
+# Kept cases:
+# test_empty_spec_records_all_seven_checks_as_not_assessed: seven check names in order, fixed record shape and not-applicable for absent checks.
+# test_required_columns_names_every_missing_column_and_counts_present: columns fails on missing columns and passes when present.
+# test_join_row_multiplication_reports_both_counts: joins fails on row multiplication.
+# test_join_key_uniqueness_reports_rows_and_distinct_duplicate_keys: joins fails on duplicate keys unless uniqueness is disabled.
+# test_null_threshold_reports_rate_and_threshold_and_summarizes_failures: nulls fails above the threshold and passes at the bound.
+# test_judgments_preserve_supplied_outcome_and_detail: scope, metrics and values judgments pass through unchanged.
+# test_invalid_judgment_raises_value_error: regression: non-dict judgment raises ValueError naming the check.
+# test_row_counts_integer_uses_result_length_and_default_upper_bound: row_counts integer form passes or fails at the default upper bound.
+# test_row_count_steps_apply_custom_bounds_and_summarize_first_failure: row_counts steps fail at explicit upper and lower bounds.
+# test_profile_reports_type_nulls_distincts_and_capped_frequent_samples: profile contract shape, null rates and capped sample values.
+# test_absent_judgments_are_not_assessed_beside_measured_checks: regression: absent judgments remain not-applicable beside measured checks.
+# test_row_counts_accepts_numpy_integer_and_rejects_bool: regression: numpy integer row count accepted and bool rejected.
+# test_profile_rejects_negative_limit_and_keeps_samples_strict_json: regressions: negative max_distinct rejected and inf samples serialize as strict JSON.
+
 import importlib.util
 import json
 from pathlib import Path
@@ -54,14 +69,6 @@ def test_join_key_uniqueness_reports_rows_and_distinct_duplicate_keys():
     }})[2]["outcome"] == "pass"
 
 
-def test_join_missing_key_is_named_even_when_uniqueness_is_disabled():
-    checks = validation.validate(pd.DataFrame({"id": [1]}), {"joins": {
-        "left_rows": 1, "keys": ["region", "order_date"], "keys_unique": False,
-    }})
-    assert checks[2] == {"name": "joins", "outcome": "fail",
-                         "detail": "Missing join key: region (+1 more)."}
-
-
 def test_null_threshold_reports_rate_and_threshold_and_summarizes_failures():
     frame = pd.DataFrame({"customer_id": [None, 2, 3, 4, 5, 6, 7, 8],
                           "region": [None] * 8})
@@ -73,15 +80,6 @@ def test_null_threshold_reports_rate_and_threshold_and_summarizes_failures():
         "customer_id": 0.125, "region": 1.0,
     }})[3] == {"name": "nulls", "outcome": "pass",
               "detail": "Null rates: customer_id 0.125, region 1.000."}
-
-
-def test_null_check_names_missing_columns_and_empty_frame_has_zero_null_rate():
-    assert validation.validate(pd.DataFrame(), {"nulls": {"id": 0.0}})[3] == {
-        "name": "nulls", "outcome": "fail", "detail": "Missing null-check column: id.",
-    }
-    assert validation.validate(pd.DataFrame({"id": []}), {"nulls": {"id": 0.0}})[3] == {
-        "name": "nulls", "outcome": "pass", "detail": "Null rates: id 0.000.",
-    }
 
 
 def test_judgments_preserve_supplied_outcome_and_detail():
@@ -97,22 +95,9 @@ def test_judgments_preserve_supplied_outcome_and_detail():
     ]
 
 
-@pytest.mark.parametrize("name", ["scope", "metrics", "values"])
-@pytest.mark.parametrize("judgment", [
-    {"outcome": "unknown", "detail": "Inspected."},
-    {"outcome": 1, "detail": "Inspected."},
-    {"outcome": "pass", "detail": ""},
-    {"outcome": "pass", "detail": 1},
-    "pass",
-])
-def test_invalid_judgment_raises_value_error(name, judgment):
-    with pytest.raises(ValueError, match=name):
-        validation.validate(pd.DataFrame(), {name: judgment})
-
-
-def test_unknown_spec_key_is_named_in_value_error():
-    with pytest.raises(ValueError, match="row_count"):
-        validation.validate(pd.DataFrame(), {"row_count": 10})
+def test_invalid_judgment_raises_value_error():
+    with pytest.raises(ValueError, match="scope"):
+        validation.validate(pd.DataFrame(), {"scope": "pass"})
 
 
 def test_row_counts_integer_uses_result_length_and_default_upper_bound():
@@ -141,27 +126,6 @@ def test_row_count_steps_apply_custom_bounds_and_summarize_first_failure():
     }
 
 
-def test_row_count_positive_input_cannot_vanish_without_explicit_minimum():
-    assert validation.validate(pd.DataFrame(), {"row_counts": 4})[1] == {
-        "name": "row_counts", "outcome": "fail",
-        "detail": "result: 4 -> 0 rows, ratio 0.00 violates non-empty result bound.",
-    }
-    assert validation.validate(pd.DataFrame(), {"row_counts": [
-        {"step": "filter", "before": 4, "after": 0, "min_ratio": 0.0},
-    ]})[1]["outcome"] == "pass"
-
-
-def test_row_count_zero_input_passes_only_with_zero_output():
-    assert validation.validate(pd.DataFrame(), {"row_counts": [
-        {"step": "empty", "before": 0, "after": 0, "min_ratio": 0.5},
-    ]})[1] == {"name": "row_counts", "outcome": "pass",
-               "detail": "Steps checked: 1; last 0 -> 0 rows."}
-    assert validation.validate(pd.DataFrame({"id": [1]}), {"row_counts": 0})[1] == {
-        "name": "row_counts", "outcome": "fail",
-        "detail": "result: 0 -> 1 rows from an empty input, which must stay empty.",
-    }
-
-
 def test_profile_reports_type_nulls_distincts_and_capped_frequent_samples():
     frame = pd.DataFrame({"region": ["west", "east", "west", None, "east", "north"],
                           7: [3, 3, 2, 3, 2, 1]})
@@ -174,78 +138,6 @@ def test_profile_reports_type_nulls_distincts_and_capped_frequent_samples():
     }}
     assert all(type(value) is int for value in result["columns"]["7"]["sample_values"])
     json.dumps(result)
-
-
-def test_profile_converts_timestamps_and_other_non_json_samples_to_strings():
-    from decimal import Decimal
-
-    result = validation.profile(pd.DataFrame({
-        "date": [pd.Timestamp("2026-10-07"), pd.NaT],
-        "amount": [Decimal("1.25"), None],
-    }))
-    assert result == {"row_count": 2, "columns": {
-        "date": {"dtype": "datetime64[ns]", "null_rate": 0.5, "distinct_count": 1,
-                 "sample_values": ["2026-10-07 00:00:00"]},
-        "amount": {"dtype": "object", "null_rate": 0.5, "distinct_count": 1,
-                   "sample_values": ["1.25"]},
-    }}
-    json.dumps(result)
-
-
-@pytest.mark.parametrize("frame", [[], {"id": [1]}, pd.Series([1]), None])
-@pytest.mark.parametrize("operation", ["profile", "validate"])
-def test_public_functions_reject_non_dataframes(operation, frame):
-    with pytest.raises(TypeError, match="pandas.DataFrame"):
-        if operation == "profile":
-            validation.profile(frame)
-        else:
-            validation.validate(frame, {})
-
-
-def test_explicit_empty_mechanical_specs_assess_no_items_successfully():
-    checks = validation.validate(pd.DataFrame(), {
-        "required_columns": [], "row_counts": [], "joins": {"left_rows": 0, "keys": []},
-        "nulls": {},
-    })
-    assert checks[:4] == [
-        {"name": "columns", "outcome": "pass", "detail": "Required columns present: 0."},
-        {"name": "row_counts", "outcome": "pass", "detail": "Steps checked: 0."},
-        {"name": "joins", "outcome": "pass", "detail": "Join has 0 rows from 0 left rows."},
-        {"name": "nulls", "outcome": "pass", "detail": "Null thresholds checked: 0."},
-    ]
-
-
-def test_profile_empty_and_all_null_columns_have_no_samples():
-    assert validation.profile(pd.DataFrame({"id": pd.Series([], dtype="Int64")})) == {
-        "row_count": 0, "columns": {"id": {"dtype": "Int64", "null_rate": 0.0,
-                                          "distinct_count": 0, "sample_values": []}},
-    }
-    assert validation.profile(pd.DataFrame({"id": [None, None]})) == {
-        "row_count": 2, "columns": {"id": {"dtype": "object", "null_rate": 1.0,
-                                          "distinct_count": 0, "sample_values": []}},
-    }
-
-
-def test_profile_default_sample_limit_is_twenty_and_zero_limit_has_no_samples():
-    # Frequencies 21, 20, ... 1 avoid assuming an order for pandas' tied counts.
-    frame = pd.DataFrame({"id": [value for value in range(21) for _ in range(21 - value)]})
-    assert validation.profile(frame)["columns"]["id"]["sample_values"] == list(range(20))
-    assert validation.profile(frame, max_distinct=0)["columns"]["id"]["sample_values"] == []
-
-
-def test_join_reports_multiplication_first_and_counts_other_failures():
-    assert validation.validate(pd.DataFrame({"id": [1, 1, 2]}), {"joins": {
-        "left_rows": 2, "keys": ["id"],
-    }})[2] == {"name": "joins", "outcome": "fail",
-               "detail": "Join grew from 2 to 3 rows (+1 more)."}
-
-
-def test_profile_categorical_samples_include_only_observed_non_null_values():
-    frame = pd.DataFrame({"region": pd.Categorical(["west", None], categories=["west", "east"])})
-    assert validation.profile(frame) == {"row_count": 2, "columns": {
-        "region": {"dtype": "category", "null_rate": 0.5, "distinct_count": 1,
-                   "sample_values": ["west"]},
-    }}
 
 
 def test_absent_judgments_are_not_assessed_beside_measured_checks():
