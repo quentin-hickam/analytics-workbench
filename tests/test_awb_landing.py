@@ -526,3 +526,30 @@ def test_land_rejects_invalid_output_without_provenance(tmp_path, bad_output):
     else:
         assert not (partial / "provenance.json").exists()
     assert not tmp_path.joinpath("data/raw/api/batch-1").exists()
+
+
+def test_retain_requires_source_and_acquisition_directly_under_raw(tmp_path):
+    root = tmp_path / "project"
+    nested = landing.land(root, "api", "batch-1",
+                          lambda directory: (directory / "page.json").write_bytes(b"abc"),
+                          request="query")
+    deeper = nested / "part" / "inner"
+    deeper.mkdir(parents=True)
+    (deeper / "provenance.json").write_text(json.dumps({"status": "complete"}))
+    location = tmp_path / "storage"
+    with pytest.raises(ValueError):
+        landing.retain(root, deeper, location)
+    with pytest.raises(ValueError):
+        landing.retain(root, nested.parent, location)
+    assert not location.exists()
+
+
+def test_session_refuses_a_project_root_containing_a_comma(tmp_path, monkeypatch):
+    duckdb = pytest.importorskip("duckdb")
+    opened = []
+    monkeypatch.setattr(duckdb, "connect", lambda: opened.append(1))
+    root = tmp_path / "a,b"
+    root.mkdir()
+    with pytest.raises(ValueError, match="comma"):
+        landing.session(root)
+    assert opened == []
