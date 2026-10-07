@@ -9,7 +9,9 @@ Schema awb-evidence/1, in order: schema, investigation, result_id, recorded_at
 conversion_commit/files), acquisitions (path/provenance_file/status/files),
 settings (path/bytes/sha256/content), checks (name/outcome/detail), figure
 (path/bytes/sha256 or null), notes (text or null). Unknowns are {"unknown": reason}.
-Paths are project-relative POSIX; listed data paths are metadata-directory-relative.
+Paths are project-relative POSIX, except that a files[].path copied from publication.json or
+provenance.json is relative to the directory holding that file, and a publication's
+inputs[].files[].path to its acquisition directory.
 Data hashes are copied when recording and verified when comparing; TOML date/time
 values use ISO strings in JSON, consistently during comparison.
 """
@@ -30,8 +32,8 @@ def file_checksums(paths: Iterable[str | os.PathLike], *,
     base = Path(root).resolve() if root is not None else None
     entries = []
     for path in paths:
-        file = (base / path).resolve() if base is not None else Path(path)
-        path = file.relative_to(base).as_posix() if base is not None else file.as_posix()
+        path = _relative(base, path) if base is not None else Path(path).as_posix()
+        file = base / path if base is not None else Path(path)
         if file.is_dir():
             raise ValueError(f"directory is not a file: {path}")
         digest, size = hashlib.sha256(), 0
@@ -47,8 +49,16 @@ def file_checksums(paths: Iterable[str | os.PathLike], *,
     return entries
 
 
+def _checksum(root, path):
+    return file_checksums([path], root=root)[0]
+
+
 def _relative(root, path):
-    return (root / path).resolve().relative_to(root).as_posix()
+    # Lexical first so a symlink keeps its own path; resolved second for an aliased absolute root.
+    for candidate in (Path(os.path.normpath(root / path)), (root / path).resolve()):
+        if candidate.is_relative_to(root):
+            return candidate.relative_to(root).as_posix()
+    raise ValueError(f"path outside the project root: {path}")
 
 
 def _git(root, *args):
@@ -72,7 +82,7 @@ def _expand(root, paths):
     return expanded
 
 
-def _refs(root, path):
+def _view_publications(root, path):
     try:
         return sorted({f"data/parquet/{dataset}/{publication}" for dataset, publication in
                        re.findall(r"data/parquet/([^/\s'\"]+)/([^/\s'\"*]+)/", (root / path).read_text())})
@@ -80,9 +90,9 @@ def _refs(root, path):
         return {"unknown": f"{path}: {error}"}
 
 
-def _metadata(root, path, filename, keys):
+def _input_record(root, path, filename, keys):
     path = _relative(root, path)
-    entry = file_checksums([f"{path}/{filename}"], root=root)[0]
+    entry = _checksum(root, f"{path}/{filename}")
     try:
         content = json.loads((root / entry["path"]).read_text())
         if not isinstance(content, dict):
@@ -95,7 +105,7 @@ def _metadata(root, path, filename, keys):
 
 
 def _settings(root, path):
-    entry = file_checksums([path], root=root)[0]
+    entry = _checksum(root, path)
     try:
         import tomllib
     except ImportError:
@@ -132,13 +142,14 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
     paths = sorted(set(code + [_relative(root, p) for p in views] +
                        ([_relative(root, settings_path)] if settings_path is not None else [])))
     try:
-        vcs = _git(root, "rev-parse", "--is-inside-work-tree").strip() == "true"
+        in_git = _git(root, "rev-parse", "--is-inside-work-tree").strip() == "true"
     except (OSError, subprocess.CalledProcessError, ValueError):
-        vcs = False
+        in_git = False
     try:
-        if not vcs:
-            raise subprocess.CalledProcessError(128, "git")
-        commit = _git(root, "rev-parse", "--verify", "HEAD").strip()
+        commit = _git(root, "rev-parse", "--verify", "HEAD").strip() if in_git else None
+    except subprocess.CalledProcessError:
+        commit = None
+    if commit:
         changes = []
         prefix = _git(root, "rev-parse", "--show-prefix").strip()
         statuses = iter(_git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all",
@@ -151,24 +162,27 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
                 next(statuses, None)
             path = path.removeprefix(prefix)
             if path in paths:
-                changes.append({"path": path, "status": status.strip(), **file_checksums([path], root=root)[0]})
-    except subprocess.CalledProcessError:
-        commit = "uncommitted" if vcs else {"unknown": "not a git repository"}
-        changes = [{"path": e["path"], "status": "uncommitted" if vcs else "no-vcs", **e}
+                changes.append({"path": path, "status": status.strip(), **_checksum(root, path)})
+    else:
+        commit = "uncommitted" if in_git else {"unknown": "not a git repository"}
+        changes = [{"path": e["path"], "status": "uncommitted" if in_git else "no-vcs", **e}
                    for e in file_checksums(paths, root=root)]
     evidence = {
         "schema": "awb-evidence/1", "investigation": investigation, "result_id": result_id,
         "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "producing_commit": commit, "producing_paths": paths, "producing_uncommitted_changes": changes,
-        "views": [{**e, "publications": _refs(root, e["path"])} for e in file_checksums(views, root=root)],
-        "publications": [_metadata(root, p, "publication.json", ["inputs", "conversion_commit", "files"])
+        "views": [{**e, "publications": _view_publications(root, e["path"])}
+                  for e in file_checksums(views, root=root)],
+        "publications": [_input_record(root, p, "publication.json", ["inputs", "conversion_commit", "files"])
                          for p in publications],
-        "acquisitions": [_metadata(root, p, "provenance.json", ["status", "files"]) for p in acquisitions],
+        "acquisitions": [_input_record(root, p, "provenance.json", ["status", "files"]) for p in acquisitions],
         "settings": _settings(root, settings_path) if settings_path is not None else
                     {"unknown": "no settings file given"},
-        "checks": checks, "figure": file_checksums([figure], root=root)[0] if figure else None, "notes": notes,
+        "checks": checks, "figure": _checksum(root, figure) if figure else None, "notes": notes,
     }
     path = root / _relative(root, f"investigations/{investigation}/evidence/{result_id}.json")
+    if not path.parent.resolve().is_relative_to(root):
+        raise ValueError(f"evidence directory resolves outside the project root: {path.parent}")
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
@@ -179,10 +193,14 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
     return path
 
 
+def _is_unknown(value):
+    return isinstance(value, dict) and set(value) == {"unknown"}
+
+
 def _known(value, *, deep=True):
-    if isinstance(value, dict):
-        if set(value) == {"unknown"}:
-            raise ValueError(value["unknown"])
+    """Return value, raising ValueError with the reason when it, or a nested value, is unknown."""
+    if _is_unknown(value):
+        raise ValueError(value["unknown"])
     if deep and isinstance(value, (dict, list)):
         for item in value.values() if isinstance(value, dict) else value:
             _known(item)
@@ -193,7 +211,7 @@ def _file_diff(root, entry, keys=("sha256",), *, absent_ok=False):
     try:
         _known({k: entry[k] for k in ("path", *keys)})
         path = entry["path"]
-        current = file_checksums([path], root=root)[0]
+        current = _checksum(root, path)
         problems = []
         for key in keys:
             if entry[key] is None and not absent_ok:
@@ -208,15 +226,16 @@ def _file_diff(root, entry, keys=("sha256",), *, absent_ok=False):
 def compare_evidence(project_root, evidence_path) -> list[dict]:
     """Return the five export comparisons in order, with paths and one-sentence details."""
     root = Path(project_root).resolve()
-    evidence_path = _relative(root, evidence_path)
+    evidence_path = Path(evidence_path).as_posix()
     names = ("committed-code", "uncommitted-code", "views", "inputs", "settings")
     try:
+        evidence_path = _relative(root, evidence_path)
         evidence = json.loads((root / evidence_path).read_text())
         if evidence["schema"] != "awb-evidence/1":
             raise ValueError("wrong schema")
     except (OSError, ValueError, KeyError, TypeError) as error:
         return [{"name": name, "paths": [evidence_path], "outcome": "fail",
-                 "detail": f"missing evidence: {evidence_path}: {error}."} for name in names]
+                 "detail": f"missing evidence: {evidence_path}: {str(error).rstrip('.')}."} for name in names]
     comparisons = []
     for name in names:
         paths, mismatches = [], []
@@ -227,25 +246,34 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
                 sha = evidence["producing_commit"]
                 if paths and sha != "uncommitted":
                     _known(sha)
-                    _git(root, "cat-file", "-e", f"{sha}^{{commit}}")
-                    changed = _git(root, "diff", "--name-only", "-z", "--relative", sha, "--", *paths)
-                    mismatches = [f"{p}: differs from producing commit" for p in changed.split("\0") if p]
+                    try:
+                        _git(root, "cat-file", "-e", f"{sha}^{{commit}}")
+                    except subprocess.CalledProcessError:
+                        mismatches = [f"producing commit {sha} is not in this repository"]
+                    else:
+                        changed = _git(root, "diff", "--name-only", "-z", "--relative", sha, "--", *paths)
+                        mismatches = [f"{p}: differs from producing commit" for p in changed.split("\0") if p]
             elif name == "uncommitted-code":
                 paths = [e["path"] for e in _known(evidence["producing_uncommitted_changes"], deep=False)]
                 for entry in evidence["producing_uncommitted_changes"]:
                     mismatches.extend(_file_diff(root, entry, ("bytes", "sha256"), absent_ok=True))
             elif name == "views":
                 paths = [e["path"] for e in _known(evidence["views"], deep=False)]
-                publications = {_known(e["path"]) for e in _known(evidence["publications"], deep=False)} if paths else set()
+                publications = ({_known(e["path"]) for e in _known(evidence["publications"], deep=False)}
+                                if paths else set())
                 for entry in evidence["views"]:
                     path = entry["path"]
                     mismatches.extend(_file_diff(root, entry))
                     try:
-                        references = _refs(root, path)
-                        _known(references)
                         _known(entry["publications"])
-                    except (OSError, ValueError) as error:
+                    except (ValueError, KeyError) as error:
                         mismatches.append(f"missing evidence: {path}: {error}")
+                        continue
+                    references = _view_publications(root, path)
+                    if _is_unknown(references):
+                        # A deleted view is already reported missing by _file_diff.
+                        if (root / path).exists():
+                            mismatches.append(f"{path}: unreadable ({references['unknown']})")
                         continue
                     if references != entry["publications"]:
                         mismatches.append(f"{path}: publications differ")
@@ -276,23 +304,23 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
                 paths = [entry["path"]]
                 current = _settings(root, entry["path"])
                 old, new = entry["content"], current["content"]
-                if set(old) != {"unknown"} and set(new) != {"unknown"}:
-                    keys = sorted(k for k in old.keys() | new.keys() if (k not in old or k not in new or old[k] != new[k]))
+                if not _is_unknown(old) and not _is_unknown(new):
+                    keys = sorted(k for k in old.keys() | new.keys()
+                                  if k not in old or k not in new or old[k] != new[k])
                     if keys:
                         mismatches.append(f"{entry['path']}: settings differ for keys {', '.join(keys)}")
                 else:
-                    if entry["sha256"] is None:
-                        raise ValueError(f"{entry['path']}: missing sha256")
-                    if entry["sha256"] != current["sha256"]:
-                        mismatches.append(f"{entry['path']}: sha256 differs")
+                    mismatches.extend(_file_diff(root, entry))
         except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.CalledProcessError) as error:
-            mismatches.append(f"missing evidence: {evidence_path}: {error}")
+            mismatches.append(f"missing evidence: {evidence_path}: {str(error).rstrip('.')}")
         if mismatches:
             prefix = "missing evidence: " if any(m.startswith("missing evidence:") for m in mismatches) else ""
-            detail = (prefix if not mismatches[0].startswith(prefix) else "") + "; ".join(mismatches) + "."
+            text = "; ".join(m.rstrip(".") for m in mismatches) + "."
+            detail = text if text.startswith(prefix) else prefix + text
         elif name == "committed-code" and evidence["producing_commit"] == "uncommitted":
             detail = "no producing commit; producing files compared under uncommitted-code"
         else:
             detail = "current state matches recorded evidence." if paths else "nothing to compare."
-        comparisons.append({"name": name, "paths": paths, "outcome": "fail" if mismatches else "pass", "detail": detail})
+        comparisons.append({"name": name, "paths": paths,
+                            "outcome": "fail" if mismatches else "pass", "detail": detail})
     return comparisons

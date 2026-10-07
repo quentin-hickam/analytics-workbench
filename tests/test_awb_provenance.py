@@ -28,12 +28,6 @@ def test_file_checksums_preserves_order_and_reports_missing_files(tmp_path):
         provenance.file_checksums([tmp_path])
 
 
-def test_record_evidence_captures_modified_code(project):
-    write(project, "src/ops.py", b"x = 2\n")
-    evidence = json.loads(record(project).read_text())
-    assert evidence["producing_uncommitted_changes"] == [
-        {"path": "src/ops.py", "status": "M", "bytes": 6,
-         "sha256": hashlib.sha256(b"x = 2\n").hexdigest()}]
 def git(root, *args):
     return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True,
                           text=True).stdout.strip()
@@ -109,6 +103,14 @@ def test_record_evidence_records_clean_producing_state(project):
         "sha256": hashlib.sha256(b"parquet bytes").hexdigest()}]
     assert evidence["acquisitions"][0]["status"] == "complete"
     assert evidence["figure"] is None and evidence["notes"] is None
+
+
+def test_record_evidence_captures_modified_code(project):
+    write(project, "src/ops.py", b"x = 2\n")
+    evidence = json.loads(record(project).read_text())
+    assert evidence["producing_uncommitted_changes"] == [
+        {"path": "src/ops.py", "status": "M", "bytes": 6,
+         "sha256": hashlib.sha256(b"x = 2\n").hexdigest()}]
 
 
 def test_record_evidence_rejects_invalid_checks_and_records_figure(project):
@@ -509,3 +511,101 @@ def test_record_evidence_before_first_commit_checksums_every_producing_file(proj
         {"path": "src/ops.py", "status": "uncommitted", "bytes": 6,
          "sha256": hashlib.sha256(b"x = 1\n").hexdigest()},
     ]
+
+
+def test_compare_evidence_resolves_landing_helper_layout(project):
+    # The exact provenance.json and publication.json layout that awb_landing.py writes: files[].path
+    # is relative to the directory holding the JSON file, and a publication's inputs[].files[].path is
+    # copied from the acquisition's provenance, so it is relative to the acquisition directory.
+    pages = {"pages/page-1.json": b'[{"id": 1}]\n', "pages/page-2.json": b'[{"id": 2}]\n'}
+    parts = {"part/part-0.parquet": b"parquet zero", "part/part-1.parquet": b"parquet one"}
+    for name, content in pages.items():
+        write(project, f"data/raw/crm/a2/{name}", content)
+    for name, content in parts.items():
+        write(project, f"data/parquet/orders/p2/{name}", content)
+    acquisition_files = [{"path": name, "bytes": len(content),
+                          "sha256": hashlib.sha256(content).hexdigest(), "records": 1}
+                         for name, content in sorted(pages.items())]
+    landed_provenance = {
+        "source": "crm", "acquisition_id": "a2", "request": {"endpoint": "orders"},
+        "started_at": "2026-10-07T00:00:00+00:00", "completed_at": "2026-10-07T00:00:01+00:00",
+        "status": "complete", "files": acquisition_files, "notes": None,
+    }
+    landed_publication = {
+        "dataset": "orders", "publication_id": "p2",
+        "inputs": [{"source": "crm", "acquisition_id": "a2",
+                    "files": [{"path": f["path"], "sha256": f["sha256"]} for f in acquisition_files]}],
+        "conversion_commit": git(project, "rev-parse", "HEAD"),
+        "converted_at": "2026-10-07T00:00:02+00:00",
+        "files": [{"path": name, "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+                  for name, content in sorted(parts.items())],
+        "notes": None,
+    }
+    write(project, "data/raw/crm/a2/provenance.json", (json.dumps(landed_provenance, indent=2) + "\n").encode())
+    write(project, "data/parquet/orders/p2/publication.json",
+          (json.dumps(landed_publication, indent=2) + "\n").encode())
+    write(project, "foundation/views/orders.sql",
+          b"select * from read_parquet('data/parquet/orders/p2/part/*.parquet');\n")
+    path = provenance.record_evidence(
+        project, "inv", "r2", views=["foundation/views/orders.sql"], publications=["data/parquet/orders/p2"],
+        acquisitions=["data/raw/crm/a2"], settings_path="investigations/inv/settings.toml", checks=CHECKS)
+    evidence = json.loads(path.read_text())
+    assert evidence["views"][0]["publications"] == ["data/parquet/orders/p2"]
+    publication, acquisition = evidence["publications"][0], evidence["acquisitions"][0]
+    assert {k: publication[k] for k in ("inputs", "conversion_commit", "files")} == {
+        k: landed_publication[k] for k in ("inputs", "conversion_commit", "files")}
+    assert acquisition["status"] == "complete" and acquisition["files"] == acquisition_files
+    inputs = provenance.compare_evidence(project, path)[3]
+    assert inputs["outcome"] == "pass", inputs["detail"]
+    assert "data/raw/crm/a2/pages/page-1.json" in inputs["paths"]
+    assert "data/parquet/orders/p2/part/part-1.parquet" in inputs["paths"]
+    write(project, "data/raw/crm/a2/pages/page-2.json", b"[]\n")
+    (project / "data/parquet/orders/p2/part/part-0.parquet").unlink()
+    inputs = provenance.compare_evidence(project, path)[3]
+    assert inputs["outcome"] == "fail"
+    assert "data/raw/crm/a2/pages/page-2.json" in inputs["detail"]
+    assert "data/parquet/orders/p2/part/part-0.parquet: missing" in inputs["detail"]
+
+
+def test_record_evidence_stores_validation_record_unchanged(project):
+    # The shape validate() in awb_validate.py returns: seven {name, outcome, detail} checks in order.
+    checks = [{"name": "columns", "outcome": "pass", "detail": "Required columns present: 2."},
+              {"name": "row_counts", "outcome": "fail", "detail": "Step dedupe lost 3 rows."},
+              {"name": "joins", "outcome": "not-applicable", "detail": "not assessed"},
+              {"name": "nulls", "outcome": "pass", "detail": "Null rates: amount 0.0%."},
+              {"name": "scope", "outcome": "pass", "detail": "Orders placed in 2026."},
+              {"name": "metrics", "outcome": "not-applicable", "detail": "not assessed"},
+              {"name": "values", "outcome": "pass", "detail": "Totals reconcile with finance."}]
+    path = provenance.record_evidence(
+        project, "inv", "r1", views=[], publications=[], acquisitions=[], settings_path=None,
+        checks=checks, code_paths=[])
+    assert json.loads(path.read_text())["checks"] == checks
+
+
+def test_record_evidence_keeps_symlinked_code_at_its_given_path(project):
+    write(project, "shared/lib.py", b"y = 1\n")
+    (project / "src/link.py").symlink_to("../shared/lib.py")
+    evidence = json.loads(record(project).read_text())
+    assert "src/link.py" in evidence["producing_paths"]
+    assert "shared/lib.py" not in evidence["producing_paths"]
+
+
+def test_compare_evidence_reports_current_state_failures_without_missing_evidence(project):
+    path = record(project)
+    (project / "foundation/views/orders.sql").unlink()
+    views = provenance.compare_evidence(project, path)[2]
+    assert views["outcome"] == "fail"
+    assert views["detail"] == "foundation/views/orders.sql: missing."
+    evidence = json.loads(path.read_text())
+    evidence["producing_commit"] = "0" * 40
+    path.write_text(json.dumps(evidence))
+    committed = provenance.compare_evidence(project, path)[0]
+    assert committed["outcome"] == "fail"
+    assert committed["detail"] == f"producing commit {'0' * 40} is not in this repository."
+
+
+def test_compare_evidence_outside_root_returns_five_failures(project, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside") / "r1.json"
+    comparisons = provenance.compare_evidence(project, outside)
+    assert [c["name"] for c in comparisons] == NAMES
+    assert all(c["outcome"] == "fail" and c["detail"].startswith("missing evidence:") for c in comparisons)
