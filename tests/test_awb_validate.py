@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -31,7 +32,7 @@ def test_required_columns_names_every_missing_column_and_counts_present():
     })[0] == {"name": "columns", "outcome": "fail",
               "detail": "Missing required columns: region, order_date."}
     assert validation.validate(frame, {"required_columns": ["order_id"]})[0] == {
-        "name": "columns", "outcome": "pass", "detail": "1 required columns present.",
+        "name": "columns", "outcome": "pass", "detail": "Required columns present: 1.",
     }
 
 
@@ -102,6 +103,7 @@ def test_judgments_preserve_supplied_outcome_and_detail():
     {"outcome": 1, "detail": "Inspected."},
     {"outcome": "pass", "detail": ""},
     {"outcome": "pass", "detail": 1},
+    "pass",
 ])
 def test_invalid_judgment_raises_value_error(name, judgment):
     with pytest.raises(ValueError, match=name):
@@ -116,7 +118,7 @@ def test_unknown_spec_key_is_named_in_value_error():
 def test_row_counts_integer_uses_result_length_and_default_upper_bound():
     frame = pd.DataFrame({"id": [1, 2, 3]})
     assert validation.validate(frame, {"row_counts": 4})[1] == {
-        "name": "row_counts", "outcome": "pass", "detail": "1 steps checked; last 4 -> 3 rows.",
+        "name": "row_counts", "outcome": "pass", "detail": "Steps checked: 1; last 4 -> 3 rows.",
     }
     assert validation.validate(frame, {"row_counts": 2})[1] == {
         "name": "row_counts", "outcome": "fail",
@@ -153,10 +155,10 @@ def test_row_count_zero_input_passes_only_with_zero_output():
     assert validation.validate(pd.DataFrame(), {"row_counts": [
         {"step": "empty", "before": 0, "after": 0, "min_ratio": 0.5},
     ]})[1] == {"name": "row_counts", "outcome": "pass",
-               "detail": "1 steps checked; last 0 -> 0 rows."}
+               "detail": "Steps checked: 1; last 0 -> 0 rows."}
     assert validation.validate(pd.DataFrame({"id": [1]}), {"row_counts": 0})[1] == {
         "name": "row_counts", "outcome": "fail",
-        "detail": "result: 0 -> 1 rows, ratio undefined violates zero-input bound (after must be 0).",
+        "detail": "result: 0 -> 1 rows from an empty input, which must stay empty.",
     }
 
 
@@ -206,10 +208,10 @@ def test_explicit_empty_mechanical_specs_assess_no_items_successfully():
         "nulls": {},
     })
     assert checks[:4] == [
-        {"name": "columns", "outcome": "pass", "detail": "0 required columns present."},
-        {"name": "row_counts", "outcome": "pass", "detail": "0 steps checked."},
+        {"name": "columns", "outcome": "pass", "detail": "Required columns present: 0."},
+        {"name": "row_counts", "outcome": "pass", "detail": "Steps checked: 0."},
         {"name": "joins", "outcome": "pass", "detail": "Join has 0 rows from 0 left rows."},
-        {"name": "nulls", "outcome": "pass", "detail": "0 null thresholds checked."},
+        {"name": "nulls", "outcome": "pass", "detail": "Null thresholds checked: 0."},
     ]
 
 
@@ -244,3 +246,26 @@ def test_profile_categorical_samples_include_only_observed_non_null_values():
         "region": {"dtype": "category", "null_rate": 0.5, "distinct_count": 1,
                    "sample_values": ["west"]},
     }}
+
+
+def test_absent_judgments_are_not_assessed_beside_measured_checks():
+    checks = validation.validate(pd.DataFrame({"id": [1]}), {"required_columns": ["id"]})
+    assert checks[0]["outcome"] == "pass"
+    assert checks[4:] == [{"name": name, "outcome": "not-applicable", "detail": "not assessed"}
+                          for name in ("scope", "metrics", "values")]
+
+
+def test_row_counts_accepts_numpy_integer_and_rejects_bool():
+    frame = pd.DataFrame({"id": [1, 2, 3]})
+    assert validation.validate(frame, {"row_counts": np.int64(4)})[1]["detail"] == (
+        "Steps checked: 1; last 4 -> 3 rows.")
+    with pytest.raises(TypeError):
+        validation.validate(frame, {"row_counts": True})
+
+
+def test_profile_rejects_negative_limit_and_keeps_samples_strict_json():
+    with pytest.raises(ValueError, match="max_distinct"):
+        validation.profile(pd.DataFrame({"id": [1]}), max_distinct=-1)
+    result = validation.profile(pd.DataFrame({"x": [float("inf"), 1.5]}))
+    assert result["columns"]["x"]["sample_values"] == ["inf", 1.5]
+    json.dumps(result, allow_nan=False)
