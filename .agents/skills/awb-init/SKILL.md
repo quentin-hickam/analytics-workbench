@@ -33,7 +33,7 @@ When a business question is available and its consequential scope or purpose dec
 
 - Ask exactly one decision question at a time and include a recommended answer.
 - Carry every settled answer forward. Ask only about unresolved choices that materially affect the analysis; routine implementation choices need no question.
-- Resolve facts from the repository, source systems, and available tools rather than asking the user to retrieve them. When a knowledge vault is configured, apply the read rules in the **Knowledge vault** section of the [project agent instructions](assets/workbench/AGENTS.md); when none is configured or it is inaccessible, say the vault was not consulted. During scoping, a `choosing.md` preference whose coverage fits the question supplies the recommended answer to the source question; one whose coverage does not fit is not recommended as it stands.
+- Resolve facts from the repository, source systems, and available tools rather than asking the user to retrieve them.
 - Establish the business question, population or scope, supported decision or exploratory purpose, usefulness criteria, and material unknowns.
 - The interview is complete when every consequential scope and purpose decision is either settled or explicitly recorded as a material unknown. Unknowns may remain visible without blocking exploration. Create the investigation records after that point.
 
@@ -60,8 +60,6 @@ Land every acquired API response, SQL extract, or other source before canonical 
 Create `data/raw/` only for an acquisition, `data/parquet/` only for validated publication, and `data/cache/` only for a deliberate expensive result whose purpose is recorded in the catalog. Create `foundation/views/` when the first canonical definition exists. Let readers query stable published files while new outputs are prepared elsewhere and validated before publication.
 
 Package templates and `deliveries/` remain absent during initialization. If the user explicitly asks for a package, complete initialization and then invoke the sibling [`awb-package` skill](../awb-package/SKILL.md); that skill owns `package-format/` and the package's working draft.
-
-Project initialization never creates or changes a knowledge vault, even when one is configured. A request to create a vault goes to the sibling [`awb-vault` skill](../awb-vault/SKILL.md).
 
 ## Complete initialization
 

@@ -6,7 +6,7 @@ This specification consolidates the accepted design for a reusable analytics wor
 
 Requirements outside the final **Unresolved design choices** section are accepted behavior. Items in that final section remain deliberately open and must not be inferred from examples in this document.
 
-The workbench supports one project with a shared data foundation and multiple investigations. It must let an analyst change or expand a business question without rebuilding reusable data preparation, while keeping the findings, decisions, and delivery history for each investigation distinct. An optional knowledge vault carries one analyst's reusable knowledge about the data estate (systems, databases, and tables) across projects, without carrying analytical conclusions.
+The workbench supports one project with a shared data foundation and multiple investigations. It must let an analyst change or expand a business question without rebuilding reusable data preparation, while keeping the findings, decisions, and delivery history for each investigation distinct.
 
 ## Artifacts to produce
 
@@ -14,14 +14,13 @@ Keep the skills as agent-agnostic folders under `.agents/skills/`. Generated pro
 
 The eventual implementation must provide these artifacts:
 
-1. **Initialization skill (`awb-init`).** Establishes the project structure, working conventions, shared data foundation, and the first investigation. A new project starts from a business question; the skill asks for one when none is supplied and completes setup without an investigation only when the user explicitly has none yet. It also starts later investigations and resolves consequential scope changes, directly invoking the `grilling` skill as described below. It does not create a delivery package or a knowledge vault.
-2. **Project `AGENTS.md` template.** Governs daily analytical work, architectural boundaries, automatic record maintenance, source and cache handling, investigation switching, when the knowledge vault is read, and the prohibition on unsolicited deliverables.
-3. **Status skill (`awb-status`).** A read-only report of the active investigation, findings and revalidation flags, unresolved issues, package and release state, landed data and release storage, and vault configuration, ending with the requests that are relevant now. It changes nothing and makes the workbench's request-gated capabilities discoverable to the analyst.
+1. **Initialization skill (`awb-init`).** Establishes the project structure, working conventions, shared data foundation, and the first investigation. A new project starts from a business question; the skill asks for one when none is supplied and completes setup without an investigation only when the user explicitly has none yet. It also starts later investigations and resolves consequential scope changes, directly invoking the `grilling` skill as described below. It does not create a delivery package.
+2. **Project `AGENTS.md` template.** Governs daily analytical work, architectural boundaries, automatic record maintenance, source and cache handling, investigation switching, and the prohibition on unsolicited deliverables.
+3. **Status skill (`awb-status`).** A read-only report of the active investigation, findings and revalidation flags, unresolved issues, package and release state, and landed data and release storage, ending with the requests that are relevant now. It changes nothing and makes the workbench's request-gated capabilities discoverable to the analyst.
 4. **Packaging skill (`awb-package`).** Creates or revises a named delivery package's working draft only when the user explicitly requests it. It gathers the package's dataset selection, records provenance, carries caveats for findings awaiting revalidation, and produces a complete upstream narrative plus M365 assembly instructions. It owns the draft layout, shared package format, manifest fields, and draft consistency rules.
 5. **Release skill (`awb-release`).** Preserves a numbered release from the working draft only when the user explicitly marks the package delivered. It verifies the draft against the packaging skill's consistency rules, obtains a disposition for each unresolved revalidation flag, and records the project's release storage location, copying each release there when reachable.
-6. **Knowledge vault skill (`awb-vault`).** Creates a knowledge vault, and records data-estate knowledge in one, only when the user explicitly asks. Its one asset is the vault-root `AGENTS.md`, stating the page conventions in **Knowledge vault**, written only at vault creation and never over an existing file.
-7. **Visualization skill (`awb-visualize`).** Principles for attractive, legible charts, figures, diagrams, and results tables that display correctly inline in the agent chat and when pasted into a document, while keeping presentation logic out of neutral analytical operations.
-8. **Supporting templates.** Provide consistent starting formats for the shared source register, data catalog, quality record, glossary, investigation brief, current state, investigation history, package journal, executive summary, M365 assembly instructions, and delivery manifest. Templates should be created or instantiated only when the corresponding artifact is needed.
+6. **Visualization skill (`awb-visualize`).** Principles for attractive, legible charts, figures, diagrams, and results tables that display correctly inline in the agent chat and when pasted into a document, while keeping presentation logic out of neutral analytical operations.
+7. **Supporting templates.** Provide consistent starting formats for the shared source register, data catalog, quality record, glossary, investigation brief, current state, investigation history, package journal, executive summary, M365 assembly instructions, and delivery manifest. Templates should be created or instantiated only when the corresponding artifact is needed.
 
 Every skill name carries the `awb-` prefix so the workbench's actions group together in hosts that list skills as commands.
 
@@ -168,7 +167,7 @@ project-root/
 └── .gitignore
 ```
 
-Create investigation, cache, package, and release locations lazily. The structure is a stable convention, not a requirement to create empty directories or placeholder documents during initialization. There is no `CONTEXT.md` in the generated structure. The knowledge vault, when used, lives outside every project in a folder of its own; see **Knowledge vault**.
+Create investigation, cache, package, and release locations lazily. The structure is a stable convention, not a requirement to create empty directories or placeholder documents during initialization. There is no `CONTEXT.md` in the generated structure.
 
 ## Packaging and delivery behavior
 
@@ -194,72 +193,6 @@ The package narrative is authoritative upstream. The approved flow is workbench 
 Working analysis uses current data and definitions. A delivered release preserves its exact exported results and provenance so later changes do not alter what it represented. Full database snapshots and exact rerun capability are not retained per release by default. Preserving enough original data for an exact rerun is an explicit choice.
 
 Drafts may include findings flagged for revalidation if each affected conclusion carries a clear caveat and the draft lists unresolved issues. Before a flagged draft is marked delivered, require the user to choose among revalidating the finding, omitting it, or explicitly releasing it with the caveat. Packaging must not automatically rerun analysis.
-
-## Knowledge vault
-
-An analyst may keep a knowledge vault: a folder of plain Markdown, opened in Obsidian, that records what they have learned about the data estate they work with (its systems, databases, schemas, and tables) so that knowledge gained in one project is found when a later project touches the same object. The vault lives outside every project and is optional. A project works fully without it, and nothing a project's results depend on lives only in the vault.
-
-### Scope: how to read the data, not what it showed
-
-The vault records knowledge about data objects and how to read and use them. It does not record analytical conclusions. The boundary test is whether a statement would change if the business changed: "pay_detail excludes contractors" belongs in the vault; "contractor share is rising" does not. A known issue may note that ignoring it once changed a result, without saying which way.
-
-The vault records curated knowledge about interpreting and handling data objects: meaning, grain, coverage, keys and joins, code values and their meanings, refresh behavior, known issues and their handling, and which object to use for which need. It does not mirror schemas: no exhaustive column lists, types, or row counts. A structural detail appears only where it explains meaning or handling, and each object page says where its full column list can be read. The vault contains no credentials or other secrets, no record-level data, and no paths that work only on one machine. System, server, and database names, code values, and access instructions are allowed.
-
-### Layout
-
-```text
-<vault-root>/
-├── AGENTS.md               # Conventions; the only file a new vault starts with
-├── choosing.md             # Which object to use for which need (created when first needed)
-├── glossary.md             # Business terms that span objects (created when first needed)
-└── <system>/               # One folder per system the analyst connects to or receives data from
-    ├── README.md           # What the system is, how it is identified and accessed, system-wide behavior
-    └── <qualified-name>.md # One page per object used or assessed, e.g. PAY.dbo.pay_detail.md
-```
-
-A system is a database server, warehouse, application, or provider. Its folder has a short name the analyst chooses, and its `README.md` records how the system is identified in connections (server, host, or provider name). An object is a table, view, file extract, or API endpoint in a system. An object's page is named by its qualified name within the system (`database.schema.table` for a database; the extract name or endpoint path otherwise), with any character not allowed in file names, including `/`, replaced by `_`. If two exact names map to the same file name, including names that differ only in letter case, give each a distinct file name and list the exact-name-to-file mapping in the system `README.md`. The page's first line states the exact qualified name; before using or changing a page, check that it names the intended object. An agent holding a qualified name finds the page by path, through the system `README.md` mapping, or by searching the system `README.md` files for the server or provider name when the folder is not obvious.
-
-Knowledge that applies to many objects goes on the narrowest page that covers them: the system `README.md`, or a database or schema page named by its qualified name (`PAY.md`, `PAY.dbo.md`). Create a page only for an object the analyst has used or assessed, and only when something is recorded about it; never populate the vault from a system catalog.
-
-An object page covers, as far as known: what the object is and its grain; keys and how it joins to other objects, with cardinality and conditions; fields whose meaning, coding, or behavior is not obvious from their names; coverage and refresh behavior; known issues and how to handle them; copies of it in other systems, or the object it copies, with any lag; and where its full column list can be read. No section and no frontmatter is required.
-
-`choosing.md` has one entry per recurring need: the preferred object, alternatives and when they fit, objects to avoid and why, and the coverage and date the preference rests on. Comparative preference lives only there; object pages state facts. `glossary.md` holds business terms whose definition spans objects; a term defined by one field is recorded on that object's page.
-
-Each claim carries, inline, its date and how it was established (documentation, a query or check, or the system owner's word), for example "a rerun pay run duplicates rows per (employee_id, pay_period); keep the highest run_id within each (checked by query, 2026-08)". A claim about a period states the period. Refreshing one claim never makes another look current. When an object is renamed or moved, rename its page, update links to it, and keep the old name on the page. Agents write file-relative Markdown links inside the vault; Obsidian resolves those and any wikilinks a person adds.
-
-### Access and reading
-
-Agents read and write the vault through the filesystem; no Obsidian plugin, REST API, or MCP server is required. The vault location is a user-level setting: the `WORKBENCH_VAULT` environment variable or an equivalent line in user-level agent instructions. When it is unset or inaccessible, report that the vault was not consulted and continue from project records.
-
-The project `AGENTS.md` template gains a short **Knowledge vault** section holding the location rule, the read triggers, and the write rule. `awb-init` applies the read triggers during scoping. `awb-vault` creates a vault on explicit request at a user-named path by writing only its `AGENTS.md`, and records knowledge in it on explicit request. Project initialization never creates a vault as a side effect. The vault-root `AGENTS.md` alone owns page conventions.
-
-Read triggers:
-
-- once per session, before the first vault read: the vault-root `AGENTS.md`;
-- before first assessing, querying, or interpreting an object in a session: its system `README.md`, any database or schema page above it, and its own page; if it has no page, search the vault once for its name and move on;
-- when choosing which object to use for a need: `choosing.md`; and
-- when defining a business term against data: `glossary.md`.
-
-Do not sweep the vault. Vault claims are dated prior knowledge, not evidence about the data a project acquired: before preparation depends on one, check it against the acquired data when a check is feasible, and record the result in the project. During scoping, a `choosing.md` preference whose recorded coverage fits the question supplies the recommended answer to the source question, with its date. When that coverage does not fit the question's population or period, do not recommend the preference as it stands; state the gap and recommend objects that together cover the question, or leave the source question open.
-
-### Relationship to project records
-
-The vault describes estate objects as they exist, independent of any project. Project records describe what the project did with them:
-
-- `foundation/sources.md`: which objects the project uses, their fitness for its question, and its acquisitions;
-- `foundation/catalog.md`: the project's own datasets, views, and caches, which never go in the vault;
-- `foundation/quality.md`: the issues that affect the project's canonical data and the treatment applied; and
-- `foundation/glossary.md`: the definitions the project adopted.
-
-When the project relies on a vault claim, it records the claim with its date and basis, and a labeled plain-text reference in the cell that holds it, for example `vault: payroll/PAY.dbo.pay_detail.md`, so the project stays complete and later vault edits do not change it. When project work contradicts or extends a vault page, record that in the project and tell the user which page differs; change the vault only on request.
-
-### Writing
-
-Write to the vault only when the user explicitly asks, having read the vault-root `AGENTS.md`. Apply the boundary test; when a candidate statement fails it, explain why and leave it out. Put each fact on the narrowest page it applies to, creating that page and its system `README.md` when absent. Git is optional; if the vault is a Git repository, commit only on explicit request.
-
-### Sharing with a team (optional)
-
-The solo vault never depends on this subsection. A team can share a vault by keeping it in a Git repository with a remote. Then pull fast-forward-only before changing pages and stop if the clone has diverged; push only on explicit request; do not also sync the folder through a file-sync service or Obsidian Sync; and add the observer's initials to each new claim. Curation and review policy are the team's choice.
 
 ## Acceptance scenarios
 
@@ -344,41 +277,6 @@ Expected behavior:
 - permit separate analytical sessions to query completed, stable datasets while another job prepares new files, without requiring access to a shared writable DuckDB file; and
 - apply the same landing-first rule to acquired batches if a project uses an incremental workflow or another backend.
 
-### 7. Reusing estate knowledge in a new project
-
-The vault has `payroll/README.md`; `payroll/PAY.md` (every PAY table reloads nightly and the previous day is incomplete until 06:00); `payroll/PAY.dbo.pay_detail.md` (a rerun pay run duplicates rows per (employee_id, pay_period); keep the highest run_id within each); and pages for both `hrdw/HRDW.dbo.emp_snapshot.md` and `hrdw/HRDW.stage.emp_snapshot.md`. Its `choosing.md` prefers `HRDW.dbo.emp_snapshot` for headcount as of a date, resting on coverage of employees only (observed 2026-05). A new investigation needs headcount as of a date for employees and contractors, and will use pay_detail.
-
-Expected behavior:
-
-- read the vault-root `AGENTS.md`, `choosing.md`, and for each object considered its system `README.md`, database page and object page, reading the `dbo` emp_snapshot page and not the `stage` one when the query uses `HRDW.dbo.emp_snapshot`; do not sweep the vault;
-- not recommend emp_snapshot as it stands: state that its coverage excludes contractors, and recommend objects that together cover contractors or leave the source question open;
-- account for the PAY reload window when setting the acquisition cutoff, and check the pay_detail duplication against the acquired data before preparation applies the handling;
-- record the source choice and reason in `foundation/sources.md`, and the pay_detail issue, check result and treatment in `foundation/quality.md`, each with the claim's date, basis and a `vault:` reference; and
-- leave the vault unchanged.
-
-### 8. Recording estate knowledge on request
-
-During an investigation the user asks the agent to record: that a query in this project shows pay_detail reruns no longer duplicate rows from the 2026-09 pay period; that `HRDW.dbo.term_events` has one row per termination event and that its reason codes `RES` and `RET` mean voluntary exits; the definition of voluntary exit used across HRDW and payroll; and that attrition is highest in sales.
-
-Expected behavior:
-
-- read the vault-root `AGENTS.md` first;
-- on the pay_detail page, keep the earlier duplication claim with its original date, basis and scope; add the new claim that reruns from the 2026-09 pay period onward do not duplicate rows, with its date and basis; and narrow the handling advice only as far as the new evidence supports, leaving the status of earlier periods as recorded;
-- create `hrdw/HRDW.dbo.term_events.md` (and `hrdw/README.md` if absent) with the supplied grain and code meanings, without copying its column list or adding facts that were not supplied;
-- add voluntary exit to `glossary.md`, linking the object pages it rests on;
-- decline to record the sales attrition statement, explaining the boundary test;
-- create no page for any object not involved; and
-- commit only on explicit request when the vault is a Git repository.
-
-### 9. A project that contradicts the vault, and a project without one
-
-A project's query shows that `PAY.dbo.pay_detail` no longer duplicates rows on rerun, contrary to its vault page. Separately, a project runs where no vault location is configured.
-
-Expected behavior:
-
-- the first project records the observation in its own `foundation/quality.md`, tells the user the vault page differs, and leaves the vault unchanged; and
-- the second reports that the vault was not consulted and continues from its own records.
-
 ## Explicit exclusions
 
 The workbench does not:
@@ -393,9 +291,7 @@ The workbench does not:
 - retain mistakes in approaching the data, coding mistakes, or debugging logs as analytical history;
 - create `CONTEXT.md`, `CONTEXT-MAP.md`, or ADRs in initialized workbenches;
 - invoke `grill-with-docs` or the unmodified `domain-modeling` skill;
-- store analytical conclusions in the knowledge vault or mirror system schemas into it;
-- read other investigations' or projects' conclusions on the agent's own initiative before an investigation's own results exist, except that a related investigation's findings may inform method selection as in scenario 2;
-- require the knowledge vault for project work, write to it without an explicit request, populate it in bulk from system catalogs, or require Git, an Obsidian plugin, REST API, or MCP server to use it; or
+- read other investigations' or projects' conclusions on the agent's own initiative before an investigation's own results exist, except that a related investigation's findings may inform method selection as in scenario 2; or
 - require a speculative general-purpose analytics framework beyond the current work.
 
 ## Unresolved design choices

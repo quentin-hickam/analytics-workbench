@@ -42,4 +42,3 @@ Name the workbench skill in a plain request:
 - `awb-package` creates or revises a package's working draft: "Use awb-package to draft a package for this investigation."
 - `awb-release` preserves a numbered release from the draft: "Use awb-release — mark the package delivered."
 - `awb-visualize` makes charts and results tables that read in chat and in documents: "Use awb-visualize to chart late closures by region."
-- `awb-vault` creates a knowledge vault or records estate knowledge in it: "Use awb-vault to record that pay_detail duplicates rows on rerun."

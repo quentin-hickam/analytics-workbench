@@ -5,7 +5,7 @@
 #
 # Archive layout, independent of the checkout directory's name:
 #   analytics-workbench-skills/
-#     awb-init/ awb-package/ awb-release/ awb-status/ awb-vault/ awb-visualize/
+#     awb-init/ awb-package/ awb-release/ awb-status/ awb-visualize/
 #     docs/ CHANGELOG.md LICENSE README.md
 # The skill folders sit at the top level so they can be copied as-is into a
 # host's user-level skills directory. README links into .agents/skills/ are
@@ -20,7 +20,6 @@ allowlist="
 .agents/skills/awb-package
 .agents/skills/awb-release
 .agents/skills/awb-status
-.agents/skills/awb-vault
 .agents/skills/awb-visualize
 docs
 CHANGELOG.md
