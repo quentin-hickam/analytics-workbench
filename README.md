@@ -18,6 +18,7 @@ Every skill name carries the `awb-` prefix, so typing `awb-` in a host that list
 - For figures made under `awb-visualize`, the analysis project's Python environment needs Python 3.10 or later, matplotlib, and seaborn 0.13. The shared style file was tested with matplotlib 3.10.0 and seaborn 0.13.2.
 - For the landing helper that `awb-init` ships, the analysis project's Python environment needs Python 3.10 or later; its `session()` also needs the `duckdb` package. `land()`, `publish()`, and `retain()` use only the standard library.
 - For result validation under the project `AGENTS.md`, the analysis project's Python environment needs Python 3.10 or later and pandas. The shared validation file was tested with pandas 2.2.
+- pytest is needed only to run this repository's own tests under `tests/`; they exercise the shipped helper files and are not part of the distributed archive.
 
 ## Install
 
