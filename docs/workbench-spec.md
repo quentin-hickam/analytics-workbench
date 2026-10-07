@@ -81,7 +81,7 @@ The workbench must use consistent logical locations across projects. It must not
 
 Canonical, reusable views are preferred. DuckDB querying external Parquet datasets is the default. A project may select a different backend for a concrete need, including incremental workloads, while retaining independent source landing and the preparation/EDA boundary. Source conversion to Parquet is a deliberate storage boundary, not a requirement to materialize every transformation. Accumulating materialized results without an explicit reason violates the workflow.
 
-All analytical code is tracked in Git. Delivery packages are not part of the code history under the current convention; their metadata identifies the Git commit that produced them. A commit identifies code, not input data, so delivery metadata also records input provenance and analytical settings.
+All analytical code is tracked in Git. Delivery packages are not part of the code history under the current convention; their metadata identifies the Git commit that produced them. A commit identifies code, not input data, so delivery metadata also records input provenance and analytical settings. Each result's evidence is a JSON file in the investigation's `evidence/` directory, written and compared by a shipped provenance helper copied into `src/`; `state.md` links to it.
 
 ## Records and vocabulary
 
@@ -128,6 +128,7 @@ project-root/
 │   ├── preparation/              # Reusable normalization and correction logic
 │   ├── exploration/              # Neutral profiling and analytical operations
 │   ├── packaging/                # Shared package assembly logic
+│   ├── provenance.py             # Result evidence recording and comparison
 │   └── presentation/             # Shared figure style and figure builders
 ├── data/
 │   ├── raw/                      # Independently landed originals and provenance
@@ -146,6 +147,7 @@ project-root/
 │       ├── history.md            # Meaningful learnings and analytical decisions
 │       ├── <configuration>       # Population and analytical settings
 │       ├── <composition-entry>   # Thin composition of shared operations
+│       ├── evidence/             # One JSON evidence file per result
 │       ├── figures/              # Figures cited as evidence for findings
 │       └── exploration/          # Local exploratory queries, notebooks, and figures
 ├── package-format/
@@ -303,7 +305,7 @@ The following choices remain open and must not be silently fixed by the specific
 - the general rule for when a scope change becomes a new investigation rather than an expansion, beyond the accepted population scenarios above;
 - the backend and refresh strategy for the exceptional incremental project; DuckDB over Parquet is the batch default;
 - precise cache identity, freshness detection, invalidation, and refresh mechanics;
-- the serialization format of the delivery manifest and the exact formatting of the foundation catalog; the manifest field list and field names are fixed by the shared template;
+- the serialization format of the delivery manifest and the exact formatting of the foundation catalog; the manifest field list and field names are fixed by the shared template. Result evidence files, acquisition provenance files, and publication files are not open: they are JSON with fixed schemas;
 - implementation language, executable filenames, and configuration serialization format;
 - backend-specific raw-data retention and ignore rules, beyond the landed-data storage rule in **Question-driven data preparation**; and
 - which deliveries, if any, warrant preserving original inputs for exact reruns.
