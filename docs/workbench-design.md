@@ -10,6 +10,7 @@ These notes capture accepted decisions from the design interview. The workflow d
 - Do not export intermediate CSV files as handoffs between analysis steps. Keep intermediate computation in views or the analytical runtime; cache expensive results deliberately. User-selected dataset exports for delivery packages are separate from intermediate computation.
 - Maintain canonical, reusable views of the data in the shared analytical store. DuckDB currently serves this role, but the principle survives a change in storage technology.
 - Maintain a catalog of the shared analytical store's datasets and canonical views, separate from investigation records. Its exact format remains to be specified.
+- Validate before presenting results: columns, row counts, joins, nulls, scope, metrics, and values. This checklist is carried from the earlier framework as an always-on requirement recorded with each result's evidence.
 - Generate ad hoc deliverables only upon explicit user invocation.
 - Track all analytical code in Git and identify the producing commit in delivery metadata.
 
@@ -99,7 +100,7 @@ Keep definitions separate from scope and configuration: a selected population or
 
 At investigation creation, capture the business question, population or scope, the decision the analysis will support, and what would make the answer useful. Allow an exploratory purpose and explicitly record unknowns rather than requiring a predetermined decision or outcome. Use this brief to guide source relevance and preparation effort.
 
-Separate a concise current-state summary from a chronological history of meaningful learnings and decisions. The current state supports resuming work; the history retains analytical reasoning, caveats, superseded conclusions, and relevant data limitations or errors. Execution mistakes, mistaken approaches to the data, and routine debugging are excluded from both the investigation history and the delivery journal. Shared data preparation and quality knowledge remain part of the data foundation.
+Separate a concise current-state summary from a chronological history of meaningful learnings and decisions. The current state supports resuming work; the history retains analytical reasoning, caveats, superseded conclusions, and relevant data limitations or errors. Routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding are excluded from both the investigation history and the delivery journal. A methodological mistake that changed a finding or explains why an earlier conclusion was wrong is retained, because the account must explain how the conclusion was reached. Shared data preparation and quality knowledge remain part of the data foundation.
 
 The agent maintains these records automatically when a finding, decision, or next step changes. Explicit checkpoints are also available before switching investigations.
 
