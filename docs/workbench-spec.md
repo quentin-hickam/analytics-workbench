@@ -184,7 +184,7 @@ Every release is self-contained and includes:
 - a brief description of changes since the previous release, when applicable;
 - any user-selected datasets;
 - M365 assembly instructions; and
-- a manifest containing the producing Git commit, input provenance, analytical settings, dataset selection, and unresolved caveats.
+- a manifest containing the producing Git commit (or `uncommitted` with checksums of the producing files when no commit existed), input provenance, analytical settings, dataset selection, and unresolved caveats.
 
 The package narrative is authoritative upstream. The approved flow is workbench to M365. M365 formats and beautifies the provided Markdown and datasets into Word and Excel outputs; it does not supply substantive revisions back to the workbench. Reverse synchronization is out of scope.
 
@@ -192,7 +192,7 @@ The package narrative is authoritative upstream. The approved flow is workbench 
 
 Working analysis uses current data and definitions. A delivered release preserves its exact exported results and provenance so later changes do not alter what it represented. Full database snapshots and exact rerun capability are not retained per release by default. Preserving enough original data for an exact rerun is an explicit choice.
 
-Drafts may include findings flagged for revalidation if each affected conclusion carries a clear caveat and the draft lists unresolved issues. Before a flagged draft is marked delivered, require the user to choose among revalidating the finding, omitting it, or explicitly releasing it with the caveat. Packaging must not automatically rerun analysis.
+Drafts may include findings flagged for revalidation if each affected conclusion carries a clear caveat and the draft lists unresolved issues. Before a flagged draft is marked delivered, require the user to choose among revalidating the finding, omitting it, or explicitly releasing it with the caveat. Packaging must not automatically rerun analysis. Serializing an already-recorded result through a neutral operation, after checking that the result-producing code is unchanged since the producing state, is an export rather than a rerun.
 
 ## Acceptance scenarios
 
@@ -301,7 +301,7 @@ The following choices remain open and must not be silently fixed by the specific
 - the general rule for when a scope change becomes a new investigation rather than an expansion, beyond the accepted population scenarios above;
 - the backend and refresh strategy for the exceptional incremental project; DuckDB over Parquet is the batch default;
 - precise cache identity, freshness detection, invalidation, and refresh mechanics;
-- the serialization format of the delivery manifest and the exact formatting of the foundation catalog; the manifest field list is fixed by the shared template;
+- the serialization format of the delivery manifest and the exact formatting of the foundation catalog; the manifest field list and field names are fixed by the shared template;
 - implementation language, executable filenames, and configuration serialization format;
 - backend-specific raw-data retention and ignore rules, beyond the landed-data storage rule in **Question-driven data preparation**; and
 - which deliveries, if any, warrant preserving original inputs for exact reruns.

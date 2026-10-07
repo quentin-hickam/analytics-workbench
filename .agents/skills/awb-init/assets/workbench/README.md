@@ -14,12 +14,12 @@ Released packages are kept at: not yet recorded
 
 - `foundation/` records sources, canonical datasets and views, shared data quality, and common vocabulary.
 - `investigations/` keeps each question's brief, current state, meaningful history, settings, thin composition code, and local exploration.
-- `src/preparation/` holds reusable normalization and correction logic when such code exists.
+- `src/preparation/` holds acquisition, landing, conversion, session-loading, and reusable normalization and correction code when such code exists.
 - `src/exploration/` holds neutral analytical operations when such code exists.
 - `src/packaging/` holds shared package assembly code when such code exists.
 - `src/presentation/` holds shared figure style and figure builders when the first figure needs them.
-- `data/raw/` holds independently landed originals and acquisition provenance when data has been acquired. It is excluded from Git, so landed originals persist only where the project copies them. The agent asks for that location before the first landing and records it in the `Landed data is kept at` line above.
-- `data/parquet/` holds validated published datasets for the default batch workflow.
+- `data/raw/` holds independently landed originals when data has been acquired, one directory per acquisition with its provenance file. It is excluded from Git, so landed originals persist only where the project copies them. The agent asks for that location before the first landing and records it in the `Landed data is kept at` line above.
+- `data/parquet/` holds validated publications for the default batch workflow; each canonical view names the publication it reads.
 - `data/cache/` holds only deliberate, rebuildable expensive results recorded in the foundation catalog.
 - `deliveries/` is created only through an explicit packaging request. It is excluded from Git, so numbered releases persist only where the project copies them. Releases are made with `awb-release`, which asks for that location on the first release and records it in the `Released packages are kept at` line above.
 

@@ -23,6 +23,8 @@ Planned as 0.2.0.
 - `awb-init` reports an instruction file, such as a `CLAUDE.md` in the project directory or above it, that the current host reads in place of the workbench `AGENTS.md`. It never creates or edits that file.
 - MIT license (`LICENSE`).
 - This changelog.
+- Validation of acceptance scenarios 1 through 6 by isolated agents on fixture projects, recorded in the README. Every expected-behavior bullet passed.
+- Instruction gaps those runs surfaced are closed: `awb-release` verifies structural rules before asking for revalidation dispositions and re-verifies the caveat rule afterwards; dispositions cover every place a conclusion is represented, including figures and dataset columns; the manifest template fixes field names that `awb-status` reads; the project `AGENTS.md` gives a default landing, provenance, retention, and publication layout and homes for acquisition and settings code; an expansion is scoped through `awb-init`; `awb-status` compares current flags with draft dispositions, handles repositories with no commits, and offers the next analytical step.
 - README sections on requirements, host compatibility, and versioning. Requirements name the source of the `grilling` dependency (`skills/productivity/grilling` in [mattpocock/skills](https://github.com/mattpocock/skills), tested against release v1.3.1) and the Python packages `awb-visualize` assumes. Host compatibility covers where Claude Code and OpenAI Codex look for user-level skills, and when Claude Code reads a project `AGENTS.md`.
 
 ### Removed
