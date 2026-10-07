@@ -32,6 +32,8 @@ If any of these shared files is missing, copy only the missing file from this sk
 
 Preserve every existing shared format file. The root `package-format/` applies across investigations; keep it shared rather than forking it for a package.
 
+If `src/packaging/manifest.py` is missing, copy [awb_manifest.py](assets/awb_manifest.py) there; it builds and checks the manifest `inventory`. Keep an existing copy, and import it from `src/packaging/`, never from the skill folder.
+
 For a new package, ask which audience-facing datasets to include and explicitly offer **none**. There is no default export set. For a revision, inherit the selection recorded in the current manifest unless the user changes it or it no longer fits the package scope. If it no longer fits, explain why and ask for a new selection before exporting data.
 
 ## Gather the record
@@ -72,7 +74,7 @@ Every revision leaves the draft consistent:
 
 - The journal is self-contained: it explains enough scope, sources, method, settings, findings, evidence, contrary results, limitations, and caveats to stand without earlier releases or M365 edits.
 - The executive summary agrees with the journal in claims, numbers, qualifications, and recommendations.
-- The manifest `inventory` matches the draft directory exactly: the same files, each with matching byte size and SHA-256, and the manifest listed by path only.
+- The manifest `inventory` matches the draft directory exactly: the same files, each with matching byte size and SHA-256, and the manifest listed by path only. After every other draft file is final, run `inventory` from `src/packaging/manifest.py` on the draft, serialize its rows in order into the manifest's `inventory` field, then run `verify` and repair the draft until it returns no discrepancies. A listing, hash, or comparison made by hand does not substitute for the helper.
 - The `datasets/` directory and the manifest match the recorded dataset selection.
 - Every place the draft represents an affected conclusion of a finding awaiting revalidation carries a nearby caveat, unless a recorded disposition omits it: journal and summary text beside the claim, a figure in its journal caption and alt text, and a dataset or column in the journal's description of it. The draft lists that finding as unresolved.
 

@@ -12,7 +12,7 @@ Every draft and release manifest records these fields under the field names show
 - `revised_at`: when this draft revision was written; a release keeps the value of the draft it copies;
 - `released_at`: when the release was made; empty on a draft;
 - `prior_release`: the latest numbered release before this one, such as `released/001`, or `none`; and
-- `inventory`: every file in the package directory, each with its path relative to the package directory, byte size, and SHA-256. The manifest lists itself by path only, with no size or checksum, since writing them would change them.
+- `inventory`: every file in the package directory, each with its path relative to the package directory using `/` separators, byte size, and SHA-256; directories are not listed. The manifest lists itself by path only, with no size or checksum, since writing them would change them. Produce the rows with `inventory` in `src/packaging/manifest.py` and serialize them in order under the keys `path`, `bytes`, and `sha256`.
 
 ## Producing state
 
