@@ -4,7 +4,9 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ## [Unreleased]
 
-Planned as 0.2.0.
+Nothing yet.
+
+## [0.2.0] - 2026-10-07
 
 ### Changed
 
@@ -92,6 +94,7 @@ First release.
 - The knowledge vault, which carries knowledge about systems, databases, schemas, and tables from one project to the next through `WORKBENCH_VAULT`.
 - The specification, design notes, and an archive build script that packages an explicit allowlist of tracked files.
 
-[Unreleased]: https://github.com/quentin-hickam/analytics-workbench/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/quentin-hickam/analytics-workbench/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/quentin-hickam/analytics-workbench/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/quentin-hickam/analytics-workbench/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/quentin-hickam/analytics-workbench/releases/tag/v0.1.0
