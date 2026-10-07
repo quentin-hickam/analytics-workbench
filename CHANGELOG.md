@@ -55,7 +55,7 @@ The workbench is now five skills under the `awb-` prefix, replacing `workbench-i
 
 **Required:** the `grilling` skill from https://github.com/mattpocock/skills (`skills/productivity/grilling`, tested against release v1.3.1) must be installed where your host discovers skills, normally the same directory. It is not included.
 
-**Claude Code:** the workbench rules live in the project's `AGENTS.md`. Claude Code reads it from version 2.1.277, and by default only when no `CLAUDE.md` or `CLAUDE.local.md` exists in the working directory or above it. If one does, add the line `@AGENTS.md` to that `CLAUDE.md`, or set Project instructions to `claude-md-and-agents-md` in `/config`.
+**Claude Code:** the workbench rules live in the project's `AGENTS.md`. Claude Code reads it from version 2.1.277, and by default only when no `CLAUDE.md` or `CLAUDE.local.md` exists in the working directory or above it. If one does, add an import line to it with the path from that file to the project's `AGENTS.md` (`@AGENTS.md` beside it, `@../AGENTS.md` in `.claude/CLAUDE.md`, the relative path into the project from an ancestor's `CLAUDE.md`), or set Project instructions to `claude-md-and-agents-md` in `/config`.
 
 ## Use
 > Use awb-init to initialize this analytics project. The question is …

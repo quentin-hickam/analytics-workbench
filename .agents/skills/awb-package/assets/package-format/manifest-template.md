@@ -19,7 +19,7 @@ Every draft and release manifest records these fields under the field names show
 The analytical results this package represents.
 
 - `producing_commit`: the producing commit SHA, recovered from result provenance in the investigation records or an earlier manifest, never assumed from the packaging checkout; or `uncommitted` with the recorded SHA-256 checksums of the producing files when no commit existed;
-- `producing_uncommitted_changes`: `none`, or the affected code, view, and settings paths, since a SHA with uncommitted changes does not fully identify the producing code;
+- `producing_uncommitted_changes`: `none`, or each affected code, view, and settings path with the checksum recorded for it when the result was produced, since a SHA with uncommitted changes does not fully identify the producing code; paths without recorded checksums are listed as such, and the producing state is then not recoverable;
 - `inputs`: the inputs actually used: source and acquisition or publication identifiers, plus the versions, dates, or checksums available in the foundation records;
 - `analytical_settings`: the analytical settings represented by the results; and
 - `scope`: the population, period, and other scope the results cover.
@@ -30,7 +30,7 @@ The operation that assembled this package, recorded separately from the producin
 
 - `packaging_commit`: the packaging checkout commit;
 - `packaging_uncommitted_changes`: `none`, or the relevant uncommitted package-source paths; and
-- `export_checks`: for each exported dataset, the check run before its export that the result-producing code is unchanged: `git diff <producing-commit> -- <result code paths>`, or for an `uncommitted` producing state a comparison of the current files with the recorded checksums; with the commit or checksums, the paths, and the outcome. A revision that reuses an export carries its check forward unchanged; with no exported datasets, `none`.
+- `export_checks`: for each exported dataset, the check run before its export that the result-producing code matches the complete producing state: `git diff <producing-commit> -- <result code paths>` is empty and every path in `producing_uncommitted_changes` has its recorded checksum now, or for an `uncommitted` producing state every producing file matches its recorded checksum; with the commit, the paths, the checksums compared, and the outcome. A revision that reuses an export carries its check forward unchanged; with no exported datasets, `none`.
 
 ## Selection and caveats
 

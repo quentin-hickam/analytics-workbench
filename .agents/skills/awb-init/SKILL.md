@@ -68,7 +68,7 @@ Check that every created link is relative and every created record has a clear r
 - the target root;
 - files created and existing files preserved or augmented;
 - unresolved decisions or file conflicts;
-- any host-specific instruction file found that the host reads in preference to `AGENTS.md`, with a warning that the workbench rules may not be loaded and how that host imports or enables `AGENTS.md` (for `CLAUDE.md`, an `@AGENTS.md` line), leaving that change to the user;
+- any host-specific instruction file found that the host reads in preference to `AGENTS.md`, with a warning that the workbench rules may not be loaded and how that host imports or enables `AGENTS.md` (for Claude Code, an import line in the found file giving the path from that file to the project's `AGENTS.md`, such as `@AGENTS.md` beside it, `@../AGENTS.md` in `.claude/CLAUDE.md`, or the path down into the project from an ancestor's `CLAUDE.md`, because imports resolve relative to the file that contains them), leaving that change to the user;
 - which lazy directories were intentionally deferred;
 - how work continues: analysis proceeds through normal requests, and nothing is packaged until the user asks for a package, which `awb-package` creates; and
 - the active investigation, or that none exists, followed by a suggestion to use `awb-status` to see where things stand and what can be asked for next.

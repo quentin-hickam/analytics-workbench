@@ -13,7 +13,7 @@ Summarize the current question and material scope settings. Link to the brief fo
 
 Use status to distinguish provisional, supported, superseded, and revalidation-needed findings. When flagging a finding, keep its prior status visible, as in `revalidation-needed (was supported)`.
 
-For result evidence, record or link the producing code commit, or `uncommitted` with the checksums of the producing files when no commit exists yet, and any uncommitted producing changes, input acquisition or publication identifiers, settings used, and the path of any evidence figure under `figures/`. Record unknown provenance honestly; a later checkout or packaging date does not identify the state that produced an earlier result.
+For result evidence, record or link the producing code commit, or `uncommitted` with the checksums of the producing files when no commit exists yet, and any uncommitted producing changes as each changed path with its checksum at that time, input acquisition or publication identifiers, settings used, and the path of any evidence figure under `figures/`. Record unknown provenance honestly; a later checkout or packaging date does not identify the state that produced an earlier result.
 
 ## Unresolved issues
 
