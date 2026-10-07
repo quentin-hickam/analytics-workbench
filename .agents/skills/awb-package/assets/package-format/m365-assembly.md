@@ -2,6 +2,17 @@
 
 The Markdown narrative and packaged datasets are the authoritative source. Use Microsoft 365 to improve presentation while preserving every substantive claim, value, qualification, and caveat.
 
+## Files in this package
+
+The draft replaces this list with every file it includes, one path per line relative to the package directory. Write **None** under figures or datasets when the package has none.
+
+- `executive-summary.md`
+- `journal.md`
+- `m365-assembly.md`
+- `manifest.<format>`
+- Figures: `figures/<figure>.png`
+- Datasets: `datasets/<dataset>.<format>`
+
 ## Word
 
 - Produce a concise executive-summary document from `executive-summary.md` and a detailed report from `journal.md`, or combine them when the requested deliverable calls for one document.

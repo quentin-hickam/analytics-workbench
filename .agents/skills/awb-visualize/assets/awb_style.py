@@ -20,6 +20,7 @@ GREY_GRID = "#E5E5E5"  # light gridlines and reference lines
 
 WIDTH_IN = 6.5   # Word text width on Letter or A4 with ~1 in margins
 HEIGHT_IN = 4.0  # 6.5 x 4.0 in at 200 dpi -> 1300 x 800 px
+TALL_HEIGHT_IN = 5.0  # single-panel maximum when row labels or a multi-line caption need it
 DPI = 200        # below Word's 220 ppi default compression target at full text width
 
 
@@ -38,9 +39,9 @@ def apply_style() -> None:
         "font.sans-serif": ["Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"],
         "font.size": 10,
         "figure.titlesize": 13,
-        "figure.titleweight": "semibold",
+        "figure.titleweight": "bold",
         "axes.titlesize": 13,
-        "axes.titleweight": "semibold",
+        "axes.titleweight": "bold",
         "axes.titlelocation": "left",
         "axes.labelsize": 11,
         "xtick.labelsize": 10,

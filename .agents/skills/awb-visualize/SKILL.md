@@ -22,7 +22,7 @@ Every figure is an opaque white PNG, 6.5 in wide at 200 dpi (1300 px), plus a co
 
 ## Workbench placement
 
-- Figure code is presentation. Neutral operations in `src/exploration/` return data; figure functions take those results and draw them. A figure function computes no finding, filter, or exclusion of its own.
+- Figure code is presentation. Neutral operations in `src/exploration/` return data; figure functions take those results and draw them. A figure function computes no finding, filter, or exclusion of its own. A classification made only for display, such as a highlight threshold, lives in the investigation's figure script, not in shared builders, and the caption states it.
 - Plot from canonical DuckDB views or in-process results: `con.sql(query).df()` for pandas or `.pl()` for polars, then plot. Pass frames in memory; never write a CSV for a figure to read.
 - Plot the estimates and intervals the analysis computed. seaborn's built-in aggregation and bootstrap (`estimator`, `errorbar`) suit exploration; a figure supporting a finding draws precomputed values (`errorbar=None` with `ax.errorbar` or `ax.fill_between`) so the figure, the table, and the record agree. When seaborn bootstraps, pass `seed=`.
 - Shared style lives in one place, created the first time a project figure needs it: copy [awb_style.py](assets/awb_style.py) to `src/presentation/style.py` and import it from there. Reusable figure builders join it in `src/presentation/`. Never import from the skill folder.
@@ -56,8 +56,8 @@ Use bars for part-to-whole beyond three parts rather than pies. Put a second mea
 
 `apply_style()` in the shared style module sets these; change them there, once, for the project.
 
-- **Size**: 6.5 x 4.0 in for a single panel; 6.5 x 2.6 to 3.0 in for a row of small multiples. Keep the 6.5 in width so figures in one document line up.
-- **Type**: sans-serif (Arial, falling back to Helvetica, Liberation Sans, DejaVu Sans). Title 13 pt semibold, left-aligned; axis labels 11 pt; ticks, legend, and value labels 10 pt; caption 9 pt; panel titles 11 pt via `ax.set_title(name, fontsize=11)`. Nothing smaller than 9 pt at 6.5 in.
+- **Size**: 6.5 x 4.0 in for a single panel, up to 6.5 x 5.0 in (`TALL_HEIGHT_IN`) when row labels or a multi-line caption need the height; 6.5 x 2.6 to 3.0 in for a row of small multiples. Keep the 6.5 in width so figures in one document line up.
+- **Type**: sans-serif (Arial, falling back to Helvetica, Liberation Sans, DejaVu Sans). Title 13 pt bold, left-aligned; axis labels 11 pt; ticks, legend, and value labels 10 pt; caption 9 pt; panel titles 11 pt via `ax.set_title(name, fontsize=11)`. Nothing smaller than 9 pt at 6.5 in.
 - **Color**: Okabe-Ito hues. One accent `#0072B2` marks what the title is about; non-focal marks are `#A6A6A6`; text is `#333333`; gridlines are `#E5E5E5`. Add `#D55E00` for a second highlighted group. Use at most six categorical hues (`SUPPORT`); beyond that, group the remainder as Other or use small multiples. Highlight with `hue=is_focus, palette={True: ACCENT, False: GREY_CONTEXT}, legend=False`.
 - **Furniture**: top and right spines off; no gridlines when values are labeled directly, otherwise a light grid on the value axis only (`ax.grid(axis="x")`). Direct labels replace legends when there are four series or fewer.
 - **Numbers**: format ticks with `matplotlib.ticker`: `PercentFormatter(xmax=1, decimals=0)` for proportions, `StrMethodFormatter("{x:,.0f}")` for counts, `FuncFormatter(lambda v, _: f"{v / 1e6:.1f}M")` for large values, and `mdates.ConciseDateFormatter` for dates. Use the same rounding as the narrative.
@@ -88,7 +88,7 @@ Use bars for part-to-whole beyond three parts rather than pies. Put a second mea
 
 Run this against each figure before showing or packaging it; every item is yes.
 
-1. PNG is 1300 px wide, opaque white, and nothing is clipped at the edges.
+1. PNG is 1300 px wide, opaque white, and nothing is clipped at the edges. Matplotlib writes RGBA PNGs; with the white facecolor every alpha value is fully opaque, which satisfies this item.
 2. The title states the finding in a sentence, and the chart form makes that comparison directly.
 3. Every number in the title, labels, and table matches the analytical result and the narrative's rounding.
 4. No text is below 9 pt at 6.5 in; axis labels carry units in plain words.

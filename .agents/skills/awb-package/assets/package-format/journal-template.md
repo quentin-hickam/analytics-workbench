@@ -35,7 +35,7 @@ Connect the findings to the intended decision or exploratory purpose. Keep recom
 
 ## Limitations and unresolved caveats
 
-List interpretation limits and unresolved issues. Put a clear caveat beside every conclusion still flagged for revalidation.
+List interpretation limits and unresolved issues. Put a clear caveat beside every place a conclusion still flagged for revalidation appears: the claim in the text, a figure's caption and alt text, and a dataset's description.
 
 ## Changes since previous release
 
@@ -43,4 +43,4 @@ For later releases, describe material changes to scope, inputs, method, findings
 
 ## Supporting datasets
 
-List the audience-facing datasets selected for this package, or state **None**. Describe their role without duplicating manifest provenance.
+List the audience-facing datasets selected for this package, or state **None**. Describe their role and any caveat on a dataset or column without duplicating manifest provenance.

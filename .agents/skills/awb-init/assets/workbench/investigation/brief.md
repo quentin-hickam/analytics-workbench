@@ -20,9 +20,9 @@ Describe what would make the answer useful to its intended audience.
 
 List unresolved facts or decisions that should remain visible. An unknown need not block useful exploration.
 
-## Starting method and settings
+## Starting method, settings, and package format
 
-Record inherited methods or parameters when this investigation is related to an earlier one. They are a starting configuration, not evidence about this population.
+Record the inherited method, settings, and package format when this investigation is related to an earlier one. They are a starting configuration, not evidence about this population. The settings themselves live in the investigation's settings file.
 
 ## Local terms or departures
 
