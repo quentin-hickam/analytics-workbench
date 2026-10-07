@@ -17,7 +17,7 @@ Note failed acquisition attempts in the source's Notes. Use stable source IDs in
 
 ## Acquisitions
 
-List completed landings only, one row per acquisition directory, `data/raw/<source>/<acquisition-id>/` unless the project has its own layout. A landing is complete only when every acquired artifact and its provenance file are durable and the directory has dropped its `.partial` suffix; a failed or partial attempt gets no row. A file the user hands over is an acquisition too. `data/raw/` is excluded from Git, so record where each acquisition directory is retained outside this checkout, or `this checkout only`.
+List completed landings only, one row per acquisition directory, `data/raw/<source>/<acquisition-id>/` unless the project has its own layout. A landing is complete only when every acquired artifact and its `provenance.json` are durable and the directory has dropped its `.partial` suffix; a failed or partial attempt gets no row. A file the user hands over is an acquisition too. `data/raw/` is excluded from Git, so record where each acquisition directory is retained outside this checkout, or `this checkout only`.
 
 | Acquisition ID | Source ID | Acquired at | Source version, query, or request | Landed directory | Retained copy | Integrity or completeness check | Restrictions | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |

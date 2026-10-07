@@ -4,7 +4,9 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `awb-init` ships `awb_landing.py`, copied to `src/preparation/landing.py` on the first landing. `land()`, `publish()`, `retain()`, and `session()` replace the landing, publication, retained-copy, and view-loading procedures the project `AGENTS.md` described step by step. Provenance and publication files are JSON with fixed keys (`provenance.json`, `publication.json`). `session()` needs `duckdb`.
 
 ## [0.2.0] - 2026-10-07
 

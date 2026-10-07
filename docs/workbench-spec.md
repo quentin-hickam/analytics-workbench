@@ -307,3 +307,5 @@ The following choices remain open and must not be silently fixed by the specific
 - implementation language, executable filenames, and configuration serialization format;
 - backend-specific raw-data retention and ignore rules, beyond the landed-data storage rule in **Question-driven data preparation**; and
 - which deliveries, if any, warrant preserving original inputs for exact reruns.
+
+The acquisition provenance file and the publication file are not open: they are JSON files named `provenance.json` and `publication.json`, with the keys written by the `awb-init` landing helper `awb_landing.py`. The delivery manifest's serialization stays open.
