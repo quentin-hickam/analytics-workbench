@@ -30,7 +30,7 @@ The operation that assembled this package, recorded separately from the producin
 
 - `packaging_commit`: the packaging checkout commit;
 - `packaging_uncommitted_changes`: `none`, or the relevant uncommitted package-source paths; and
-- `export_checks`: for each exported dataset, the comparisons run before its export showing that the current code and data match the complete producing state: committed result code paths against the producing commit, uncommitted producing changes against their recorded checksums (every producing file, for an `uncommitted` state), view definitions and the publications they read against the recorded ones, input publication and acquisition files against their recorded checksums, and resolved settings against the recorded settings; each with its paths or identifiers and outcome. A revision that reuses an export carries its checks forward unchanged; with no exported datasets, `none`.
+- `export_checks`: for each exported dataset, the output of `compare_evidence` in `src/provenance.py`, run before its export: the five named comparisons showing that the current code and data match the complete producing state (committed result code paths against the producing commit, uncommitted producing changes against their recorded checksums or every producing file for an `uncommitted` state, view definitions and the publications they read against the recorded ones, input publication and acquisition files against their recorded checksums, and resolved settings against the recorded settings), each with its paths or identifiers and outcome. A revision that reuses an export carries its checks forward unchanged; with no exported datasets, `none`.
 
 ## Selection and caveats
 

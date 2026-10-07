@@ -4,7 +4,9 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `awb-init` ships a provenance helper, copied to `src/provenance.py` the first time a result needs it, that writes each result's evidence to `investigations/<name>/evidence/<result-id>.json` and compares the current state with it. `state.md` findings link to that file instead of holding checksums, and `awb-package` export checks run the comparison and record its output. Evidence, acquisition provenance, and publication files are fixed as JSON; the delivery manifest format stays open.
 
 ## [0.2.0] - 2026-10-07
 

@@ -13,12 +13,12 @@ Summarize the current question and material scope settings. Link to the brief fo
 
 Use status to distinguish provisional, supported, superseded, and revalidation-needed findings. When flagging a finding, keep its prior status visible, as in `revalidation-needed (was supported)`.
 
-For result evidence, record or link the producing code commit, or `uncommitted` with the checksums of the producing files when no commit exists yet, and any uncommitted producing changes as each changed path with its checksum at that time, input acquisition or publication identifiers with the checksums their provenance or publication files record, the view definitions read with their checksums, the resolved settings, the validation checks performed, and the path of any evidence figure under `figures/`. Record unknown provenance honestly; a later checkout or packaging date does not identify the state that produced an earlier result.
+Each finding's Evidence cell is a relative link to its evidence file, such as `[r-003](evidence/r-003.json)`, written by `record_evidence` in `src/provenance.py`. That file holds the producing commit or `uncommitted`, uncommitted producing changes, input publications and acquisitions, view definitions, resolved settings, validation checks, and any evidence figure, each with checksums, and names unknown provenance with its reason. Keep commits and checksums out of this file. A later checkout or packaging date does not identify the state that produced an earlier result.
 
 ## Unresolved issues
 
-List open analytical questions, relevant data limitations, and decisions still needed.
+List open analytical questions, relevant data limitations, and decisions still needed. Keep this a short list.
 
 ## Next steps
 
-List the smallest concrete steps that would advance the investigation.
+List the smallest concrete steps that would advance the investigation. Keep this a short list.

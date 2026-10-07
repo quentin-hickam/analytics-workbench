@@ -27,7 +27,7 @@ Every figure is an opaque white PNG, 6.5 in wide at 200 dpi (1300 px), plus a co
 - Plot the estimates and intervals the analysis computed. seaborn's built-in aggregation and bootstrap (`estimator`, `errorbar`) suit exploration; a figure supporting a finding draws precomputed values (`errorbar=None` with `ax.errorbar` or `ax.fill_between`) so the figure, the table, and the record agree. When seaborn bootstraps, pass `seed=`.
 - Shared style lives in one place, created the first time a project figure needs it: copy [awb_style.py](assets/awb_style.py) to `src/presentation/style.py` and import it from there. Reusable figure builders join it in `src/presentation/`. Never import from the skill folder.
 - Exploratory figures go to `investigations/<name>/exploration/figures/` and may be overwritten. A figure cited as evidence for a finding goes to `investigations/<name>/figures/<slug>.png`, created on first use. Package figures follow `awb-package`; they reuse the evidence figure unless separate analytical work changed the result.
-- For an evidence figure, record the producing commit (and any uncommitted producing changes), input view or acquisition identifiers, and settings in the finding's evidence in `state.md`, and embed the same values with `save_figure(fig, path, provenance={"Source": ..., "Comment": ...})`, which writes PNG text metadata.
+- For an evidence figure, pass its path as `figure=` to `record_evidence` so the finding's evidence file records it, and embed the producing commit (and any uncommitted producing changes), input view or acquisition identifiers, and settings with `save_figure(fig, path, provenance={"Source": ..., "Comment": ...})`, which writes PNG text metadata.
 
 ## Tools
 
@@ -97,4 +97,4 @@ Run this against each figure before showing or packaging it; every item is yes.
 7. Caption gives unit, population, period, n, source, and any exclusion; caveats sit beside affected values; intervals are shown and explained when estimated.
 8. Contrary results and outliers the analysis returned are visible or explicitly noted.
 9. Alt text states the finding and key numbers; a Markdown table of the plotted numbers accompanies the image.
-10. Evidence figures have provenance in `state.md` and PNG metadata.
+10. Evidence figures have provenance in the finding's evidence file and PNG metadata.
