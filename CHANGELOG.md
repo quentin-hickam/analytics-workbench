@@ -4,6 +4,10 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ## [Unreleased]
 
+### Changed
+
+- The project `AGENTS.md` names the investigation's composition entry as the only producer of a finding. A rerun of flagged findings runs the entry with its settings file and records evidence instead of rebuilding the analysis in chat, and `awb-status` routes "Rerun the flagged findings" to it. A query run a second time is saved under the investigation's `exploration/` or promoted to a view and rerun by path; profiling goes through the shared `profile()` operation.
+
 ### Added
 
 - `awb-package` ships a manifest helper, copied to `src/packaging/manifest.py` on first use, that builds the manifest `inventory`, verifies a draft against it, and compares a release with its storage copy. `awb-package` and `awb-release` now run it instead of hashing and comparing files by hand.

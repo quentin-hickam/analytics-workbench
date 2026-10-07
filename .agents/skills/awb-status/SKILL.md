@@ -53,7 +53,7 @@ Landed data storage: /Volumes/analytics/workbench (risk: 1 of 4 acquisitions exi
 Release storage: /Volumes/analytics/releases
 
 You can ask for:
-  - "Rerun the flagged findings" (analytical work under AGENTS.md)
+  - "Rerun the flagged findings" (run the composition entry under AGENTS.md)
   - "Revise the churn-review draft to carry the new caveats" (awb-package)
   - "Record where landed data is kept" (AGENTS.md record maintenance)
   - "Update the investigation state" (AGENTS.md record maintenance)
@@ -68,7 +68,7 @@ End with the handful of requests the current state makes relevant, each phrased 
 | --- | --- | --- | --- |
 | No active investigation | "Start an investigation into <question>" | `awb-init` | progress |
 | A consequential scope or purpose decision is open in the brief or state | "Resolve the <topic> scope change" | `awb-init` | progress |
-| Findings flagged for revalidation | "Rerun the flagged findings" | analytical work under AGENTS.md | risk |
+| Findings flagged for revalidation | "Rerun the flagged findings" | run the composition entry under AGENTS.md | risk |
 | A draft or release represents a finding flagged since the draft was revised | "Revise the <package> draft to carry the new caveats" | `awb-package` | risk |
 | Supported findings and no draft | "Prepare a draft package" | `awb-package` | progress |
 | Draft ahead of the latest release, or never released | "Mark the <package> package delivered" | `awb-release` | progress |
