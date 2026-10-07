@@ -9,7 +9,7 @@
 # test_retain_copies_and_verifies_then_reports_existing_copy: verified copy succeeds; second call reports conflict without overwriting.
 # test_retain_reports_checksum_discrepancy_without_changing_existing_copy: changed retained copy reports a discrepancy without overwriting.
 # test_session_loads_views_in_name_order_without_recursing: session loads two views with the second depending on the first.
-# test_session_resolves_project_paths_from_another_working_directory: review fix check: session resolves project-relative paths from another working directory.
+# test_session_resolves_project_paths_from_another_working_directory: session resolves project-relative paths from another working directory.
 # test_session_names_failing_view_and_closes_connection: regression: failed view loading closes the session connection.
 # test_land_refuses_existing_id_before_fetch: existing completed acquisition is refused before fetching.
 # test_retain_requires_source_and_acquisition_directly_under_raw: regression: retain enforces source/acquisition depth under data/raw.
@@ -161,10 +161,9 @@ def test_publish_keeps_rejected_validation_unpublished(tmp_path, rejection):
     assert not tmp_path.joinpath("data/parquet/events/v1").exists()
 
 
-@pytest.mark.parametrize("suffix", [""])
-def test_publish_refuses_existing_id_before_conversion(tmp_path, suffix):
+def test_publish_refuses_existing_id_before_conversion(tmp_path):
     original = acquisition(tmp_path)
-    existing = tmp_path / f"data/parquet/events/v1{suffix}"
+    existing = tmp_path / "data/parquet/events/v1"
     existing.mkdir(parents=True)
     (existing / "keep.txt").write_text("keep")
     called = []
@@ -174,29 +173,20 @@ def test_publish_refuses_existing_id_before_conversion(tmp_path, suffix):
     assert str(existing) in str(error.value)
     assert called == []
     assert (existing / "keep.txt").read_text() == "keep"
-    if not suffix:
-        assert not existing.with_name("v1.partial").exists()
+    assert not existing.with_name("v1.partial").exists()
 
 
-@pytest.mark.parametrize("output", ["raises"])
-def test_publish_keeps_invalid_conversion_unpublished(tmp_path, output):
+def test_publish_keeps_invalid_conversion_unpublished(tmp_path):
     def convert(directory):
-        if output == "reserved":
-            (directory / "publication.json").write_text("caller metadata")
-        elif output == "raises":
-            (directory / "part.parquet").write_bytes(b"abc")
-            raise LookupError("conversion failed")
+        (directory / "part.parquet").write_bytes(b"abc")
+        raise LookupError("conversion failed")
 
-    error = LookupError if output == "raises" else ValueError
-    with pytest.raises(error):
+    with pytest.raises(LookupError):
         landing.publish(tmp_path, "events", "v1", convert,
                         acquisitions=[acquisition(tmp_path)])
     partial = tmp_path / "data/parquet/events/v1.partial"
     assert partial.is_dir()
-    if output == "reserved":
-        assert (partial / "publication.json").read_text() == "caller metadata"
-    else:
-        assert not (partial / "publication.json").exists()
+    assert not (partial / "publication.json").exists()
     assert not tmp_path.joinpath("data/parquet/events/v1").exists()
 
 
@@ -275,9 +265,8 @@ def test_session_names_failing_view_and_closes_connection(tmp_path, monkeypatch)
         connection.execute("SELECT 1")
 
 
-@pytest.mark.parametrize("suffix", [""])
-def test_land_refuses_existing_id_before_fetch(tmp_path, suffix):
-    existing = tmp_path / f"data/raw/api/batch-1{suffix}"
+def test_land_refuses_existing_id_before_fetch(tmp_path):
+    existing = tmp_path / "data/raw/api/batch-1"
     existing.mkdir(parents=True)
     (existing / "keep.txt").write_text("keep")
     called = []
@@ -287,8 +276,7 @@ def test_land_refuses_existing_id_before_fetch(tmp_path, suffix):
     assert str(existing) in str(error.value)
     assert called == []
     assert (existing / "keep.txt").read_text() == "keep"
-    if not suffix:
-        assert not existing.with_name("batch-1.partial").exists()
+    assert not existing.with_name("batch-1.partial").exists()
 
 
 def test_retain_requires_source_and_acquisition_directly_under_raw(tmp_path):

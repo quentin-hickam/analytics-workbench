@@ -5,7 +5,7 @@
 # test_join_key_uniqueness_reports_rows_and_distinct_duplicate_keys: joins fails on duplicate keys unless uniqueness is disabled.
 # test_null_threshold_reports_rate_and_threshold_and_summarizes_failures: nulls fails above the threshold and passes at the bound.
 # test_judgments_preserve_supplied_outcome_and_detail: scope, metrics and values judgments pass through unchanged.
-# test_invalid_judgment_raises_value_error: regression: non-dict judgment raises ValueError (scope only).
+# test_invalid_judgment_raises_value_error: regression: non-dict judgment raises ValueError naming the check.
 # test_row_counts_integer_uses_result_length_and_default_upper_bound: row_counts integer form passes or fails at the default upper bound.
 # test_row_count_steps_apply_custom_bounds_and_summarize_first_failure: row_counts steps fail at explicit upper and lower bounds.
 # test_profile_reports_type_nulls_distincts_and_capped_frequent_samples: profile contract shape, null rates and capped sample values.
@@ -95,11 +95,9 @@ def test_judgments_preserve_supplied_outcome_and_detail():
     ]
 
 
-@pytest.mark.parametrize("name", ["scope"])
-@pytest.mark.parametrize("judgment", ["pass"])
-def test_invalid_judgment_raises_value_error(name, judgment):
-    with pytest.raises(ValueError, match=name):
-        validation.validate(pd.DataFrame(), {name: judgment})
+def test_invalid_judgment_raises_value_error():
+    with pytest.raises(ValueError, match="scope"):
+        validation.validate(pd.DataFrame(), {"scope": "pass"})
 
 
 def test_row_counts_integer_uses_result_length_and_default_upper_bound():

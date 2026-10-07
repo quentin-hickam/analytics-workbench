@@ -1,23 +1,24 @@
 # Kept cases:
 # test_record_evidence_records_clean_producing_state: evidence JSON schema/key order and clean producing state.
 # test_record_evidence_captures_modified_code: uncommitted producing paths retain status, size and checksum.
-# test_record_evidence_rejects_invalid_checks_and_records_figure: evidence figure carries its path, size and checksum.
+# test_record_evidence_rejects_invalid_checks_and_records_figure: a check outside the validation record shape raises; the evidence figure carries its path, size and checksum.
 # test_compare_evidence_clean_committed_state_passes_five_comparisons: clean state passes all five ordered comparisons in the contract shape.
 # test_compare_evidence_detects_view_changed_after_recording: view mutation fails the views comparison.
 # test_compare_evidence_names_changed_setting: settings mutation fails the settings comparison.
 # test_compare_evidence_detects_missing_input_and_missing_metadata: missing input file or unavailable metadata fails inputs.
 # test_compare_evidence_checks_dirty_code_against_recorded_bytes: uncommitted code mutation fails uncommitted-code.
-# test_record_evidence_rejects_destination_symlink_outside_root: review fix check: evidence destination cannot escape through a symlink.
+# test_record_evidence_rejects_destination_symlink_outside_root: regression: evidence destination cannot escape through a symlink.
 # test_compare_evidence_without_commit_uses_file_checksums: no-commit evidence compares producing file checksums.
 # test_compare_evidence_missing_file_fails_all_five_comparisons: missing evidence fails every comparison.
 # test_compare_evidence_bad_files_still_return_five_failures: unreadable JSON or wrong-schema evidence fails every comparison.
 # test_compare_evidence_detects_code_metadata_and_data_changes: committed-code mutation; publication/acquisition metadata and data mutations fail inputs.
 # test_record_evidence_before_first_commit_checksums_every_producing_file: uncommitted evidence state records checksums for all producing files.
-# test_compare_evidence_resolves_landing_helper_layout: review contract case: metadata-relative files and acquisition-relative input paths.
-# test_record_evidence_stores_validation_record_unchanged: review contract case: validation record stored unchanged under checks.
+# test_compare_evidence_resolves_landing_helper_layout: metadata-relative files and acquisition-relative input paths.
+# test_record_evidence_stores_validation_record_unchanged: validation record stored unchanged under checks.
 # test_record_evidence_keeps_symlinked_code_at_its_given_path: regression: symlinked producing code keeps its given path.
 # test_compare_evidence_reports_current_state_failures_without_missing_evidence: regressions: deleted current view is a mismatch; missing producing commit has precise detail.
 # test_compare_evidence_outside_root_returns_five_failures: regression: evidence path outside root returns five failures.
+# test_record_evidence_raises_on_git_failure_after_reading_head: regression: a Git failure after HEAD is read raises instead of relabelling the commit uncommitted.
 
 import hashlib
 import importlib.util
@@ -349,3 +350,10 @@ def test_compare_evidence_outside_root_returns_five_failures(project, tmp_path_f
     comparisons = provenance.compare_evidence(project, outside)
     assert [c["name"] for c in comparisons] == NAMES
     assert all(c["outcome"] == "fail" and c["detail"].startswith("missing evidence:") for c in comparisons)
+
+
+def test_record_evidence_raises_on_git_failure_after_reading_head(project):
+    (project / ".git/index").write_bytes(b"corrupt")
+    with pytest.raises(subprocess.CalledProcessError):
+        record(project)
+    assert not (project / "investigations/inv/evidence/r1.json").exists()
