@@ -4,7 +4,9 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `awb-package` ships a manifest helper, copied to `src/packaging/manifest.py` on first use, that builds the manifest `inventory`, verifies a draft against it, and compares a release with its storage copy. `awb-package` and `awb-release` now run it instead of hashing and comparing files by hand.
 
 ## [0.2.0] - 2026-10-07
 

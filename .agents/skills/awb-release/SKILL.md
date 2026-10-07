@@ -23,7 +23,7 @@ When that line is absent or reads `not yet recorded`, ask the user where release
 
 ## Verify the draft
 
-Check the draft against the structural consistency rules in **Assemble the draft** of [awb-package](../awb-package/SKILL.md): it is self-contained, the journal and executive summary agree, its files match the manifest `inventory` exactly by path, byte size, and SHA-256, and the selected exports are present. Defer the caveat rule for findings awaiting revalidation to the re-verification in **Resolve revalidation flags**: a draft can predate a flag, and that gap is settled by a disposition, not reported here. When a structural rule fails, list each discrepancy and stop; repairs are package revisions made through awb-package, never reconstructed here.
+Check the draft against the structural consistency rules in **Assemble the draft** of [awb-package](../awb-package/SKILL.md): it is self-contained, the journal and executive summary agree, the selected exports are present, and `verify` from `src/packaging/manifest.py`, run on the draft with the manifest's recorded `inventory`, returns no discrepancies. If `src/packaging/manifest.py` is missing, copy [awb_manifest.py](../awb-package/assets/awb_manifest.py) there first. Report each discrepancy `verify` returns as it returns it; a comparison made by hand does not substitute for the helper. Defer the caveat rule for findings awaiting revalidation to the re-verification in **Resolve revalidation flags**: a draft can predate a flag, and that gap is settled by a disposition, not reported here. When a structural rule fails, list each discrepancy and stop; repairs are package revisions made through awb-package, never reconstructed here.
 
 ## Resolve revalidation flags
 
@@ -37,7 +37,7 @@ An affected conclusion includes every place the draft represents it: journal and
 
 Release is never authority to revalidate or rerun analysis. A revalidation choice pauses the release until separate analytical work updates the investigation and the draft; the user then requests the release again. For omission or an accepted caveat, revise the draft through [awb-package](../awb-package/SKILL.md) so each listed place omits the conclusion or carries the caveat beside it and the draft lists the finding as unresolved, and record each disposition in the draft manifest's `revalidation_flags`. An applicable disposition whose omission or caveat is missing from the draft also requires that revision before release. A recorded disposition stays applicable while the finding and its evidence remain materially the same.
 
-Once every represented flag has an applicable disposition, re-verify the draft against all the consistency rules, the structural rules and the deferred caveat rule together, even when this release needed no new disposition. When a rule fails, list each discrepancy and stop as in **Verify the draft**.
+Once every represented flag has an applicable disposition, re-verify the draft against all the consistency rules, the structural rules and the deferred caveat rule together, even when this release needed no new disposition. Run `verify` again on the draft as it now stands; never reuse the earlier result. When a rule fails, list each discrepancy and stop as in **Verify the draft**.
 
 ## Create the release
 
@@ -47,13 +47,13 @@ Copy the complete draft, including its exact exported datasets, to `deliveries/<
 
 ## Copy to storage
 
-When the recorded location is a filesystem path that exists and is reachable from this machine, copy the new release directory to `<location>/<investigation>/<package>/released/<NNN>/`, creating the intermediate directories as needed. Never overwrite: if that directory already exists, stop the copy and report the conflict. Compare the copy's recursive relative file list and file checksums with the local release and report any difference.
+When the recorded location is a filesystem path that exists and is reachable from this machine, copy the new release directory to `<location>/<investigation>/<package>/released/<NNN>/`, creating the intermediate directories as needed. Never overwrite: if that directory already exists, stop the copy and report the conflict. Run `compare_trees` from `src/packaging/manifest.py` with the local release as `local_dir` and the copy as `copy_dir`, copying the helper first as in **Verify the draft** if it is missing, and report each discrepancy it returns, or that it returned none. Never compare the trees by hand.
 
 When the location is not reachable, such as a SharePoint or other URL, or a path that is absent or unmounted, tell the user exactly which local directory to copy and the destination path to copy it to. With `none chosen`, repeat the warning that this checkout holds the only copy.
 
 ## Record storage without releasing
 
-When the user asks only to record or change where released packages are kept, record the location as above and create no release. Then, for each existing numbered release under `deliveries/`, apply **Copy to storage**; a destination that already exists is skipped and reported, never overwritten. Report each copy, skip, or copy instruction.
+When the user asks only to record or change where released packages are kept, record the location as above and create no release. Then, for each existing numbered release under `deliveries/`, apply **Copy to storage**, including its `compare_trees` check; a destination that already exists is skipped and reported, never overwritten. Report each copy with its comparison result, each skip, and each copy instruction.
 
 ## Report
 
