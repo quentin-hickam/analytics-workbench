@@ -56,4 +56,4 @@ A preserved, numbered revision of a delivery package created at an explicit deli
 The current understanding of an investigation, including its active question, findings, unresolved issues, and next steps.
 
 **Investigation history**:
-The record of meaningful findings, analytical decisions, and relevant data limitations accumulated during an investigation, including superseded conclusions. It excludes execution mistakes and routine debugging.
+The record of meaningful findings, analytical decisions, and relevant data limitations accumulated during an investigation, including superseded conclusions. It retains methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, and excludes routine debugging, coding mistakes, and abandoned attempts that changed no understanding.

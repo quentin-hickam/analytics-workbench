@@ -75,6 +75,8 @@ EDA can reveal a shared data problem, but the correction must return through pre
 
 Code must be readable, reusable, and modular. Modules should have cohesive responsibilities and small, explicit interfaces. Parameterize meaningful variation and group related settings into named configuration objects or files with sensible defaults. A CLI is optional. Do not turn parameterization into a universal command with a sprawling interface; distinct workflows should use distinct entry points or modules while sharing common logic.
 
+Before a result is presented or recorded as a finding, it is validated and the checks are recorded with its evidence: required columns exist and their meaning is clear; row counts before and after each filter are plausible; joins cause no unexpected row multiplication, with key uniqueness inspected whenever counts change; missing-value rates of important fields are checked; date filters and grouping dimensions are explicit; metric definitions and assumptions are documented; and distinct values are inspected when they drive business interpretation.
+
 The workbench must use consistent logical locations across projects. It must not use intermediate CSV exports as handoffs between analytical steps. Intermediate computation stays in the analytical runtime, preferably as views. Materialize or cache a result only when recomputation is expensive, and record deliberate caches in the catalog. Dataset exports selected for a delivery package are audience-facing artifacts and are exempt from the intermediate-CSV rule.
 
 Canonical, reusable views are preferred. DuckDB querying external Parquet datasets is the default. A project may select a different backend for a concrete need, including incremental workloads, while retaining independent source landing and the preparation/EDA boundary. Source conversion to Parquet is a deliberate storage boundary, not a requirement to materialize every transformation. Accumulating materialized results without an explicit reason violates the workflow.
@@ -88,7 +90,7 @@ Each investigation separates a concise current state from a chronological histor
 - `state.md` captures the active question, current findings, unresolved issues, revalidation flags, and next steps so work can resume quickly.
 - `history.md` captures meaningful findings, analytical decisions, caveats, superseded conclusions, and data limitations or errors that affected the investigation.
 
-The workbench updates these records automatically when a finding, decision, flag, or next step changes. The user can also request a checkpoint before switching investigations. Records and delivery journals retain limitations and errors in the data, but exclude our mistakes in approaching the data, execution mistakes, and routine debugging. Git remains the record for code evolution.
+The workbench updates these records automatically when a finding, decision, flag, or next step changes. The user can also request a checkpoint before switching investigations. Records and delivery journals retain limitations and errors in the data and the methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, but exclude routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding. Git remains the record for code evolution.
 
 Shared business and analytical terms live in `foundation/glossary.md`. Investigations inherit those definitions. A deliberate local meaning or departure is recorded and explained in that investigation's `brief.md`; the full glossary is not copied. Population and reporting-period choices are settings rather than competing definitions.
 
@@ -192,7 +194,7 @@ The package narrative is authoritative upstream. The approved flow is workbench 
 
 Working analysis uses current data and definitions. A delivered release preserves its exact exported results and provenance so later changes do not alter what it represented. Full database snapshots and exact rerun capability are not retained per release by default. Preserving enough original data for an exact rerun is an explicit choice.
 
-Drafts may include findings flagged for revalidation if each affected conclusion carries a clear caveat and the draft lists unresolved issues. Before a flagged draft is marked delivered, require the user to choose among revalidating the finding, omitting it, or explicitly releasing it with the caveat. Packaging must not automatically rerun analysis. Serializing an already-recorded result through a neutral operation, after checking that the result-producing code is unchanged since the producing state, is an export rather than a rerun.
+Drafts may include findings flagged for revalidation if each affected conclusion carries a clear caveat and the draft lists unresolved issues. Before a flagged draft is marked delivered, require the user to choose among revalidating the finding, omitting it, or explicitly releasing it with the caveat. Packaging must not automatically rerun analysis. Serializing an already-recorded result through a neutral operation, after checking that the result-producing code, view definitions, input publications and acquisitions, and resolved settings match the producing state recorded with the result, is an export rather than a rerun.
 
 ## Acceptance scenarios
 
@@ -288,7 +290,7 @@ The workbench does not:
 - generate packages or ad hoc deliverables without explicit invocation;
 - automatically rerun analyses when shared data changes;
 - silently promote investigation-specific transformations into canonical preparation;
-- retain mistakes in approaching the data, coding mistakes, or debugging logs as analytical history;
+- retain routine debugging, coding mistakes, or abandoned execution attempts that changed no understanding as analytical history;
 - create `CONTEXT.md`, `CONTEXT-MAP.md`, or ADRs in initialized workbenches;
 - invoke `grill-with-docs` or the unmodified `domain-modeling` skill;
 - read other investigations' or projects' conclusions on the agent's own initiative before an investigation's own results exist, except that a related investigation's findings may inform method selection as in scenario 2; or

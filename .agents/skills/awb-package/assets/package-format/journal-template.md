@@ -23,7 +23,7 @@ Identify the inputs used and summarize their fitness for this analysis. Include 
 
 ## Method and settings
 
-Explain the analytical approach and the settings needed to understand the results. Distinguish canonical preparation from investigation-specific filters or assumptions.
+Explain the analytical approach and the settings needed to understand the results. Distinguish canonical preparation from investigation-specific filters or assumptions. State the validation checks performed on the results presented.
 
 ## Findings
 

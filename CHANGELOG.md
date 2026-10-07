@@ -10,6 +10,10 @@ Nothing yet.
 
 ### Changed
 
+- The export check in `awb-package` covers data as well as code: view definitions, the publications they read, input publication and acquisition checksums, and resolved settings must match the state recorded with the result. Each publication directory now holds a publication file with its inputs, conversion commit, and file checksums, and result evidence records those identities.
+- The dirty-state comparison no longer contradicts itself: committed result code paths are compared with the producing commit, and paths recorded as uncommitted producing changes are compared with their recorded checksums.
+- The validation checklist (columns, row counts, joins, nulls, scope, metrics, values) is an always-on requirement in the project `AGENTS.md`, recorded with each result's evidence and stated in the package journal.
+- Investigation history and the package journal retain methodological mistakes that changed a finding or explain why an earlier conclusion was wrong; only routine debugging, coding mistakes, and abandoned attempts that changed no understanding are excluded.
 - The two workbench skills are repackaged as five skills under the `awb-` prefix, so typing `awb-` in a host that lists skills as commands shows every workbench action. `workbench-init` and `workbench-package` no longer exist.
   - `awb-init` keeps project setup, investigation scoping, and scope changes, and now asks for a business question when none is given.
   - `awb-package` creates and revises a package's working draft only.
@@ -48,6 +52,7 @@ The workbench is now five skills under the `awb-` prefix, replacing `workbench-i
 - `awb-visualize` (new) sets figure and table conventions for chat and documents.
 - Landed source data in `data/raw/` is excluded from Git, so the agent now asks where landed originals are kept outside the checkout and copies each completed landing there.
 - The zip now unpacks to `analytics-workbench-skills/` with the skill folders at its top level. The v0.1.x instructions to unzip into your skills directory were wrong for those archives.
+- Results are validated before they are presented (columns, row counts, joins, nulls, scope, metrics, values), package exports are checked against the recorded code and data state, and histories keep the methodological mistakes that changed a finding.
 - The project is MIT licensed, and changes are listed in CHANGELOG.md.
 
 ## Install
