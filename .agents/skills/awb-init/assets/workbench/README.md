@@ -31,7 +31,7 @@ Acquired records are landed durably before canonical ingestion. Completed landed
 
 ## Resume work
 
-Open the active investigation's `state.md` for current findings, unresolved issues, revalidation flags, and next steps. Use its `brief.md` for scope and purpose, and `history.md` for meaningful analytical decisions and superseded conclusions.
+Open the active investigation's `state.md` for current findings, unresolved issues, revalidation flags, and next steps. Use its `brief.md` for scope and purpose, and `history.md` for meaningful analytical decisions and superseded conclusions. Findings come from the investigation's composition entry run with its settings file, so a rerun is running that entry again; repeated exploratory queries live as files in the investigation's `exploration/` and are rerun by path.
 
 ## Asking for things
 
