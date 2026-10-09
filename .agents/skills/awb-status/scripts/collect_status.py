@@ -1,4 +1,4 @@
-"""Read-only status facts for standard workbench Markdown records and JSON manifests.
+"""Read-only status facts for standard workbench Markdown records and manifest.json files.
 
 Run with Python 3.10+: collect_status.py [PROJECT_ROOT]. Emits compact JSON;
 uncertainties identify records requiring targeted agent interpretation.
@@ -12,6 +12,9 @@ import os
 from pathlib import Path
 import re
 import subprocess
+
+DISPOSITIONS = {"none", "revalidate", "omit", "release_with_caveat"}
+BLOCKING = {"none", "revalidate"}
 
 
 def collect(root):
@@ -178,42 +181,42 @@ def collect(root):
     result["landed_data_storage"] = storage(field(readme, "Landed data is kept at", readme_path, optional=True))
     result["release_storage"] = storage(field(readme, "Released packages are kept at", readme_path, optional=True))
 
-    def manifest(directory):
-        paths = entries(directory)
-        if paths is None:
-            return None, None
-        paths = [p for p in paths if p.name.startswith("manifest")]
-        if len(paths) != 1 or paths[0].suffix != ".json":
-            uncertain(directory, "Expected one JSON manifest; inspect established manifest format manually")
-            return None, None
-        path = paths[0]
+    def manifest(directory, *, frozen=False):
+        """Read manifest.json; a frozen release's is tolerated when absent, unreadable, or not JSON."""
+        path = directory / "manifest.json"
         try:
-            obj = json.loads(read(path))
-            if not isinstance(obj, dict):
-                raise ValueError
-            return obj, path
-        except (ValueError, TypeError):
-            uncertain(path, "Invalid JSON manifest object")
-            return None, path
+            obj = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(obj, dict):
+                return obj
+            raise ValueError
+        except FileNotFoundError:
+            if not frozen:
+                uncertain(directory, "Draft lacks manifest.json; awb-package rewrites it on the next revision")
+        except (OSError, UnicodeError, ValueError) as error:
+            if not frozen:
+                uncertain(path, f"Cannot read JSON manifest object: {type(error).__name__}")
+        return None
 
-    def timestamp(obj, key, path):
-        if obj is None or path is None:
-            return None, False
-        if key not in obj:
-            uncertain(path, f"{key} absent; comparison uses manifest mtime estimate")
-            try:
-                return datetime.fromtimestamp(path.stat().st_mtime).astimezone(), True
-            except OSError as error:
-                uncertain(path, f"Cannot read manifest mtime: {type(error).__name__}")
-                return None, False
+    def timestamp(obj, key, path=None):
+        if obj is None:
+            return None
         try:
             parsed = datetime.fromisoformat(obj[key].replace("Z", "+00:00"))
             if parsed.utcoffset() is None:
                 raise ValueError
-            return parsed, False
-        except (ValueError, TypeError, AttributeError):
-            uncertain(path, f"Invalid {key}; requires ISO timestamp with UTC offset")
-            return None, False
+            return parsed
+        except (KeyError, ValueError, TypeError, AttributeError):
+            if path is not None:
+                uncertain(path, f"Missing or invalid {key}; requires ISO timestamp with UTC offset")
+            return None
+
+    def valid_flag(flag):
+        if not (isinstance(flag, dict) and isinstance(flag.get("finding"), str) and isinstance(flag.get("reason"), str)):
+            return False
+        places = flag.get("represented_in")
+        if places == "none":  # Represented nowhere: no disposition is needed.
+            return flag.get("disposition", "none") in DISPOSITIONS
+        return isinstance(places, list) and bool(places) and all(isinstance(p, str) and p.strip() for p in places) and flag.get("disposition") in DISPOSITIONS
 
     flagged = [row for row in findings or [] if row["Status"].startswith("revalidation-needed")]
     packages = []
@@ -224,44 +227,36 @@ def collect(root):
     else:
         for directory in package_dirs:
             draft = directory / "draft"
-            obj, path = manifest(draft) if draft.is_dir() else (None, None)
-            revised, revised_estimate = timestamp(obj, "revised_at", path)
-            released_dir = directory / "released"
-            release_dirs = entries(released_dir, directories=True)
+            obj = manifest(draft) if draft.is_dir() else None
+            revised = timestamp(obj, "revised_at", draft / "manifest.json")
+            release_dirs = entries(directory / "released", directories=True)
             releases = [p for p in release_dirs or [] if p.name.isascii() and p.name.isdigit()]
             latest = max(releases, key=lambda p: int(p.name)) if releases else None
-            released_obj, released_path = manifest(latest) if latest else (None, None)
-            released, released_estimate = timestamp(released_obj, "released_at", released_path)
-            comparison = None
-            if revised and released:
-                comparison = "ahead" if revised > released else "same_or_older"
+            # Frozen releases are read only for released_at; an earlier format leaves it unknown.
+            released = timestamp(manifest(latest, frozen=True), "released_at") if latest else None
             entry = {"name": directory.name, "draft_exists": draft.is_dir(), "revised_at": revised.isoformat() if revised else None,
                      "release_inventory_known": release_dirs is not None, "latest_release": latest.name if latest else None, "released_at": released.isoformat() if released else None,
-                     "draft_vs_release": comparison, "comparison_is_estimate": revised_estimate or released_estimate}
+                     "draft_vs_release": ("ahead" if revised > released else "same_or_older") if revised and released else None}
             flags = obj.get("revalidation_flags") if obj is not None else None
-            if flags == "none":
-                flags = []
-            valid_flags = isinstance(flags, list) and all(isinstance(f, dict) and isinstance(f.get("finding"), str) and isinstance(f.get("reason"), str) and (f.get("represented_in") == "none" or (isinstance(f.get("represented_in"), list) and f["represented_in"] and all(isinstance(place, dict) and place.get("disposition") in {"none", "revalidate", "omit", "release_with_caveat"} for place in f["represented_in"]))) for f in flags)
-            if draft.is_dir() and not valid_flags:
-                uncertain(path or draft, "Missing or malformed revalidation_flags; disposition counts unknown")
-            exact = []
-            review = []
+            flags = [] if flags == "none" else flags
+            valid_flags = isinstance(flags, list) and all(valid_flag(f) for f in flags)
+            if obj is not None and not valid_flags:
+                uncertain(draft / "manifest.json", "Missing or malformed revalidation_flags; disposition counts unknown")
             if findings is None and draft.is_dir():
                 uncertain(draft, "Current findings unknown; flag comparison requires state review")
+            confirmed = []
             for finding in flagged:
                 matches = [f for f in flags if f["finding"] == finding["Finding"] and f["reason"] == finding["Revalidation reason or caveat"]] if valid_flags else []
                 if matches:
-                    # `none` and `revalidate` both block a release, so neither counts as a disposition here.
-                    exact.append({"finding": finding["Finding"], "reason": finding["Revalidation reason or caveat"], "without_disposition": any(p["disposition"] in {"none", "revalidate"} for f in matches if isinstance(f["represented_in"], list) for p in f["represented_in"])})
-                elif draft.is_dir() or latest:
-                    review.append({"finding": finding["Finding"], "reason": finding["Revalidation reason or caveat"]})
-            entry["confirmed_flags"] = exact
-            entry["confirmed_without_disposition"] = sum(f["without_disposition"] for f in exact) if valid_flags and findings is not None else None
-            # Semantic representation cannot be inferred from substring matches in package prose.
-            entry["representation_review"] = review
-            if review:
-                entry["review_methodology"] = relative((draft if draft.is_dir() else latest) / "methodology.md")
-                entry["flags_since_draft"] = "unknown until representation review"
+                    # `none` and `revalidate` block a release; a flag represented nowhere blocks nothing.
+                    confirmed.append({"finding": finding["Finding"], "reason": finding["Revalidation reason or caveat"],
+                                      "without_disposition": any(f["represented_in"] != "none" and f["disposition"] in BLOCKING for f in matches)})
+            # A draft compares its recorded flags; a release-only package records none. Unknown inputs stay null.
+            known = findings is not None and (valid_flags if draft.is_dir() else True)
+            entry["confirmed_flags"] = confirmed
+            entry["confirmed_without_disposition"] = sum(f["without_disposition"] for f in confirmed) if known and draft.is_dir() else None
+            # Whether the package represents an unmatched flag is awb-package's call, never inferred here.
+            entry["unmatched_flags"] = (len(flagged) - len(confirmed) if known else None) if draft.is_dir() or latest else 0
             packages.append(entry)
     result["packages"] = packages
     result["git"] = git_status(root, slug, state_date, uncertain)
