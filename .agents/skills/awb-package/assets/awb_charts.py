@@ -1,7 +1,7 @@
 """Write and check the chart data of an analytics workbench package.
 
 Copy this file to `src/packaging/charts.py`; do not import it from the skill folder.
-Needs pandas.
+`write_charts` needs pandas; `check_charts` needs only the standard library.
 
 A package's `charts/` directory holds one CSV per chart that `findings.md` specifies, named
 `chart-N.csv` in the order the specifications appear, each holding a header row of display
@@ -12,8 +12,6 @@ import os
 import re
 from pathlib import Path
 
-import pandas as pd
-
 _SPEC = re.compile(r"\*\*Chart (\d+)\.\*\*")
 _FILE = re.compile(r"chart-([1-9]\d*)\.csv")
 # An underscore or a dot between letters marks a column name or code, not a display name.
@@ -21,6 +19,8 @@ _IDENTIFIER = re.compile(r"[A-Za-z0-9]_[A-Za-z0-9]|[A-Za-z]\.[A-Za-z]")
 
 
 def _check_frame(number, frame):
+    import pandas as pd
+
     if not isinstance(frame, pd.DataFrame):
         raise TypeError(f"Chart {number} is not a DataFrame")
     if frame.empty:
