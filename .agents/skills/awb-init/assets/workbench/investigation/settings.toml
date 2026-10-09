@@ -25,15 +25,3 @@
 # scope = { outcome = "pass", detail = "Orders placed from $start to $end, one row per order month." }
 # metrics = { outcome = "pass", detail = "Orders counts distinct order_id by order month." }
 # values = { outcome = "not-applicable", detail = "No categorical value drives this result." }
-
-# Scope for the awb-eda scan. Each key comes from the first of [eda.<dataset>], [eda], [scope],
-# then the top level; an [eda.<dataset>] table overrides [eda] for one dataset.
-# [eda]
-# date_column = "order_date"         # needed for any period filter, coverage, or trend
-# where = "status <> 'test'"         # SQL predicate, or a list of predicates joined with AND
-# measure = "amount"                 # numeric column or SQL expression; a boolean gives a rate
-# dimensions = ["region", "channel"]
-# key = ["order_id"]                 # expected grain
-# period = "month"                   # day, week, month, quarter, or year
-# period_start = 2026-01-01          # inclusive; omit to use [parameters] start and end
-# period_end = 2026-06-30

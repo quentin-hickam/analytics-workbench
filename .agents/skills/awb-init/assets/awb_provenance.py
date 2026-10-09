@@ -9,12 +9,15 @@ Schema awb-evidence/3, in order: schema, investigation, result_id, recorded_at
 conversion_commit/files), acquisitions (path/provenance_file/status/files),
 settings (path/bytes/sha256/[result]/content), checks (name/outcome/detail), notes (text or null).
 Unknowns are {"unknown": reason}.
-Settings are scoped when the file's `results` table holds the result ID: settings carries
-"result", content holds only [parameters] and that result's [results.<id>] table, and the
-settings file is left out of producing_paths, so other results' tables and other top-level
-tables never make this result stale. Any other layout records and compares the whole file.
-compare_evidence also reads awb-evidence/1 and /2 files: both record whole-file settings, and
-/1 files carry a figure entry, which it ignores.
+Settings are scoped: the settings file must hold a [results.<id>] table for the result; settings
+carries "result", content holds only [parameters] and that table, and the settings file is left
+out of producing_paths, so other results' tables and other top-level tables never make this
+result stale. Producing paths are the investigation's code (run.py and other files outside its
+records, queries/ and settings), the result's own queries, and src/ except the helpers that only
+dispatch, record, or package (awb.py, provenance.py, packaging/), so a repair replacing those
+stales nothing. compare_evidence also reads awb-evidence/1 and /2 files, and /3 files written
+before scoping was required: those record whole-file settings, and /1 files carry a figure
+entry, which it ignores.
 Paths are project-relative POSIX, except that a files[].path copied from publication.json or
 provenance.json is relative to the directory holding that file, and a publication's
 inputs[].files[].path to its acquisition directory.
@@ -184,8 +187,13 @@ def _settings(root, path, result_id=None):
     entry = _checksum(root, path)
     try:
         import tomllib
-    except ImportError:
-        entry["content"] = {"unknown": "tomllib unavailable"}
+    except ImportError:  # Python 3.10
+        try:
+            import tomli as tomllib
+        except ImportError:
+            tomllib = None
+    if tomllib is None:
+        entry["content"] = {"unknown": "tomllib unavailable; install tomli on Python 3.10"}
     else:
         try:
             content = tomllib.loads((root / entry["path"]).read_text())
@@ -209,14 +217,22 @@ def _settings_keys(content, result_id):
             f"results.{result_id}": content.get("results", {}).get(result_id)}
 
 
+# Investigation entries that are records or outputs, or that other results own, not producing code.
+_NOT_CODE = {"brief.md", "state.md", "history.md", "evidence", "figures", "exploration", "results", "queries"}
+# Helpers that dispatch, record evidence, or package; replacing them changes no result.
+_NOT_PRODUCING = ("src/awb.py", "src/provenance.py", "src/packaging/")
+
+
 def record_evidence(project_root, investigation: str, result_id: str, *, views: list[str],
                     publications: list[str] | None = None, acquisitions: list[str] | None = None,
-                    settings_path: str | None, checks: list[dict], notes: str | None = None,
+                    settings_path: str, checks: list[dict], notes: str | None = None,
                     code_paths: list[str] | None = None) -> Path:
     """Write one result's complete producing state atomically, replacing the same id.
 
-    Omitted publications are those the views read; omitted acquisitions are the inputs
-    recorded in those publications' publication.json.
+    The settings file must hold the result's [results.<id>] table; its `queries` (default
+    queries/<id>.sql, relative to the investigation) are producing code. code_paths adds further
+    producing files or directories. Omitted publications are those the views read; omitted
+    acquisitions are the inputs recorded in those publications' publication.json.
     """
     root = Path(project_root).resolve()
     if not all(isinstance(v, str) and _ID.fullmatch(v) for v in (investigation, result_id)):
@@ -226,13 +242,18 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
                 or not all(isinstance(check[k], str) for k in check)
                 or check["outcome"] not in {"pass", "fail", "not-applicable"}):
             raise ValueError("checks require name, outcome (pass/fail/not-applicable), and detail strings")
-    code = _expand(root, code_paths if code_paths is not None else
-                   [p for p in ("src", f"investigations/{investigation}") if (root / p).is_dir()])
-    if code_paths is None:
-        prefix = f"investigations/{investigation}/"
-        code = [p for p in code if not (p.startswith(prefix) and p[len(prefix):].split("/")[0]
-                # figures/ is excluded for investigations laid out before awb-evidence/2.
-                in {"brief.md", "state.md", "history.md", "evidence", "figures", "exploration", "results"})]
+    settings = _settings(root, settings_path, result_id)
+    if settings.get("result") != result_id:
+        reason = settings["content"]["unknown"] if _is_unknown(settings["content"]) else "no such table"
+        raise ValueError(f"{settings_path} must hold [results.{result_id}]: {reason}")
+    table = settings["content"]["results"][result_id]
+    queries = table.get("queries", [f"queries/{result_id}.sql"]) if isinstance(table, dict) else []
+    prefix = f"investigations/{investigation}/"
+    code = [p for p in _expand(root, [p for p in ("src", prefix) if (root / p).is_dir()])
+            if not p.startswith(_NOT_PRODUCING)
+            # figures/ is excluded for investigations laid out before awb-evidence/2.
+            and not (p.startswith(prefix) and p[len(prefix):].split("/")[0] in _NOT_CODE)]
+    code += _expand(root, [prefix + query for query in queries] + list(code_paths or []))
     view_entries = [{**e, "publications": _view_publications(root, e["path"])}
                     for e in file_checksums(views, root=root)]
     if publications is None:
@@ -240,14 +261,8 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
                                for p in e["publications"]})
     if acquisitions is None:
         acquisitions = _publication_acquisitions(root, publications)
-    settings = (_settings(root, settings_path, result_id) if settings_path is not None else
-                {"unknown": "no settings file given"})
-    paths = set(code + [_relative(root, p) for p in views] +
-                ([_relative(root, settings_path)] if settings_path is not None else []))
-    if "result" in settings:
-        # Scoped settings are compared by content alone, so other results' tables never count.
-        paths.discard(settings["path"])
-    paths = sorted(paths)
+    # Scoped settings are compared by content alone, so other results' tables never count.
+    paths = sorted(set(code + [_relative(root, p) for p in views]) - {settings["path"]})
     try:
         in_git = _git(root, "rev-parse", "--is-inside-work-tree").strip() == "true"
     except (OSError, subprocess.CalledProcessError, ValueError):

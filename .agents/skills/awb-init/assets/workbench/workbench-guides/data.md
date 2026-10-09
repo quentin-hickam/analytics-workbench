@@ -1,10 +1,12 @@
 # Data acquisition, retention, and preparation
 
+`references/` and `assets/` paths below are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (Codex).
+
 Existing project layouts remain authoritative. Read `references/landing.md` only to write a `fetch` callable for `land()` or a `convert` callable for `publish()`.
 
 ## Assess and acquire
 
-Assess candidate sources from their landed copies only far enough to establish relevance and fitness, and record the assessment in `foundation/sources.md` under its Status rules.
+Assess a candidate from its documentation or schema when that settles relevance and fitness; inspect records only from landed copies, landing only what the assessment needs. Record the assessment and its basis in `foundation/sources.md` under its Status rules.
 
 Land user-supplied or already-downloaded files:
 

@@ -1,5 +1,7 @@
 # Analytical implementation, validation, and evidence
 
+`references/` and `assets/` paths below are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (Codex).
+
 ## Structure
 
 Put reusable operations in `src/`: `src/preparation/` for acquisition, landing, conversion, session loading, normalization, and corrections; `src/exploration/` for neutral measurements, comparisons, profiles, and graph operations; `src/packaging/` for shared package assembly. Reuse existing operations first. Each investigation's `run.py` selects shared operations and its `settings.toml` supplies scope and settings. An investigation without `run.py` gets one adapted from `assets/workbench/investigation/run.py` and `settings.toml` before its next rerun.
@@ -10,7 +12,7 @@ A new result is a `[results.<id>]` table in `settings.toml`, its `[results.<id>.
 
 Specify four mechanical checks: required columns; plausible counts before and after each filter; joins without unexpected multiplication, inspecting key uniqueness whenever counts change; and null rates for important fields. Supply three judgments, each an outcome with a one-sentence detail: scope (explicit date filters and grouping dimensions), metrics (definitions, assumptions, and column meanings), and values (distinct values that drive business interpretation, inspected with `awb.py profile`).
 
-Run `python3 investigations/<name>/run.py [result-id ...]`. It prints one JSON line per result with the evidence path, `failed_checks`, `not_assessed`, and the `state_row` to paste into `state.md`. Validation is done when each `failed_checks` entry is understood and recorded, and each `not_assessed` entry is either supplied in settings or justified in the row's caveat.
+Before rerunning a supported or flagged finding, suggest committing its uncommitted evidence. When the rerun changes the investigation's understanding, append to `history.md` the prior finding text, its status, and the reason for the change, citing the commit holding the prior evidence or `uncommitted`. Run `python3 investigations/<name>/run.py [result-id ...]`. It prints one JSON line per result with the evidence path, `failed_checks`, `not_assessed`, and the `state_row` to paste into `state.md`. Validation is done when each `failed_checks` entry is understood and recorded, and each `not_assessed` entry is either supplied in settings or justified in the row's caveat. Include interpretation-driving values in supported finding text.
 
 ## Rerun flagged findings
 

@@ -31,10 +31,9 @@ COMMANDS = {
                 "print each column's type, null rate, and distinct count for a view, query file, or SQL text"),
     "stale": ("provenance.py", "cli_stale",
               "list findings whose evidence no longer matches the current code, views, inputs, or settings"),
-    "draft-provenance": ("packaging/draft.py", "cli_draft_provenance",
-                         "fill the draft manifest's producing and packaging state from the results' evidence"),
     "export": ("packaging/draft.py", "cli_export",
-               "write the draft's chart and dataset files from saved result tables after the export checks"),
+               "write the draft's chart and dataset files and the manifest's producing and packaging state; "
+               "--result alone refreshes provenance"),
     "check-draft": ("packaging/draft.py", "cli_check_draft",
                     "run every mechanical draft check, including state.md's current flags, and rewrite the "
                     "manifest inventory; --verify-only checks a release candidate"),

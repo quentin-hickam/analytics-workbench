@@ -1,6 +1,6 @@
 ---
 name: awb-init
-description: Initialize or repair an analytics workbench. Use when the user sets one up, brings a new business question, changes an investigation's scope, or asks to update the workbench to newer skills, or when a helper reports it predates a command.
+description: Initialize or repair an analytics workbench. Use when the user sets one up, brings a new business question, changes an investigation's scope, or asks to update the workbench to newer skills.
 ---
 
 # Initialize an analytics workbench
@@ -17,6 +17,8 @@ Build a project around one shared data foundation and zero or more investigation
 
 A rerun is reconciliation: settled records, answered questions, working paths, and customized templates stay as they are.
 
+For a repair or an update to newer skills, follow [references/repair.md](references/repair.md), then report under step 5; otherwise continue below.
+
 ## 2. Decide how much to initialize
 
 An investigation exists only when the user has supplied a business question. For a new project, ask for the question before creating any project file; set up the project and shared foundation without an investigation only when the user explicitly says there is no question yet. A repair needs no new question.
@@ -28,7 +30,7 @@ For an existing workbench, read the active investigation's brief before deciding
 When a business question is available and scope or purpose decisions remain open:
 
 - Follow the decision tree: settle the choices that constrain later choices before their dependent branches. Establish the business question, population or scope, supported decision or exploratory purpose, usefulness criteria, and material unknowns.
-- Ask one decision question at a time, with a recommended answer. Carry settled answers forward; ask only about choices that materially affect the analysis.
+- Ask a decision only after those it depends on; ask independent decisions together, each with a recommended answer. Carry settled answers forward; ask only about choices that materially affect the analysis.
 - Look facts up yourself in the repository, source systems, and tools; ask the user only for decisions.
 - Record any reader the user describes in the brief's Audience section; `awb-package` asks for it when a package needs it.
 - Challenge ambiguous terms, test a proposed meaning with a concrete example, and compare it with source data and analytical logic when available. Keep each resolved meaning and carry it into its record in step 4: shared meanings in `foundation/glossary.md`, an investigation's departure in its `brief.md`, dataset and view descriptions in `foundation/catalog.md`, consequential analytical decisions in its history. Record terms there instead of `CONTEXT.md` or ADRs.
@@ -39,42 +41,26 @@ The interview is done when the question, population, supported decision or explo
 
 Adapt asset files to the target; their instructional comments and example rows are guidance, not project facts. The user-level skills serve every project, so the project holds only these files.
 
-1. Adapt the [orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [agent instructions](assets/workbench/AGENTS.md) into missing root files; merge `.gitignore` rules one by one. Step 5 reconciles existing ones during a repair.
-2. Copy missing `assets/workbench/workbench-guides/{data,analysis}.md` to `workbench-guides/` unread; read a guide only to merge it into an existing one.
-3. Make the root instructions link to both guides relatively.
-4. Install the project helpers and declare their packages, with the interpreter that will run the project's analysis, such as its virtual environment. Run it as a black box; `--check` reports without writing. A repair runs it in step 5 instead.
+1. Adapt the [orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [agent instructions](assets/workbench/AGENTS.md) into missing root files; merge `.gitignore` rules one by one. A repair reconciles existing ones through references/repair.md.
+2. When merging into an existing `AGENTS.md`, link both guides relatively and check the links resolve.
+3. Install the project helpers and workbench guides and declare their packages, with the interpreter that will run the project's analysis, such as its virtual environment. Run it as a black box; `--check` reports without writing. A repair runs it from references/repair.md instead.
 
    ```sh
    python3 <skill-directory>/scripts/install_helpers.py <project-root>
    ```
 
    Carry into the report every `files` entry not `installed` or `current`, any `requirements` entry marked `missing`, and the `install` command it prints; the user adds or runs those.
-5. Create shared foundation records as their conditions fire: the [source register](assets/workbench/foundation/sources.md) when a source becomes a real candidate, the [catalog](assets/workbench/foundation/catalog.md) when a dataset, view, or deliberate cache exists, the [quality record](assets/workbench/foundation/quality.md) when a shared limitation, check, or correction is known, and the [glossary](assets/workbench/foundation/glossary.md) when shared vocabulary is resolved. Keep an existing project's format when it serves the same responsibility; create each ledger only with content.
-6. Investigation:
+4. Create shared foundation records as their conditions fire: the [source register](assets/workbench/foundation/sources.md) when a source becomes a real candidate, the [catalog](assets/workbench/foundation/catalog.md) when a dataset, view, or deliberate cache exists, the [quality record](assets/workbench/foundation/quality.md) when a shared limitation, check, or correction is known, and the [glossary](assets/workbench/foundation/glossary.md) when shared vocabulary is resolved. Keep an existing project's format when it serves the same responsibility; create each ledger only with content.
+5. Investigation:
    - New: adapt the [brief](assets/workbench/investigation/brief.md), [state](assets/workbench/investigation/state.md), and [history](assets/workbench/investigation/history.md), and copy [run.py](assets/workbench/investigation/run.py) with its [settings.toml](assets/workbench/investigation/settings.toml), under `investigations/<stable-slug>/`, with a slug named for the question rather than the population so an expansion keeps it right. Populate them only with settled facts, put open questions in the brief and state, and point README's `Active investigation` line at the state file.
    - Extending: revise the brief, settings, and state to the settled scope; record superseded findings in the history.
-7. Create `data/raw/`, `data/parquet/`, `data/cache/`, `foundation/views/`, and further code or configuration only when their first content exists.
+6. Create `data/raw/`, `data/parquet/`, `data/cache/`, `foundation/views/`, and further code or configuration only when their first content exists.
 
 Package templates and `deliveries/` stay absent. If the user explicitly asks for a package, finish initialization, then invoke the sibling [`awb-package` skill](../awb-package/SKILL.md).
 
-## 5. Repair and upgrade
+## 5. Report
 
-For a repair, an update to newer skills, or a helper that predates a command:
-
-1. Run the installer with `--upgrade`. The user's request authorizes it: it installs missing helpers and replaces only `earlier` copies, unmodified versions the skills shipped, of helpers, package formats, and workbench guides.
-
-   ```sh
-   python3 <skill-directory>/scripts/install_helpers.py <project-root> --upgrade
-   ```
-
-2. When it reports `customized` files or `unmodified` `retired` files, ask the user once about all of them: show each customized file's difference (`git diff --no-index <project file> <asset>`, the asset from `customized`) and ask whether to replace, keep, or merge it; ask whether to remove the unmodified retired files. Then rerun the installer with `--upgrade`, a `--replace <path>` for each file to replace, and `--remove-retired` if agreed. Make hand merges with ordinary edits, keeping the project's changes. Customized retired files are the project's code; keep and report them.
-3. Reconcile `AGENTS.md` and `README.md` with the [agent instructions](assets/workbench/AGENTS.md) and [orientation](assets/workbench/README.md) templates: add what the template holds and the project lacks, such as routing to every skill, command conventions, and **Asking for things** requests; delete lines naming skills, commands, or paths the template no longer has; keep project-specific content.
-
-Repair is done when the last installer output shows every file `installed`, `current`, `replaced`, or kept or merged by the user's choice, every retired file `removed` or kept by choice, and both root files match their templates apart from project content.
-
-## 6. Report
-
-Check that every created link is relative and both guide links resolve from the root `AGENTS.md`. Report:
+Report:
 
 - the target root;
 - files created, replaced, and existing files preserved or augmented;
@@ -82,7 +68,6 @@ Check that every created link is relative and both guide links resolve from the 
 - any host instruction file from step 1, with its import line;
 - installer items needing attention;
 - which lazy directories were deferred;
-- after a repair, each `old_format_drafts` entry, which the next `awb-package` revision rewrites while its releases stay frozen, and each investigation without `run.py`, which gets one before its next rerun;
 - how work continues: analysis through normal requests, a package only when the user asks `awb-package` for one; and
 - the active investigation, or that none exists, followed by a suggestion to use `awb-status` to see where things stand and what to ask next.
 
