@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Regenerate awb-update's record of every committed version of the files skills copy into projects.
+"""Regenerate awb-init's record of every committed version of the files skills copy into projects.
 
 Run from anywhere in the repository after changing a copied asset and committing it:
     python3 scripts/record-shipped-versions.py
-Writes .agents/skills/awb-update/assets/shipped-versions.json. `--check` exits 1 when the
+Writes .agents/skills/awb-init/assets/shipped-versions.json, which
+`install_helpers.py --upgrade` reads. `--check` exits 1 when the
 file is out of date instead of writing it.
 """
 import argparse
@@ -14,7 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / ".agents/skills/awb-update/assets/shipped-versions.json"
+OUT = ROOT / ".agents/skills/awb-init/assets/shipped-versions.json"
 SKILLS = ".agents/skills/"
 FORMAT = "assets/package-format/"
 

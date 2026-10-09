@@ -6,6 +6,7 @@
 # test_compare_evidence_clean_committed_state_passes_five_comparisons: clean state passes all five ordered comparisons in the contract shape.
 # test_compare_evidence_detects_view_changed_after_recording: view mutation fails the views comparison.
 # test_compare_evidence_names_changed_setting: settings mutation fails the settings comparison.
+# test_scoped_settings_ignore_other_results_and_tables: with a [results] table, only [parameters] and the result's own table count; the file leaves the code comparisons.
 # test_compare_evidence_detects_missing_input_and_missing_metadata: missing input file or unavailable metadata fails inputs.
 # test_compare_evidence_checks_dirty_code_against_recorded_bytes: uncommitted code mutation fails uncommitted-code.
 # test_record_evidence_rejects_destination_symlink_outside_root: regression: evidence destination cannot escape through a symlink.
@@ -106,7 +107,7 @@ def test_record_evidence_records_clean_producing_state(project):
         "producing_paths", "producing_uncommitted_changes", "views", "publications",
         "acquisitions", "settings", "checks", "notes",
     ]
-    assert raw.endswith("\n") and raw.startswith('{\n  "schema": "awb-evidence/2",')
+    assert raw.endswith("\n") and raw.startswith('{\n  "schema": "awb-evidence/3",')
     assert evidence["producing_commit"] == git(project, "rev-parse", "HEAD")
     assert evidence["producing_paths"] == ["foundation/views/orders.sql",
         "investigations/inv/run.py", "investigations/inv/settings.toml", "src/ops.py"]
@@ -175,6 +176,42 @@ def test_compare_evidence_names_changed_setting(project):
     assert settings["paths"] == ["investigations/inv/settings.toml"]
     if importlib.util.find_spec("tomllib"):
         assert "threshold" in settings["detail"]
+
+
+SCOPED = (b'[parameters]\nstart = 2026-01-01\n\n[results.r1]\nqueries = ["queries/r1.sql"]\n'
+          b'[results.r1.validation]\nrequired_columns = ["month"]\n')
+
+
+@pytest.mark.parametrize("edit, fails", [
+    (b'\n[results.r2]\nqueries = ["queries/r2.sql"]\n', False),
+    (b'\n[eda]\nmax_rows = 10\n', False),
+    (b'\n[results.r1.validation.nulls]\nmonth = 0.0\n', True),
+    (None, True),
+])
+def test_scoped_settings_ignore_other_results_and_tables(project, edit, fails):
+    if not importlib.util.find_spec("tomllib"):
+        pytest.skip("scoping parses TOML")
+    write(project, "investigations/inv/settings.toml", SCOPED + b'\n[results.r0]\nqueries = []\n')
+    git(project, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c",
+        "commit.gpgsign=false", "commit", "-qam", "results layout")
+    evidence = json.loads(record(project).read_text())
+    assert evidence["settings"]["result"] == "r1"
+    assert set(evidence["settings"]["content"]) == {"parameters", "results"}
+    assert "investigations/inv/settings.toml" not in evidence["producing_paths"]
+    text = (project / "investigations/inv/settings.toml").read_bytes()
+    if edit is None:
+        text = text.replace(b"2026-01-01", b"2026-02-01")
+        text = text.replace(b"[results.r0]\nqueries = []", b"[results.r0]\nqueries = [\"x\"]")
+    else:
+        text += edit
+    write(project, "investigations/inv/settings.toml", text)
+    comparisons = provenance.compare_evidence(project, project / "investigations/inv/evidence/r1.json")
+    assert [c["outcome"] for c in comparisons[:4]] == ["pass"] * 4
+    assert comparisons[4]["outcome"] == ("fail" if fails else "pass")
+    if edit is None:
+        assert "parameters" in comparisons[4]["detail"] and "r0" not in comparisons[4]["detail"]
+    elif fails:
+        assert "results.r1" in comparisons[4]["detail"]
 
 
 def test_compare_evidence_detects_missing_input_and_missing_metadata(project):

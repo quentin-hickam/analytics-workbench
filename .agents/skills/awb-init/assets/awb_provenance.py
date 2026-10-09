@@ -1,15 +1,20 @@
 """Result evidence for an analytics workbench (Python 3.10+, standard library).
 
-Copy this file to `src/provenance.py`; do not import it from the skill folder.
+Copy this file to `src/provenance.py` and import the project copy.
 
-Schema awb-evidence/2, in order: schema, investigation, result_id, recorded_at
+Schema awb-evidence/3, in order: schema, investigation, result_id, recorded_at
 (local ISO time), producing_commit (SHA/uncommitted/unknown), producing_paths
 (sorted), producing_uncommitted_changes (path/status/bytes/sha256), views
 (path/bytes/sha256/publications), publications (path/publication_file/inputs/
 conversion_commit/files), acquisitions (path/provenance_file/status/files),
-settings (path/bytes/sha256/content), checks (name/outcome/detail), notes (text or null).
-Unknowns are {"unknown": reason}. awb-evidence/1 files also carry a figure entry, which
-compare_evidence ignores; it compares both versions.
+settings (path/bytes/sha256/[result]/content), checks (name/outcome/detail), notes (text or null).
+Unknowns are {"unknown": reason}.
+Settings are scoped when the file's `results` table holds the result ID: settings carries
+"result", content holds only [parameters] and that result's [results.<id>] table, and the
+settings file is left out of producing_paths, so other results' tables and other top-level
+tables never make this result stale. Any other layout records and compares the whole file.
+compare_evidence also reads awb-evidence/1 and /2 files: both record whole-file settings, and
+/1 files carry a figure entry, which it ignores.
 Paths are project-relative POSIX, except that a files[].path copied from publication.json or
 provenance.json is relative to the directory holding that file, and a publication's
 inputs[].files[].path to its acquisition directory.
@@ -97,6 +102,7 @@ def _view_publications(root, path):
         return {"unknown": f"{path}: {error}"}
 
 
+_SCHEMAS = ("awb-evidence/1", "awb-evidence/2", "awb-evidence/3")
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _DEFINES = re.compile(r"\bcreate\s+(?:or\s+replace\s+)?(?:temp(?:orary)?\s+)?(?:view|table)\s+"
                       r"(?:if\s+not\s+exists\s+)?((?:\"[^\"]+\"|\w+)(?:\.(?:\"[^\"]+\"|\w+))*)", re.I)
@@ -161,7 +167,20 @@ def _input_record(root, path, filename, keys):
     return {"path": path, filename.removesuffix(".json") + "_file": entry, **copied}
 
 
-def _settings(root, path):
+def _scoped(content, result_id):
+    """The part of parsed settings one result reads: [parameters] and its own [results.<id>]."""
+    results = content.get("results")
+    table = results.get(result_id) if isinstance(results, dict) else None
+    return {**({"parameters": content["parameters"]} if "parameters" in content else {}),
+            "results": {result_id: table}}
+
+
+def _settings(root, path, result_id=None):
+    """Checksum and parsed content of a settings file, scoped to result_id when it names one.
+
+    With result_id, a file whose `results` table holds that ID is recorded with "result" and only
+    what that result reads; any other layout is recorded whole.
+    """
     entry = _checksum(root, path)
     try:
         import tomllib
@@ -170,10 +189,24 @@ def _settings(root, path):
     else:
         try:
             content = tomllib.loads((root / entry["path"]).read_text())
-            entry["content"] = json.loads(json.dumps(content, default=lambda value: value.isoformat()))
+            content = json.loads(json.dumps(content, default=lambda value: value.isoformat()))
         except (OSError, ValueError) as error:
             entry["content"] = {"unknown": str(error)}
+        else:
+            if result_id is not None and isinstance(content.get("results"), dict) \
+                    and result_id in content["results"]:
+                entry["result"] = result_id
+                content = _scoped(content, result_id)
+            entry["content"] = content
     return entry
+
+
+def _settings_keys(content, result_id):
+    """Top-level settings keys to compare, naming a scoped result's table results.<id>."""
+    if result_id is None:
+        return content
+    return {**{k: v for k, v in content.items() if k != "results"},
+            f"results.{result_id}": content.get("results", {}).get(result_id)}
 
 
 def record_evidence(project_root, investigation: str, result_id: str, *, views: list[str],
@@ -207,8 +240,14 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
                                for p in e["publications"]})
     if acquisitions is None:
         acquisitions = _publication_acquisitions(root, publications)
-    paths = sorted(set(code + [_relative(root, p) for p in views] +
-                       ([_relative(root, settings_path)] if settings_path is not None else [])))
+    settings = (_settings(root, settings_path, result_id) if settings_path is not None else
+                {"unknown": "no settings file given"})
+    paths = set(code + [_relative(root, p) for p in views] +
+                ([_relative(root, settings_path)] if settings_path is not None else []))
+    if "result" in settings:
+        # Scoped settings are compared by content alone, so other results' tables never count.
+        paths.discard(settings["path"])
+    paths = sorted(paths)
     try:
         in_git = _git(root, "rev-parse", "--is-inside-work-tree").strip() == "true"
     except (OSError, subprocess.CalledProcessError, ValueError):
@@ -236,15 +275,14 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
         changes = [{"path": e["path"], "status": "uncommitted" if in_git else "no-vcs", **e}
                    for e in file_checksums(paths, root=root)]
     evidence = {
-        "schema": "awb-evidence/2", "investigation": investigation, "result_id": result_id,
+        "schema": "awb-evidence/3", "investigation": investigation, "result_id": result_id,
         "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "producing_commit": commit, "producing_paths": paths, "producing_uncommitted_changes": changes,
         "views": view_entries,
         "publications": [_input_record(root, p, "publication.json", ["inputs", "conversion_commit", "files"])
                          for p in publications],
         "acquisitions": [_input_record(root, p, "provenance.json", ["status", "files"]) for p in acquisitions],
-        "settings": _settings(root, settings_path) if settings_path is not None else
-                    {"unknown": "no settings file given"},
+        "settings": settings,
         "checks": checks, "notes": notes,
     }
     path = root / _relative(root, f"investigations/{investigation}/evidence/{result_id}.json")
@@ -298,7 +336,7 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
     try:
         evidence_path = _relative(root, evidence_path)
         evidence = json.loads((root / evidence_path).read_text())
-        if evidence["schema"] not in ("awb-evidence/1", "awb-evidence/2"):
+        if evidence["schema"] not in _SCHEMAS:
             raise ValueError("wrong schema")
     except (OSError, ValueError, KeyError, TypeError) as error:
         return [{"name": name, "paths": [evidence_path], "outcome": "fail",
@@ -369,9 +407,12 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
                 entry = evidence["settings"]
                 _known({k: v for k, v in entry.items() if k != "content"})
                 paths = [entry["path"]]
+                scope = entry.get("result")
                 current = _settings(root, entry["path"])
                 old, new = entry["content"], current["content"]
                 if not _is_unknown(old) and not _is_unknown(new):
+                    if scope is not None:
+                        old, new = _settings_keys(old, scope), _settings_keys(_scoped(new, scope), scope)
                     keys = sorted(k for k in old.keys() | new.keys()
                                   if k not in old or k not in new or old[k] != new[k])
                     if keys:
@@ -444,8 +485,15 @@ def cli_stale(root: Path, argv: list[str]) -> int:
     """Print, as compact JSON, each recorded result whose evidence no longer matches the project."""
     parser = argparse.ArgumentParser(
         prog="awb.py stale",
-        description="Compare investigations' evidence files with the current state; changes nothing.")
-    parser.add_argument("--investigation", metavar="NAME", help="check one investigation only")
+        description="Compare investigations' evidence files with the current code, views, inputs, and "
+                    "settings; changes nothing.",
+        epilog="Prints one JSON line: checked, stale, skipped (JSON in an evidence directory that is not "
+               "evidence), and results, one entry per result with a failing comparison: investigation, "
+               "result_id, evidence, failed [{name, detail}], and findings, the exact state.md rows to "
+               "flag. A finding whose linked evidence file is missing is listed too. Exit 0 whether or "
+               "not anything is stale; 2 for an unknown investigation.")
+    parser.add_argument("--investigation", metavar="NAME",
+                        help="check only this investigation, by its directory name under investigations/")
     args = parser.parse_args(argv)
     root = Path(root).resolve()
     base = root / "investigations"

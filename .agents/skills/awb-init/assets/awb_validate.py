@@ -1,11 +1,11 @@
 """Shared result validation for an analytics workbench project (Python 3.10+, pandas only).
 
-Copy this file to the project's src/exploration/validate.py and import it from there;
-never from the skill folder. It measures without interpreting.
+Copy this file to the project's src/exploration/validate.py and import the project copy.
+It measures without interpreting.
 
 validate() returns the validation record: a list of checks {name, outcome, detail}, one per name in
 CHECK_NAMES and in that order, with outcome one of OUTCOMES and every value a str. Store the list
-unchanged with the result's evidence. profile() reports the counts and values to inspect.
+verbatim with the result's evidence. profile() reports the counts and values to inspect.
 src/awb.py runs cli_profile() as `python3 src/awb.py profile`; it also needs DuckDB and the
 project's src/preparation/landing.py for its session.
 """
@@ -184,10 +184,18 @@ def _landing(root):
 
 def cli_profile(root: Path, argv: list[str]) -> int:
     """Profile a view, query file, or SQL text in a fresh session; print a per-column summary."""
-    parser = argparse.ArgumentParser(prog="awb.py profile", description=cli_profile.__doc__)
+    parser = argparse.ArgumentParser(
+        prog="awb.py profile", description=cli_profile.__doc__,
+        epilog="A bare name matching a view or table profiles all of it. Above --max-rows the profile "
+               "uses a repeatable sample: the summary line says so, row_count is the sample size, the "
+               "JSON adds sampled_from with the full count, and null rates and distinct counts are "
+               "estimates (distinct counts run low). For exact figures raise --max-rows, narrow the "
+               "query, or aggregate with `python3 src/awb.py sql`. Needs DuckDB and "
+               "src/preparation/landing.py. Errors print one line on stderr and exit 1.")
     parser.add_argument("source",
                         help="view name, query file (absolute or project-relative), or SQL text")
-    parser.add_argument("--out", help="write the full profile JSON to this file")
+    parser.add_argument("--out", help="write the full profile JSON, with each column's most frequent "
+                                      "sample values, to this project-relative file")
     parser.add_argument("--max-rows", type=int, default=PROFILE_MAX_ROWS,
                         help="profile a repeatable sample of this many rows when the result is "
                              f"larger (default {PROFILE_MAX_ROWS})")
