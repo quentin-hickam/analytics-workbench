@@ -6,7 +6,7 @@ Existing project layouts remain authoritative. Read `references/landing.md` only
 
 Assess candidate sources from their landed copies only far enough to establish relevance and fitness, and record the assessment in `foundation/sources.md` under its Status rules.
 
-Land user-supplied or already-downloaded files, inputs first and options after:
+Land user-supplied or already-downloaded files:
 
 ```
 python3 src/awb.py land <source> <acquisition-id> <file-or-directory>... [--request TEXT] [--records NAME=COUNT] [--notes TEXT]
