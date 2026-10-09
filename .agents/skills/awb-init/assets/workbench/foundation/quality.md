@@ -1,6 +1,6 @@
 # Data quality
 
-Record shared limitations, errors, checks, and accepted corrections that affect canonical data. Investigation-specific filters and execution mistakes do not belong here.
+Record shared limitations, errors, checks, and accepted corrections that affect canonical data. Investigation-specific filters belong in that investigation's settings; execution mistakes go unrecorded.
 
 ## Active limitations and issues
 
@@ -12,4 +12,4 @@ Record shared limitations, errors, checks, and accepted corrections that affect 
 | Date | Issue ID | Accepted correction and rationale | Preparation or view change | Findings that may need revalidation |
 | --- | --- | --- | --- | --- |
 
-When a shared correction may change an investigation's findings, explain the connection here and flag the affected findings in that investigation's `state.md`. Preserve prior conclusions in its history; do not rerun or rewrite them automatically.
+`awb-clean` records each correction here with the findings it flagged in their investigations' `state.md`; prior conclusions stay in each investigation's history.

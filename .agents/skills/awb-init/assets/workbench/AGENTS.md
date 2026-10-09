@@ -1,34 +1,38 @@
 # Analytics workbench
 
-This repository shares one data foundation across multiple investigations. Source knowledge, quality records, vocabulary, the catalog, and canonical SQL views belong in `foundation/`; reusable executable operations in `src/`; each question's scope, settings, exploration, findings, and history in `investigations/<name>/`.
+One data foundation serves every investigation here. Source knowledge, quality records, vocabulary, the catalog, and canonical SQL views belong in `foundation/`; reusable operations in `src/`; each question's scope, settings, exploration, findings, and history in `investigations/<name>/`.
 
 ## Start or resume
 
-Resume the active investigation linked from `README.md` unless the user names another, and briefly identify it. Read its `brief.md` and `state.md`; read relevant history entries when prior reasoning matters. Point the README's `Active investigation` link at the investigation's `state.md` when creating or switching investigations. Ask before changing records when an ask could belong to several investigations.
+For investigation work, resume the investigation on README's `Active investigation` line unless the user names another, and name it briefly. Read its `brief.md` and `state.md`, and history entries when prior reasoning matters. When switching, repoint that line at the new `state.md`. When an ask could belong to several investigations, ask which before changing records.
 
-Use `awb-init` to establish or repair structure, start an investigation, or resolve a consequential scope change. The same ask about a broader population containing the current population expands the existing investigation and reopens only affected decisions. A related question about an independent population starts a new investigation with fresh findings, state, and history; inherit method, settings, and package format as starting points subject to correction. Prior findings guide method selection, not evidence about the new population. Use `awb-status` for status and possible next requests, `awb-clean` to clean one dataset at the foundation level, `awb-eda` to explore one dataset for the active investigation, and `awb-update` to bring the workbench up to date after newer skills are installed.
+Take a consequential scope change, such as a broader or different population, through `awb-init`'s scoping interview; repair the workbench through `awb-init` too, including after newer skills are installed. Explore a dataset with `awb-eda`, and clean one or make a shared correction with `awb-clean`, including when you start that work yourself.
 
-## Load the relevant procedures
+## Procedures
 
-- Before assessing sources, acquiring or retaining data, configuring canonical sessions, changing preparation or publication, or adding a cache, read [data procedures](workbench-guides/data.md).
-- Before writing analytical code, presenting any result, recording a finding, or correcting shared data and revalidating findings, read [analysis procedures](workbench-guides/analysis.md).
+- **Data**: before assessing a source, landing, retaining, or publishing data, editing `foundation/views/`, or adding a cache, read [workbench-guides/data.md](workbench-guides/data.md).
+- **Analysis**: before adding or changing a result, recording a finding, or rerunning flagged findings, read [workbench-guides/analysis.md](workbench-guides/analysis.md).
 
-Read only the procedures needed for the current work. Once loaded, reuse their context until a relevant change requires rereading. Preserve existing project conventions; resolve conflicts explicitly instead of overwriting customized records or code.
+Read each guide once per session. Paths under `awb-init`'s `references/`, `scripts/`, and `assets/` resolve in its skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (Codex). Existing project conventions win; surface any conflict for a decision.
+
+## Commands
+
+Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists them and `<command> --help` their arguments. Compute through saved queries: run every query with `awb.py sql`, and counts, null rates, and distinct values with `awb.py profile`; save a query you run twice as `investigations/<name>/exploration/<topic>.sql` and rerun it by path. Run the project's helpers, customized or not, as black boxes; open one's source only to adapt or debug it. When a helper or package is missing, run `awb-init`'s `scripts/install_helpers.py`; it restores only what is missing. Keep complete records in files; in chat, report counts, paths, and helper failures verbatim.
 
 ## Analytical invariants
 
-Let the active question bound preparation; broader preparation requires an explicit request. Check source coverage and limitations against each investigation. Land complete acquisitions with provenance before canonical ingestion, preserve originals, and publish only validated outputs. Keep preparation reusable and exploratory transformations local until deliberately promoted. Intermediate computation belongs in canonical views and in-process results; materialized caches require a recorded purpose.
+Let the active question bound preparation; broader preparation needs an explicit request. Keep exploratory transformations local to the investigation until deliberately promoted, and intermediate computation in views and in-process results.
 
-Compute before interpreting. Apart from related findings used to select methods, read other investigations' or projects' conclusions only after this investigation produces its own results unless the user requests otherwise. Preserve results that challenge the expected explanation.
+Compute before interpreting: read other investigations' conclusions only after this investigation has its own results, unless the user asks otherwise. Preserve results that challenge the expected explanation.
 
-Only an investigation's composition entry run with its settings can produce a finding. Validate every result before presentation or recording; retain the complete checks with its evidence, and understand and record failures before promoting a finding. Track analytical code in Git and record producing state, input provenance, views, settings, and validation through the project evidence helper. Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists the commands. When a helper or package is missing, run the `awb-init` skill's `scripts/install_helpers.py`, which restores missing helpers without overwriting any and reports missing packages. Reuse helpers and save queries or checks executed a second time for rerunning by path.
+Only a result from the investigation's `run.py`, run with its settings, can become a finding; present other query output as exploration. Understand and record each failed check before promoting a finding.
 
-## Maintain records and delivery boundaries
+## Record maintenance
 
-Resolve ambiguous terms with concrete examples and available data. Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and dataset/view/cache descriptions in `foundation/catalog.md`; these replace separate context maps and ADRs.
+Settle ambiguous terms with concrete examples and the data. Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and dataset, view, and cache descriptions in `foundation/catalog.md`; these replace context maps and ADRs.
 
-Update `state.md` when findings, issues, revalidation flags, or next steps change. Append meaningful findings, decisions, caveats, superseded conclusions, and relevant source limitations to history according to its header. Write a checkpoint before switching investigations when requested. Accepted shared corrections flag every potentially affected finding with a reason while preserving its prior status; rerun affected analyses and revise conclusions only on request.
+Update `state.md` when findings, issues, flags, or next steps change; append to `history.md` under its header's rules. Rerun flagged findings and revise conclusions only on request. When the user names who will read the deliverables, record it in the brief's Audience section.
 
-When the user says who will read the delivered documents, record it in the Audience section of the investigation's `brief.md`.
+Commit when the user asks; suggest one when analytical code is uncommitted, so evidence carries a SHA.
 
-Create or refresh delivery packages only on explicit request through `awb-package`. Preserve numbered releases unchanged; create one only when the user explicitly marks the package delivered through `awb-release`. Routine record maintenance never triggers packaging or an ad hoc deliverable.
+Answer in chat. Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen.

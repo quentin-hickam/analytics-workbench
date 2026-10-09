@@ -14,7 +14,7 @@ __pycache__/
 *.duckdb
 *.duckdb.wal
 
-# Delivery packages are retained outside analytical code history
+# Package drafts and releases are kept outside Git
 /deliveries/
 
 # Temporary publication outputs
