@@ -5,8 +5,10 @@
 # test_check_charts_clean_package_returns_no_rows: specifications and chart files match one to one.
 # test_check_charts_reports_each_mismatch: misnumbered, missing, unspecified, foreign, and empty files are one row each.
 # test_check_charts_without_directory: specifications with no charts directory each report it; no specifications and no directory is clean.
+# test_check_charts_without_pandas: the module loads and check_charts runs when pandas cannot be imported.
 
 import importlib.util
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -84,3 +86,14 @@ def test_check_charts_without_directory(tmp_path):
         {"chart": "Chart 2", "problem": "no chart file for this specification"},
     ]
     assert charts.check_charts(findings(tmp_path), tmp_path / "charts") == []
+
+
+def test_check_charts_without_pandas(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "pandas", None)
+    bare = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(bare)
+    (tmp_path / "charts").mkdir()
+    (tmp_path / "charts/chart-1.csv").write_text("Month,Cases\nJan,4\n")
+    assert bare.check_charts(findings(tmp_path, 1), tmp_path / "charts") == []
+    with pytest.raises(ImportError):
+        bare.write_charts(tmp_path / "charts", [object()])
