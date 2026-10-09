@@ -1,17 +1,20 @@
 # Kept cases:
 # test_names_cover_project_records: names hold investigation/package, created views, sources without CTEs or table functions, top-level settings keys and dotted paths (not bare nested keys), and result IDs from evidence and state links.
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten and other manifest fields kept; the audit record holds the names set.
-# test_check_draft_reports_each_helper_problem: an internal name, a chart without a file, and a missing settings file each fail with the helper's rows unchanged.
+# test_check_draft_reports_each_helper_problem: an internal name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
+# test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_verify_only_never_rewrites_inventory: a changed file is reported against the recorded inventory, which stays as recorded.
 # test_non_json_manifest_runs_other_checks: findings and chart checks still run; verify is not run and the check fails.
 # test_draft_provenance_fills_producing_state: shared commit, inputs, settings, and packaging state are written; export checks pass and other fields stay.
 # test_draft_provenance_keeps_differences_and_unknowns: differing commits are listed per result and an unknown keeps its reason.
 # test_draft_provenance_blocks_failed_or_missing_evidence: a changed setting blocks exports and a missing evidence file fails; neither writes the manifest.
-# test_release_refuses_failed_check_or_pending_disposition: a failing verify or a none/revalidate disposition creates no release.
+# test_release_refuses_failed_check_or_pending_disposition: a failing verify, an unmatched flag, or a none/revalidate disposition creates no release; represented_in none needs no disposition.
+# test_release_reports_fields_for_the_report: datasets, dispositions marked new since the prior release, provenance gaps, checkout-only acquisitions, and a clean local verify.
 # test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy compared.
 # test_export_writes_charts_datasets_and_manifest: display names, mapped codes, and rounding shape a saved result into a chart and a dataset; the manifest records charts, selection, and passing export checks.
-# test_export_names_every_gap_and_blocks_stale_results: every missing display name is listed at once; a changed setting blocks the export and writes nothing; --no-datasets records none.
+# test_export_names_every_gap_and_blocks_stale_results: every missing display name is listed at once; a changed setting blocks the export with a stop message and writes nothing; --no-datasets records none.
 # test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do.
+# test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage; a rerun reports already copied; a differing copy is a conflict; an unknown package fails.
 
 import hashlib
 import importlib.util
@@ -42,6 +45,18 @@ SELECT r.*, EXTRACT(year FROM r.ordered_at) AS y FROM recent r JOIN main.regions
 """
 SETTINGS = b'minimum_count = 5\n\n[period]\nstart = 2026-01-01\n'
 FINDINGS = "# Order quality\n\n### Late orders rose in the west\n\n**Chart 1.** Bar: late share by region\n"
+METHODOLOGY = "# Methodology\n\n## Findings\n\n### Late orders rose in the west\n"
+STATE = """# Current investigation state
+
+## Current findings
+
+| Finding | Evidence | Status | Revalidation reason or caveat |
+| --- | --- | --- | --- |
+| Late orders rose in the west | [r-009](evidence/r-009.json) | {status} | {reason} |
+
+## Next steps
+"""
+FLAGGED = STATE.format(status="revalidation-needed (was supported)", reason="Q-3 corrected west dates")
 
 
 def git(root, *args):
@@ -71,7 +86,7 @@ def project(tmp_path):
     write(tmp_path, "foundation/views/01_orders.sql", VIEW)
     write(tmp_path, "investigations/inv/settings.toml", SETTINGS)
     write(tmp_path, "investigations/inv/run.py", "x = 1\n")
-    write(tmp_path, "investigations/inv/state.md", "| r-009 | [r-009](evidence/r-009.json) |\n")
+    write(tmp_path, "investigations/inv/state.md", STATE.format(status="supported", reason=""))
     write(tmp_path, "data/parquet/orders/p1/part-0.parquet", b"parquet bytes")
     write(tmp_path, "data/parquet/orders/p1/publication.json", json.dumps({
         "inputs": [], "conversion_commit": "c1",
@@ -92,7 +107,7 @@ def project(tmp_path):
     git(tmp_path, "commit", "-m", "evidence")
     draft = tmp_path / "deliveries/inv/pkg/draft"
     write(draft, "findings.md", FINDINGS)
-    write(draft, "methodology.md", "# Method\n")
+    write(draft, "methodology.md", METHODOLOGY)
     write(draft, "charts/chart-1.csv", "Region,Late (%)\nWest,21\n")
     write(draft, "manifest.json", json.dumps({
         "investigation": "inv", "package": "pkg", "status": "draft", "release_number": "",
@@ -136,7 +151,8 @@ def test_check_draft_rewrites_inventory_and_passes(project, capsys):
 
 def test_check_draft_reports_each_helper_problem(project, capsys):
     draft = project / "deliveries/inv/pkg/draft"
-    write(draft, "findings.md", FINDINGS + "\nCounts come from orders_view.\n\n**Chart 2.** Line: cases\n")
+    write(draft, "findings.md", FINDINGS + "\nCounts come from orders_view.\n\n**Chart 2.** Line: cases\n"
+          "\n### East held steady\n")
     (project / "investigations/inv/settings.toml").unlink()
     for path in (project / "investigations/inv/evidence").glob("r-00?.json"):
         path.unlink()
@@ -144,15 +160,43 @@ def test_check_draft_reports_each_helper_problem(project, capsys):
     assert code == 1 and not report["passed"]
     assert report["findings"] == [{"line": 7, "kind": "name", "text": "orders_view"}]
     assert report["charts"] == [{"chart": "Chart 2", "problem": "no chart file for this specification"}]
+    assert report["headings"] == [
+        {"heading": "East held steady", "problem": "methodology.md has no ### section with this exact heading"}]
     assert report["names_problems"] == [
         "no settings found: investigations/inv/settings.toml is absent and no evidence records a settings file"]
     assert report["verify"] == []
 
 
+def set_flags(project, flags):
+    path = project / "deliveries/inv/pkg/draft/manifest.json"
+    record = json.loads(path.read_text())
+    record["revalidation_flags"] = flags
+    path.write_text(json.dumps(record))
+
+
+def test_check_draft_reports_unmatched_flags(project, capsys):
+    write(project, "investigations/inv/state.md", FLAGGED)
+    flag = {"finding": "Late orders rose in the west", "reason": "Q-3 corrected west dates"}
+    for argv in ((), ("--verify-only",)):
+        code, report = run(project, capsys, "check-draft", "inv", "pkg", *argv)
+        assert code == 1 and not report["passed"] and report["unmatched_flags"] == [flag]
+        assert report["errors"] == [] and report["verify"] == []
+    set_flags(project, [{**flag, "reason": "an older reason", "represented_in": "none"}])
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["unmatched_flags"] == [flag]
+    set_flags(project, [{**flag, "represented_in": [{"place": "findings: Late orders", "disposition": "none"}]}])
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["unmatched_flags"] == []
+    write(project, "investigations/inv/state.md", "# Current investigation state\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert code == 1 and report["unmatched_flags"] is None
+    assert "no Current findings table" in report["errors"][0]
+
+
 def test_verify_only_never_rewrites_inventory(project, capsys):
     run(project, capsys, "check-draft", "inv", "pkg")
     recorded = manifest(project)["inventory"]
-    write(project / "deliveries/inv/pkg/draft", "methodology.md", "# Method, revised\n")
+    write(project / "deliveries/inv/pkg/draft", "methodology.md", METHODOLOGY + "Revised.\n")
     code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
     assert code == 1 and report["inventory"]["source"] == "recorded"
     assert [(d["path"], d["kind"]) for d in report["verify"]] == [
@@ -208,7 +252,8 @@ def test_draft_provenance_blocks_failed_or_missing_evidence(project, capsys):
     before = (project / "deliveries/inv/pkg/draft/manifest.json").read_text()
     write(project, "investigations/inv/settings.toml", SETTINGS + b"extra = 1\n")
     code, report = run(project, capsys, "draft-provenance", "inv", "pkg", "r-001", "--export-checks")
-    assert code == 1 and not report["written"] and "exports_blocked" in report
+    assert code == 1 and not report["written"]
+    assert report["exports_blocked"].endswith("Stop: changed results need separately authorized analytical work")
     assert {(f["result_id"], f["name"]) for f in report["export_checks"]["failed"]} >= {("r-001", "settings")}
     code, report = run(project, capsys, "draft-provenance", "inv", "pkg", "r-404")
     assert code == 1 and report["errors"][0].startswith("missing evidence: investigations/inv/evidence/r-404.json")
@@ -219,18 +264,62 @@ def test_release_refuses_failed_check_or_pending_disposition(project, capsys):
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
     run(project, capsys, "check-draft", "inv", "pkg")
+    write(project, "investigations/inv/state.md", FLAGGED)
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == "flagged findings without a release disposition"
+    assert report["unmatched_flags"] == [
+        {"finding": "Late orders rose in the west", "reason": "Q-3 corrected west dates"}]
+    set_flags(project, [
+        {"finding": "Late orders rose in the west", "reason": "Q-3 corrected west dates", "represented_in": [
+            {"place": "findings: Late orders", "disposition": "release_with_caveat"},
+            {"place": "chart 1", "disposition": "none"},
+            {"place": "methodology", "disposition": "revalidate"}]},
+        {"finding": "F2", "reason": "unrelated", "represented_in": "none"}])
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["unmatched_flags"] == [] and report["dispositions"] == [
+        {"finding": "Late orders rose in the west", "place": {"place": "chart 1"}, "problem": "no disposition"},
+        {"finding": "Late orders rose in the west", "place": {"place": "methodology"},
+         "problem": "revalidation pending"}]
+    assert not (project / "deliveries/inv/pkg/released").exists()
+
+
+SOURCES = """# Source register
+
+## Acquisitions
+
+| Acquisition ID | Source ID | Acquired at | Source version, query, or request | Landed directory | Retained copy | Integrity or completeness check | Restrictions | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| a1 | crm | 2026-01-02 | export | data/raw/crm/a1 | this checkout only | rows | none | |
+| a2 | crm | 2026-01-03 | export | data/raw/crm/a2 | `/backup/raw` | rows | none | |
+"""
+
+
+def test_release_reports_fields_for_the_report(project, capsys):
+    write(project, "investigations/inv/state.md", FLAGGED)
+    write(project, "foundation/sources.md", SOURCES)
     path = project / "deliveries/inv/pkg/draft/manifest.json"
     record = json.loads(path.read_text())
-    record["revalidation_flags"] = [{"finding": "F1", "reason": "late fix", "represented_in": [
-        {"place": "findings: Late orders", "disposition": "release_with_caveat"},
-        {"place": "chart 1", "disposition": "none"},
-        {"place": "methodology", "disposition": "revalidate"}]}]
+    record.update(dataset_selection=["datasets/late.csv"], producing_commit={"unknown": "not a git repository"},
+                  inputs={"acquisitions": [{"path": f"data/raw/crm/{a}", "results": ["r-001"]}
+                                           for a in ("a1", "a2", "a3")]},
+                  revalidation_flags=[{"finding": "Late orders rose in the west",
+                                       "reason": "Q-3 corrected west dates", "represented_in": [
+                                           {"place": "chart 1", "disposition": "release_with_caveat",
+                                            "disposition_recorded_at": "2026-01-01T09:00:00+00:00"}]}])
     path.write_text(json.dumps(record))
+    write(project, "deliveries/inv/pkg/draft/datasets/late.csv", "Region\nWest\n")
+    run(project, capsys, "check-draft", "inv", "pkg")
     code, report = run(project, capsys, "release", "inv", "pkg")
-    assert code == 1 and report["dispositions"] == [
-        {"finding": "F1", "place": {"place": "chart 1"}, "problem": "no disposition"},
-        {"finding": "F1", "place": {"place": "methodology"}, "problem": "revalidation pending"}]
-    assert not (project / "deliveries/inv/pkg/released").exists()
+    assert code == 0 and report["verify"] == [] and report["datasets"] == ["datasets/late.csv"]
+    assert report["dispositions"] == [{"finding": "Late orders rose in the west",
+                                       "reason": "Q-3 corrected west dates", "place": {"place": "chart 1"},
+                                       "disposition": "release_with_caveat", "new": True}]
+    assert report["provenance_gaps"] == [{"field": "producing_commit", "reason": "not a git repository"}]
+    assert report["checkout_only_acquisitions"] == [
+        {"acquisition": "data/raw/crm/a1", "retained_copy": "this checkout only"},
+        {"acquisition": "data/raw/crm/a3", "retained_copy": "no Acquisitions row"}]
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 0 and report["release_number"] == "002" and report["dispositions"][0]["new"] is False
 
 
 def test_release_numbers_stamps_and_copies_to_storage(project, capsys, tmp_path_factory):
@@ -263,6 +352,7 @@ def test_release_storage_conflict_and_instructions(project, capsys, tmp_path_fac
     readme.write_text(original.replace("not yet recorded", str(store)))
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 1 and report["released"] and report["storage"]["status"] == "conflict"
+    assert {row["kind"] for row in report["storage"]["compare_trees"]} == {"missing"}
     assert list((store / "inv/pkg/released/001").iterdir()) == []
 
     cases = {"none chosen": "none chosen", "not yet recorded": "unrecorded",
@@ -328,15 +418,39 @@ def test_export_names_every_gap_and_blocks_stale_results(project, capsys):
     assert code == 1 and not out["written"]
     assert out["errors"] == [
         "r-001: column 'n' has no display name in foundation/display.toml [columns]",
-        "investigations/inv/results/r-002.csv is missing; run the investigation's run.py"]
+        "investigations/inv/results/r-002.csv is missing. Stop: saving a result table needs separately "
+        "authorized analytical work"]
     with_results(project)
     before = (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes()
     write(project, "investigations/inv/settings.toml", SETTINGS + b"minimum_count_2 = 6\n")
     code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001")
-    assert code == 1 and out["exports_blocked"] and out["export_checks"]["failed"]
+    assert code == 1 and out["export_checks"]["failed"]
+    assert out["exports_blocked"].endswith("Stop: changed results need separately authorized analytical work")
     assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes() == before
     write(project, "investigations/inv/settings.toml", SETTINGS)
     write(project, "deliveries/inv/pkg/draft/datasets/old.csv", "a\n1\n")
     code, out = run(project, capsys, "export", "inv", "pkg", "--no-datasets")
     assert code == 0 and manifest(project)["dataset_selection"] == "none"
     assert not (project / "deliveries/inv/pkg/draft/datasets").exists()
+
+
+def test_copy_releases_copies_compares_and_never_overwrites(project, capsys, tmp_path_factory):
+    run(project, capsys, "check-draft", "inv", "pkg")
+    for _ in range(2):
+        code, report = run(project, capsys, "release", "inv", "pkg")
+        assert code == 0 and report["storage"]["status"] == "unrecorded"
+    store = tmp_path_factory.mktemp("store")
+    readme = project / "README.md"
+    readme.write_text(readme.read_text().replace("not yet recorded", str(store)))
+    code, report = run(project, capsys, "copy-releases", "inv")
+    assert code == 0 and report["location"] == str(store) and report["errors"] == []
+    assert [(r["release"], r["storage"]["status"], r["storage"]["compare_trees"]) for r in report["releases"]] == [
+        ("deliveries/inv/pkg/released/001", "copied", []), ("deliveries/inv/pkg/released/002", "copied", [])]
+    assert (store / "inv/pkg/released/002/findings.md").read_text() == FINDINGS
+    assert (project / "deliveries/inv/pkg/audit/copy-releases.json").is_file()
+    (store / "inv/pkg/released/001/findings.md").write_text("changed\n")
+    code, report = run(project, capsys, "copy-releases", "inv", "pkg")
+    assert code == 1 and [r["storage"]["status"] for r in report["releases"]] == ["conflict", "already copied"]
+    assert (store / "inv/pkg/released/001/findings.md").read_text() == "changed\n"
+    code, report = run(project, capsys, "copy-releases", "inv", "other")
+    assert code == 1 and report["errors"] == ["no package at deliveries/inv/other"]
