@@ -1,0 +1,116 @@
+{
+  "copied": [
+    {
+      "path": "package-format/findings-template.md",
+      "asset": "awb-package/assets/package-format/findings-template.md",
+      "previous": [
+        "d1553e856999d3abacf449688ba3102858426eb588a57bc518d1d03de2d30fa9"
+      ]
+    },
+    {
+      "path": "package-format/methodology-template.md",
+      "asset": "awb-package/assets/package-format/methodology-template.md",
+      "previous": [
+        "6974efa0b3616728d2d789a0c4ccad8949dbac48eb757723d93b60b8001f8db6"
+      ]
+    },
+    {
+      "path": "package-format/m365-assembly.md",
+      "asset": "awb-package/assets/package-format/m365-assembly.md",
+      "previous": [
+        "19f1c969c71880e3ad4a71861a2e7a8914ac64f35850b409e497dbadd971243d",
+        "b052e630a28feab47aa24bac6c994a9cc3250f17c8fac7131c2282d04242316a",
+        "b0de950b4971b6a0a8f584a81b1cc89e6da0af3a7fe55f902f1c961be14fc516",
+        "e1a62e1aa4408517e0a4115a28ccd5e8cd522de66e88008ec3da43428a9dbc46"
+      ]
+    },
+    {
+      "path": "package-format/manifest-template.md",
+      "asset": "awb-package/assets/package-format/manifest-template.md",
+      "previous": [
+        "18d3151f2b888ca7abe060e1c3cc9984a6621b5544c251b7afde21fedf7211d0",
+        "30ea696a0782cae6b4743b0b6ecd3e28bd51df6035ff39b5f55453cdfc250fa3",
+        "3a783f131ff6fe68d996861a0192ef8867001ad8dc9f4550e59d14d0e296bfad",
+        "40124cbeee3c39fd3f2f0869d58c0cf4890d0429ca02c1506709e5621b9a2076",
+        "8fc746048ef4967d3d7803de44d95dbbc555bc807c4038185d47783276ef943d",
+        "a3a424f06aa6c92eb2227e66fe32ca240c15e6d072953230e15545fbe79bfdfb",
+        "cb8f7920593f87c20e7dd6b3b6609868ec62654958381a65c34822ddece47823"
+      ]
+    },
+    {
+      "path": "src/packaging/manifest.py",
+      "asset": "awb-package/assets/awb_manifest.py",
+      "previous": [
+        "2ef18884c44c70471e02d20954d5921168912f7136d6ade7fcce542964caf577"
+      ]
+    },
+    {
+      "path": "src/packaging/findings.py",
+      "asset": "awb-package/assets/awb_findings.py",
+      "previous": []
+    },
+    {
+      "path": "src/packaging/charts.py",
+      "asset": "awb-package/assets/awb_charts.py",
+      "previous": []
+    },
+    {
+      "path": "src/provenance.py",
+      "asset": "awb-init/assets/awb_provenance.py",
+      "previous": [
+        "244a7118ba3e177365abe7e3fa8c2621bd2c7a91889f8ff027bf140fe8bdfb03",
+        "5aa4dd83a6b3388d9126224a61a27ad1f7a7016716acbc528b1dadc716472204"
+      ]
+    },
+    {
+      "path": "src/preparation/landing.py",
+      "asset": "awb-init/assets/awb_landing.py",
+      "previous": [
+        "edd8a9d328d996b7bbaa575358b93b5baf9f69e91ec329bd87e3371373afcb0c"
+      ]
+    },
+    {
+      "path": "src/exploration/validate.py",
+      "asset": "awb-init/assets/awb_validate.py",
+      "previous": [
+        "67c424272cb0f651a0bae501e564272991da10811674883e4515baa25c9936bb"
+      ]
+    },
+    {
+      "path": "workbench-guides/data.md",
+      "asset": "awb-init/assets/workbench/workbench-guides/data.md",
+      "previous": []
+    },
+    {
+      "path": "workbench-guides/analysis.md",
+      "asset": "awb-init/assets/workbench/workbench-guides/analysis.md",
+      "previous": [
+        "43da4183f342b0013c5dc426559d14f91ac7e75411ae88226b57abc164c292f0"
+      ]
+    }
+  ],
+  "retired": [
+    {
+      "path": "package-format/journal-template.md",
+      "shipped": [
+        "53bb3127e1363b86f6ace3fe51fc59be3e0aed768198a824d3f670fce3e20d36",
+        "878ab373ad734f41bb48e25ee3c2b799a1bf0dc6d88b6f49ccddbf1aa4ddad43",
+        "dffcf930ef96791a0d5bd8f1c83fa1b346c3c3f2ddacd96023ce54c81d13d1d7"
+      ]
+    },
+    {
+      "path": "package-format/executive-summary-template.md",
+      "shipped": [
+        "bc89874384171e65a372e06119a81ac1705abd70d7b40b627775a5d1d3c4fd95"
+      ]
+    },
+    {
+      "path": "src/presentation/style.py",
+      "shipped": [
+        "c31d09d3f4489d589d7a035ede628e4c091740b03c7fd558291a39a3dbf6746e",
+        "eab0acaa5dab17a845d4f4a91d77e3a47ba6a924045c7cca3e1ab3223925bb14",
+        "fe837acc329c3cafe7bcbb0e321dec4a2bf9b12292702164a9f24412f328f6ab"
+      ]
+    }
+  ]
+}

@@ -10,11 +10,11 @@ Every skill name carries the `awb-` prefix, so typing `awb-` in a host that list
 - [awb-status](.agents/skills/awb-status/SKILL.md): read-only report of where the project stands and the requests that fit right now.
 - [awb-package](.agents/skills/awb-package/SKILL.md): create or revise a delivery package's working draft.
 - [awb-release](.agents/skills/awb-release/SKILL.md): preserve a numbered release when you mark a package delivered, and record and copy releases to the project's storage location.
-- [awb-visualize](.agents/skills/awb-visualize/SKILL.md): principles, libraries, and style defaults for charts and tables that display inline in agent chat and survive pasting into a document.
+- [awb-update](.agents/skills/awb-update/SKILL.md): bring an existing workbench up to date after installing newer skills: refresh copied package formats, helpers, and project guides, retire files no longer shipped, and apply instruction migrations.
 
 ## Requirements
 
-- For figures made under `awb-visualize`, the analysis project's Python environment needs Python 3.10 or later, matplotlib, and seaborn 0.13. The shared style file was tested with matplotlib 3.10.0 and seaborn 0.13.2.
+- For package chart files, the chart helper that `awb-package` ships needs Python 3.10 or later and pandas.
 - For the landing helper that `awb-init` ships, the analysis project's Python environment needs Python 3.10 or later; its `session()` also needs the `duckdb` package. `land()`, `publish()`, and `retain()` use only the standard library.
 - For result validation under the project `AGENTS.md`, the analysis project's Python environment needs Python 3.10 or later and pandas. The shared validation file was tested with pandas 2.2.
 - The read-only status collector needs Python 3.10 or later and the standard library; unsupported project record formats use targeted manual reads.
@@ -62,7 +62,11 @@ The skill asks which datasets to include. Subsequent requests revise the same dr
 
 > Use awb-release — mark the package delivered.
 
-That preserves the next numbered release after any outstanding revalidation decisions. Releases live under `deliveries/`, which the generated ignore rules exclude from Git, so before the first release `awb-release` asks where released packages are kept, records it in the project README, and copies each release there when the location is reachable. M365 receives the audience-facing findings, an internal methodology reference, figures, chosen exports, and assembly instructions. M365 Copilot builds the Word and Excel documents from the findings, distills the executive summary under the assembly guidelines, and asks you when something is unclear.
+That preserves the next numbered release after any outstanding revalidation decisions. Releases live under `deliveries/`, which the generated ignore rules exclude from Git, so before the first release `awb-release` asks where released packages are kept, records it in the project README, and copies each release there when the location is reachable. M365 receives the audience-facing findings, written as a slide-by-slide deck outline, an internal methodology reference, one data file per chart, chosen exports, and assembly instructions. In the Microsoft 365 Copilot app, the PowerPoint agent builds the deck from the outline, draws each chart as a native chart from its data file under the assembly's chart rules, and asks you when something is unclear. Checking the storyline means reading the outline's headings before anything is built.
+
+After installing a newer release of the skills, bring each existing workbench up to date:
+
+> Use awb-update to update this workbench.
 
 Landed source data gets the same treatment. `data/raw/` is also excluded from Git, and a landed original often cannot be fetched again, so before the first acquisition is landed the agent asks where landed originals are kept outside the checkout, records it on the project README's `Landed data is kept at` line, and copies each completed landing there when the location is reachable. `awb-status` reports landed data that exists only in the checkout.
 
@@ -81,7 +85,7 @@ Historical validation of the `awb-*` skills, run 2026-10-07 by four isolated age
 - Scenario 6: paged API and extract acquisitions landed with provenance before conversion and copied to the recorded location; a failed partial acquisition stayed unpublished; a conversion failure was retried from landed files without reacquisition; two reader processes queried published Parquet through Git-managed views while a third process prepared a new publication, with no shared DuckDB file.
 - `awb-status` after each run: the report shape, the landed-data and release storage lines, the `none chosen` risk path, and the request menu.
 
-The runs also surfaced places where the instructions were silent or conflicted, including the order of verification and revalidation dispositions in `awb-release`, the manifest field names `awb-status` reads, the landing and publication layout, where acquisition and settings code lives, and how an expansion is scoped. Those were corrected in the skills afterwards; the corrected wording has not itself been rerun. No API acquisition, production data conversion, or M365 assembly was performed. The runs used the earlier package format, a `journal.md` and an `executive-summary.md` written in the workbench, with captions drawn into figure images; the `findings.md` and `methodology.md` format that replaced it, the findings check, and caption-free figures were not exercised in those historical runs. Current helper and recipe checks are recorded in the efficiency validation below; real M365 assembly remains untested.
+The runs also surfaced places where the instructions were silent or conflicted, including the order of verification and revalidation dispositions in `awb-release`, the manifest field names `awb-status` reads, the landing and publication layout, where acquisition and settings code lives, and how an expansion is scoped. Those were corrected in the skills afterwards; the corrected wording has not itself been rerun. No API acquisition, production data conversion, or M365 assembly was performed. The runs used the earlier package format, a `journal.md` and an `executive-summary.md` written in the workbench, with captions drawn into figure images; the `findings.md` and `methodology.md` format that replaced it, the findings check, the slide-outline format, and the chart files were not exercised in those historical runs. Current helper and recipe checks are recorded in the efficiency validation below; real M365 assembly remains untested.
 
 The token-efficiency revision separates conditional procedures, adds a read-only status collector, and narrows revision reads. [Efficiency validation](docs/token-efficiency.md) describes how to compare instruction load and full agent runs without confusing file size with token usage.
 <!-- /dist:exclude -->

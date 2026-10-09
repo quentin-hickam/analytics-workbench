@@ -17,7 +17,6 @@ Released packages are kept at: not yet recorded
 - `src/preparation/` holds acquisition, landing, conversion, session-loading, and reusable normalization and correction code when such code exists.
 - `src/exploration/` holds neutral analytical operations when such code exists.
 - `src/packaging/` holds shared package assembly code when such code exists.
-- `src/presentation/` holds shared figure style and figure builders when the first figure needs them.
 - `data/raw/` holds independently landed originals when data has been acquired, one directory per acquisition with its `provenance.json`. It is excluded from Git, so landed originals persist only where the project copies them. The agent asks for that location before the first landing and records it in the `Landed data is kept at` line above.
 - `data/parquet/` holds validated publications for the default batch workflow, each with its `publication.json`; each canonical view names the publication it reads.
 - `data/cache/` holds only deliberate, rebuildable expensive results recorded in the foundation catalog.
@@ -41,4 +40,4 @@ Name the workbench skill in a plain request:
 - `awb-status` reports where things stand and what can be asked for next: "Use awb-status — where are we?"
 - `awb-package` creates or revises a package's working draft: "Use awb-package to draft a package for this investigation."
 - `awb-release` preserves a numbered release from the draft: "Use awb-release — mark the package delivered."
-- `awb-visualize` makes charts and results tables that read in chat and in documents: "Use awb-visualize to chart late closures by region."
+- `awb-update` brings the workbench up to date after installing newer skills: "Use awb-update to update this workbench."

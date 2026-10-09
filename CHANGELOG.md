@@ -4,6 +4,21 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ## [Unreleased]
 
+### Changed
+
+- The delivered output is a PowerPoint deck built by the PowerPoint agent in the Microsoft 365 Copilot app, replacing the Word and Excel documents. `findings.md` is the deck's slide-by-slide outline: a one-sentence headline with its number per slide, at most five bullets, caveats on the slide they qualify, and speaker notes, so the storyline can be checked by reading the headings before anything is built. Its **Answer** slide is the executive summary; M365 no longer distills one. The assembly instructions tell the PowerPoint agent to build one slide per outline slide with headlines, numbers, and caveats as written, and to ask before building when the audience or decision differs, a slide will not fit, a chart cannot be drawn as specified, or a caveat's effect is unclear. Supporting datasets are delivered beside the deck. Existing drafts are rewritten in the new format on their next `awb-package` revision; released packages are untouched.
+- Charts are drawn by M365 as native, editable PowerPoint charts. Each chart in `findings.md` is a specification (form, comparison, highlight, axis, interval, source, caveat, alt text), and its plotted values are one CSV in the draft's `charts/` directory, serialized from a recorded result under the same export check as datasets, so M365 draws from the numbers and never aggregates them. Chart forms, style, and honest-display rules live in the M365 assembly instructions. The manifest gains a `charts` field naming the result each chart file serializes.
+- Result evidence is `awb-evidence/2`: `record_evidence()` no longer takes `figure=` and the evidence file has no figure entry. `compare_evidence()` still reads `awb-evidence/1` files, ignoring their figure entry, so earlier evidence keeps passing export checks.
+
+### Added
+
+- `awb-update` brings an existing workbench up to date after newer skills are installed. Its helper compares every file the skills copy verbatim (shared package formats, project helpers, project guides) with every version the skills have shipped, replaces unmodified earlier copies, leaves customized ones for the user to decide with a diff, and offers to remove retired files such as the old figure style and journal templates. Its migrations section lists the edits for adapted files such as `AGENTS.md` and `README.md`. `scripts/record-shipped-versions.py` regenerates the shipped-version record from Git history, and a test fails when it is out of date.
+- `awb-package` ships a chart helper, `awb_charts.py`, copied to `src/packaging/charts.py` on first use. `write_charts()` writes one `chart-N.csv` per chart in specification order and refuses headers that are not display names; `check_charts()` matches the chart specifications in `findings.md` with the chart files, and `awb-package` and `awb-release` run it.
+
+### Removed
+
+- The `awb-visualize` skill, its figure style module, references, and rendering notes. The workbench renders no figures for delivery; the chart rules moved to the M365 assembly instructions, and an exploratory chart in chat follows the host's defaults. `src/presentation/` is gone from the generated layout, and matplotlib and seaborn are no longer requirements. The instruction-load script drops its table scenario.
+
 ## [0.3.0] - 2026-10-09
 
 ### Changed

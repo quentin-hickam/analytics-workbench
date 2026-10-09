@@ -41,7 +41,7 @@ An inquiry into a business question, with its own scope, analytical choices, pro
 A collection of audience-facing outputs, with an internal methodology reference, representing an investigation at a particular point, with provenance identifying the code, inputs, and analytical parameters that produced it.
 
 **Package format**:
-The shared conventions for package structure and presentation, including the audience-facing findings document, the internal methodology reference, and the M365 assembly instructions under which M365 distills the executive summary. It is independent of an investigation's scope, narrative, and results.
+The shared conventions for package structure and presentation, including the audience-facing findings document written as a deck outline, the internal methodology reference, the chart files, and the M365 assembly instructions under which M365 builds the PowerPoint deck. It is independent of an investigation's scope, narrative, and results.
 
 **Cache**:
 A stored result retained to avoid expensive recomputation of an analysis or data preparation step.
@@ -59,4 +59,4 @@ The current understanding of an investigation, including its active question, fi
 The record of meaningful findings, analytical decisions, and relevant data limitations accumulated during an investigation, including superseded conclusions. It retains methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, and excludes routine debugging, coding mistakes, and abandoned attempts that changed no understanding.
 
 **Result evidence**:
-The per-result record of what produced a finding: the producing commit or `uncommitted` state with checksums, the inputs with the checksums their provenance or publication files record, the view definitions read, the resolved settings, the validation checks, and any evidence figure. It is written to `investigations/<name>/evidence/<result-id>.json` and linked from the finding's row in `state.md`. It records provenance for one result; the investigation history records how understanding changed.
+The per-result record of what produced a finding: the producing commit or `uncommitted` state with checksums, the inputs with the checksums their provenance or publication files record, the view definitions read, the resolved settings, and the validation checks. It is written to `investigations/<name>/evidence/<result-id>.json` and linked from the finding's row in `state.md`. It records provenance for one result; the investigation history records how understanding changed.
