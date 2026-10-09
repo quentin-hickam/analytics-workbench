@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scan one workbench dataset for candidate cleaning issues. Proposes; never changes data or views.
+"""Scan one workbench dataset for candidate cleaning issues. Proposes only: data and views stay as they are.
 
 Run with Python 3.10+ and the duckdb package from the project's environment:
     scan_dataset.py PROJECT_ROOT DATASET [--key COLS] [--ref COL=TARGET.COL] [--range COL=MIN:MAX]
@@ -18,10 +18,12 @@ Scan file (schema awb-scan/1):
      candidate_keys, null_patterns: [{columns, rows}], issues: [issue],
      baseline: null | {scanned_at, row_count, columns, issues}, delta: null | {...}}
     issue: {id, key, check, column, count, of, summary, examples: [{value, count}], detail,
-            recorded: null | {id, status}}
+            recorded: null | {id, status, count}}
 Issue ids (S1, S2, ...) stay stable from a baseline scan through its rescans; a key names the
 check, column, and value, so a rescan matches issues by key and reports before and after counts.
-Keys written into foundation/quality.md as `<name>#<key>` mark an issue as recorded.
+Keys written into foundation/quality.md as `<name>#<key>` mark an issue as recorded; the row's
+"(<count> of <of>)" is its recorded count, printed on stdout as recorded_count beside the current count.
+Stdout lists at most 25 unrecorded issues; more_issues counts the rest, which are in the scan file.
 """
 
 import argparse
@@ -640,7 +642,7 @@ def _parse_ref(spec):
 # ----- records, baselines, and output ------------------------------------------------------------
 
 def _recorded(root, name):
-    """Map `<name>#<key>` markers in the quality record to their row's ID and status."""
+    """Map `<name>#<key>` markers in the quality record to their row's ID, status, and recorded count."""
     path = root / "foundation/quality.md"
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -653,7 +655,10 @@ def _recorded(root, name):
             continue
         cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
         for key in marker.findall(line):
-            found[key.replace("\\|", "|")] = {"id": cells[0], "status": cells[-1]}
+            cell = next((c for c in cells if f"`{name}#{key}`" in c), "")
+            count = re.search(r"\((\d+) of \d+\)", cell)
+            found[key.replace("\\|", "|")] = {"id": cells[0], "status": cells[-1],
+                                              "count": int(count.group(1)) if count else None}
     return found
 
 
@@ -792,6 +797,7 @@ def summary(record, path, root, limit=25):
     if len(open_issues) > limit:
         out["more_issues"] = len(open_issues) - limit
     recorded = [{"id": i["id"], "quality": i["recorded"]["id"], "status": i["recorded"]["status"], "count": i["count"]}
+                | ({"recorded_count": i["recorded"]["count"]} if i["recorded"].get("count") is not None else {})
                 for i in record["issues"] if i["recorded"]]
     if recorded:
         out["recorded"] = recorded

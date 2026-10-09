@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write the records of one cleaning pass in one call: quality rows, catalog cells, and flags.
+"""Write the records of one cleaning pass in one call: quality rows, catalog cells, and flagged findings.
 
 Run with Python 3.10+ (standard library only):
     record_cleaning.py PROJECT_ROOT SCAN_NAME [--dry-run] < decisions.json
@@ -9,13 +9,14 @@ SCAN_NAME names foundation/scans/<SCAN_NAME>.json written by scan_dataset.py. De
                        "correction", "change",                    both or neither: a correction row
                        "findings", "object"}},                    optional overrides
      "findings": "...",                                           correction rows' findings when no flags
-     "flags": [{"investigation", "result", "reason"}],            revalidation flags
+     "flags": [{"investigation", "result", "reason"}],            findings to flag
      "catalog": {"name", "cells": {column: text}}}                catalog cells to set
 Text may name an issue as {S1}; it becomes the issue's quality ID.
 
 Quality issue rows get the next ID, the scan's counts and examples, and the marker
 `<scan>#<key>` that later scans use to report the issue as recorded; an issue already recorded
-has its judgment cells updated instead. Correction rows carry the rescan's before and after
+has its judgment cells updated instead, and its observation takes this scan's count and date, so
+later scans compare with the reopened state. Correction rows carry the rescan's before and after
 counts. A flag sets the finding's status to `revalidation-needed (was <status>)`, adds the reason,
 and updates `Last updated`. Everything is checked before any file is written; --dry-run prints the
 rows that would change and writes nothing. Prints compact JSON.
@@ -181,7 +182,14 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
         values = {judged[k]: _fill(decision[k], ids) for k in judged if decision.get(k)}
         if issue["key"] in recorded:
             if values:
-                rows.append(active.set(recorded[issue["key"]][0], values))
+                line_index = recorded[issue["key"]][0]
+                observation = _cells(quality[line_index])[2]
+                if f"`{marker}" in observation:  # a reopened issue records this scan's count and date
+                    observation = re.sub(r"\(\d+ of \d+\)", f"({issue['count']} of {issue['of']})", observation, count=1)
+                    observation = re.sub(r"(\]\(scans/[^)]*\)) \d{4}-\d{2}-\d{2}",
+                                         rf"\g<1> {scan['scanned_at'][:10]}", observation, count=1)
+                    values[active.columns[2]] = observation.replace("\\|", "|")
+                rows.append(active.set(line_index, values))
                 updated.append(qid)
         else:
             missing = [k for k in judged if not decision.get(k)]

@@ -4,9 +4,9 @@
 # test_text_dates_and_codes_are_typed_conservatively: a day-first text date column is typed by its one covering format, an all-ambiguous one is reported, and leading-zero codes stay text.
 # test_rescan_reports_delta_with_stable_ids_and_inherited_options: a rescan after a correction view reports before and after counts by issue, keeps ids, and reuses the baseline's options.
 # test_local_query_scan_stays_beside_the_query: a saved exploration query scanned against a view baseline writes its scan beside the query, not in the foundation.
-# test_recorded_markers_mark_issues_as_recorded: issues whose `<scan>#<key>` marker is in the quality record are reported as recorded with their quality ID.
+# test_recorded_markers_mark_issues_as_recorded: issues whose `<scan>#<key>` marker is in the quality record are reported as recorded with their quality ID and recorded count beside the current count.
 # test_record_writes_quality_catalog_and_flags_in_one_call: new quality IDs, issue and correction rows with scan counts and markers, a catalog row, and a revalidation flag that keeps the prior status.
-# test_record_updates_recorded_issue_and_continues_numbering: a recorded issue has its judgment cells updated; a new issue continues the existing ID prefix and width.
+# test_record_updates_recorded_issue_and_continues_numbering: a recorded issue has its judgment cells updated and its observation's count and scan date refreshed; a new issue continues the existing ID prefix and width.
 # test_record_checks_everything_before_writing: an unmatched flag or a correction without findings writes nothing; a dry run prints rows and writes nothing.
 
 import importlib.util
@@ -171,11 +171,11 @@ def test_recorded_markers_mark_issues_as_recorded(project, capsys):
     with_session(project)
     quality = (TEMPLATES / "foundation/quality.md").read_text().replace(
         "| --- | --- | --- | --- | --- | --- |\n",
-        "| --- | --- | --- | --- | --- | --- |\n| Q-003 | view `orders` | Trailing spaces; `orders#whitespace:dept` | None | Trimmed | corrected |\n", 1)
+        "| --- | --- | --- | --- | --- | --- |\n| Q-003 | view `orders` | Trailing spaces (1 of 45); `orders#whitespace:dept` | None | Trimmed | corrected |\n", 1)
     write(project, "foundation/quality.md", quality)
     assert scanner.main([str(project), "orders"]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert {"quality": "Q-003", "status": "corrected"}.items() <= out["recorded"][0].items()
+    assert {"quality": "Q-003", "status": "corrected", "count": 2, "recorded_count": 1}.items() <= out["recorded"][0].items()
     assert all(i["key"] != "whitespace:dept" for i in out["issues"])
 
 
@@ -237,7 +237,7 @@ def test_record_updates_recorded_issue_and_continues_numbering(tmp_path):
     quality = (TEMPLATES / "foundation/quality.md").read_text().replace(
         "| --- | --- | --- | --- | --- | --- |\n",
         "| --- | --- | --- | --- | --- | --- |\n"
-        "| DQ-07 | view `orders` | Spaces; `orders#whitespace:dept` | Splits counts | Open | open |\n", 1)
+        "| DQ-07 | view `orders` | Spaces (5 of 45); `orders#whitespace:dept` in [scan](scans/orders.json) 2026-01-02 | Splits counts | Open | open |\n", 1)
     write(tmp_path, "foundation/quality.md", quality)
     result = recorder.record(tmp_path, "orders", {
         "issues": {"S1": {"treatment": "Trimmed in the view", "status": "corrected"},
@@ -245,7 +245,8 @@ def test_record_updates_recorded_issue_and_continues_numbering(tmp_path):
     assert result["quality_ids"] == {"S1": "DQ-07", "S2": "DQ-08"}
     assert result["updated"] == ["DQ-07"] and result["added"] == ["DQ-08"]
     text = (tmp_path / "foundation/quality.md").read_text()
-    assert "| DQ-07 | view `orders` | Spaces; `orders#whitespace:dept` | Splits counts | Trimmed in the view | corrected |" in text
+    assert ("| DQ-07 | view `orders` | Spaces (2 of 45); `orders#whitespace:dept` in [scan](scans/orders.json) 2026-10-09 | "
+            "Splits counts | Trimmed in the view | corrected |") in text
 
 
 def test_record_checks_everything_before_writing(tmp_path, capsys, monkeypatch):
