@@ -1,27 +1,27 @@
 # Kept cases:
-# test_write_charts_numbers_files_in_order_and_writes_values: files are chart-1..N.csv in list order; headers and values land as given, NaN as an empty field.
+# test_write_charts_numbers_files_in_order_and_writes_values: files are chart-1..N.csv in list order; headers and values land as given, an empty value as an empty field.
 # test_write_charts_replaces_stale_chart_files: a rewrite with fewer charts removes the extra chart file and leaves other files alone.
-# test_write_charts_rejects_bad_input: no charts, an empty frame, an identifier header, or a repeated header raises and writes nothing.
+# test_write_charts_without_charts_removes_them: an empty list removes every chart file, then the directory when nothing else is in it.
+# test_write_charts_rejects_bad_input: a chart without rows, an identifier header, a blank header, or a repeated header raises and writes nothing.
 # test_check_charts_clean_package_returns_no_rows: specifications and chart files match one to one.
 # test_check_charts_reports_each_mismatch: misnumbered, missing, unspecified, foreign, and empty files are one row each.
 # test_check_charts_without_directory: specifications with no charts directory each report it; no specifications and no directory is clean.
-# test_check_charts_without_pandas: the module loads and check_charts runs when pandas cannot be imported.
+# test_charts_without_pandas: the module loads, writes, and checks charts when pandas cannot be imported.
 
 import importlib.util
 import sys
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 
-ASSET = Path(__file__).resolve().parents[1] / ".agents/skills/awb-package/assets/awb_charts.py"
-spec = importlib.util.spec_from_file_location("awb_charts", ASSET)
+ASSET = Path(__file__).resolve().parents[1] / ".agents/skills/awb-package/assets/awb_draft.py"
+spec = importlib.util.spec_from_file_location("awb_draft_charts", ASSET)
 charts = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(charts)
 
-LATE = pd.DataFrame({"Region": ["North", "East", "West"], "Closed late (%)": [21.0, 18.0, float("nan")]})
-TREND = pd.DataFrame({"Month": ["Jan", "Feb"], "Cases": [1204, 1310]})
+LATE = (["Region", "Closed late (%)"], [["North", "21.0"], ["East", "18.0"], ["West", ""]])
+TREND = (["Month", "Cases"], [["Jan", "1204"], ["Feb", "1310"]])
 
 
 def findings(tmp_path, *numbers):
@@ -46,11 +46,22 @@ def test_write_charts_replaces_stale_chart_files(tmp_path):
     assert (tmp_path / "charts/chart-1.csv").read_text().startswith("Month,Cases\n")
 
 
+def test_write_charts_without_charts_removes_them(tmp_path):
+    charts.write_charts(tmp_path / "charts", [LATE, TREND])
+    (tmp_path / "charts/notes.txt").write_text("keep")
+    assert charts.write_charts(tmp_path / "charts", []) == []
+    assert [path.name for path in (tmp_path / "charts").iterdir()] == ["notes.txt"]
+    (tmp_path / "charts/notes.txt").unlink()
+    charts.write_charts(tmp_path / "charts", [LATE])
+    charts.write_charts(tmp_path / "charts", [])
+    assert not (tmp_path / "charts").exists()
+
+
 @pytest.mark.parametrize("frames, message", [
-    ([], "No charts"),
-    ([LATE, TREND.iloc[0:0]], "Chart 2 has no rows"),
-    ([LATE.rename(columns={"Region": "region_code"})], "not a display name: region_code"),
-    ([pd.DataFrame([[1, 2]], columns=["Cases", "Cases"])], "repeats a header"),
+    ([LATE, (["Month"], [])], "Chart 2 has no rows"),
+    ([(["region_code"], [["W"]])], "not a display name: region_code"),
+    ([([" "], [["W"]])], "blank or non-text header"),
+    ([(["Cases", "Cases"], [["1", "2"]])], "repeats a header"),
 ])
 def test_write_charts_rejects_bad_input(tmp_path, frames, message):
     with pytest.raises(ValueError, match=message):
@@ -88,12 +99,9 @@ def test_check_charts_without_directory(tmp_path):
     assert charts.check_charts(findings(tmp_path), tmp_path / "charts") == []
 
 
-def test_check_charts_without_pandas(tmp_path, monkeypatch):
+def test_charts_without_pandas(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "pandas", None)
     bare = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bare)
-    (tmp_path / "charts").mkdir()
-    (tmp_path / "charts/chart-1.csv").write_text("Month,Cases\nJan,4\n")
+    bare.write_charts(tmp_path / "charts", [TREND])
     assert bare.check_charts(findings(tmp_path, 1), tmp_path / "charts") == []
-    with pytest.raises(ImportError):
-        bare.write_charts(tmp_path / "charts", [object()])
