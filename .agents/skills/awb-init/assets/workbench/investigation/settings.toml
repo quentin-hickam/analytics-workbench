@@ -1,5 +1,6 @@
-# Scope and settings for run.py. Every result's evidence records this whole file, so a
-# change here marks the investigation's recorded results stale until they are rerun.
+# Scope and settings for run.py. A result's evidence records [parameters] and the result's own
+# table; editing either marks that result stale until it is rerun. [eda] and other results'
+# tables don't.
 
 [parameters]
 # Named query parameters: a result query reads `start` as $start. Use TOML dates for dates.
@@ -10,8 +11,14 @@
 # [results.orders-by-month]
 # queries = ["queries/orders-by-month.sql"]  # default: ["queries/<id>.sql"]; a producer may use more
 #
-# Validation spec for validate(): mechanical checks here, run-time counts from a producer.
-# Omitted judgments are recorded as not assessed, never as passes.
+# Validation spec for validate(): static checks here, run-time counts from a run.py producer.
+#   required_columns = [names that must exist]
+#   nulls = { column = maximum null fraction, 0 to 1 }
+#   row_counts = [{ step, before, after, min_ratio?, max_ratio? }]  # max_ratio defaults to 1.0;
+#       a nonzero before needs a nonempty after unless min_ratio = 0. Usually from a producer.
+#   joins = { keys = [...], left_rows = N, keys_unique = true }  # left_rows usually from a producer
+#   scope / metrics / values = { outcome = "pass" | "fail" | "not-applicable", detail = "one sentence" }
+# An omitted key is recorded as not assessed, never as a pass.
 # [results.orders-by-month.validation]
 # required_columns = ["month", "orders"]
 # nulls = { month = 0.0, orders = 0.0 }

@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-"""Scan one workbench dataset for candidate cleaning issues. Proposes; never changes data or views.
+"""Scan one workbench dataset for candidate cleaning issues. Proposes only: data and views stay as they are.
 
 Run with Python 3.10+ and the duckdb package from the project's environment:
     scan_dataset.py PROJECT_ROOT DATASET [--key COLS] [--ref COL=TARGET.COL] [--range COL=MIN:MAX]
-                    [--columns COLS] [--name NAME] [--rescan [BASELINE]]
+                    [--columns COLS] [--name NAME] [--rescan]
 DATASET is a canonical view, a dataset under data/parquet/ (its newest publication), a publication
-or acquisition directory, a data file, or a saved .sql query. Views load through the project's
-session() in src/preparation/landing.py. Landed CSV is read as text so parse failures stay visible.
+or acquisition directory, or a data file. Views load through the project's session() in
+src/preparation/landing.py. Landed CSV is read as text so parse failures stay visible.
 
-The complete scan goes to foundation/scans/<name>.json, beside the quality record that cites it;
-a query saved under investigations/ is scanned to <query>.scan.json beside it, so a local
-assessment stays local. Stdout is compact JSON: counts, a few examples, and the scan path.
+The complete scan goes to foundation/scans/<name>.json, which stays local to the checkout.
+Stdout is compact JSON: counts, a few examples, and the scan path.
 
 Scan file (schema awb-scan/1):
     {schema, name, target: {kind, label, path}, scanned_at, options, row_count,
@@ -18,10 +17,12 @@ Scan file (schema awb-scan/1):
      candidate_keys, null_patterns: [{columns, rows}], issues: [issue],
      baseline: null | {scanned_at, row_count, columns, issues}, delta: null | {...}}
     issue: {id, key, check, column, count, of, summary, examples: [{value, count}], detail,
-            recorded: null | {id, status}}
+            recorded: null | {id, status, count}}
 Issue ids (S1, S2, ...) stay stable from a baseline scan through its rescans; a key names the
 check, column, and value, so a rescan matches issues by key and reports before and after counts.
-Keys written into foundation/quality.md as `<name>#<key>` mark an issue as recorded.
+Keys written into foundation/quality.md as `<name>#<key>` mark an issue as recorded; the row's
+"(<count> of <of>)" is its recorded count, printed on stdout as recorded_count beside the current count.
+Stdout lists at most 25 unrecorded issues; more_issues counts the rest, which are in the scan file.
 """
 
 import argparse
@@ -43,6 +44,8 @@ NUMERIC_SENTINELS = (-1, -9, -99, -999, -9999, -99999, 99, 999, 9999, 99999, 999
 DATE_SENTINELS = ("0001-01-01", "1800-01-01", "1899-12-30", "1899-12-31", "1900-01-01",
                   "1970-01-01", "2099-12-31", "2999-12-31", "9999-12-31")
 TYPE_ORDER = ("BIGINT", "DOUBLE", "DATE", "TIMESTAMP", "BOOLEAN")
+TYPED_THRESHOLD = 0.9  # share of text values that must parse before a column counts as typed
+MAX_CATEGORIES = 500  # largest distinct count checked for spelling variants
 DATE_FORMATS = ("%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y", "%m-%d-%Y", "%d.%m.%Y",
                 "%d %b %Y", "%b %d, %Y")
 DATE_LIKE = r"^\d{1,4}[/.\-]\d{1,2}[/.\-]\d{1,4}$|^\d{1,2} [A-Za-z]{3} \d{4}$|^[A-Za-z]{3} \d{1,2}, \d{4}$"
@@ -170,14 +173,10 @@ def _newest_publication(directory):
 
 
 def _resolve(root, connection, dataset):
-    """Return {relation, kind, label, path, name} for a view, dataset, path, or saved query."""
+    """Return {relation, kind, label, path, name} for a view, dataset, or path."""
     path = Path(dataset)
     full = path if path.is_absolute() else root / path
     relative = os.path.relpath(full, root)
-    if full.suffix == ".sql" and full.is_file():
-        sql = re.sub(r";\s*$", "", full.read_text(encoding="utf-8").strip())
-        return {"relation": f"(\n{sql}\n)", "kind": "query", "label": f"query {relative}",
-                "path": relative, "name": full.stem}
     if full.exists():
         relation, kind, name = _file_relation(full)
         return {"relation": relation, "kind": kind, "label": f"{kind} {relative}",
@@ -271,7 +270,7 @@ class Scan:
         rows = a["n"]
         # Examples read __awb_typed; it gains the typed columns once they are known.
         db.execute("CREATE OR REPLACE TEMP VIEW __awb_typed AS SELECT * FROM __awb_base")
-        threshold = self.options["typed_threshold"]
+        threshold = TYPED_THRESHOLD
 
         info = {}
         for name, sql_type in columns:
@@ -358,7 +357,7 @@ class Scan:
                              f"{example['count']} values in {name} equal to the placeholder {json.dumps(token)}",
                              self.examples(c, f"lower({t}) = {lit(token)}", limit=3))
             distinct = info[name]["distinct"] or 0
-            if info[name]["typed_as"] is None and 1 < distinct <= self.options["max_categories"]:
+            if info[name]["typed_as"] is None and 1 < distinct <= MAX_CATEGORIES:
                 self.variants(name, t, tokens, distinct, info[name]["non_null"])
 
         self.ranges(typed, index, info)
@@ -640,7 +639,7 @@ def _parse_ref(spec):
 # ----- records, baselines, and output ------------------------------------------------------------
 
 def _recorded(root, name):
-    """Map `<name>#<key>` markers in the quality record to their row's ID and status."""
+    """Map `<name>#<key>` markers in the quality record to their row's ID, status, and recorded count."""
     path = root / "foundation/quality.md"
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -653,23 +652,14 @@ def _recorded(root, name):
             continue
         cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
         for key in marker.findall(line):
-            found[key.replace("\\|", "|")] = {"id": cells[0], "status": cells[-1]}
+            cell = next((c for c in cells if f"`{name}#{key}`" in c), "")
+            count = re.search(r"\((\d+) of \d+\)", cell)
+            found[key.replace("\\|", "|")] = {"id": cells[0], "status": cells[-1],
+                                              "count": int(count.group(1)) if count else None}
     return found
 
 
-def _scan_path(root, target, name):
-    if target["kind"] == "query" and target["path"].startswith("investigations/"):
-        return root / Path(target["path"]).with_suffix(".scan.json")
-    return root / "foundation/scans" / f"{name}.json"
-
-
-def _load_previous(root, rescan, own_path):
-    if rescan is True:
-        path = own_path
-    elif str(rescan).endswith(".json"):
-        path = Path(rescan) if Path(rescan).is_absolute() else root / rescan
-    else:
-        path = root / "foundation/scans" / f"{rescan}.json"
+def _load_previous(root, path):
     try:
         previous = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
@@ -703,8 +693,8 @@ def _delta(baseline, row_count, columns, issues):
             "issues": changes, "null_rates": null_rates, "types": types}
 
 
-def scan(project_root, dataset, *, keys=(), refs=(), ranges=(), columns=None, name=None, rescan=None,
-         typed_threshold=0.9, max_categories=500, today=None):
+def scan(project_root, dataset, *, keys=(), refs=(), ranges=(), columns=None, name=None, rescan=False,
+         today=None):
     """Scan DATASET, write the complete scan file, and return (scan record, its path)."""
     root = Path(project_root).resolve()
     connection = _connect(root, need_views=not (root / dataset).exists() and not Path(dataset).is_absolute())
@@ -713,13 +703,12 @@ def scan(project_root, dataset, *, keys=(), refs=(), ranges=(), columns=None, na
         name = name or target["name"]
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._@-]*", name):
             raise ValueError(f"scan name {name!r} must be a simple file name; pass --name")
-        path = _scan_path(root, target, name)
-        previous = _load_previous(root, rescan, path) if rescan else None
+        path = root / "foundation/scans" / f"{name}.json"
+        previous = _load_previous(root, path) if rescan else None
         old = previous["options"] if previous else {}
         options = {"keys": list(keys) or old.get("keys", []), "refs": list(refs) or old.get("refs", []),
                    "ranges": list(ranges) or old.get("ranges", []),
-                   "columns": list(columns or []) or old.get("columns", []),
-                   "typed_threshold": typed_threshold, "max_categories": max_categories}
+                   "columns": list(columns or []) or old.get("columns", [])}
         today = (today or date.today()).isoformat()
         worker = Scan(connection, target, {**options, "root": root}, today)
         row_count, info, candidate_keys, null_patterns = worker.run()
@@ -792,6 +781,7 @@ def summary(record, path, root, limit=25):
     if len(open_issues) > limit:
         out["more_issues"] = len(open_issues) - limit
     recorded = [{"id": i["id"], "quality": i["recorded"]["id"], "status": i["recorded"]["status"], "count": i["count"]}
+                | ({"recorded_count": i["recorded"]["count"]} if i["recorded"].get("count") is not None else {})
                 for i in record["issues"] if i["recorded"]]
     if recorded:
         out["recorded"] = recorded
@@ -809,26 +799,21 @@ def summary(record, path, root, limit=25):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("root", help="workbench root")
-    parser.add_argument("dataset", help="view, dataset, publication or acquisition directory, data file, or .sql query")
+    parser.add_argument("dataset", help="view, dataset, publication or acquisition directory, or data file")
     parser.add_argument("--key", action="append", default=[], help="candidate key columns, comma-separated; repeatable")
     parser.add_argument("--ref", action="append", default=[], help="COLUMN=TARGET.COLUMN referential check; repeatable")
     parser.add_argument("--range", action="append", default=[], dest="ranges",
                         help="COLUMN=MIN:MAX valid range, numbers or ISO dates, one side may be empty; repeatable")
     parser.add_argument("--columns", help="limit per-column checks to these comma-separated columns")
     parser.add_argument("--name", help="scan name (default: view name, <dataset>@<publication>, or file stem)")
-    parser.add_argument("--rescan", nargs="?", const=True,
-                        help="compare with the baseline of this scan's earlier file, or of the named scan")
-    parser.add_argument("--typed-threshold", type=float, default=0.9,
-                        help="share of text values that must parse before a column counts as typed")
-    parser.add_argument("--max-categories", type=int, default=500,
-                        help="largest distinct count checked for spelling variants")
+    parser.add_argument("--rescan", action="store_true",
+                        help="compare with the baseline of this scan's earlier file")
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
     try:
         record, path = scan(root, args.dataset, keys=args.key, refs=args.ref, ranges=args.ranges,
                             columns=[c.strip() for c in args.columns.split(",")] if args.columns else None,
-                            name=args.name, rescan=args.rescan, typed_threshold=args.typed_threshold,
-                            max_categories=args.max_categories)
+                            name=args.name, rescan=args.rescan)
     except Exception as error:  # report any failure compactly; the scan changes nothing on failure
         print(json.dumps({"error": f"{type(error).__name__}: {error}"}), file=sys.stderr)
         return 2

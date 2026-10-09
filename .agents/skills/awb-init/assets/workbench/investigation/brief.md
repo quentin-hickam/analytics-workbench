@@ -14,7 +14,7 @@ Record the decision this analysis will support, or state that its purpose is exp
 
 ## Audience
 
-Record who will read the delivered documents, what they already know, the decision they own, and the terms they use. Leave it blank until the user names the audience; packaging asks for it when it is missing.
+Record who will read the package, what they already know, the decision they own, and the terms they use. Leave it blank until the user names the audience; packaging asks for it when it is missing.
 
 ## Usefulness criteria
 

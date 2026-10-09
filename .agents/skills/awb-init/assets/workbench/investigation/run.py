@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Composition entry for this investigation: produce, validate, and record each result.
+"""Run script for this investigation: produce, validate, and record each result.
 
 Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With no IDs it
 produces every result in settings.toml. For each result it runs the result's saved queries in a
@@ -9,7 +9,7 @@ failed and unassessed checks, and the state.md findings row to paste.
 
 Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml
 and its query in queries/<id>.sql. Add a producer below only when a result needs more than its
-query, and put reusable operations in src/, not here. Requires duckdb and pandas.
+query, and put reusable operations in src/. Requires duckdb and pandas.
 """
 
 import json
@@ -74,6 +74,8 @@ def produce_result(connection, result_id, config, parameters):
     sql = [(HERE / query).read_text() for query in queries]
     frame, measured = PRODUCERS.get(result_id, produce)(connection, sql, parameters)
     checks = validate(frame, _spec(config.get("validation", {}), measured))
+    # Evidence describes the saved table, so drop it before the table changes; a failed run leaves none.
+    (HERE / "evidence" / f"{result_id}.json").unlink(missing_ok=True)
     output = HERE / "results"
     output.mkdir(exist_ok=True)
     # The saved table holds the computed values that packaging later serializes for charts.

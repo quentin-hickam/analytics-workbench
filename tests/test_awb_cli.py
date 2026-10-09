@@ -1,5 +1,5 @@
 # Kept cases:
-# test_help_lists_every_command: --help and no arguments print every command with its summary.
+# test_help_lists_every_command: --help and no arguments print every command with its summary and the per-command help pointer; the ten commands, export covering --result, draft-provenance gone.
 # test_dispatches_to_helper_function: a command loads its helper by path and passes the project root and remaining arguments.
 # test_missing_helper_or_function_and_unknown_command: each exits 2 with a message naming the remedy.
 
@@ -27,6 +27,10 @@ def test_help_lists_every_command(tmp_path, capsys):
         assert cli.main(argv) == 0
         out = capsys.readouterr().out
         assert all(name in out for name in cli.COMMANDS)
+        assert "<command> --help" in out and "Exit status" in out
+    assert list(cli.COMMANDS) == ["land", "retain", "publish", "sql", "profile", "stale", "export",
+                                  "check-draft", "release", "copy-releases"]
+    assert "--result" in cli.COMMANDS["export"][2]
 
 
 def test_dispatches_to_helper_function(tmp_path):
@@ -46,6 +50,6 @@ def test_missing_helper_or_function_and_unknown_command(tmp_path, capsys):
     (tmp_path / "src/preparation").mkdir()
     (tmp_path / "src/preparation/landing.py").write_text("def session(root):\n    pass\n")
     assert cli.main(["sql", "x.sql"]) == 2
-    assert "awb-update" in capsys.readouterr().err
+    assert "install_helpers.py --upgrade" in capsys.readouterr().err
     assert cli.main(["nope"]) == 2
     assert "unknown command" in capsys.readouterr().err

@@ -6,6 +6,7 @@
 # test_compare_evidence_clean_committed_state_passes_five_comparisons: clean state passes all five ordered comparisons in the contract shape.
 # test_compare_evidence_detects_view_changed_after_recording: view mutation fails the views comparison.
 # test_compare_evidence_names_changed_setting: settings mutation fails the settings comparison.
+# test_scoped_settings_ignore_other_results_and_tables: only [parameters] and the result's own table count; the file leaves the code comparisons.
 # test_compare_evidence_detects_missing_input_and_missing_metadata: missing input file or unavailable metadata fails inputs.
 # test_compare_evidence_checks_dirty_code_against_recorded_bytes: uncommitted code mutation fails uncommitted-code.
 # test_record_evidence_rejects_destination_symlink_outside_root: regression: evidence destination cannot escape through a symlink.
@@ -24,6 +25,10 @@
 # test_views_read_follows_view_references: views read by FROM/JOIN/comma, transitively; a column alias is not a read.
 # test_finding_row_reuses_state_text_and_names_check_gaps: the row keeps existing finding text, escapes pipes, names failed and unassessed checks.
 # test_cli_stale_lists_changed_results_with_their_findings: stale lists failing results with state.md rows, missing linked evidence, skips non-evidence JSON, rejects an unknown investigation.
+# test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
+# test_producing_paths_follow_the_result: run.py, the result's queries, other investigation code, src/ minus awb.py, provenance.py and packaging/, plus code_paths; other results' queries and the excluded helpers never stale it.
+# test_settings_fall_back_to_tomli: without tomllib, settings parse through tomli, and without either the content is unknown.
+# test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: the run.py template records a result; a run failing after the table is rewritten leaves no evidence.
 
 import hashlib
 import importlib.util
@@ -31,6 +36,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -55,12 +61,17 @@ def write(root, path, content):
     target.write_bytes(content)
 
 
+SETTINGS = b"[parameters]\nthreshold = 5\n\n[results.r1]\n\n[results.r2]\n"
+
+
 @pytest.fixture
 def project(tmp_path):
     git(tmp_path, "init")
     write(tmp_path, "src/ops.py", b"x = 1\n")
     write(tmp_path, "investigations/inv/run.py", b"import ops\n")
-    write(tmp_path, "investigations/inv/settings.toml", b"threshold = 5\n")
+    write(tmp_path, "investigations/inv/settings.toml", SETTINGS)
+    write(tmp_path, "investigations/inv/queries/r1.sql", b"select * from orders\n")
+    write(tmp_path, "investigations/inv/queries/r2.sql", b"select 2\n")
     write(tmp_path, "foundation/views/orders.sql",
           b"select * from read_parquet('data/parquet/orders/p1/*.parquet');\n")
     write(tmp_path, "data/parquet/orders/p1/part-0.parquet", b"parquet bytes")
@@ -106,15 +117,15 @@ def test_record_evidence_records_clean_producing_state(project):
         "producing_paths", "producing_uncommitted_changes", "views", "publications",
         "acquisitions", "settings", "checks", "notes",
     ]
-    assert raw.endswith("\n") and raw.startswith('{\n  "schema": "awb-evidence/2",')
+    assert raw.endswith("\n") and raw.startswith('{\n  "schema": "awb-evidence/3",')
     assert evidence["producing_commit"] == git(project, "rev-parse", "HEAD")
     assert evidence["producing_paths"] == ["foundation/views/orders.sql",
-        "investigations/inv/run.py", "investigations/inv/settings.toml", "src/ops.py"]
+        "investigations/inv/queries/r1.sql", "investigations/inv/run.py", "src/ops.py"]
     assert evidence["producing_uncommitted_changes"] == []
     assert evidence["views"][0]["publications"] == ["data/parquet/orders/p1"]
     assert evidence["checks"] == CHECKS
-    if importlib.util.find_spec("tomllib"):
-        assert evidence["settings"]["content"] == {"threshold": 5}
+    assert evidence["settings"]["result"] == "r1"
+    assert evidence["settings"]["content"] == {"parameters": {"threshold": 5}, "results": {"r1": {}}}
     assert evidence["publications"][0]["files"] == [{"path": "part-0.parquet", "bytes": 13,
         "sha256": hashlib.sha256(b"parquet bytes").hexdigest()}]
     assert evidence["acquisitions"][0]["status"] == "complete"
@@ -132,7 +143,8 @@ def test_record_evidence_captures_modified_code(project):
 def test_record_evidence_rejects_invalid_checks(project):
     with pytest.raises(ValueError):
         provenance.record_evidence(project, "inv", "r1", views=[], publications=[], acquisitions=[],
-            settings_path=None, checks=[{"name": "scope", "outcome": "ok", "detail": "wrong"}])
+            settings_path="investigations/inv/settings.toml",
+            checks=[{"name": "scope", "outcome": "ok", "detail": "wrong"}])
 
 
 def test_compare_evidence_accepts_schema_1_evidence(project):
@@ -152,8 +164,8 @@ def test_compare_evidence_clean_committed_state_passes_five_comparisons(project)
     assert [c["name"] for c in comparisons] == NAMES
     assert [c["outcome"] for c in comparisons] == ["pass"] * 5
     assert all(set(c) == {"name", "paths", "outcome", "detail"} for c in comparisons)
-    assert comparisons[0]["paths"] == ["foundation/views/orders.sql", "investigations/inv/run.py",
-                                        "investigations/inv/settings.toml", "src/ops.py"]
+    assert comparisons[0]["paths"] == ["foundation/views/orders.sql", "investigations/inv/queries/r1.sql",
+                                        "investigations/inv/run.py", "src/ops.py"]
     assert comparisons[1]["paths"] == [] and "nothing to compare" in comparisons[1]["detail"]
 
 
@@ -169,12 +181,47 @@ def test_compare_evidence_detects_view_changed_after_recording(project):
 
 def test_compare_evidence_names_changed_setting(project):
     path = record(project)
-    write(project, "investigations/inv/settings.toml", b"threshold = 6\n")
+    write(project, "investigations/inv/settings.toml", SETTINGS.replace(b"5", b"6"))
     settings = provenance.compare_evidence(project, path)[4]
     assert settings["outcome"] == "fail"
     assert settings["paths"] == ["investigations/inv/settings.toml"]
-    if importlib.util.find_spec("tomllib"):
-        assert "threshold" in settings["detail"]
+    assert "parameters" in settings["detail"]
+
+
+SCOPED = (b'[parameters]\nstart = 2026-01-01\n\n[results.r1]\nqueries = ["queries/r1.sql"]\n'
+          b'[results.r1.validation]\nrequired_columns = ["month"]\n')
+
+
+@pytest.mark.parametrize("edit, fails", [
+    (b'\n[results.r2]\nqueries = ["queries/r2.sql"]\n', False),
+    (b'\n[eda]\nmax_rows = 10\n', False),
+    (b'\n[results.r1.validation.nulls]\nmonth = 0.0\n', True),
+    (None, True),
+])
+def test_scoped_settings_ignore_other_results_and_tables(project, edit, fails):
+    if not importlib.util.find_spec("tomllib"):
+        pytest.skip("scoping parses TOML")
+    write(project, "investigations/inv/settings.toml", SCOPED + b'\n[results.r0]\nqueries = []\n')
+    git(project, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c",
+        "commit.gpgsign=false", "commit", "-qam", "results layout")
+    evidence = json.loads(record(project).read_text())
+    assert evidence["settings"]["result"] == "r1"
+    assert set(evidence["settings"]["content"]) == {"parameters", "results"}
+    assert "investigations/inv/settings.toml" not in evidence["producing_paths"]
+    text = (project / "investigations/inv/settings.toml").read_bytes()
+    if edit is None:
+        text = text.replace(b"2026-01-01", b"2026-02-01")
+        text = text.replace(b"[results.r0]\nqueries = []", b"[results.r0]\nqueries = [\"x\"]")
+    else:
+        text += edit
+    write(project, "investigations/inv/settings.toml", text)
+    comparisons = provenance.compare_evidence(project, project / "investigations/inv/evidence/r1.json")
+    assert [c["outcome"] for c in comparisons[:4]] == ["pass"] * 4
+    assert comparisons[4]["outcome"] == ("fail" if fails else "pass")
+    if edit is None:
+        assert "parameters" in comparisons[4]["detail"] and "r0" not in comparisons[4]["detail"]
+    elif fails:
+        assert "results.r1" in comparisons[4]["detail"]
 
 
 def test_compare_evidence_detects_missing_input_and_missing_metadata(project):
@@ -204,7 +251,7 @@ def test_record_evidence_rejects_destination_symlink_outside_root(project):
     directory = project / "investigations/inv/evidence"
     directory.symlink_to(project.parent, target_is_directory=True)
     with pytest.raises(ValueError):
-        record(project, code_paths=[])
+        record(project)
 
 
 def test_compare_evidence_without_commit_uses_file_checksums(project):
@@ -255,10 +302,10 @@ def test_record_evidence_before_first_commit_checksums_every_producing_file(proj
     assert evidence["producing_uncommitted_changes"] == [
         {"path": "foundation/views/orders.sql", "status": "uncommitted", "bytes": 64,
          "sha256": hashlib.sha256(b"select * from read_parquet('data/parquet/orders/p1/*.parquet');\n").hexdigest()},
+        {"path": "investigations/inv/queries/r1.sql", "status": "uncommitted", "bytes": 21,
+         "sha256": hashlib.sha256(b"select * from orders\n").hexdigest()},
         {"path": "investigations/inv/run.py", "status": "uncommitted", "bytes": 11,
          "sha256": hashlib.sha256(b"import ops\n").hexdigest()},
-        {"path": "investigations/inv/settings.toml", "status": "uncommitted", "bytes": 14,
-         "sha256": hashlib.sha256(b"threshold = 5\n").hexdigest()},
         {"path": "src/ops.py", "status": "uncommitted", "bytes": 6,
          "sha256": hashlib.sha256(b"x = 1\n").hexdigest()},
     ]
@@ -328,8 +375,8 @@ def test_record_evidence_stores_validation_record_unchanged(project):
               {"name": "metrics", "outcome": "not-applicable", "detail": "not assessed"},
               {"name": "values", "outcome": "pass", "detail": "Totals reconcile with finance."}]
     path = provenance.record_evidence(
-        project, "inv", "r1", views=[], publications=[], acquisitions=[], settings_path=None,
-        checks=checks, code_paths=[])
+        project, "inv", "r1", views=[], publications=[], acquisitions=[],
+        settings_path="investigations/inv/settings.toml", checks=checks)
     assert json.loads(path.read_text())["checks"] == checks
 
 
@@ -435,3 +482,70 @@ def test_cli_stale_lists_changed_results_with_their_findings(project, capsys):
     assert "foundation/views/orders.sql" in stale["r1"]["failed"][1]["detail"]
     assert stale["r9"]["failed"][0]["detail"].startswith("missing evidence:")
     assert provenance.cli_stale(project, ["--investigation", "absent"]) == 2
+
+
+@pytest.mark.parametrize("settings, reason", [
+    (b"[parameters]\nthreshold = 5\n", "no such table"),
+    (b"threshold = \n", "Invalid"),
+])
+def test_record_evidence_requires_the_results_table(project, settings, reason):
+    write(project, "investigations/inv/settings.toml", settings)
+    with pytest.raises(ValueError, match=r"must hold \[results\.r1\]") as error:
+        record(project)
+    assert reason in str(error.value)
+    assert not (project / "investigations/inv/evidence/r1.json").exists()
+
+
+def test_producing_paths_follow_the_result(project):
+    write(project, "investigations/inv/lib.py", b"y = 1\n")
+    for path in ("src/awb.py", "src/provenance.py", "src/packaging/draft.py"):
+        write(project, path, b"# helper\n")
+    write(project, "shared/extra.sql", b"select 3\n")
+    git(project, "add", ".")
+    git(project, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c",
+        "commit.gpgsign=false", "commit", "-qm", "more code")
+    path = record(project, code_paths=["shared"])
+    assert json.loads(path.read_text())["producing_paths"] == [
+        "foundation/views/orders.sql", "investigations/inv/lib.py", "investigations/inv/queries/r1.sql",
+        "investigations/inv/run.py", "shared/extra.sql", "src/ops.py"]
+    for changed in ("investigations/inv/queries/r2.sql", "src/awb.py", "src/provenance.py",
+                    "src/packaging/draft.py"):
+        write(project, changed, b"-- changed\n")
+    assert [c["outcome"] for c in provenance.compare_evidence(project, path)] == ["pass"] * 5
+    for changed in ("investigations/inv/queries/r1.sql", "investigations/inv/lib.py", "shared/extra.sql"):
+        write(project, changed, b"-- changed\n")
+        assert changed in provenance.compare_evidence(project, path)[0]["detail"]
+
+
+def test_settings_fall_back_to_tomli(project, monkeypatch):
+    import tomllib
+    monkeypatch.setitem(sys.modules, "tomllib", None)
+    monkeypatch.setitem(sys.modules, "tomli", tomllib)
+    assert provenance._settings(project, "investigations/inv/settings.toml", "r1")["result"] == "r1"
+    monkeypatch.setitem(sys.modules, "tomli", None)
+    content = provenance._settings(project, "investigations/inv/settings.toml", "r1")["content"]
+    assert "install tomli" in content["unknown"]
+
+
+def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(project):
+    pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    assets = ASSET.parent
+    for asset, installed in (("awb_provenance.py", "provenance.py"), ("awb_landing.py", "preparation/landing.py"),
+                             ("awb_validate.py", "exploration/validate.py")):
+        write(project, f"src/{installed}", (assets / asset).read_bytes())
+    write(project, "investigations/inv/run.py", (assets / "workbench/investigation/run.py").read_bytes())
+    write(project, "foundation/views/orders.sql", b"create view orders as select range as n from range(3);\n")
+    run = [sys.executable, str(project / "investigations/inv/run.py"), "r1"]
+    done = subprocess.run(run, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    line = json.loads(done.stdout)
+    evidence = json.loads((project / line["evidence"]).read_text())
+    assert "investigations/inv/queries/r1.sql" in evidence["producing_paths"]
+    assert evidence["views"][0]["path"] == "foundation/views/orders.sql"
+    write(project, "investigations/inv/settings.toml", SETTINGS.replace(
+        b"[results.r1]\n", b'[results.r1]\nviews = ["../outside.sql"]\n'))
+    failed = subprocess.run(run, capture_output=True, text=True)
+    assert failed.returncode == 1 and "outside the project root" in failed.stdout
+    assert (project / "investigations/inv/results/r1.csv").exists()
+    assert not (project / "investigations/inv/evidence/r1.json").exists()
