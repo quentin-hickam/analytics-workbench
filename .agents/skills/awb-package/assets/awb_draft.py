@@ -5,15 +5,17 @@ do not import it from the skill folder. `src/awb.py` runs its commands:
 
     python3 src/awb.py check-draft <investigation> <package> [--verify-only] [--manifest NAME]
     python3 src/awb.py draft-provenance <investigation> <package> <result-id>... [--export-checks]
+    python3 src/awb.py export <investigation> <package> [--chart RESULT[:COLUMNS]]... [--dataset NAME=RESULT[:COLUMNS]]...
     python3 src/awb.py release <investigation> <package> [--manifest NAME]
 
 Each prints one line of JSON and keeps its complete record under
 `deliveries/<investigation>/<package>/audit/`, outside the draft and its releases. Only JSON
-manifests are automated. Standard library only; `src/provenance.py` is needed for
-`draft-provenance`.
+manifests are automated. Standard library only, except that `export` writes chart files through
+`charts.py` and so needs pandas; `src/provenance.py` is needed for `draft-provenance` and `export`.
 """
 
 import argparse
+import csv
 import importlib.util
 import json
 import os
@@ -22,6 +24,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 # The dispatcher puts this directory on sys.path; a direct import of this file needs it too.
@@ -466,6 +469,204 @@ def cli_draft_provenance(root: Path, argv: list[str]) -> int:
                               export_checks=args.export_checks, manifest_name=args.manifest)
     _print(report)
     return 0 if report["written"] else 1
+
+
+# ---------------------------------------------------------------- export
+
+_DISPLAY = "foundation/display.toml"
+
+
+def _load_toml(path):
+    try:
+        import tomllib
+    except ImportError:  # Python 3.10
+        try:
+            import tomli as tomllib
+        except ImportError as error:
+            raise ImportError(f"reading {path.name} needs Python 3.11 or the tomli package") from error
+    return tomllib.loads(path.read_text(encoding="utf-8"))
+
+
+def display_names(root) -> dict:
+    """Return {columns, values, round} from foundation/display.toml, empty when it is absent."""
+    path = Path(root) / _DISPLAY
+    record = _load_toml(path) if path.is_file() else {}
+    return {"columns": dict(record.get("columns", {})),
+            "values": {column: dict(codes) for column, codes in record.get("values", {}).items()},
+            "round": dict(record.get("round", {}))}
+
+
+def _spec(text, what):
+    """Parse RESULT[:COL,COL] into (result_id, [columns] or None)."""
+    result_id, _, columns = text.partition(":")
+    return _simple(result_id, what), [c.strip() for c in columns.split(",") if c.strip()] or None
+
+
+def _rounded(value, places):
+    # Decimal from the saved text rounds half up as a reader would, which binary floats do not.
+    try:
+        number = Decimal(value)
+    except InvalidOperation:
+        return value
+    return str(number.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP))
+
+
+def _shape(root, investigation, result_id, columns, display, rounding):
+    """Read a saved result table and return (headers, rows, sources, problems) for the audience."""
+    path = Path(root) / "investigations" / investigation / "results" / f"{result_id}.csv"
+    if not path.is_file():
+        return None, None, None, [f"{_rel(root, path)} is missing; run the investigation's run.py"]
+    with path.open(newline="", encoding="utf-8") as stream:
+        reader = csv.DictReader(stream)
+        available, rows = list(reader.fieldnames or []), list(reader)
+    chosen = columns or available
+    problems = [f"{result_id}: no column {c!r} (has {', '.join(available)})" for c in chosen if c not in available]
+    problems += [f"{result_id}: column {c!r} has no display name in {_DISPLAY} [columns]"
+                 for c in chosen if c in available and c not in display["columns"]]
+    if problems:
+        return None, None, None, problems
+    headers = [display["columns"][c] for c in chosen]
+    out = []
+    for row in rows:
+        cells = []
+        for column in chosen:
+            value = row[column]
+            value = display["values"].get(column, {}).get(value, value)
+            if column in rounding and value != "":
+                value = _rounded(value, int(rounding[column]))
+            cells.append(value)
+        out.append(cells)
+    sources = [f"{header} <- {result_id}.{column}" for header, column in zip(headers, chosen)]
+    return headers, out, sources, []
+
+
+def export(root, investigation, package, charts, datasets, *, no_datasets=False, rounding=None,
+           manifest_name=None) -> dict:
+    """Serialize recorded results into the draft's chart and dataset files after the export checks."""
+    root = Path(root)
+    draft = _package_dir(root, investigation, package) / "draft"
+    report = {"charts": [], "datasets": [], "written": False, "errors": []}
+    if not draft.is_dir():
+        report["errors"].append(f"no draft at {_rel(root, draft)}; create it with awb-package")
+        return report
+    try:
+        name = report["manifest"] = _manifest_name(draft, manifest_name)
+        if not name.endswith(".json"):
+            raise ValueError(f"only JSON manifests are automated; export {name} by hand")
+        record = _read_json(draft / name) if (draft / name).exists() else {}
+        display = display_names(root)
+    except (OSError, ValueError, ImportError) as error:
+        report["errors"].append(str(error))
+        return report
+    rounding = {**display["round"], **(rounding or {})}
+
+    shaped, sources = [], []
+    for kind, label, (result_id, columns) in ([("chart", f"chart-{i}", spec) for i, spec in enumerate(charts, 1)]
+                                              + [("dataset", n, spec) for n, spec in datasets]):
+        headers, rows, lines, problems = _shape(root, investigation, result_id, columns, display, rounding)
+        report["errors"] += problems
+        if not problems:
+            shaped.append((kind, label, result_id, headers, rows))
+            sources += [f"{label}: {line}" for line in lines]
+    if report["errors"]:
+        return report
+
+    result_ids = list(dict.fromkeys(r for _, _, r, _, _ in shaped))
+    try:
+        compare = _load_provenance(root).compare_evidence
+    except (OSError, ImportError) as error:
+        report["errors"].append(str(error))
+        return report
+    checks = []
+    for result_id in result_ids:
+        evidence = f"investigations/{investigation}/evidence/{result_id}.json"
+        checks.append({"result_id": result_id, "evidence": evidence, "comparisons": compare(root, evidence)})
+    failed = [{"result_id": c["result_id"], "name": i["name"], "detail": i["detail"]}
+              for c in checks for i in c["comparisons"] if i["outcome"] != "pass"]
+    report["export_checks"] = {"results": len(checks), "failed": failed}
+    if failed:
+        report["exports_blocked"] = ("the current state differs from the recorded producing state; "
+                                     "rerun the investigation before exporting")
+        report["record"] = _audit(root, investigation, package, "export.json", {**report, "checks": checks})
+        return report
+
+    frames = [(headers, rows) for kind, _, _, headers, rows in shaped if kind == "chart"]
+    if frames:
+        import pandas as pd
+        sys.path.insert(0, str(_HERE))
+        from charts import write_charts
+        try:
+            paths = write_charts(draft / "charts", [pd.DataFrame(rows, columns=headers) for headers, rows in frames])
+        except (TypeError, ValueError) as error:
+            report["errors"].append(f"charts: {error}")
+            return report
+        chart_ids = [r for kind, _, r, _, _ in shaped if kind == "chart"]
+        record["charts"] = [{"path": _rel(draft, p), "result_id": r} for p, r in zip(paths, chart_ids)]
+        report["charts"] = record["charts"]
+    if datasets or no_datasets:
+        directory = draft / "datasets"
+        directory.mkdir(exist_ok=True)
+        for stale in directory.glob("*.csv"):
+            stale.unlink()  # The selection is replaced whole, as write_charts replaces charts.
+        for kind, label, result_id, headers, rows in shaped:
+            if kind != "dataset":
+                continue
+            path = directory / f"{label}.csv"
+            with path.open("w", newline="", encoding="utf-8") as stream:
+                writer = csv.writer(stream, lineterminator="\n")
+                writer.writerow(headers)
+                writer.writerows(rows)
+            report["datasets"].append({"path": _rel(draft, path), "result_id": result_id})
+        if not any(directory.iterdir()):
+            directory.rmdir()
+        record["dataset_selection"] = [d["path"] for d in report["datasets"]] or "none"
+    kept = [c for c in record.get("export_checks") or [] if isinstance(c, dict)
+            and c.get("result_id") not in result_ids] if isinstance(record.get("export_checks"), list) else []
+    record["export_checks"] = kept + checks
+    _write_json(draft / name, record)
+    report["written"] = True
+    report["methodology_lines"] = sources
+    if (draft / "findings.md").is_file():
+        report["check_charts"] = check_charts(draft / "findings.md", draft / "charts")
+    report["record"] = _audit(root, investigation, package, "export.json", {**report, "checks": checks})
+    return report
+
+
+def cli_export(root: Path, argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="awb.py export", description=(
+        "Write the draft's chart and dataset files from saved result tables, after the export checks."))
+    parser.add_argument("investigation")
+    parser.add_argument("package")
+    parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS]",
+                        help="one per chart, in the order of the Chart N specifications; columns comma-separated")
+    parser.add_argument("--dataset", action="append", default=[], metavar="NAME=RESULT[:COLUMNS]",
+                        help="one per selected dataset; replaces the whole selection")
+    parser.add_argument("--no-datasets", action="store_true", help="record an explicit selection of none")
+    parser.add_argument("--round", action="append", default=[], metavar="COLUMN=PLACES",
+                        help="decimal places for a column, over foundation/display.toml [round]")
+    parser.add_argument("--manifest", help="manifest path inside the draft (default: its manifest file)")
+    args = parser.parse_args(argv)
+    if args.dataset and args.no_datasets:
+        parser.error("--dataset and --no-datasets exclude each other")
+    if not (args.chart or args.dataset or args.no_datasets):
+        parser.error("name at least one --chart or --dataset, or --no-datasets")
+    datasets = []
+    for item in args.dataset:
+        label, sep, spec = item.partition("=")
+        if not sep:
+            parser.error(f"--dataset needs NAME=RESULT: {item!r}")
+        datasets.append((_simple(label, "dataset name"), _spec(spec, "result-id")))
+    rounding = {}
+    for item in args.round:
+        column, sep, places = item.partition("=")
+        if not sep or not places.isdigit():
+            parser.error(f"--round needs COLUMN=PLACES: {item!r}")
+        rounding[column] = int(places)
+    report = export(Path(root), _simple(args.investigation, "investigation"), _simple(args.package, "package"),
+                    [_spec(c, "result-id") for c in args.chart], datasets, no_datasets=args.no_datasets,
+                    rounding=rounding, manifest_name=args.manifest)
+    _print(report)
+    return 0 if report["written"] and not report.get("check_charts") else 1
 
 
 # ---------------------------------------------------------------- release

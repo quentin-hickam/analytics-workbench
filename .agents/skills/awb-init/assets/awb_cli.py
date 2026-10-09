@@ -33,6 +33,8 @@ COMMANDS = {
                     "run every mechanical draft check and rewrite the manifest inventory"),
     "draft-provenance": ("packaging/draft.py", "cli_draft_provenance",
                          "fill the manifest's producing state from the represented results' evidence"),
+    "export": ("packaging/draft.py", "cli_export",
+               "write the draft's chart and dataset files from saved result tables after the export checks"),
     "release": ("packaging/draft.py", "cli_release",
                 "copy the verified draft to the next numbered release and to release storage"),
 }

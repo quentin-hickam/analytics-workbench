@@ -53,7 +53,7 @@ In the target project's agent session, start from the business question:
 
 If you ask without a question, `awb-init` asks for one; say there is no question yet to set up the project alone. Continue analytical work normally using the generated AGENTS.md instructions. The default data flow is independent source landing, validated Parquet datasets, and DuckDB views loaded into separate analytical sessions. Data gathering never writes directly into the canonical database as its only retained representation.
 
-`awb-init` installs the project helpers under `src/` once and writes a `requirements.txt` when the project declares no dependencies. Mechanical work then runs as single commands, so the agent neither retypes helper output into records nor writes throwaway scripts: `python3 src/awb.py --help` lists them (`sql`, `profile`, `land`, `retain`, `publish`, `stale`, `check-draft`, `draft-provenance`, `release`). Each investigation's `run.py` produces, validates, and records its results in one run and prints the `state.md` rows to paste.
+`awb-init` installs the project helpers under `src/` once and writes a `requirements.txt` when the project declares no dependencies. Mechanical work then runs as single commands, so the agent neither retypes helper output into records nor writes throwaway scripts: `python3 src/awb.py --help` lists them (`sql`, `profile`, `land`, `retain`, `publish`, `stale`, `check-draft`, `draft-provenance`, `export`, `release`). Each investigation's `run.py` produces, validates, and records its results in one run and prints the `state.md` rows to paste.
 
 To see where things stand and what you can ask for next:
 

@@ -9,6 +9,8 @@
 # test_draft_provenance_blocks_failed_or_missing_evidence: a changed setting blocks exports and a missing evidence file fails; neither writes the manifest.
 # test_release_refuses_failed_check_or_pending_disposition: a failing verify or a none/revalidate disposition creates no release.
 # test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy compared.
+# test_export_writes_charts_datasets_and_manifest: display names, mapped codes, and rounding shape a saved result into a chart and a dataset; the manifest records charts, selection, and passing export checks.
+# test_export_names_every_gap_and_blocks_stale_results: every missing display name is listed at once; a changed setting blocks the export and writes nothing; --no-datasets records none.
 # test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do.
 
 import hashlib
@@ -278,3 +280,63 @@ def test_release_storage_conflict_and_instructions(project, capsys, tmp_path_fac
                 "there as <location>/inv/pkg/released/003/")
     assert report["storage"]["instruction"] == (
         "copy deliveries/inv/pkg/released/004/ to https://example.invalid/sites/team/inv/pkg/released/004/")
+
+
+DISPLAY = """[columns]
+region = "Region"
+late_rate = "Closed late (%)"
+n = "Cases"
+
+[values.region]
+W = "West"
+E = "East"
+
+[round]
+late_rate = 1
+"""
+
+
+def with_results(project):
+    write(project, "investigations/inv/results/r-001.csv", "region,late_rate,n\nW,21.349,10\nE,2.675,8\n")
+    write(project, "foundation/display.toml", DISPLAY)
+
+
+def test_export_writes_charts_datasets_and_manifest(project, capsys):
+    pytest.importorskip("pandas")
+    with_results(project)
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,late_rate",
+                    "--dataset", "late-closures=r-001")
+    assert code == 0 and out["written"] and out["export_checks"]["failed"] == []
+    draft = project / "deliveries/inv/pkg/draft"
+    assert (draft / "charts/chart-1.csv").read_text() == "Region,Closed late (%)\nWest,21.3\nEast,2.7\n"
+    assert (draft / "datasets/late-closures.csv").read_text() == \
+        "Region,Closed late (%),Cases\nWest,21.3,10\nEast,2.7,8\n"
+    record = manifest(project)
+    assert record["charts"] == [{"path": "charts/chart-1.csv", "result_id": "r-001"}]
+    assert record["dataset_selection"] == ["datasets/late-closures.csv"]
+    assert [c["result_id"] for c in record["export_checks"]] == ["r-001"]
+    assert record["scope"] == "west region, 2026"
+    assert "chart-1: Closed late (%) <- r-001.late_rate" in out["methodology_lines"]
+    assert out["check_charts"] == []
+
+
+def test_export_names_every_gap_and_blocks_stale_results(project, capsys):
+    pytest.importorskip("pandas")
+    with_results(project)
+    write(project, "foundation/display.toml", DISPLAY.replace('n = "Cases"\n', ""))
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--chart", "r-002")
+    assert code == 1 and not out["written"]
+    assert out["errors"] == [
+        "r-001: column 'n' has no display name in foundation/display.toml [columns]",
+        "investigations/inv/results/r-002.csv is missing; run the investigation's run.py"]
+    with_results(project)
+    before = (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes()
+    write(project, "investigations/inv/settings.toml", SETTINGS + b"minimum_count_2 = 6\n")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001")
+    assert code == 1 and out["exports_blocked"] and out["export_checks"]["failed"]
+    assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes() == before
+    write(project, "investigations/inv/settings.toml", SETTINGS)
+    write(project, "deliveries/inv/pkg/draft/datasets/old.csv", "a\n1\n")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--no-datasets")
+    assert code == 0 and manifest(project)["dataset_selection"] == "none"
+    assert not (project / "deliveries/inv/pkg/draft/datasets").exists()

@@ -61,6 +61,7 @@
       "path": "src/packaging/draft.py",
       "asset": "awb-package/assets/awb_draft.py",
       "previous": [
+        "31e0b58a9974e339f998cb0eb25bc06eee23ec5993fb63380c936d0241b109dd",
         "3b5bb96bcdc4c37f0b435ba141364d72a5cdee7fa131d2f90391bd13db60eac5"
       ]
     },
