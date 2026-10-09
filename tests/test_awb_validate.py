@@ -12,9 +12,15 @@
 # test_absent_judgments_are_not_assessed_beside_measured_checks: regression: absent judgments remain not-applicable beside measured checks.
 # test_row_counts_accepts_numpy_integer_and_rejects_bool: regression: numpy integer row count accepted and bool rejected.
 # test_profile_rejects_negative_limit_and_keeps_samples_strict_json: regressions: negative max_distinct rejected and inf samples serialize as strict JSON.
+# test_cli_profile_summarizes_a_view_and_saves_the_full_profile: profile through src/awb.py resolves a view name, prints row count and per-column type, null rate and distinct count, and saves profile() unchanged.
+# test_cli_profile_samples_results_above_max_rows_repeatably: a result above --max-rows is profiled on a seeded sample and the JSON records sampled_from.
+# test_cli_profile_reports_unknown_names_and_missing_landing_helper: an unknown bare name or a project without src/preparation/landing.py prints one stderr line and returns 1.
 
 import importlib.util
 import json
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +33,7 @@ MODULE_PATH = (Path(__file__).resolve().parents[1]
 module_spec = importlib.util.spec_from_file_location("awb_validate", MODULE_PATH)
 validation = importlib.util.module_from_spec(module_spec)
 module_spec.loader.exec_module(validation)
+ASSETS = MODULE_PATH.parent
 
 
 def test_empty_spec_records_all_seven_checks_as_not_assessed():
@@ -161,3 +168,63 @@ def test_profile_rejects_negative_limit_and_keeps_samples_strict_json():
     result = validation.profile(pd.DataFrame({"x": [float("inf"), 1.5]}))
     assert result["columns"]["x"]["sample_values"] == ["inf", 1.5]
     json.dumps(result, allow_nan=False)
+
+
+def profile_project(root):
+    for asset, installed in (("awb_cli.py", "awb.py"), ("awb_landing.py", "preparation/landing.py"),
+                             ("awb_validate.py", "exploration/validate.py")):
+        (root / "src" / installed).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ASSETS / asset, root / "src" / installed)
+    views = root / "foundation/views"
+    views.mkdir(parents=True)
+    (views / "01_orders.sql").write_text(
+        "CREATE VIEW orders AS SELECT range AS id, "
+        "CASE WHEN range < 2 THEN NULL ELSE 'west' END AS region FROM range(8);")
+
+
+def test_cli_profile_summarizes_a_view_and_saves_the_full_profile(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    profile_project(tmp_path)
+    run = subprocess.run([sys.executable, str(tmp_path / "src/awb.py"), "profile", "Orders",
+                          "--out", "profiles/orders.json"],
+                         cwd=tmp_path.parent, capture_output=True, text=True, check=False)
+    assert run.returncode == 0, run.stderr
+    lines = run.stdout.splitlines()
+    assert lines[0] == "rows: 8"
+    assert lines[1:3] == ["| column | type | null rate | distinct |", "|---|---|---|---|"]
+    assert lines[3] == "| id | int64 | 0.0 | 8 |"
+    assert lines[4].startswith("| region | ") and lines[4].endswith(" | 0.25 | 1 |")
+    assert lines[5:] == ["full profile in profiles/orders.json"]
+    with duckdb.connect() as connection:
+        frame = connection.sql("SELECT range AS id, CASE WHEN range < 2 THEN NULL ELSE 'west' END "
+                               "AS region FROM range(8)").df()
+    saved = json.loads((tmp_path / "profiles/orders.json").read_text())
+    assert saved == validation.profile(frame)
+
+
+def test_cli_profile_samples_results_above_max_rows_repeatably(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    profile_project(tmp_path)
+    saved = []
+    for name in ("first.json", "second.json"):
+        assert validation.cli_profile(tmp_path, ["SELECT range AS n FROM range(500)",
+                                                 "--max-rows", "50", "--out", name]) == 0
+        saved.append(json.loads((tmp_path / name).read_text()))
+    assert capsys.readouterr().out.startswith("rows: 50 profiled of 500 (repeatable sample;")
+    assert saved[0] == saved[1]
+    assert saved[0]["row_count"] == 50 and saved[0]["sampled_from"] == 500
+    assert validation.cli_profile(tmp_path, ["SELECT range AS n FROM range(50)",
+                                             "--max-rows", "50", "--out", "all.json"]) == 0
+    assert "sampled_from" not in json.loads((tmp_path / "all.json").read_text())
+
+
+def test_cli_profile_reports_unknown_names_and_missing_landing_helper(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    profile_project(tmp_path)
+    assert validation.cli_profile(tmp_path, ["order"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == "profile: no view or query file named order\n"
+    (tmp_path / "src/preparation/landing.py").unlink()
+    assert validation.cli_profile(tmp_path, ["orders"]) == 1
+    error = capsys.readouterr().err
+    assert "src/preparation/landing.py" in error and error.count("\n") == 1

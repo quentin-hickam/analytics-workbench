@@ -14,6 +14,19 @@ If the project lacks `src/exploration/validate.py`, copy [awb_validate.py](../as
 - `nulls`: mapping from column names to maximum null fractions (0–1).
 - `scope`, `metrics`, `values`: each `{outcome, detail}` with a supported outcome and nonempty explanation. These record the analyst's judgment; the helper does not establish it. Document filters/grouping, metric meanings/assumptions, and interpretation-driving values respectively.
 
+## Profile from the command line
+
+Profile a view, a saved query, or SQL text with the command instead of writing a snippet:
+
+```sh
+python3 src/awb.py profile orders --out investigations/order-quality/exploration/orders-profile.json
+python3 src/awb.py profile investigations/order-quality/exploration/missing-ids.sql --out investigations/order-quality/exploration/missing-ids-profile.json
+```
+
+A bare name that matches a view or table in a fresh `session(root)` profiles `select * from` it; otherwise the argument is a query file when it names an existing file (absolute or project-relative), else SQL text. The command prints the row count and, per column, type, null rate, and distinct count. `--out` saves the complete `profile()` result as JSON, including sample values; relative paths are project-relative. It needs DuckDB and `src/preparation/landing.py`. Errors print one line on stderr and exit 1.
+
+A result larger than `--max-rows` (default 1,000,000) is profiled on a repeatable reservoir sample of that many rows, which bounds memory. The summary says so, `row_count` is the sample size, and the JSON adds `sampled_from` with the full row count. Null rates and distinct counts are then sample estimates and distinct counts can be low; for exact figures, raise `--max-rows`, narrow the query, or aggregate in SQL with `python3 src/awb.py sql`.
+
 ## Save complete checks, return a compact summary
 
 In the investigation's composition entry, use its actual result DataFrame, observed pre-filter count, and inspected judgments. This illustrative function assumes the scope and metric described in the judgments have been verified; adapt those details and thresholds before use. No join is performed in this example.

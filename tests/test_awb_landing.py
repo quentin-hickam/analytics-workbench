@@ -14,6 +14,8 @@
 # test_land_refuses_existing_id_before_fetch: existing completed acquisition is refused before fetching.
 # test_retain_requires_source_and_acquisition_directly_under_raw: regression: retain enforces source/acquisition depth under data/raw.
 # test_session_refuses_a_project_root_containing_a_comma: regression: comma-containing project root is rejected before opening a connection.
+# test_cli_sql_prints_first_rows_and_total_and_writes_full_result: sql runs a project-relative query file or SQL text, prints a capped Markdown table and the total, and writes CSV or Parquet.
+# test_cli_sql_reports_failures_on_one_line: SQL errors, failing view files and non-query SQL print one stderr line and return 1; a bad --out extension is a usage error.
 
 import hashlib
 import importlib.util
@@ -304,3 +306,50 @@ def test_session_refuses_a_project_root_containing_a_comma(tmp_path, monkeypatch
     with pytest.raises(ValueError, match="comma"):
         landing.session(root)
     assert opened == []
+
+
+def sql_project(root):
+    views = root / "foundation/views"
+    views.mkdir(parents=True)
+    (views / "01_orders.sql").write_text(
+        "CREATE VIEW orders AS SELECT range AS id, 'a|b' AS note FROM range(5);")
+    (root / "queries").mkdir()
+    (root / "queries/large.sql").write_text("SELECT id FROM orders WHERE id >= 1 ORDER BY id;\n")
+
+
+def test_cli_sql_prints_first_rows_and_total_and_writes_full_result(tmp_path, monkeypatch, capsys):
+    duckdb = pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    monkeypatch.chdir(tmp_path.parent)  # the query file and --out are project-relative
+    assert landing.cli_sql(tmp_path, ["queries/large.sql", "--limit", "2",
+                                      "--out", "out/large.csv"]) == 0
+    assert capsys.readouterr().out == (
+        "| id |\n|---|\n| 1 |\n| 2 |\n2 of 4 rows shown; full result in out/large.csv\n")
+    assert (tmp_path / "out/large.csv").read_text().split() == ["id", "1", "2", "3", "4"]
+    assert landing.cli_sql(tmp_path, ["SELECT note, NULL AS gap FROM orders LIMIT 1",
+                                      "--out", "out/note.parquet"]) == 0
+    assert capsys.readouterr().out == (
+        "| note | gap |\n|---|---|\n| a\\|b | NULL |\n"
+        "1 of 1 rows shown; full result in out/note.parquet\n")
+    with duckdb.connect() as connection:
+        assert connection.execute("SELECT * FROM read_parquet(?)",
+                                  [str(tmp_path / "out/note.parquet")]).fetchall() == [("a|b", None)]
+
+
+def test_cli_sql_reports_failures_on_one_line(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    for query in ("SELECT * FROM absent", "CREATE TABLE t AS SELECT 1"):
+        assert landing.cli_sql(tmp_path, [query]) == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.startswith("sql: ") and captured.err.count("\n") == 1
+    failing = tmp_path / "foundation/views/02_invalid.sql"
+    failing.write_text("CREATE VIEW invalid AS SELECT * FROM absent;")
+    assert landing.cli_sql(tmp_path, ["SELECT 1"]) == 1
+    error = capsys.readouterr().err
+    assert str(failing) in error and "absent" in error and error.count("\n") == 1
+    with pytest.raises(SystemExit) as exit:
+        landing.cli_sql(tmp_path, ["SELECT 1", "--out", "result.json"])
+    assert exit.value.code == 2
+    assert not (tmp_path / "result.json").exists()

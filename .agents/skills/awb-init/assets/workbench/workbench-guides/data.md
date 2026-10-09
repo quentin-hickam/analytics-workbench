@@ -18,11 +18,11 @@ After each landing, call `retain()` when that location is a reachable filesystem
 
 Use `publish()` to convert landed inputs into validated Parquet. It stages in `data/parquet/<dataset>/<publication-id>.partial/`, runs supplied validation, records the conversion commit and cited acquisition checksums in `publication.json`, then renames beside existing publications. Each canonical DuckDB view names its publication; record it in the catalog. Switching publications is a deliberate preparation change. Remove superseded publications only when no reader needs them.
 
-`session()` opens each process's own DuckDB session and loads `foundation/views/*.sql` in filename order; dependent definitions must sort after their inputs.
+`session()` opens each process's own DuckDB session and loads `foundation/views/*.sql` in filename order; dependent definitions must sort after their inputs. `python3 src/awb.py sql <query.sql | "SQL">` runs a query in such a session and prints the first rows and the row count.
 
 Preparation owns reusable parsing, normalization, checks, and corrections; record limitations and correction rationale in `foundation/quality.md`. EDA consumes canonical data, with population, periods, filters, exclusions, and assumptions local to the investigation. Preparation and EDA may iterate before cleaning finishes. Generally valid exploratory rules can be promoted into preparation and saved queries into `foundation/views/`.
 
-For source profiling, use `profile()` from `src/exploration/validate.py` rather than ad hoc counting queries; the installed `awb-init` skill's `references/validation.md` supplies setup and calling conventions.
+For source profiling, run `python3 src/awb.py profile <view | query.sql | "SQL"> --out <path>.json` rather than ad hoc counting queries; it applies `profile()` from `src/exploration/validate.py`, and the installed `awb-init` skill's `references/validation.md` describes its output and large-result sampling.
 
 ## Storage and output
 
