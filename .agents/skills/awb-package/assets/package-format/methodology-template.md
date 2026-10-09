@@ -37,11 +37,3 @@ Give one `###` section per finding in `findings.md`, its heading identical to th
 ## Methodological corrections
 
 Record each methodological mistake that changed a finding or explains why an earlier conclusion was wrong: what was wrong, how it was found, and what it changed. Routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding stay out, as in `history.md`. Otherwise state **None**.
-
-## Revalidation status
-
-List each represented flagged finding, with its reason as recorded in `state.md`, the quality entry that raised it, and its `represented_in` places from the manifest. Otherwise state **None**.
-
-## Changes since previous release
-
-For later releases, describe material changes to scope, inputs, method, settings, findings, caveats, or selected datasets since the latest numbered release, naming releases by number. For the first release, state that there is no previous release.

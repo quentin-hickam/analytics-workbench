@@ -1,26 +1,6 @@
 # M365 assembly instructions
 
-`findings.md` is the slide-by-slide outline of the deck and the authoritative source of every word and number on it; the files in `charts/` hold every plotted value. Both are already written for the audience below, in their terms. In the Microsoft 365 Copilot app, use the PowerPoint agent to build the deck from them and improve its presentation, while preserving every slide, claim, value, qualification, and caveat.
-
-## Audience
-
-The draft replaces this section with the investigation brief's **Audience** section:
-
-- **Readers:** who will see or present the deck.
-- **What they already know:**
-- **Decision they own:**
-- **Terms they use:**
-
-## Files in this package
-
-The draft replaces this list with every file it includes, one path per line relative to the package directory. Write **None** under charts or datasets when the package has none.
-
-- `findings.md`: the deck outline; the source of all slide content.
-- `methodology.md`: internal reference for the reasoning behind decisions; kept off slides.
-- `m365-assembly.md`: these instructions; kept off slides.
-- `manifest.<format>`: provenance record; kept off slides.
-- Charts: `charts/chart-N.csv`, one file per chart, `chart-1.csv` holding the data for the specification **Chart 1.** in `findings.md`, and so on.
-- Datasets: `datasets/<dataset>.<format>`, each described on the **Supporting datasets** slide; delivered beside the deck.
+`findings.md` is the slide-by-slide outline of the deck and the authoritative source of every word and number on it; the files in `charts/` hold every plotted value. Both are already written for the deck's audience, in their terms. In the Microsoft 365 Copilot app, use the PowerPoint agent to build the deck from them and improve its presentation, while preserving every slide, claim, value, qualification, and caveat.
 
 ## Before you start
 
@@ -34,9 +14,9 @@ Use `methodology.md` to understand reasoning, or to answer the requester's quest
 
 Before building the deck, check for the conditions below. When one holds, ask the requester before building. Put every question in one message, keep each to a sentence or two, and propose a default the requester can accept with a yes.
 
-- **Audience or decision differs.** The **Audience** section above is blank, or the requester names readers or a decision that differ from it. Example: "The deck is written for regional operations managers deciding on staffing. Is it for them, or for the finance committee? Default: regional operations managers."
+- **Audience or decision differs.** The requester names readers or a decision that differ from the deck's subtitle line and **Answer** slide. Example: "The deck is written for regional operations managers deciding on staffing. Is it for them, or for the finance committee? Default: regional operations managers."
 - **A slide will not fit.** A slide's bullets and chart cannot fit at the minimum text sizes below. Example: "The third finding slide has five bullets and a chart and will not fit at 18 pt. Should I split it into two slides with the same headline continued? Default: yes, split it."
-- **A chart cannot be drawn as specified.** Its chart file lacks a column the specification names, or the form cannot show those columns. Example: "Chart 2 asks for intervals but its file has no interval columns. Should I draw it without intervals and flag it to the analyst? Default: yes."
+- **A chart cannot be drawn as specified.** Its chart file lacks a column the specification names, or the form cannot show those columns. Example: "Chart 2 asks for intervals but its file has no interval columns, so I cannot draw it as specified. Default: build the rest, leave Chart 2 as a marked placeholder, and report the deck as incomplete until the analyst corrects the package."
 - **A caveat's effect on a headline is ambiguous.** It is unclear whether a caveat narrows, weakens, or leaves intact the headline it sits under. Example: "The late-closure headline carries a caveat about missing March records. Keep the headline as written with the caveat bullet beneath it? Default: yes."
 - **A slide needs method context that only `methodology.md` has.** A reader could not trust or interpret the slide from the outline alone. Example: "The second finding depends on how repeat cases are counted, which only the internal notes explain. Should I flag this for the analyst to add? Default: yes, and build now from what the outline says, with the gap noted to you."
 
@@ -76,7 +56,7 @@ Never use 3D, a second value axis, or decorative effects. Put a second measure i
 - **Title:** none on the chart; the slide headline states the finding.
 - **Axis titles:** the measure and its unit, from the file's header in the audience's words; omit one only when the category labels speak for themselves.
 - **Labels:** categories, series names, and legend entries exactly as the file writes them.
-- **Color:** the theme's accent `#0072B2` marks the **Highlight** group and grey `#A6A6A6` the rest; `#D55E00` marks a second highlighted group. With no highlight, use at most six hues from `#0072B2`, `#E69F00`, `#009E73`, `#D55E00`, `#CC79A7`, `#56B4E9`, and group the rest as Other. Text is `#333333`. When the organization's theme is applied, keep one accent for the highlight and grey for context in its palette. Never rely on color alone: the headline or a data label names the highlighted group.
+- **Color:** the theme's accent `#0072B2` marks the **Highlight** group and grey `#A6A6A6` the rest; `#D55E00` marks a second highlighted group. With no highlight, color series with at most six hues from `#0072B2`, `#E69F00`, `#009E73`, `#D55E00`, `#CC79A7`, `#56B4E9`, and any further series grey, each still labeled; never combine series or categories. Text is `#333333`. When the organization's theme is applied, keep one accent for the highlight and grey for context in its palette. Never rely on color alone: the headline or a data label names the highlighted group.
 - **Text size:** no chart text below 12 pt; data labels and axis labels 12 to 14 pt.
 - **Data labels:** on the highlighted marks, or on every mark when there are six or fewer, in the number format the slide uses (thousands separators, the same decimals). When values are labeled, remove gridlines; otherwise keep light `#E5E5E5` gridlines on the value axis only.
 - **Furniture:** no chart border, no top or right axis line, no shadows.

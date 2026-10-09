@@ -1,6 +1,5 @@
 # Kept cases:
 # test_inventory_lists_sorted_files_and_manifest_by_path_only: sorted paths, sizes and checksums; path-only manifest whether present or absent.
-# test_inventory_rejects_empty_manifest_name: regression: empty manifest name is rejected.
 # test_verify_accepts_unchanged_package_with_serialized_inventory: serialized inventory exact match returns no discrepancies.
 # test_verify_reports_extra_file_including_manifest_without_row: extra file and manifest without a recorded row.
 # test_verify_reports_missing_file: missing regular file reports its recorded digest.
@@ -27,8 +26,8 @@ from pathlib import Path
 import pytest
 
 
-ASSET = Path(__file__).resolve().parents[1] / ".agents/skills/awb-package/assets/awb_manifest.py"
-spec = importlib.util.spec_from_file_location("awb_manifest", ASSET)
+ASSET = Path(__file__).resolve().parents[1] / ".agents/skills/awb-package/assets/awb_draft.py"
+spec = importlib.util.spec_from_file_location("awb_draft_manifest", ASSET)
 manifest = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(manifest)
 
@@ -39,8 +38,8 @@ HELLO = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
 
 # Each seam called on one directory with an empty inventory, for checks every seam shares.
 SEAMS = {
-    "inventory": lambda directory: manifest.inventory(directory, manifest_name="manifest.json"),
-    "verify": lambda directory: manifest.verify(directory, [], manifest_name="manifest.json"),
+    "inventory": lambda directory: manifest.inventory(directory),
+    "verify": lambda directory: manifest.verify(directory, []),
     "compare_trees": lambda directory: manifest.compare_trees(directory, directory),
 }
 
@@ -65,7 +64,7 @@ def test_inventory_lists_sorted_files_and_manifest_by_path_only(package, manifes
     if not manifest_exists:
         (package / "manifest.json").unlink()
 
-    rows = manifest.inventory(package, manifest_name="manifest.json")
+    rows = manifest.inventory(package)
     for row in rows[:-1]:
         content = (package / row["path"]).read_bytes()
         assert (row["bytes"], row["sha256"]) == (len(content), hashlib.sha256(content).hexdigest())
@@ -78,97 +77,92 @@ def test_inventory_lists_sorted_files_and_manifest_by_path_only(package, manifes
     ]
 
 
-def test_inventory_rejects_empty_manifest_name(package):
-    with pytest.raises(ValueError, match="manifest path"):
-        manifest.inventory(package, manifest_name="")
-
-
 def test_verify_accepts_unchanged_package_with_serialized_inventory(package):
-    rows = json.loads(json.dumps(manifest.inventory(package, manifest_name="manifest.json")))
-    assert manifest.verify(package, rows, manifest_name="manifest.json") == []
+    rows = json.loads(json.dumps(manifest.inventory(package)))
+    assert manifest.verify(package, rows) == []
 
 
 @pytest.mark.parametrize("extra_path", ["added.md", "manifest.json"])
 def test_verify_reports_extra_file_including_manifest_without_row(package, extra_path):
-    rows = manifest.inventory(package, manifest_name="manifest.json")
+    rows = manifest.inventory(package)
     if extra_path == "manifest.json":
         rows = [row for row in rows if row["path"] != "manifest.json"]
     (package / extra_path).write_bytes(b"abc")
-    assert manifest.verify(package, rows, manifest_name="manifest.json") == [
+    assert manifest.verify(package, rows) == [
         {"path": extra_path, "kind": "extra", "expected": None, "actual": ABC},
     ]
 
 
 def test_verify_reports_missing_file(package):
-    rows = manifest.inventory(package, manifest_name="manifest.json")
+    rows = manifest.inventory(package)
     (package / "findings.md").unlink()
-    assert manifest.verify(package, rows, manifest_name="manifest.json") == [
+    assert manifest.verify(package, rows) == [
         {"path": "findings.md", "kind": "missing", "expected": ABC, "actual": None},
     ]
 
 
 def test_verify_reports_same_size_checksum_change(package):
-    rows = manifest.inventory(package, manifest_name="manifest.json")
+    rows = manifest.inventory(package)
     (package / "datasets/d.csv").write_bytes(b"world")
-    assert manifest.verify(package, rows, manifest_name="manifest.json") == [
+    assert manifest.verify(package, rows) == [
         {"path": "datasets/d.csv", "kind": "checksum", "expected": HELLO,
          "actual": "486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7"},
     ]
 
 
 def test_verify_reports_size_then_checksum_for_length_change(package):
-    rows = manifest.inventory(package, manifest_name="manifest.json")
+    rows = manifest.inventory(package)
     (package / "findings.md").write_bytes(b"hello")
-    assert manifest.verify(package, rows, manifest_name="manifest.json") == [
+    assert manifest.verify(package, rows) == [
         {"path": "findings.md", "kind": "size", "expected": 3, "actual": 5},
         {"path": "findings.md", "kind": "checksum", "expected": ABC, "actual": HELLO},
     ]
 
 
 def test_verify_checks_manifest_presence_only(package):
-    rows = manifest.inventory(package, manifest_name="manifest.json")
+    rows = manifest.inventory(package)
     (package / "manifest.json").write_bytes(b'{"inventory": "written after hashing"}')
-    assert manifest.verify(package, rows, manifest_name="manifest.json") == []
+    assert manifest.verify(package, rows) == []
 
 
 def test_verify_accepts_digit_string_sizes_and_reports_int_sizes(package):
-    rows = manifest.inventory(package, manifest_name="manifest.json")
+    rows = manifest.inventory(package)
     for row in rows:
         if "bytes" in row:
             row["bytes"] = str(row["bytes"])
-    assert manifest.verify(package, rows, manifest_name="manifest.json") == []
+    assert manifest.verify(package, rows) == []
     (package / "findings.md").write_bytes(b"hello")
-    assert manifest.verify(package, rows, manifest_name="manifest.json") == [
+    assert manifest.verify(package, rows) == [
         {"path": "findings.md", "kind": "size", "expected": 3, "actual": 5},
         {"path": "findings.md", "kind": "checksum", "expected": ABC, "actual": HELLO},
     ]
 
 
 def test_verify_rejects_incomplete_non_manifest_rows(package):
-    rows = manifest.inventory(package, manifest_name="manifest.json")
+    rows = manifest.inventory(package)
     next(row for row in rows if row["path"] == "findings.md")["sha256"] = None
     with pytest.raises(ValueError, match="findings.md"):
-        manifest.verify(package, rows, manifest_name="manifest.json")
+        manifest.verify(package, rows)
 
 
 @pytest.mark.parametrize("size", ["-3", 3.0, True, -3])
 def test_verify_rejects_invalid_byte_sizes(package, size):
-    rows = manifest.inventory(package, manifest_name="manifest.json")
+    rows = manifest.inventory(package)
     next(row for row in rows if row["path"] == "findings.md")["bytes"] = size
     with pytest.raises(ValueError, match="findings.md"):
-        manifest.verify(package, rows, manifest_name="manifest.json")
+        manifest.verify(package, rows)
 
 
 def test_verify_rejects_row_without_path(package):
     with pytest.raises(ValueError, match="without a path"):
-        manifest.verify(package, [{"bytes": 3, "sha256": ABC}], manifest_name="manifest.json")
+        manifest.verify(package, [{"bytes": 3, "sha256": ABC}])
 
 
 def test_verify_reports_missing_manifest_as_none_even_with_recorded_digest(package):
-    rows = manifest.inventory(package, manifest_name="manifest.json")
+    rows = manifest.inventory(package)
     rows[-1]["sha256"] = ABC
     (package / "manifest.json").unlink()
-    assert manifest.verify(package, rows, manifest_name="manifest.json") == [
+    assert manifest.verify(package, rows) == [
         {"path": "manifest.json", "kind": "missing", "expected": None, "actual": None},
     ]
 

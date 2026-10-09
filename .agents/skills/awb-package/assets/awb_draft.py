@@ -1,42 +1,30 @@
-"""Check, record provenance for, and release an analytics workbench package draft.
+"""Export, check, and release an analytics workbench package draft.
 
-awb-init's installer places this file at `src/packaging/draft.py` beside `findings.py`,
-`manifest.py`, and `charts.py`. `src/awb.py` runs its commands:
+awb-init's installer places this file at `src/packaging/draft.py`. `src/awb.py` runs its commands:
 
-    python3 src/awb.py export <investigation> <package> [--chart RESULT[:COLUMNS]]... [--dataset NAME=RESULT[:COLUMNS]]...
-    python3 src/awb.py draft-provenance <investigation> <package> <result-id>... [--export-checks]
-    python3 src/awb.py check-draft <investigation> <package> [--verify-only] [--manifest NAME]
-    python3 src/awb.py release <investigation> <package> [--manifest NAME]
+    python3 src/awb.py export <investigation> <package> [--chart RESULT[:COLUMNS]]... [--dataset NAME=RESULT[:COLUMNS]]... [--no-datasets] [--result RESULT]...
+    python3 src/awb.py check-draft <investigation> <package> [--verify-only]
+    python3 src/awb.py release <investigation> <package>
     python3 src/awb.py copy-releases <investigation> [<package>]
 
-Each prints one line of JSON and keeps its complete record under
-`deliveries/<investigation>/<package>/audit/`, outside the draft and its releases. Only JSON
-manifests are automated. Standard library only, except that `export` writes chart files through
-`charts.py` and so needs pandas; `src/provenance.py` is needed for `draft-provenance` and `export`.
+Each prints one line of JSON. The manifest is the draft's `manifest.json`; chart and dataset files
+are CSV. Standard library only; `export` also needs the project's `src/provenance.py`.
 """
 
 import argparse
 import csv
+import hashlib
 import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
-import sys
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
-# The dispatcher puts this directory on sys.path; a direct import of this file needs it too.
-_HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
-
-from charts import check_charts  # noqa: E402
-from findings import check  # noqa: E402
-from manifest import compare_trees, inventory, verify  # noqa: E402
-
+MANIFEST = "manifest.json"
 _SIMPLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _EVIDENCE_SCHEMAS = ("awb-evidence/1", "awb-evidence/2", "awb-evidence/3")
 _EVIDENCE_LINK = re.compile(r"evidence/([A-Za-z0-9][A-Za-z0-9._-]*)\.json")
@@ -45,8 +33,8 @@ _STORAGE_LINE = "Released packages are kept at:"
 _REASON = "Revalidation reason or caveat"
 _BLOCKED = ("the current state differs from the recorded producing state; an export would not serialize "
             "the represented result. Stop: changed results need separately authorized analytical work")
-_RECORD_EPILOG = ("Prints one JSON line and writes the complete record under "
-                  "deliveries/<investigation>/<package>/audit/, named by its record key.")
+# A plain word is never flagged as a name: it collides with ordinary prose ("claims", "period").
+_PLAIN_WORD = re.compile(r"[A-Za-z]+")
 
 # SQL names: comments and string literals are blanked first so paths and prose never count.
 _SQL_NOISE = re.compile(r"--[^\n]*|/\*.*?\*/|'(?:[^']|'')*'", re.DOTALL)
@@ -79,15 +67,6 @@ def _package_dir(root, investigation, package):
     return root / "deliveries" / investigation / package
 
 
-def _manifest_name(draft, requested):
-    if requested:
-        return requested
-    found = sorted(p.name for p in draft.iterdir() if p.is_file() and p.name.startswith("manifest"))
-    if len(found) > 1:
-        raise ValueError(f"several manifest files ({', '.join(found)}); name one with --manifest")
-    return found[0] if found else "manifest.json"
-
-
 def _read_json(path):
     record = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(record, dict):
@@ -106,11 +85,8 @@ def _write_json(path, record):
         temporary.unlink(missing_ok=True)
 
 
-def _audit(root, investigation, package, name, record):
-    directory = _package_dir(root, investigation, package) / "audit"
-    directory.mkdir(parents=True, exist_ok=True)
-    _write_json(directory / name, record)
-    return _rel(root, directory / name)
+def _now():
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def _print(report):
@@ -119,6 +95,14 @@ def _print(report):
 
 def _is_unknown(value):
     return isinstance(value, dict) and set(value) == {"unknown"}
+
+
+def _toml():
+    try:
+        import tomllib
+    except ImportError:  # Python 3.10
+        import tomli as tomllib
+    return tomllib
 
 
 def _evidence_files(root, investigation):
@@ -130,9 +114,120 @@ def _evidence_files(root, investigation):
         except (OSError, ValueError) as error:
             yield path, None, f"{_rel(root, path)}: unreadable ({error})"
             continue
-        # Export-check lists and other audit files can sit beside the evidence.
+        # Export-check lists and other files can sit beside the evidence.
         if isinstance(record, dict) and record.get("schema") in _EVIDENCE_SCHEMAS:
             yield path, record, None
+
+
+# ---------------------------------------------------------------- internal names in findings.md
+
+_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")
+_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
+_LINK_TARGET = re.compile(r"\]\([^)]*\)")
+_TOKEN = re.compile(r"\S+")
+
+# Wrapping punctuation and Markdown emphasis around a token; leading dots stay so `./x` is a path.
+# Underscores are stripped only in matching pairs (`_word_`), so `__init__.py` keeps its own.
+_LEADING = "([{<\"'*~!“‘"
+_TRAILING = ")]}>\"'*~.,;:!?”’"
+_POSSESSIVE = re.compile(r"['’]s$")
+
+_PATH = re.compile(r"\w/\w")
+_FRACTION = re.compile(r"[\d.,]+(?:/[\d.,]+)+")  # 3/4, 6/30/2026: numbers, not paths
+_FILE_NAME = re.compile(
+    r"\.(?:md|py|csv|parquet|json|sql|png|svg|duckdb|db|xlsx|yaml|yml|toml|txt|ipynb)$",
+    re.IGNORECASE,
+)
+_SNAKE = re.compile(r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)+")
+# Segments of two or more characters, so abbreviations such as e.g. and U.S. stay clean.
+_DOTTED = re.compile(r"(?<![\w.])[A-Za-z_]\w+(?:\.[A-Za-z_]\w+)+")
+_HEX = re.compile(r"[0-9a-fA-F]{7,40}")
+
+
+def _blank(text, start, end):
+    return text[:start] + " " * (end - start) + text[end:]
+
+
+def _unwrap(token):
+    token = _POSSESSIVE.sub("", token.lstrip(_LEADING).rstrip(_TRAILING)).rstrip(_TRAILING)
+    pairs = min(len(token) - len(token.lstrip("_")), len(token) - len(token.rstrip("_")))
+    if pairs:
+        token = _unwrap(token[pairs:-pairs]) if 2 * pairs < len(token) else ""
+    return token
+
+
+def _token_kind(token):
+    if token.startswith(("./", "../")) or (_PATH.search(token) and not _FRACTION.fullmatch(token)):
+        return "path"
+    if _FILE_NAME.search(token):
+        return "file"
+    if _SNAKE.search(token) or _DOTTED.search(token):
+        return "identifier"
+    if _HEX.fullmatch(token) and re.search(r"\d", token) and re.search(r"[a-fA-F]", token):
+        return "sha"
+    return None
+
+
+def _name_pattern(names):
+    names = sorted({name for name in names if name}, key=len, reverse=True)
+    if not names:
+        return None
+    # Whole token: not glued to word characters, hyphens, slashes, or a dotted continuation.
+    return re.compile(
+        r"(?<![\w./-])(?:" + "|".join(map(re.escape, names)) + r")(?![\w/-]|\.\w)"
+    )
+
+
+def _scan_line(number, line, names):
+    found = []
+    for match in _CODE_SPAN.finditer(line):
+        found.append((match.start(), "code", match.group(0)))
+        line = _blank(line, match.start(), match.end())
+    for match in _LINK_TARGET.finditer(line):
+        line = _blank(line, match.start() + 1, match.end())
+
+    taken = []
+    if names is not None:
+        for match in names.finditer(line):
+            found.append((match.start(), "name", match.group(0)))
+            taken.append((match.start(), match.end()))
+
+    for match in _TOKEN.finditer(line):
+        token = _unwrap(match.group(0))
+        start = match.start() + match.group(0).find(token)
+        end = start + len(token)
+        if not token or any(start < stop and begin < end for begin, stop in taken):
+            continue
+        kind = _token_kind(token)
+        if kind:
+            found.append((start, kind, token))
+
+    return [{"line": number, "kind": kind, "text": text} for _, kind, text in sorted(found)]
+
+
+def check_findings(path: str | os.PathLike, *, names=()) -> list[dict]:
+    """List code, paths, file names, identifiers, SHAs, and given names, by line then column."""
+    text = Path(path).read_text(encoding="utf-8")
+    text = _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
+    pattern = _name_pattern(names)
+
+    rows = []
+    fence = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        if fence is not None:
+            closing = _FENCE.match(line)
+            if (closing and closing.group(1)[0] == fence[0] and len(closing.group(1)) >= len(fence)
+                    and not line[closing.end():].strip()):
+                fence = None
+            continue
+        opening = _FENCE.match(line)
+        if opening and not (opening.group(1)[0] == "`" and "`" in line[opening.end():]):
+            fence = opening.group(1)
+            rows.append({"line": number, "kind": "code", "text": line.strip()})
+            continue
+        rows.extend(_scan_line(number, line, pattern))
+    return rows
 
 
 # ---------------------------------------------------------------- the names set
@@ -168,8 +263,8 @@ def _keys(value, prefix=""):
 
 def _toml_keys(text):
     try:
-        import tomllib
-    except ImportError:  # Python 3.10: table headers and key lines are enough for names.
+        return _keys(_toml().loads(text))
+    except ImportError:  # Python 3.10 without tomli: table headers and key lines are enough for names.
         names = set()
         for header in re.findall(r"^\s*\[\[?\s*([^\]]+?)\s*\]\]?", text, re.MULTILINE):
             parts = [part.strip().strip("\"'") for part in header.split(".")]
@@ -177,7 +272,6 @@ def _toml_keys(text):
         for key in re.findall(r"^\s*([A-Za-z0-9_\-\"'.]+)\s*=", text, re.MULTILINE):
             names.add(".".join(part.strip("\"'") for part in key.split(".")))
         return names
-    return _keys(tomllib.loads(text))
 
 
 def project_names(root, investigation, package):
@@ -240,8 +334,7 @@ def project_names(root, investigation, package):
     if not settings_found:
         problems.append(f"no settings found: investigations/{investigation}/settings.toml is absent "
                         "and no evidence records a settings file")
-    names.discard("")
-    return sorted(names), problems
+    return sorted(name for name in names if name and not _PLAIN_WORD.fullmatch(name)), problems
 
 
 # ---------------------------------------------------------------- flags and headings
@@ -306,6 +399,173 @@ def heading_problems(draft) -> list[dict]:
             for heading in _headings(Path(draft) / "findings.md") if heading not in methodology]
 
 
+# ---------------------------------------------------------------- inventory and tree comparison
+
+_CHUNK_BYTES = 1024 * 1024  # 1 MiB reads keep memory flat on large datasets
+
+
+def _scan(directory):
+    root = Path(directory)
+    if root.is_symlink():
+        raise ValueError(f"Symlink in tree: {root}")
+
+    def fail(error):
+        raise error
+
+    files = {}
+    for current, dirnames, filenames in os.walk(root, onerror=fail):
+        for name in dirnames + filenames:
+            if Path(current, name).is_symlink():
+                raise ValueError(f"Symlink in tree: {Path(current, name)}")
+        for name in filenames:
+            file = Path(current, name)
+            if not file.is_file():
+                continue
+            digest = hashlib.sha256()
+            size = 0
+            with file.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(_CHUNK_BYTES), b""):
+                    size += len(chunk)
+                    digest.update(chunk)
+            path = file.relative_to(root).as_posix()
+            files[path] = {"path": path, "bytes": size, "sha256": digest.hexdigest()}
+    return files
+
+
+def inventory(package_dir: str | os.PathLike) -> list[dict]:
+    """List files in path order, reserving a path-only row for manifest.json."""
+    files = _scan(package_dir)
+    files[MANIFEST] = {"path": MANIFEST}
+    return [files[path] for path in sorted(files)]
+
+
+def _difference(path, kind, expected, actual):
+    return {"path": path, "kind": kind, "expected": expected, "actual": actual}
+
+
+def _compare(expected, actual, manifest_name=None):
+    differences = []
+    for path in sorted(expected.keys() | actual.keys()):
+        if path not in actual:
+            recorded = None if path == manifest_name else expected[path]["sha256"]
+            differences.append(_difference(path, "missing", recorded, None))
+        elif path not in expected:
+            differences.append(_difference(path, "extra", None, actual[path]["sha256"]))
+        elif path != manifest_name:
+            recorded, found = expected[path], actual[path]
+            if recorded["bytes"] != found["bytes"]:
+                differences.append(_difference(path, "size", recorded["bytes"], found["bytes"]))
+            # A size change is also reported as a checksum change, so both kinds always name it.
+            if recorded["bytes"] != found["bytes"] or recorded["sha256"].lower() != found["sha256"]:
+                differences.append(_difference(path, "checksum", recorded["sha256"], found["sha256"]))
+    return differences
+
+
+def verify(package_dir: str | os.PathLike, inventory: list[dict]) -> list[dict]:
+    """Compare a package with the inventory recorded in its manifest; manifest content is excluded."""
+    expected = {}
+    for row in inventory:
+        path = row.get("path")
+        if not isinstance(path, str):
+            raise ValueError(f"Inventory row without a path: {row!r}")
+        if path in expected:
+            raise ValueError(f"Duplicate inventory path: {path}")
+        expected[path] = dict(row)
+        if path != MANIFEST:
+            if "bytes" not in row or not isinstance(row.get("sha256"), str):
+                raise ValueError(f"Incomplete inventory row: {path}")
+            size = row["bytes"]
+            if isinstance(size, str) and size.isascii() and size.isdigit():
+                size = int(size)
+            if type(size) is not int or size < 0:
+                raise ValueError(f"Invalid inventory byte size: {path}")
+            expected[path]["bytes"] = size
+    return _compare(expected, _scan(package_dir), MANIFEST)
+
+
+def compare_trees(local_dir: str | os.PathLike, copy_dir: str | os.PathLike) -> list[dict]:
+    """Compare every file, including the manifest, with the local release as expected."""
+    return _compare(_scan(local_dir), _scan(copy_dir))
+
+
+# ---------------------------------------------------------------- chart files
+
+# A package's charts/ holds one CSV per **Chart N.** specification in findings.md, named chart-N.csv
+# in specification order: a header row of display names and the plotted values, nothing else.
+_CHART_SPEC = re.compile(r"\*\*Chart (\d+)\.\*\*")
+_CHART_FILE = re.compile(r"chart-([1-9]\d*)\.csv")
+# An underscore or a dot between letters marks a column name or code, not a display name.
+_IDENTIFIER = re.compile(r"[A-Za-z0-9]_[A-Za-z0-9]|[A-Za-z]\.[A-Za-z]")
+
+
+def _check_chart(number, headers, rows):
+    if not rows:
+        raise ValueError(f"Chart {number} has no rows")
+    if not all(isinstance(header, str) and header.strip() for header in headers):
+        raise ValueError(f"Chart {number} has a blank or non-text header")
+    if len(set(headers)) != len(headers):
+        raise ValueError(f"Chart {number} repeats a header")
+    for header in headers:
+        if _IDENTIFIER.search(header):
+            raise ValueError(f"Chart {number} header is not a display name: {header}")
+
+
+def write_charts(charts_dir: str | os.PathLike, charts: list) -> list[Path]:
+    """Replace the chart files with chart-1.csv, ... from (headers, rows) pairs; none removes them."""
+    for number, (headers, rows) in enumerate(charts, start=1):
+        _check_chart(number, headers, rows)
+    directory = Path(charts_dir)
+    if directory.is_dir():
+        for stale in directory.iterdir():
+            if _CHART_FILE.fullmatch(stale.name):
+                stale.unlink()
+    if not charts:
+        if directory.is_dir() and not any(directory.iterdir()):
+            directory.rmdir()  # A package without charts has no charts directory.
+        return []
+    directory.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for number, (headers, rows) in enumerate(charts, start=1):
+        path = directory / f"chart-{number}.csv"
+        with path.open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.writer(stream, lineterminator="\n")
+            writer.writerow(headers)
+            writer.writerows(rows)
+        paths.append(path)
+    return paths
+
+
+def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike) -> list[dict]:
+    """Match the chart specifications in findings.md with the chart files."""
+    numbers = [int(match.group(1)) for match in _CHART_SPEC.finditer(
+        Path(findings_path).read_text(encoding="utf-8"))]
+    rows = []
+    for position, number in enumerate(numbers, start=1):
+        if number != position:
+            rows.append({"chart": f"Chart {number}",
+                         "problem": f"specification {position} is numbered {number}"})
+    directory = Path(charts_dir)
+    files = {}
+    if directory.is_dir():
+        for path in directory.iterdir():
+            match = _CHART_FILE.fullmatch(path.name)
+            if match:
+                files[int(match.group(1))] = path
+            else:
+                rows.append({"chart": path.name, "problem": "not a chart file"})
+    specified = set(numbers)
+    for number in sorted(specified - files.keys()):
+        rows.append({"chart": f"Chart {number}", "problem": "no chart file for this specification"})
+    for number in sorted(files.keys() - specified):
+        rows.append({"chart": f"Chart {number}", "problem": "chart file has no specification in findings"})
+    for number in sorted(specified & files.keys()):
+        with files[number].open(encoding="utf-8") as stream:
+            lines = [line for line, _ in zip(stream, range(2)) if line.strip()]
+        if len(lines) < 2:
+            rows.append({"chart": f"Chart {number}", "problem": "chart file has no data rows"})
+    return rows
+
+
 # ---------------------------------------------------------------- check-draft
 
 def _structure_passed(report):
@@ -313,12 +573,12 @@ def _structure_passed(report):
             and report["charts"] == [] and report["headings"] == [] and report["verify"] == [])
 
 
-def check_draft(root, investigation, package, *, verify_only=False, manifest_name=None) -> dict:
-    """Run every mechanical draft check; unless verify_only, rewrite the JSON manifest's inventory."""
+def check_draft(root, investigation, package, *, verify_only=False) -> dict:
+    """Run every mechanical draft check; unless verify_only, rewrite the manifest's inventory."""
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
-              "charts": None, "headings": None, "manifest": None, "inventory": None, "verify": None,
+              "charts": None, "headings": None, "inventory": None, "verify": None,
               "unmatched_flags": None, "errors": [], "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
@@ -328,7 +588,7 @@ def check_draft(root, investigation, package, *, verify_only=False, manifest_nam
     report["names"] = len(names)
     findings_path = draft / "findings.md"
     try:
-        report["findings"] = check(findings_path, names=names)
+        report["findings"] = check_findings(findings_path, names=names)
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"findings check: {error}")
     try:
@@ -346,31 +606,26 @@ def check_draft(root, investigation, package, *, verify_only=False, manifest_nam
         report["errors"].append(f"flags: {error}")
 
     try:
-        name = report["manifest"] = _manifest_name(draft, manifest_name)
-        if not name.endswith(".json"):
-            raise ValueError(f"only JSON manifests are automated; build the inventory of {name} "
-                             "and run verify from src/packaging/manifest.py")
-        path = draft / name
+        path = draft / MANIFEST
         if not path.is_file():
-            raise ValueError(f"no manifest at {_rel(root, path)}; write it from "
-                             "package-format/manifest-template.md first")
+            raise ValueError(f"no manifest at {_rel(root, path)}; run export first")
         record = _read_json(path)
         if not verify_only:
-            record["inventory"] = inventory(draft, manifest_name=name)
-            _write_json(path, record)
+            rows = inventory(draft)
+            if rows != record.get("inventory"):
+                record.update(inventory=rows, revised_at=_now())
+                _write_json(path, record)
         elif not isinstance(record.get("inventory"), list):
-            raise ValueError(f"{name} records no inventory list; run check-draft without --verify-only")
+            raise ValueError(f"{MANIFEST} records no inventory list; run check-draft without --verify-only")
         report["inventory"] = {"rows": len(record["inventory"]),
                                "source": "recorded" if verify_only else "rewritten"}
-        report["verify"] = verify(draft, record["inventory"], manifest_name=name)
+        report["verify"] = verify(draft, record["inventory"])
         if flags is not None:
             report["unmatched_flags"] = unmatched_flags(record, flags)
     except (OSError, ValueError) as error:
         report["errors"].append(f"manifest: {error}")
 
     report["passed"] = _structure_passed(report) and report["unmatched_flags"] == []
-    report["record"] = _audit(root, investigation, package, "check-draft.json",
-                              {**report, "names_set": names})
     return report
 
 
@@ -380,33 +635,27 @@ def _package_arguments(parser, *, package=True):
         parser.add_argument("package", help="package name under deliveries/<investigation>/")
 
 
-def _manifest_argument(parser):
-    parser.add_argument("--manifest", help="manifest path inside the draft (default: the draft's single "
-                                           "manifest* file, else manifest.json)")
-
-
 def cli_check_draft(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py check-draft", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Run every mechanical draft check (internal names in findings.md, chart files, "
                     "matching finding headings, the manifest inventory, and state.md's current flags) "
-                    "and rewrite the manifest inventory; --verify-only checks a release candidate.",
-        epilog=_RECORD_EPILOG + "\nunmatched_flags lists each finding state.md flags whose exact finding "
+                    "and rewrite the manifest inventory, stamping revised_at when it changes; "
+                    "--verify-only checks a release candidate and writes nothing.",
+        epilog="Prints one JSON line.\nunmatched_flags lists each finding state.md flags whose exact finding "
                "and reason the manifest's revalidation_flags does not record.\nExit 0 only when "
                "names_problems, findings, charts, headings, verify, unmatched_flags, and errors are all empty.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
                         help="verify against the recorded inventory without rewriting it (the release gate)")
-    _manifest_argument(parser)
     args = parser.parse_args(argv)
     report = check_draft(Path(root), _simple(args.investigation, "investigation"),
-                         _simple(args.package, "package"),
-                         verify_only=args.verify_only, manifest_name=args.manifest)
+                         _simple(args.package, "package"), verify_only=args.verify_only)
     _print(report)
     return 0 if report["passed"] else 1
 
 
-# ---------------------------------------------------------------- draft-provenance
+# ---------------------------------------------------------------- producing and packaging state
 
 def _git(root, *args):
     return subprocess.run(["git", *args], cwd=root, check=True, stdout=subprocess.PIPE,
@@ -485,113 +734,18 @@ def _load_provenance(root):
     return module
 
 
-def draft_provenance(root, investigation, package, result_ids, *, export_checks=False,
-                     manifest_name=None) -> dict:
-    """Write the producing and packaging state, and optionally export checks, into the JSON manifest."""
-    root = Path(root)
-    draft = _package_dir(root, investigation, package) / "draft"
-    report = {"manifest": None, "results": list(result_ids), "written": False, "errors": []}
-    if not draft.is_dir():
-        report["errors"].append(f"no draft at {_rel(root, draft)}; create it with awb-package")
-        return report
-    try:
-        name = report["manifest"] = _manifest_name(draft, manifest_name)
-        if not name.endswith(".json"):
-            raise ValueError(f"only JSON manifests are automated; fill the producing state of {name} by hand")
-        path = draft / name
-        report["created"] = not path.exists()
-        record = {} if report["created"] else _read_json(path)
-    except (OSError, ValueError) as error:
-        report["errors"].append(f"manifest: {error}")
-        return report
-
-    evidence, evidence_paths = {}, {}
-    for result_id in result_ids:
-        evidence_path = root / "investigations" / investigation / "evidence" / f"{result_id}.json"
-        evidence_paths[result_id] = _rel(root, evidence_path)
-        try:
-            evidence[result_id] = _read_json(evidence_path)
-            if evidence[result_id].get("schema") not in _EVIDENCE_SCHEMAS:
-                raise ValueError("not an awb-evidence file")
-        except (OSError, ValueError) as error:
-            report["errors"].append(f"missing evidence: {_rel(root, evidence_path)}: {error}")
-    if report["errors"]:
-        return report
-
-    fields = producing_state(evidence)
-    fields["packaging_commit"], fields["packaging_uncommitted_changes"] = packaging_state(root)
-    if export_checks:
-        try:
-            compare = _load_provenance(root).compare_evidence
-        except (OSError, ImportError) as error:
-            report["errors"].append(str(error))
-            return report
-        fields["export_checks"] = [{"result_id": r, "evidence": evidence_paths[r],
-                                    "comparisons": compare(root, evidence_paths[r])} for r in result_ids]
-        failed = [{"result_id": entry["result_id"], "name": item["name"], "detail": item["detail"]}
-                  for entry in fields["export_checks"] for item in entry["comparisons"]
-                  if item["outcome"] != "pass"]
-        report["export_checks"] = {"comparisons": sum(len(e["comparisons"]) for e in fields["export_checks"]),
-                                   "failed": failed}
-        if failed:
-            report["exports_blocked"] = _BLOCKED
-    commits, changes = fields["producing_commit"], fields["producing_uncommitted_changes"]
-    report["producing_commit"] = "differs by result" if isinstance(commits, list) else commits
-    report["producing_uncommitted_changes"] = len(changes) if isinstance(changes, list) else 0
-    report["packaging_commit"] = fields["packaging_commit"]
-    report["packaging_uncommitted_changes"] = fields["packaging_uncommitted_changes"]
-    report["record"] = _audit(root, investigation, package, "draft-provenance.json",
-                              {**report, "fields": fields})
-    if report.get("exports_blocked"):
-        return report  # Nothing is written, so no failing check is mistaken for a recorded export.
-    record.update(fields)
-    _write_json(draft / name, record)
-    report["written"] = True
-    return report
-
-
-def cli_draft_provenance(root: Path, argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(
-        prog="awb.py draft-provenance", formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Fill the draft manifest's producing and packaging state from the represented results' "
-                    "evidence. Run it once the draft exists.",
-        epilog=_RECORD_EPILOG + "\nWrites nothing and exits 1 when an evidence file is missing or a "
-               "comparison fails (exports_blocked).")
-    _package_arguments(parser)
-    parser.add_argument("result_ids", nargs="+", metavar="result-id",
-                        help="every result the package represents")
-    parser.add_argument("--export-checks", action="store_true",
-                        help="for a hand export: record each result's compare_evidence output as export_checks")
-    _manifest_argument(parser)
-    args = parser.parse_args(argv)
-    report = draft_provenance(Path(root), _simple(args.investigation, "investigation"),
-                              _simple(args.package, "package"),
-                              [_simple(r, "result-id") for r in args.result_ids],
-                              export_checks=args.export_checks, manifest_name=args.manifest)
-    _print(report)
-    return 0 if report["written"] else 1
-
-
 # ---------------------------------------------------------------- export
 
 _DISPLAY = "foundation/display.toml"
 
 
-def _load_toml(path):
-    try:
-        import tomllib
-    except ImportError:  # Python 3.10
-        try:
-            import tomli as tomllib
-        except ImportError as error:
-            raise ImportError(f"reading {path.name} needs Python 3.11 or the tomli package") from error
-    return tomllib.loads(path.read_text(encoding="utf-8"))
-
-
 def display_names(root) -> dict:
     """Return {columns, values, round} from foundation/display.toml, empty when it is absent."""
     path = Path(root) / _DISPLAY
-    record = _load_toml(path) if path.is_file() else {}
+    try:
+        record = _toml().loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except ImportError as error:
+        raise ImportError(f"reading {path.name} needs Python 3.11 or the tomli package") from error
     return {"columns": dict(record.get("columns", {})),
             "values": {column: dict(codes) for column, codes in record.get("values", {}).items()},
             "round": dict(record.get("round", {}))}
@@ -642,94 +796,128 @@ def _shape(root, investigation, result_id, columns, display, rounding):
     return headers, out, sources, []
 
 
-def export(root, investigation, package, charts, datasets, *, no_datasets=False, rounding=None,
-           manifest_name=None) -> dict:
-    """Serialize recorded results into the draft's chart and dataset files after the export checks."""
+def export(root, investigation, package, charts=(), datasets=(), results=(), *, no_datasets=False,
+           rounding=None) -> dict:
+    """Serialize recorded results into the draft and record the represented results' provenance.
+
+    Any chart, dataset, or no_datasets makes a full export that replaces the chart set and the dataset
+    selection; serialized results must pass compare_evidence. Results named only in `results` are
+    represented without the check, and with no chart or dataset the exported files stay untouched.
+    """
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
+    full = bool(charts or datasets or no_datasets)
     report = {"charts": [], "datasets": [], "written": False, "errors": []}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {_rel(root, draft)}; create it with awb-package")
         return report
+    path = draft / MANIFEST
     try:
-        name = report["manifest"] = _manifest_name(draft, manifest_name)
-        if not name.endswith(".json"):
-            raise ValueError(f"only JSON manifests are automated; export {name} by hand")
-        record = _read_json(draft / name) if (draft / name).exists() else {}
-        display = display_names(root)
+        report["created"] = not path.exists()
+        record = {} if report["created"] else _read_json(path)
+        display = display_names(root) if full else None
     except (OSError, ValueError, ImportError) as error:
         report["errors"].append(str(error))
         return report
-    rounding = {**display["round"], **(rounding or {})}
 
     shaped, sources = [], []
-    for kind, label, (result_id, columns) in ([("chart", f"chart-{i}", spec) for i, spec in enumerate(charts, 1)]
-                                              + [("dataset", n, spec) for n, spec in datasets]):
-        headers, rows, lines, problems = _shape(root, investigation, result_id, columns, display, rounding)
-        report["errors"] += problems
-        if not problems:
-            shaped.append((kind, label, result_id, headers, rows))
-            sources += [f"{label}: {line}" for line in lines]
+    if full:
+        rounding = {**display["round"], **(rounding or {})}
+        for kind, label, (result_id, columns) in (
+                [("chart", f"chart-{i}", spec) for i, spec in enumerate(charts, 1)]
+                + [("dataset", n, spec) for n, spec in datasets]):
+            headers, rows, lines, problems = _shape(root, investigation, result_id, columns, display, rounding)
+            report["errors"] += problems
+            if not problems:
+                shaped.append((kind, label, result_id, headers, rows))
+                sources += [f"{label}: {line}" for line in lines]
+    else:
+        recorded = record.get("charts") if isinstance(record.get("charts"), list) else []
+        report["errors"] += [f"{c.get('path')} serializes {c.get('result_id')}, which this call does not name; "
+                             "pass it with --result" for c in recorded
+                             if isinstance(c, dict) and c.get("result_id") not in results]
     if report["errors"]:
         return report
 
-    result_ids = list(dict.fromkeys(r for _, _, r, _, _ in shaped))
-    try:
-        compare = _load_provenance(root).compare_evidence
-    except (OSError, ImportError) as error:
-        report["errors"].append(str(error))
+    serialized = list(dict.fromkeys(r for _, _, r, _, _ in shaped))
+    represented = list(dict.fromkeys(serialized + list(results)))
+    evidence, evidence_paths = {}, {}
+    for result_id in represented:
+        evidence_path = root / "investigations" / investigation / "evidence" / f"{result_id}.json"
+        evidence_paths[result_id] = _rel(root, evidence_path)
+        try:
+            evidence[result_id] = _read_json(evidence_path)
+            if evidence[result_id].get("schema") not in _EVIDENCE_SCHEMAS:
+                raise ValueError("not an awb-evidence file")
+        except (OSError, ValueError) as error:
+            report["errors"].append(f"missing evidence: {evidence_paths[result_id]}: {error}")
+    if report["errors"]:
         return report
-    checks = []
-    for result_id in result_ids:
-        evidence = f"investigations/{investigation}/evidence/{result_id}.json"
-        checks.append({"result_id": result_id, "evidence": evidence, "comparisons": compare(root, evidence)})
+
+    checks = {}
+    if serialized:
+        try:
+            compare = _load_provenance(root).compare_evidence
+        except (OSError, ImportError) as error:
+            report["errors"].append(str(error))
+            return report
+        checks = {r: {"result_id": r, "evidence": evidence_paths[r], "comparisons": compare(root, evidence_paths[r])}
+                  for r in serialized}
     failed = [{"result_id": c["result_id"], "name": i["name"], "detail": i["detail"]}
-              for c in checks for i in c["comparisons"] if i["outcome"] != "pass"]
+              for c in checks.values() for i in c["comparisons"] if i["outcome"] != "pass"]
     report["export_checks"] = {"results": len(checks), "failed": failed}
     if failed:
         report["exports_blocked"] = _BLOCKED
-        report["record"] = _audit(root, investigation, package, "export.json", {**report, "checks": checks})
         return report
 
-    frames = [(headers, rows) for kind, _, _, headers, rows in shaped if kind == "chart"]
-    if frames:
-        import pandas as pd
-        sys.path.insert(0, str(_HERE))
-        from charts import write_charts
+    if full:
+        frames = [(r, headers, rows) for kind, _, r, headers, rows in shaped if kind == "chart"]
         try:
-            paths = write_charts(draft / "charts", [pd.DataFrame(rows, columns=headers) for headers, rows in frames])
-        except (TypeError, ValueError) as error:
+            paths = write_charts(draft / "charts", [(headers, rows) for _, headers, rows in frames])
+        except ValueError as error:
             report["errors"].append(f"charts: {error}")
             return report
-        chart_ids = [r for kind, _, r, _, _ in shaped if kind == "chart"]
-        record["charts"] = [{"path": _rel(draft, p), "result_id": r} for p, r in zip(paths, chart_ids)]
-        report["charts"] = record["charts"]
-    if datasets or no_datasets:
+        report["charts"] = [{"path": _rel(draft, p), "result_id": r} for p, (r, _, _) in zip(paths, frames)]
+        record["charts"] = report["charts"] or "none"
         directory = draft / "datasets"
-        directory.mkdir(exist_ok=True)
-        for stale in directory.glob("*.csv"):
-            stale.unlink()  # The selection is replaced whole, as write_charts replaces charts.
+        if directory.is_dir():
+            for stale in directory.glob("*.csv"):
+                stale.unlink()  # The selection is replaced whole, as write_charts replaces charts.
         for kind, label, result_id, headers, rows in shaped:
             if kind != "dataset":
                 continue
-            path = directory / f"{label}.csv"
-            with path.open("w", newline="", encoding="utf-8") as stream:
+            directory.mkdir(exist_ok=True)
+            dataset = directory / f"{label}.csv"
+            with dataset.open("w", newline="", encoding="utf-8") as stream:
                 writer = csv.writer(stream, lineterminator="\n")
                 writer.writerow(headers)
                 writer.writerows(rows)
-            report["datasets"].append({"path": _rel(draft, path), "result_id": result_id})
-        if not any(directory.iterdir()):
+            report["datasets"].append({"path": _rel(draft, dataset), "result_id": result_id})
+        if directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()
         record["dataset_selection"] = [d["path"] for d in report["datasets"]] or "none"
-    kept = [c for c in record.get("export_checks") or [] if isinstance(c, dict)
-            and c.get("result_id") not in result_ids] if isinstance(record.get("export_checks"), list) else []
-    record["export_checks"] = kept + checks
-    _write_json(draft / name, record)
+        report["methodology_lines"] = sources
+
+    if report["created"]:
+        record.update(investigation=investigation, package=package, status="draft")
+    # A represented result not serialized keeps its entry; entries outside the represented set drop.
+    previous = record.get("export_checks") if isinstance(record.get("export_checks"), list) else []
+    kept = {c.get("result_id"): c for c in previous if isinstance(c, dict)}
+    entries = [checks.get(r) or kept.get(r) for r in represented]
+    record["export_checks"] = [e for e in entries if e] or "none"
+    fields = producing_state(evidence)
+    fields["packaging_commit"], fields["packaging_uncommitted_changes"] = packaging_state(root)
+    record.update(fields)
+    _write_json(path, record)
     report["written"] = True
-    report["methodology_lines"] = sources
+    commits, changes = fields["producing_commit"], fields["producing_uncommitted_changes"]
+    report["results"] = represented
+    report["producing_commit"] = "differs by result" if isinstance(commits, list) else commits
+    report["producing_uncommitted_changes"] = len(changes) if isinstance(changes, list) else 0
+    report["packaging_commit"] = fields["packaging_commit"]
+    report["packaging_uncommitted_changes"] = fields["packaging_uncommitted_changes"]
     if (draft / "findings.md").is_file():
         report["check_charts"] = check_charts(draft / "findings.md", draft / "charts")
-    report["record"] = _audit(root, investigation, package, "export.json", {**report, "checks": checks})
     return report
 
 
@@ -737,25 +925,33 @@ def cli_export(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py export", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Write the draft's chart and dataset files from saved result tables, renamed, mapped, "
-                    "and rounded through foundation/display.toml, once compare_evidence passes for every result.",
-        epilog=_RECORD_EPILOG + "\nEvery exported column needs a display name in foundation/display.toml; "
-               "gaps are listed together and nothing is written.\nWrites nothing when any comparison fails "
-               "(exports_blocked).\nExit 0 only when written and check_charts is empty. Writing chart "
-               "files needs pandas.")
+                    "and rounded through foundation/display.toml, once compare_evidence passes for every "
+                    "serialized result, and the manifest's producing and packaging state from the evidence "
+                    "of every represented result. Creates the manifest when absent.",
+        epilog="Prints one JSON line.\nAny --chart, --dataset, or --no-datasets replaces the whole chart set "
+               "and dataset selection: no --chart records charts none. With only --result it records "
+               "provenance and leaves exported files untouched.\nEvery exported column needs a display name "
+               "in foundation/display.toml; gaps are listed together and nothing is written.\nWrites nothing "
+               "when an evidence file is missing or any comparison fails (exports_blocked).\nExit 0 only "
+               "when written and check_charts is empty.")
     _package_arguments(parser)
     parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS]",
                         help="one per chart, in the order of the Chart N specifications; columns comma-separated")
     parser.add_argument("--dataset", action="append", default=[], metavar="NAME=RESULT[:COLUMNS]",
                         help="one per selected dataset; replaces the whole selection")
     parser.add_argument("--no-datasets", action="store_true", help="record an explicit selection of none")
+    parser.add_argument("--result", action="append", default=[], metavar="RESULT",
+                        help="a represented result not serialized here; its producing state is recorded "
+                             "without the export check")
     parser.add_argument("--round", action="append", default=[], metavar="COLUMN=PLACES",
                         help="decimal places for a column, over foundation/display.toml [round]")
-    _manifest_argument(parser)
     args = parser.parse_args(argv)
     if args.dataset and args.no_datasets:
         parser.error("--dataset and --no-datasets exclude each other")
-    if not (args.chart or args.dataset or args.no_datasets):
-        parser.error("name at least one --chart or --dataset, or --no-datasets")
+    if args.chart and not (args.dataset or args.no_datasets):
+        parser.error("--chart replaces the whole export: name every --dataset, or --no-datasets")
+    if not (args.chart or args.dataset or args.no_datasets or args.result):
+        parser.error("name every represented result: --chart, --dataset or --no-datasets, and --result")
     datasets = []
     for item in args.dataset:
         label, sep, spec = item.partition("=")
@@ -769,8 +965,9 @@ def cli_export(root: Path, argv: list[str]) -> int:
             parser.error(f"--round needs COLUMN=PLACES: {item!r}")
         rounding[column] = int(places)
     report = export(Path(root), _simple(args.investigation, "investigation"), _simple(args.package, "package"),
-                    [_spec(c, "result-id") for c in args.chart], datasets, no_datasets=args.no_datasets,
-                    rounding=rounding, manifest_name=args.manifest)
+                    [_spec(c, "result-id") for c in args.chart], datasets,
+                    [_simple(r, "result-id") for r in args.result], no_datasets=args.no_datasets,
+                    rounding=rounding)
     _print(report)
     return 0 if report["written"] and not report.get("check_charts") else 1
 
@@ -778,61 +975,48 @@ def cli_export(root: Path, argv: list[str]) -> int:
 # ---------------------------------------------------------------- release
 
 def disposition_problems(record: dict) -> list[dict]:
-    """List each revalidation-flag place whose disposition does not allow release."""
+    """List each represented flagged finding whose disposition does not allow release."""
     flags = record.get("revalidation_flags")
     if flags == "none" or flags == []:
         return []
     if not isinstance(flags, list):
-        return [{"finding": None, "place": None,
-                 "problem": "revalidation_flags is missing; record none or each flag"}]
+        return [{"finding": None, "problem": "revalidation_flags is missing; record none or each flag"}]
     problems = []
     for flag in flags:
-        places = flag.get("represented_in") if isinstance(flag, dict) else None
-        finding = flag.get("finding") if isinstance(flag, dict) else None
+        flag = flag if isinstance(flag, dict) else {}
+        places, disposition = flag.get("represented_in"), flag.get("disposition")
         if places == "none":
             continue  # A flagged finding the draft does not represent needs no disposition.
-        if not isinstance(places, list) or not places:
-            problems.append({"finding": finding, "place": None,
-                             "problem": "flag lists no represented_in places; list them or record none"})
+        if not isinstance(places, list) or not places or not all(
+                isinstance(place, str) and place.strip() for place in places):
+            problem = "represented_in is not a list of places; list them or record none"
+        elif disposition in _DISPOSITIONS:
             continue
-        for place in places:
-            disposition = place.get("disposition") if isinstance(place, dict) else None
-            if disposition in _DISPOSITIONS:
-                continue
+        else:
             problem = {None: "no disposition", "none": "no disposition",
                        "revalidate": "revalidation pending"}.get(disposition, f"unknown disposition {disposition!r}")
-            problems.append({"finding": finding, "place": _place(place), "problem": problem})
+        problems.append({"finding": flag.get("finding"), "problem": problem})
     return problems
 
 
-def _place(place):
-    return ({k: v for k, v in place.items() if k not in {"disposition", "disposition_recorded_at"}}
-            if isinstance(place, dict) else place)
+def release_dispositions(record: dict, prior) -> list[dict]:
+    """Each represented flag's disposition, `new` unless the prior release recorded the same one.
 
+    `prior` is the prior release's manifest, None when there is none, or False when it is unreadable
+    (then `new` is None: unknown).
+    """
+    def key(flag):
+        return flag.get("finding"), flag.get("reason"), flag.get("disposition")
 
-def _time(value):
-    try:
-        return datetime.fromisoformat(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def release_dispositions(record: dict, prior_released_at) -> list[dict]:
-    """Each recorded disposition, `new` when recorded after the prior release (or with none before)."""
-    since = _time(prior_released_at)
+    before = prior.get("revalidation_flags") if isinstance(prior, dict) else None
+    before = {key(f) for f in before if isinstance(f, dict)} if isinstance(before, list) else set()
     rows = []
     for flag in record.get("revalidation_flags") if isinstance(record.get("revalidation_flags"), list) else []:
-        places = flag.get("represented_in") if isinstance(flag, dict) else None
-        for place in places if isinstance(places, list) else []:
-            if not isinstance(place, dict):
-                continue
-            recorded = _time(place.get("disposition_recorded_at"))
-            try:
-                new = True if since is None else (None if recorded is None else recorded > since)
-            except TypeError:  # One timestamp lacks its UTC offset.
-                new = None
-            rows.append({"finding": flag.get("finding"), "reason": flag.get("reason"), "place": _place(place),
-                         "disposition": place.get("disposition"), "new": new})
+        if not isinstance(flag, dict) or not isinstance(flag.get("represented_in"), list):
+            continue
+        rows.append({"finding": flag.get("finding"), "reason": flag.get("reason"),
+                     "represented_in": flag["represented_in"], "disposition": flag.get("disposition"),
+                     "new": None if prior is False else key(flag) not in before})
     return rows
 
 
@@ -853,7 +1037,7 @@ def provenance_gaps(record: dict) -> list[dict]:
                 walk(item, f"{path}[{index}]")
 
     for key, value in record.items():
-        if key not in {"inventory", "export_checks", "revalidation_flags", "caveats"}:
+        if key not in {"inventory", "export_checks", "revalidation_flags"}:
             walk(value, key)
     return gaps
 
@@ -938,18 +1122,17 @@ def _copy_to_storage(root, local, investigation, package, number):
 _STORAGE_FAILURES = {"conflict", "copy failed", "mismatch"}
 
 
-def release(root, investigation, package, *, manifest_name=None) -> dict:
+def release(root, investigation, package) -> dict:
     """Verify the draft, copy it to the next numbered release, stamp it, and copy it to storage."""
     root = Path(root)
     package_dir = _package_dir(root, investigation, package)
-    check_report = check_draft(root, investigation, package, verify_only=True, manifest_name=manifest_name)
-    report = {"released": False, "check": {k: check_report[k] for k in ("passed", "record")}}
+    check_report = check_draft(root, investigation, package, verify_only=True)
+    report = {"released": False, "check": {"passed": check_report["passed"]}}
     if not _structure_passed(check_report):
         report["refused"] = "check-draft --verify-only does not pass"
         report["check"] = check_report
         return report
-    name = check_report["manifest"]
-    record = _read_json(package_dir / "draft" / name)
+    record = _read_json(package_dir / "draft" / MANIFEST)
     problems = disposition_problems(record)
     if check_report["unmatched_flags"] or problems:
         report["refused"] = "flagged findings without a release disposition"
@@ -963,31 +1146,29 @@ def release(root, investigation, package, *, manifest_name=None) -> dict:
     prior = max(existing, key=lambda p: int(p.name), default=None)
     number = f"{int(prior.name) + 1 if prior else 1:03d}"  # Gaps stay unfilled.
     try:
-        prior_released_at = _read_json(prior / name).get("released_at") if prior else None
+        prior_record = _read_json(prior / MANIFEST) if prior else None
     except (OSError, ValueError):
-        prior_released_at = None
+        prior_record = False
     target = released / number
     staging = released / f".{number}.{os.getpid()}.tmp"
     released.mkdir(parents=True, exist_ok=True)
     try:
         shutil.copytree(package_dir / "draft", staging)
-        record.update({"status": "release", "release_number": number,
-                       "released_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        record.update({"status": "release", "release_number": number, "released_at": _now(),
                        "prior_release": f"released/{prior.name}" if prior else "none"})
-        _write_json(staging / name, record)
+        _write_json(staging / MANIFEST, record)
         os.rename(staging, target)
     finally:
         if staging.exists():
             shutil.rmtree(staging)
     report.update(released=True, release=_rel(root, target), release_number=number,
                   released_at=record["released_at"], prior_release=record["prior_release"],
-                  verify=verify(target, record["inventory"], manifest_name=name),
+                  verify=verify(target, record["inventory"]),
                   datasets=record.get("dataset_selection", {"unknown": "dataset_selection is not recorded"}),
-                  dispositions=release_dispositions(record, prior_released_at),
+                  dispositions=release_dispositions(record, prior_record),
                   provenance_gaps=provenance_gaps(record),
                   checkout_only_acquisitions=checkout_only_acquisitions(root, record),
                   storage=_copy_to_storage(root, target, investigation, package, number))
-    report["record"] = _audit(root, investigation, package, f"release-{number}.json", report)
     return report
 
 
@@ -996,19 +1177,17 @@ def cli_release(root: Path, argv: list[str]) -> int:
         prog="awb.py release", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Copy a draft that passes check-draft --verify-only, with every flagged finding "
                     "recorded and disposed, to the next numbered release and to release storage.",
-        epilog=_RECORD_EPILOG + "\nRefuses, creating nothing, unless check-draft --verify-only passes and "
-               "every revalidation_flags place is omit or release_with_caveat; a flag refusal lists "
-               "unmatched_flags and dispositions.\nOn success it prints the report fields: datasets, "
-               "dispositions (new: recorded since the prior release), provenance_gaps, "
+        epilog="Prints one JSON line.\nRefuses, creating nothing, unless check-draft --verify-only passes and "
+               "every represented revalidation_flags entry is omit or release_with_caveat; a flag refusal "
+               "lists unmatched_flags and dispositions.\nOn success it prints the report fields: datasets, "
+               "dispositions (new: absent from the prior release's manifest), provenance_gaps, "
                "checkout_only_acquisitions, verify (the local copy), and storage.\nstorage.status is copied or "
                "already copied (empty compare_trees), mismatch or conflict (compare_trees rows), copy failed "
                "(problem), unreachable or unrecorded (instruction), or none chosen (warning).\nExit 1 on "
                "refusal, a verify row, or storage status mismatch, conflict, or copy failed.")
     _package_arguments(parser)
-    _manifest_argument(parser)
     args = parser.parse_args(argv)
-    report = release(Path(root), _simple(args.investigation, "investigation"),
-                     _simple(args.package, "package"), manifest_name=args.manifest)
+    report = release(Path(root), _simple(args.investigation, "investigation"), _simple(args.package, "package"))
     _print(report)
     if not report["released"]:
         return 1
@@ -1033,12 +1212,9 @@ def copy_releases(root, investigation, package=None) -> dict:
         released = directory / "released"
         numbers = sorted((p for p in released.iterdir() if p.is_dir() and p.name.isascii() and p.name.isdigit()),
                          key=lambda p: int(p.name)) if released.is_dir() else []
-        rows = [{"release": _rel(root, p),
-                 "storage": _copy_to_storage(root, p, investigation, directory.name, p.name)} for p in numbers]
-        if rows:
-            _audit(root, investigation, directory.name, "copy-releases.json",
-                   {"location": location, "releases": rows})
-        report["releases"] += rows
+        report["releases"] += [{"release": _rel(root, p),
+                                "storage": _copy_to_storage(root, p, investigation, directory.name, p.name)}
+                               for p in numbers]
     if not report["releases"]:
         report["errors"].append(f"no numbered releases under {_rel(root, base)}")
     return report
@@ -1051,9 +1227,7 @@ def cli_copy_releases(root: Path, argv: list[str]) -> int:
                     "README's recorded release storage and compare each copy with compare_trees.",
         epilog="Prints one JSON line with one storage row per release, statuses as release reports them; an "
                "identical existing copy is already copied, a differing one a conflict, never overwritten.\n"
-               "Writes each package's complete record to deliveries/<investigation>/<package>/audit/"
-               "copy-releases.json.\nExit 1 when no release exists or any storage status is mismatch, "
-               "conflict, or copy failed.")
+               "Exit 1 when no release exists or any storage status is mismatch, conflict, or copy failed.")
     _package_arguments(parser, package=False)
     parser.add_argument("package", nargs="?", help="package name under deliveries/<investigation>/ "
                                                    "(default: every package)")
