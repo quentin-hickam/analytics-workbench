@@ -36,11 +36,12 @@ COMMANDS = {
     "export": ("packaging/draft.py", "cli_export",
                "write the draft's chart and dataset files from saved result tables after the export checks"),
     "check-draft": ("packaging/draft.py", "cli_check_draft",
-                    "run every mechanical draft check and rewrite the manifest inventory; --verify-only "
-                    "checks a release candidate"),
+                    "run every mechanical draft check, including state.md's current flags, and rewrite the "
+                    "manifest inventory; --verify-only checks a release candidate"),
     "release": ("packaging/draft.py", "cli_release",
                 "copy the verified draft to the next numbered release and to release storage"),
-    "copy-releases": ("packaging/draft.py", "cli_copy_releases", "copy existing releases to newly recorded release storage and compare each copy"),
+    "copy-releases": ("packaging/draft.py", "cli_copy_releases",
+                      "copy existing releases to newly recorded release storage and compare each copy"),
 }
 
 
