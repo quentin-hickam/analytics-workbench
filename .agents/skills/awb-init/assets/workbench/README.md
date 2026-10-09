@@ -37,9 +37,10 @@ Open the active investigation's `state.md` for current findings, flagged finding
 
 Name the workbench skill in a plain request:
 
-- `awb-init` sets up or repairs the workbench, including after newer skills are installed, and starts an investigation: "Use awb-init to start an investigation into why overtime rose in Q3."
+- `awb-init` sets up the workbench and starts an investigation: "Use awb-init to start an investigation into why overtime rose in Q3."
 - `awb-status` reports where things stand and what can be asked for next: "Use awb-status — where are we?"
 - `awb-package` creates or revises a package's working draft: "Use awb-package to draft a package for this investigation."
 - `awb-release` preserves a numbered release from the draft: "Use awb-release — mark the package delivered."
 - `awb-clean` checks one dataset for errors and corrects them in the shared views: "Use awb-clean to clean the orders data."
 - `awb-eda` explores one dataset for the active investigation: "Use awb-eda to explore the shifts view."
+- `awb-init` repairs the workbench and brings it up to date after newer skills are installed: "Use awb-init to bring this workbench up to date."
