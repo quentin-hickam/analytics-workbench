@@ -65,7 +65,9 @@
     {
       "path": "src/awb.py",
       "asset": "awb-init/assets/awb_cli.py",
-      "previous": []
+      "previous": [
+        "e7c663f2bec25e4024ade9be7feb94cd7dfd2c13932feb3e85f032557d9c5bb9"
+      ]
     },
     {
       "path": "src/provenance.py",
@@ -80,7 +82,9 @@
       "path": "src/preparation/landing.py",
       "asset": "awb-init/assets/awb_landing.py",
       "previous": [
+        "1b7d01ae9df06ae98bd2a4e03034765cf48fbfdaf626535919e453c3b8fc43e0",
         "809a6aa97406bcf2dd70ea5d514e669848e1546cf71b5674abaa6fe765175174",
+        "b972724bc36ed43821dbdb9262b6b88e2fbd7334cb904e4ac521711a8216d416",
         "edd8a9d328d996b7bbaa575358b93b5baf9f69e91ec329bd87e3371373afcb0c"
       ]
     },
@@ -96,7 +100,9 @@
       "path": "workbench-guides/data.md",
       "asset": "awb-init/assets/workbench/workbench-guides/data.md",
       "previous": [
-        "6ab9bc2ffc3d0044cf4a8b3854fe82482972dc54a6d51504e8be21e24ce42800"
+        "5ee4b0424b6b9cf77322006e4ae2337891cadc9f6c9152b778faf3334bd14a5a",
+        "6ab9bc2ffc3d0044cf4a8b3854fe82482972dc54a6d51504e8be21e24ce42800",
+        "8382d539db934fe88055b19bb3a0fb88fe7dd6dab1371ced3230945410ec557f"
       ]
     },
     {
