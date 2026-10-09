@@ -36,7 +36,7 @@ The operation that assembled this package, recorded separately from the producin
 
 - `dataset_selection`: the exported dataset paths, or an explicit `none`;
 - `caveats`: unresolved caveats that need no disposition, such as source limitations, each with the conclusions it qualifies;
-- `revalidation_flags`: each represented finding awaiting revalidation, with `finding`, `reason` as currently recorded in `state.md`, and `represented_in`: every place the draft represents an affected conclusion (journal text, executive summary text, figure, dataset, or dataset column), each with its `disposition` (`revalidate`, `omit`, `release_with_caveat`, or `none` until the user chooses) and `disposition_recorded_at`; or `none`; and
+- `revalidation_flags`: each represented finding awaiting revalidation, with `finding`, `reason` as currently recorded in `state.md`, and `represented_in`: every place the draft represents an affected conclusion (findings text, methodology text, figure, dataset, or dataset column), each with its `disposition` (`revalidate`, `omit`, `release_with_caveat`, or `none` until the user chooses) and `disposition_recorded_at`; or `none`; and
 - `exact_rerun_inputs`: the exact-rerun inputs or snapshots included, only when the user chose them; otherwise `none`.
 
 A field that cannot be determined is recorded as `unknown` with the reason. A dirty, `uncommitted`, or unknown producing state is never described as reproducible. Unless exact-rerun inputs are included, the commit, input identifiers, and settings locate what produced the results but do not guarantee an exact rerun; do not describe such a package as exactly reproducible.

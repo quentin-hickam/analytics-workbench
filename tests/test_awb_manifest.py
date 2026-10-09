@@ -49,7 +49,7 @@ SEAMS = {
 def package(tmp_path):
     draft = tmp_path / "draft"
     draft.mkdir()
-    (draft / "journal.md").write_bytes(b"abc")
+    (draft / "findings.md").write_bytes(b"abc")
     (draft / "figures").mkdir()
     (draft / "figures/a.png").write_bytes(b"")
     (draft / "datasets").mkdir()
@@ -73,7 +73,7 @@ def test_inventory_lists_sorted_files_and_manifest_by_path_only(package, manifes
         {"path": ".hidden", "bytes": 5, "sha256": HELLO},
         {"path": "datasets/d.csv", "bytes": 5, "sha256": HELLO},
         {"path": "figures/a.png", "bytes": 0, "sha256": EMPTY},
-        {"path": "journal.md", "bytes": 3, "sha256": ABC},
+        {"path": "findings.md", "bytes": 3, "sha256": ABC},
         {"path": "manifest.json"},
     ]
 
@@ -101,9 +101,9 @@ def test_verify_reports_extra_file_including_manifest_without_row(package, extra
 
 def test_verify_reports_missing_file(package):
     rows = manifest.inventory(package, manifest_name="manifest.json")
-    (package / "journal.md").unlink()
+    (package / "findings.md").unlink()
     assert manifest.verify(package, rows, manifest_name="manifest.json") == [
-        {"path": "journal.md", "kind": "missing", "expected": ABC, "actual": None},
+        {"path": "findings.md", "kind": "missing", "expected": ABC, "actual": None},
     ]
 
 
@@ -118,10 +118,10 @@ def test_verify_reports_same_size_checksum_change(package):
 
 def test_verify_reports_size_then_checksum_for_length_change(package):
     rows = manifest.inventory(package, manifest_name="manifest.json")
-    (package / "journal.md").write_bytes(b"hello")
+    (package / "findings.md").write_bytes(b"hello")
     assert manifest.verify(package, rows, manifest_name="manifest.json") == [
-        {"path": "journal.md", "kind": "size", "expected": 3, "actual": 5},
-        {"path": "journal.md", "kind": "checksum", "expected": ABC, "actual": HELLO},
+        {"path": "findings.md", "kind": "size", "expected": 3, "actual": 5},
+        {"path": "findings.md", "kind": "checksum", "expected": ABC, "actual": HELLO},
     ]
 
 
@@ -137,25 +137,25 @@ def test_verify_accepts_digit_string_sizes_and_reports_int_sizes(package):
         if "bytes" in row:
             row["bytes"] = str(row["bytes"])
     assert manifest.verify(package, rows, manifest_name="manifest.json") == []
-    (package / "journal.md").write_bytes(b"hello")
+    (package / "findings.md").write_bytes(b"hello")
     assert manifest.verify(package, rows, manifest_name="manifest.json") == [
-        {"path": "journal.md", "kind": "size", "expected": 3, "actual": 5},
-        {"path": "journal.md", "kind": "checksum", "expected": ABC, "actual": HELLO},
+        {"path": "findings.md", "kind": "size", "expected": 3, "actual": 5},
+        {"path": "findings.md", "kind": "checksum", "expected": ABC, "actual": HELLO},
     ]
 
 
 def test_verify_rejects_incomplete_non_manifest_rows(package):
     rows = manifest.inventory(package, manifest_name="manifest.json")
-    next(row for row in rows if row["path"] == "journal.md")["sha256"] = None
-    with pytest.raises(ValueError, match="journal.md"):
+    next(row for row in rows if row["path"] == "findings.md")["sha256"] = None
+    with pytest.raises(ValueError, match="findings.md"):
         manifest.verify(package, rows, manifest_name="manifest.json")
 
 
 @pytest.mark.parametrize("size", ["-3", 3.0, True, -3])
 def test_verify_rejects_invalid_byte_sizes(package, size):
     rows = manifest.inventory(package, manifest_name="manifest.json")
-    next(row for row in rows if row["path"] == "journal.md")["bytes"] = size
-    with pytest.raises(ValueError, match="journal.md"):
+    next(row for row in rows if row["path"] == "findings.md")["bytes"] = size
+    with pytest.raises(ValueError, match="findings.md"):
         manifest.verify(package, rows, manifest_name="manifest.json")
 
 
@@ -189,12 +189,12 @@ def test_compare_trees_reports_sorted_missing_extra_and_checksum(package, tmp_pa
     (copy / "datasets/d.csv").unlink()
     (copy / "figures/a.png").write_bytes(b"abc")
     (copy / "new.md").write_bytes(b"hello")
-    (copy / "journal.md").write_bytes(b"def")
+    (copy / "findings.md").write_bytes(b"def")
     assert manifest.compare_trees(package, copy) == [
         {"path": "datasets/d.csv", "kind": "missing", "expected": HELLO, "actual": None},
         {"path": "figures/a.png", "kind": "size", "expected": 0, "actual": 3},
         {"path": "figures/a.png", "kind": "checksum", "expected": EMPTY, "actual": ABC},
-        {"path": "journal.md", "kind": "checksum", "expected": ABC,
+        {"path": "findings.md", "kind": "checksum", "expected": ABC,
          "actual": "cb8379ac2098aa165029e3938a51da0bcecfc008fd6795f401178647f96c5b34"},
         {"path": "new.md", "kind": "extra", "expected": None, "actual": HELLO},
     ]

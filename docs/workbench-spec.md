@@ -17,10 +17,10 @@ The eventual implementation must provide these artifacts:
 1. **Initialization skill (`awb-init`).** Establishes the project structure, working conventions, shared data foundation, and the first investigation. A new project starts from a business question; the skill asks for one when none is supplied and completes setup without an investigation only when the user explicitly has none yet. It also starts later investigations and resolves consequential scope changes, directly invoking the `grilling` skill as described below. It does not create a delivery package.
 2. **Project `AGENTS.md` template.** Governs daily analytical work, architectural boundaries, automatic record maintenance, source and cache handling, investigation switching, and the prohibition on unsolicited deliverables.
 3. **Status skill (`awb-status`).** A read-only report of the active investigation, findings and revalidation flags, unresolved issues, package and release state, and landed data and release storage, ending with the requests that are relevant now. It changes nothing and makes the workbench's request-gated capabilities discoverable to the analyst.
-4. **Packaging skill (`awb-package`).** Creates or revises a named delivery package's working draft only when the user explicitly requests it. It gathers the package's dataset selection, records provenance, carries caveats for findings awaiting revalidation, and produces a complete upstream narrative plus M365 assembly instructions. It owns the draft layout, shared package format, manifest fields, and draft consistency rules.
+4. **Packaging skill (`awb-package`).** Creates or revises a named delivery package's working draft only when the user explicitly requests it. It gathers the package's dataset selection, records provenance, carries caveats for findings awaiting revalidation, and produces an audience-facing findings document, an internal methodology reference, and M365 assembly instructions. It owns the draft layout, shared package format, manifest fields, and draft consistency rules.
 5. **Release skill (`awb-release`).** Preserves a numbered release from the working draft only when the user explicitly marks the package delivered. It verifies the draft against the packaging skill's consistency rules, obtains a disposition for each unresolved revalidation flag, and records the project's release storage location, copying each release there when reachable.
-6. **Visualization skill (`awb-visualize`).** Principles for attractive, legible charts, figures, diagrams, and results tables that display correctly inline in the agent chat and when pasted into a document, while keeping presentation logic out of neutral analytical operations.
-7. **Supporting templates.** Provide consistent starting formats for the shared source register, data catalog, quality record, glossary, investigation brief, current state, investigation history, package journal, executive summary, M365 assembly instructions, and delivery manifest. Templates should be created or instantiated only when the corresponding artifact is needed.
+6. **Visualization skill (`awb-visualize`).** Principles for attractive, legible charts, figures, diagrams, and results tables that display correctly inline in the agent chat and when pasted into a document, while keeping presentation logic out of neutral analytical operations. A figure carries no caption in the image; its caption lives in the document that contains it.
+7. **Supporting templates.** Provide consistent starting formats for the shared source register, data catalog, quality record, glossary, investigation brief, current state, investigation history, package findings and methodology documents, M365 assembly instructions, and delivery manifest. Templates should be created or instantiated only when the corresponding artifact is needed.
 
 Every skill name carries the `awb-` prefix so the workbench's actions group together in hosts that list skills as commands.
 
@@ -90,7 +90,7 @@ Each investigation separates a concise current state from a chronological histor
 - `state.md` captures the active question, current findings, unresolved issues, revalidation flags, and next steps so work can resume quickly.
 - `history.md` captures meaningful findings, analytical decisions, caveats, superseded conclusions, and data limitations or errors that affected the investigation.
 
-The workbench updates these records automatically when a finding, decision, flag, or next step changes. The user can also request a checkpoint before switching investigations. Records and delivery journals retain limitations and errors in the data and the methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, but exclude routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding. Git remains the record for code evolution.
+The workbench updates these records automatically when a finding, decision, flag, or next step changes. The user can also request a checkpoint before switching investigations. Records and a package's methodology document retain limitations and errors in the data and the methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, but exclude routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding. Git remains the record for code evolution.
 
 Shared business and analytical terms live in `foundation/glossary.md`. Investigations inherit those definitions. A deliberate local meaning or departure is recorded and explained in that investigation's `brief.md`; the full glossary is not copied. Population and reporting-period choices are settings rather than competing definitions.
 
@@ -142,7 +142,7 @@ project-root/
 │   └── views/                    # Version-controlled canonical definitions, if used
 ├── investigations/
 │   └── <investigation-name>/
-│       ├── brief.md              # Question, scope, purpose, usefulness, local terms
+│       ├── brief.md              # Question, scope, purpose, audience, usefulness, local terms
 │       ├── state.md              # Current findings, flags, issues, and next steps
 │       ├── history.md            # Meaningful learnings and analytical decisions
 │       ├── <configuration>       # Population and analytical settings
@@ -151,20 +151,20 @@ project-root/
 │       ├── figures/              # Figures cited as evidence for findings
 │       └── exploration/          # Local exploratory queries, notebooks, and figures
 ├── package-format/
-│   ├── journal-template.md
-│   ├── executive-summary-template.md
+│   ├── findings-template.md
+│   ├── methodology-template.md
 │   ├── m365-assembly.md
 │   └── manifest-template.md      # Shared manifest field list; serialization is project-specific
 ├── deliveries/
 │   └── <investigation-name>/
 │       └── <package-name>/
 │           ├── draft/
-│           │   ├── journal.md
-│           │   ├── executive-summary.md
+│           │   ├── findings.md          # Audience-facing; the only source of document content
+│           │   ├── methodology.md       # Internal reference; never rendered into documents
 │           │   ├── m365-assembly.md
 │           │   ├── manifest.<format>
-│           │   ├── figures/
-│           │   └── datasets/
+│           │   ├── figures/             # Only when findings.md cites figures
+│           │   └── datasets/            # Only when datasets were selected
 │           └── released/
 │               ├── 001/
 │               └── 002/
@@ -175,7 +175,7 @@ Create investigation, cache, package, and release locations lazily. The structur
 
 ## Packaging and delivery behavior
 
-Package creation and refresh require an explicit user request. Automatic investigation record maintenance must never trigger a package. An investigation has one named package by default, containing a detailed journal and executive summary. A second package is justified only by an independent scope or delivery schedule. Package format and M365 assembly conventions are shared across investigations.
+Package creation and refresh require an explicit user request. Automatic investigation record maintenance must never trigger a package. An investigation has one named package by default. Its draft carries an audience-facing `findings.md` and an internal `methodology.md`; the workbench writes no executive summary, which M365 Copilot distills from `findings.md`. A second package is justified only by an independent scope or delivery schedule. Package format and M365 assembly conventions are shared across investigations.
 
 At package creation, ask which datasets to include. Revisions inherit that selection unless the user changes it or the selected datasets no longer fit the package scope; in the latter case, ask again. Do not choose a default export set for a new package.
 
@@ -183,14 +183,14 @@ Each package has a stable name and one working `draft`. Revisions update that dr
 
 Every release is self-contained and includes:
 
-- a complete project journal for the analysis represented by that release;
-- an executive summary;
-- a brief description of changes since the previous release, when applicable;
-- any user-selected datasets;
-- M365 assembly instructions; and
+- `findings.md`, the complete audience-facing account of the analysis represented by that release, written for the audience recorded in the investigation brief. It is the only source of document content and follows a translation rule: no file names or paths, view, table, or column names, settings keys, internal identifiers, or code terms, only the glossary's business terms. Each figure's caption is the italic line beneath it there, never text drawn in the image;
+- `methodology.md`, the internal reference for the same analysis, in which identifiers are expected. The M365 agent consults it to understand a decision or answer the requester's question about one, but never renders or quotes it into a document. Its sections per finding carry the same headings as `findings.md`, and the two agree in claims, numbers, qualifications, and caveats;
+- a brief description of changes since the previous release, when applicable, in both documents;
+- the figures `findings.md` cites and any user-selected datasets;
+- M365 assembly instructions, including the guidelines under which M365 Copilot distills the executive summary; and
 - a manifest containing the producing Git commit (or `uncommitted` with checksums of the producing files when no commit existed), input provenance, analytical settings, dataset selection, and unresolved caveats.
 
-The package narrative is authoritative upstream. The approved flow is workbench to M365. M365 formats and beautifies the provided Markdown and datasets into Word and Excel outputs; it does not supply substantive revisions back to the workbench. Reverse synchronization is out of scope.
+The package narrative is authoritative upstream. The approved flow is workbench to M365. M365 Copilot formats `findings.md`, its figures, and the datasets into Word and Excel outputs, and distills the executive summary from `findings.md` under the assembly guidelines: the answer first, a few key findings with their numbers, the decision-relevant caveats, and no claims, metrics, or recommendations that `findings.md` lacks. It asks the requester before drafting when the audience, decision, length, or the effect of a caveat is unclear. It does not supply substantive revisions back to the workbench; a document that needs something only `methodology.md` holds is raised with the requester as an upstream gap. Reverse synchronization is out of scope.
 
 `deliveries/` is excluded from Git by the generated ignore rules, so a numbered release is retained in local storage only. Preserving releases elsewhere, such as shared storage or backup, is a project responsibility. The release skill asks for that location before the first release, records it in the project README, and copies each new release there when the location is reachable from the project; otherwise it states exactly what to copy and where. Landed data follows the same rule through the project `AGENTS.md`, on its own README line, because a release manifest cites acquisition identifiers whose landed originals would otherwise exist on one disk only. The release skill warns at each release about any cited acquisition without a retained copy.
 
@@ -247,7 +247,7 @@ The user explicitly asks for a package for an investigation, chooses which suppo
 Expected behavior:
 
 - create one stable named package and ask for its initial dataset selection;
-- maintain the complete narrative in the draft package rather than relying on M365 to supply missing substance;
+- maintain the complete narrative in the draft package's `findings.md` rather than relying on M365 to supply missing substance, with M365 distilling only the executive summary from it;
 - revise the same draft path instead of creating ad hoc names;
 - inherit the selected datasets on revision unless scope makes them unsuitable;
 - create release `001` only when the user explicitly marks the first draft delivered;
