@@ -6,7 +6,7 @@ This specification consolidates the accepted design for a reusable analytics wor
 
 Requirements outside the final **Unresolved design choices** section are accepted behavior. Items in that final section remain deliberately open and must not be inferred from examples in this document.
 
-The workbench supports one project with a shared data foundation and multiple investigations. It must let an analyst change or expand a business question without rebuilding reusable data preparation, while keeping the findings, decisions, and delivery history for each investigation distinct.
+The workbench supports one project with a shared data foundation and multiple investigations. It must let an analyst change or expand a business question without rebuilding reusable data preparation, while keeping the findings, decisions, and release history for each investigation distinct.
 
 ## Artifacts to produce
 
@@ -14,15 +14,14 @@ Keep the skills as agent-agnostic folders under `.agents/skills/`. Generated pro
 
 The eventual implementation must provide these artifacts:
 
-1. **Initialization skill (`awb-init`).** Establishes the project structure, working conventions, shared data foundation, and the first investigation. A new project starts from a business question; the skill asks for one when none is supplied and completes setup without an investigation only when the user explicitly has none yet. It also starts later investigations and resolves consequential scope changes, using the self-contained scoping interview below. It does not create a delivery package.
+1. **Initialization skill (`awb-init`).** Establishes the project structure, working conventions, shared data foundation, and the first investigation. A new project starts from a business question; the skill asks for one when none is supplied and completes setup without an investigation only when the user explicitly has none yet. It also starts later investigations and resolves consequential scope changes, using the self-contained scoping interview below. Its repair also brings an existing workbench up to date after newer skills are installed: the helper installer's `--upgrade` replaces only unmodified copies of earlier shipped helpers, package formats, and workbench guides, recognized by the shipped-version record. It reports customized copies for the user to decide and removes retired unmodified files only when asked. The agent then reconciles the adapted `AGENTS.md` and `README.md` against the current templates. The upgrade leaves investigation records, data, and releases as they are. Initialization does not create a delivery package.
 2. **Project `AGENTS.md` template.** Governs daily analytical work, architectural boundaries, automatic record maintenance, source and cache handling, investigation switching, and the prohibition on unsolicited deliverables.
-3. **Status skill (`awb-status`).** A read-only report of the active investigation, findings and revalidation flags, unresolved issues, package and release state, and landed data and release storage, ending with the requests that are relevant now. It changes nothing and makes the workbench's request-gated capabilities discoverable to the analyst.
-4. **Packaging skill (`awb-package`).** Creates or revises a named delivery package's working draft only when the user explicitly requests it. It gathers the package's dataset selection, records provenance, carries caveats for findings awaiting revalidation, and produces an audience-facing findings document, an internal methodology reference, and M365 assembly instructions. It owns the draft layout, shared package format, manifest fields, and draft consistency rules.
-5. **Release skill (`awb-release`).** Preserves a numbered release from the working draft only when the user explicitly marks the package delivered. It verifies the draft against the packaging skill's consistency rules, obtains a disposition for each unresolved revalidation flag, and records the project's release storage location, copying each release there when reachable.
-6. **Update skill (`awb-update`).** Brings an existing workbench up to date after newer skills are installed: replaces unmodified copies of earlier shipped package formats, helpers, and project guides, asks before touching customized copies, offers to remove retired files, and applies the migrations listed for adapted instructions. It changes no investigation records, data, or releases.
-7. **Cleaning skill (`awb-clean`).** Cleans one dataset at the shared foundation level: a scan proposes candidate issues in one call, the user decides those that change meaning, corrections become canonical view definitions or a new validated publication, and a record script writes quality rows, catalog cells, and revalidation flags in one call. Question-specific exclusions stay in the investigation.
-8. **Exploration skill (`awb-eda`).** Explores one dataset for the active investigation within its scope and settings: one scan writes the complete exploration under the investigation's `exploration/`, follow-ups are saved queries, and shared data problems go to `awb-clean`. Exploration records no findings.
-9. **Supporting templates.** Provide consistent starting formats for the shared source register, data catalog, quality record, glossary, investigation brief, current state, investigation history, package findings and methodology documents, M365 assembly instructions, and delivery manifest. Templates should be created or instantiated only when the corresponding artifact is needed.
+3. **Status skill (`awb-status`).** A read-only report of the active investigation, its findings including flagged ones, unresolved issues, package and release state, and landed data and release storage, ending with the requests that are relevant now. It changes nothing and makes the workbench's request-gated capabilities discoverable to the analyst.
+4. **Packaging skill (`awb-package`).** Creates or revises a named delivery package's working draft only when the user explicitly requests it. It gathers the package's dataset selection, records provenance, carries a caveat for each flagged finding, and produces an audience-facing findings document, an internal methodology reference, and M365 assembly instructions. It owns the draft layout, shared package format, manifest fields, and draft consistency rules.
+5. **Release skill (`awb-release`).** Preserves a frozen, numbered release from the working draft only when the user explicitly marks the package delivered. Its structural gate is `check-draft --verify-only`: a pass proves the draft is byte-identical to the one the packaging skill checked, so release's own review covers only what can change after packaging: a disposition for each flagged finding the draft represents. It records the project's release storage location, copying each release there when reachable; `copy-releases` copies existing releases when that location is recorded or changed later.
+6. **Cleaning skill (`awb-clean`).** Cleans one dataset at the shared foundation level: a scan proposes candidate issues in one call, the user decides those that change meaning, corrections become canonical view definitions or a new validated publication, and a record script writes quality rows and catalog cells and flags affected findings in one call. Question-specific exclusions stay in the investigation.
+7. **Exploration skill (`awb-eda`).** Explores one dataset for the active investigation within its scope and settings: one scan writes the complete exploration under the investigation's `exploration/`, follow-ups are saved queries, and shared data problems go to `awb-clean`. Exploration records no findings.
+8. **Supporting templates.** Provide consistent starting formats for the shared source register, data catalog, quality record, glossary, investigation brief, current state, investigation history, package findings and methodology documents, M365 assembly instructions, and package manifest. Templates should be created or instantiated only when the corresponding artifact is needed.
 
 Every skill name carries the `awb-` prefix so the workbench's actions group together in hosts that list skills as commands.
 
@@ -68,10 +67,10 @@ The workbench must enforce these conceptual boundaries without requiring separat
 2. **EDA consumes canonical data.** It explores distributions, relationships, quality, and possible explanations. Exploratory transformations remain local to an investigation until they are deliberately promoted into shared preparation logic.
 3. **Question-specific choices do not silently become cleaning rules.** A population exclusion or analytical filter stays local unless it represents a genuine, reusable correction to the data foundation and is consciously promoted as such.
 4. **Shared analytical code implements neutral operations.** Reusable modules compute measurements, comparisons, profiles, graph structures, or similar outputs independently of a desired conclusion.
-5. **Investigations compose operations through a thin layer.** Investigation code selects scope, configuration, and relevant operations. It must not duplicate shared operations or embed the desired narrative throughout the computation.
+5. **Investigations compose operations through a thin layer.** The investigation's run script, `run.py`, selects scope, configuration, and relevant operations. It must not duplicate shared operations or embed the desired narrative throughout the computation.
 6. **Interpretation and presentation follow computation.** Narrative explains results after neutral operations produce them. Outputs must retain relevant results that contradict an anticipated explanation.
 
-EDA can reveal a shared data problem, but the correction must return through preparation. A shared correction that may alter existing findings triggers revalidation flags; it does not silently rewrite conclusions.
+EDA can reveal a shared data problem, but the correction must return through preparation. A shared correction that may alter existing findings flags them with the reason; it does not silently rewrite conclusions.
 
 ## Code and data principles
 
@@ -83,13 +82,13 @@ The workbench must use consistent logical locations across projects. It must not
 
 Canonical, reusable views are preferred. DuckDB querying external Parquet datasets is the default. A project may select a different backend for a concrete need, including incremental workloads, while retaining independent source landing and the preparation/EDA boundary. Source conversion to Parquet is a deliberate storage boundary, not a requirement to materialize every transformation. Accumulating materialized results without an explicit reason violates the workflow.
 
-All analytical code is tracked in Git. Delivery packages are not part of the code history under the current convention; their metadata identifies the Git commit that produced them. A commit identifies code, not input data, so delivery metadata also records input provenance and analytical settings. Each result's evidence is a JSON file in the investigation's `evidence/` directory, written and compared by a shipped provenance helper copied into `src/`; `state.md` links to it.
+All analytical code is tracked in Git. Delivery packages are not part of the code history under the current convention; each package manifest identifies the Git commit that produced the represented results. A commit identifies code, not input data, so the manifest also records input provenance and analytical settings. Each result's evidence is a JSON file in the investigation's `evidence/` directory, written and compared by a shipped provenance helper copied into `src/`; `state.md` links to it.
 
 ## Records and vocabulary
 
 Each investigation separates a concise current state from a chronological history:
 
-- `state.md` captures the active question, current findings, unresolved issues, revalidation flags, and next steps so work can resume quickly.
+- `state.md` captures the active question, current findings, unresolved issues, flagged findings, and next steps so work can resume quickly.
 - `history.md` captures meaningful findings, analytical decisions, caveats, superseded conclusions, and data limitations or errors that affected the investigation.
 
 The workbench updates these records automatically when a finding, decision, flag, or next step changes. The user can also request a checkpoint before switching investigations. Records and a package's methodology document retain limitations and errors in the data and the methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, but exclude routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding. Git remains the record for code evolution.
@@ -114,9 +113,9 @@ Routine implementation choices need no interview. The vocabulary discipline abov
 
 ## Instruction loading
 
-Keep universal invariants and task routing in the generated `AGENTS.md`; copy acquisition and analytical procedures into `workbench-guides/` and require the relevant guide before that operation. Preserve customized guides during reconciliation. Skill references are loaded by branch: table-only work needs table guidance, unchanged release needs the shared package contract, and bounded narrative revisions begin with the current draft and relevant records before expanding when evidence is incomplete or inconsistent. Complete draft verification still applies.
+Keep universal invariants and task routing in the generated `AGENTS.md`; copy acquisition and analytical procedures into `workbench-guides/` and require the relevant guide before that operation. Preserve customized guides during reconciliation. Skill references are loaded by branch: an unchanged release relies on `check-draft --verify-only` and reads package rules only to settle a flagged finding's disposition, rare helper branches (a hand export, a non-JSON manifest, re-copying releases) read the package helper reference, and bounded narrative revisions begin with the current draft and relevant records before expanding when evidence is incomplete or inconsistent. Complete draft verification still applies.
 
-The status collector reports mechanical facts read-only and identifies unsupported formats or uncertain values for targeted manual inspection. Semantic claim matching remains the agent's responsibility. Full audit evidence stays in durable files; routine tool output uses counts, failures, and paths instead of repeating inventories and checksums.
+The status collector reports mechanical facts read-only and identifies unsupported formats or uncertain values for targeted manual inspection. Semantic claim matching remains the agent's responsibility. Full audit evidence stays in durable files; routine tool output uses counts, failures, and paths, which the agent reports verbatim instead of repeating inventories and checksums. Computation runs as saved queries or the run script rather than scratch scripts.
 
 ## Directory convention
 
@@ -150,7 +149,7 @@ project-root/
 │       ├── state.md              # Current findings, flags, issues, and next steps
 │       ├── history.md            # Meaningful learnings and analytical decisions
 │       ├── <configuration>       # Population and analytical settings
-│       ├── <composition-entry>   # Thin composition of shared operations
+│       ├── run.py                # Run script: thin composition of shared operations
 │       ├── evidence/             # One JSON evidence file per result
 │       └── exploration/          # Local exploratory queries and notebooks
 ├── package-format/
@@ -176,20 +175,20 @@ project-root/
 
 Create investigation, cache, package, and release locations lazily. The structure is a stable convention, not a requirement to create empty directories or placeholder documents during initialization. There is no `CONTEXT.md` in the generated structure.
 
-## Packaging and delivery behavior
+## Packaging and release behavior
 
 Package creation and refresh require an explicit user request. Automatic investigation record maintenance must never trigger a package. An investigation has one named package by default. Its draft carries an audience-facing `findings.md`, the deck outline whose **Answer** slide is the executive summary, and an internal `methodology.md`. A second package is justified only by an independent scope or delivery schedule. Package format and M365 assembly conventions are shared across investigations.
 
 At package creation, ask which datasets to include. Revisions inherit that selection unless the user changes it or the selected datasets no longer fit the package scope; in the latter case, ask again. Do not choose a default export set for a new package.
 
-Each package has a stable name and one working `draft`. Revisions update that draft. Only an explicit delivery milestone creates a preserved, numbered release; later changes resume in the working draft for the next release. This replaces filename-based revision schemes such as `really-final-v3`.
+Each package has a stable name and one working `draft`. Revisions update that draft. Only an explicit delivery milestone creates a preserved, numbered release, which is frozen from then on; later changes resume in the working draft for the next release. This replaces filename-based revision schemes such as `really-final-v3`.
 
 Every release is self-contained and includes:
 
 - `findings.md`, the complete audience-facing account of the analysis represented by that release, written for the audience recorded in the investigation brief. It is a slide-by-slide outline of the deck, so the user can check the storyline by reading its headings, and the only source of slide content. It follows a translation rule: no file names or paths, view, table, or column names, settings keys, internal identifiers, or code terms, only the glossary's business terms. Its **Answer** slide is the executive summary. Each chart is a specification (form, comparison, highlight, axis, interval, source, caveat, alt text) whose plotted values live in a separate chart file;
 - `methodology.md`, the internal reference for the same analysis, in which identifiers are expected. The M365 agent consults it to understand a decision or answer the requester's question about one, but never renders or quotes it into a document. Its sections per finding carry the same headings as `findings.md`, and the two agree in claims, numbers, qualifications, and caveats;
 - a brief description of changes since the previous release, when applicable, in both documents;
-- one CSV per chart `findings.md` specifies, each serializing a recorded result under the same export check as datasets, and any user-selected datasets;
+- one CSV per chart `findings.md` specifies, each serializing a recorded result that is not stale, as datasets do, and any user-selected datasets;
 - M365 assembly instructions, under which M365 Copilot builds the PowerPoint deck and draws its charts; and
 - a manifest containing the producing Git commit (or `uncommitted` with checksums of the producing files when no commit existed), input provenance, analytical settings, dataset selection, and unresolved caveats.
 
@@ -197,9 +196,9 @@ The package narrative is authoritative upstream. The approved flow is workbench 
 
 `deliveries/` is excluded from Git by the generated ignore rules, so a numbered release is retained in local storage only. Preserving releases elsewhere, such as shared storage or backup, is a project responsibility. The release skill asks for that location before the first release, records it in the project README, and copies each new release there when the location is reachable from the project; otherwise it states exactly what to copy and where. Landed data follows the same rule through the project `AGENTS.md`, on its own README line, because a release manifest cites acquisition identifiers whose landed originals would otherwise exist on one disk only. The release skill warns at each release about any cited acquisition without a retained copy.
 
-Working analysis uses current data and definitions. A delivered release preserves its exact exported results and provenance so later changes do not alter what it represented. Full database snapshots and exact rerun capability are not retained per release by default. Preserving enough original data for an exact rerun is an explicit choice.
+Working analysis uses current data and definitions. A release is frozen: it preserves its exact exported results and provenance so later changes do not alter what it represented. Full database snapshots and exact rerun capability are not retained per release by default. Preserving enough original data for an exact rerun is an explicit choice.
 
-Drafts may include findings flagged for revalidation if each affected conclusion carries a clear caveat and the draft lists unresolved issues. Before a flagged draft is marked delivered, require the user to choose among revalidating the finding, omitting it, or explicitly releasing it with the caveat. Packaging must not automatically rerun analysis. Serializing an already-recorded result through a neutral operation, after checking that the result-producing code, view definitions, input publications and acquisitions, and resolved settings match the producing state recorded with the result, is an export rather than a rerun.
+Drafts may include flagged findings if each affected conclusion carries a clear caveat and the draft lists unresolved issues. Before a draft with flagged findings is marked delivered, require the user's disposition for each: revalidate the finding, omit it, or explicitly release it with the caveat. Packaging must not automatically rerun analysis. Serializing an already-recorded result through a neutral operation is an export rather than a rerun when the result is not stale, that is, when its producing code, view definitions, input publications and acquisitions, and resolved settings still match the producing state recorded with it.
 
 ## Acceptance scenarios
 
@@ -239,13 +238,13 @@ Expected behavior:
 - keep the exploratory correction local while it is being assessed;
 - when accepted as a general data issue, implement it through shared preparation and document the correction and limitation in the foundation;
 - update canonical data through the preparation boundary rather than silently changing it inside EDA;
-- identify existing investigation findings that may be affected, flag them for revalidation, and explain why;
+- identify existing investigation findings that may be affected, flag them, and explain why;
 - do not rerun investigations or revise their conclusions automatically; and
-- preserve prior numbered deliveries unchanged.
+- leave prior releases frozen.
 
 ### 4. Package creation, revision, and release
 
-The user explicitly asks for a package for an investigation, chooses which supporting datasets to include (including the option to include none), and later asks for narrative revisions and a second delivery.
+The user explicitly asks for a package for an investigation, chooses which supporting datasets to include (including the option to include none), and later asks for narrative revisions and a second release.
 
 Expected behavior:
 
@@ -256,7 +255,7 @@ Expected behavior:
 - create release `001` only when the user explicitly marks the first draft delivered;
 - create release `002` only at the next explicit delivery milestone;
 - record Git commit, input provenance, settings, and dataset selection in each manifest; and
-- if a finding is flagged, allow a caveated draft but require an explicit revalidate, omit, or release-with-caveat choice before delivery.
+- if a finding is flagged, allow a caveated draft but require an explicit revalidate, omit, or release-with-caveat disposition before release.
 
 ### 5. Irrelevant candidate data
 
@@ -308,9 +307,9 @@ The following choices remain open and must not be silently fixed by the specific
 - the general rule for when a scope change becomes a new investigation rather than an expansion, beyond the accepted population scenarios above;
 - the backend and refresh strategy for the exceptional incremental project; DuckDB over Parquet is the batch default;
 - precise cache identity, freshness detection, invalidation, and refresh mechanics;
-- the serialization format of the delivery manifest and the exact formatting of the foundation catalog; the manifest field list and field names are fixed by the shared template;
+- the serialization format of the package manifest and the exact formatting of the foundation catalog; the manifest field list and field names are fixed by the shared template;
 - implementation language, executable filenames, and configuration serialization format;
 - backend-specific raw-data retention and ignore rules, beyond the landed-data storage rule in **Question-driven data preparation**; and
-- which deliveries, if any, warrant preserving original inputs for exact reruns.
+- which releases, if any, warrant preserving original inputs for exact reruns.
 
-Result evidence files, acquisition provenance files (`provenance.json`), and publication files (`publication.json`) are JSON with fixed keys written by the shipped `awb-init` helpers `awb_provenance.py` and `awb_landing.py`; the delivery manifest's serialization stays open.
+Result evidence files, acquisition provenance files (`provenance.json`), and publication files (`publication.json`) are JSON with fixed keys written by the shipped `awb-init` helpers `awb_provenance.py` and `awb_landing.py`; the package manifest's serialization stays open.
