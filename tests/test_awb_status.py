@@ -2,12 +2,16 @@
 # test_collect_standard_records_without_writes_or_other_conclusions: counts normalize flagged statuses; nothing is written; other investigations give only name and date.
 # test_missing_and_custom_tables_are_unknown_not_zero: an unsupported state table or absent sources record is null with an uncertainty, never zero.
 # test_malformed_table_does_not_count_partial_rows: one malformed findings row makes the counts unknown.
-# test_new_flag_requires_semantic_review_and_never_claims_zero: a flag absent from the manifest goes to representation review with the methodology path.
+# test_unmatched_flags_are_counted_for_awb_package: a flag absent from the manifest is counted in unmatched_flags; no methodology review or mtime estimate keys remain.
+# test_release_only_package_counts_every_flag_unmatched: with no draft, every flagged finding is unmatched and nothing is uncertain.
 # test_dispositions_require_current_reason: a disposition applies only while finding and reason match the state row exactly.
-# test_revalidate_and_none_places_block_release: a confirmed flag with any `none` or `revalidate` place counts as lacking a disposition; `omit` and `release_with_caveat` do not.
-# test_flag_the_draft_does_not_represent_needs_no_disposition: a flag recorded with represented_in "none" is valid and blocks nothing.
-# test_malformed_manifest_requests_targeted_fallback: invalid manifests name the manifest under uncertainties.
-# test_custom_manifest_preserves_manual_fallback: a non-JSON manifest leaves dates and disposition counts null.
+# test_revalidate_and_none_dispositions_block_release: a confirmed flag whose disposition is `none` or `revalidate` lacks a disposition; `omit` and `release_with_caveat` do not.
+# test_flag_the_draft_does_not_represent_needs_no_disposition: a flag recorded with represented_in "none" needs no disposition and blocks nothing.
+# test_malformed_flag_shape_leaves_counts_unknown: a missing or unknown disposition, empty or non-string places, or the per-place shape is malformed; counts are null.
+# test_malformed_manifest_requests_targeted_fallback: invalid manifests or timestamps name the manifest under uncertainties, with no mtime estimate.
+# test_draft_without_manifest_json_is_an_uncertainty: a draft manifest in another format is not read; the draft is named under uncertainties.
+# test_frozen_release_manifest_is_tolerated: an absent, non-JSON, undated, or unreadable release manifest leaves released_at null without uncertainties.
+# test_unreadable_draft_manifest_is_unknown: an unreadable draft manifest leaves dates and counts null with an uncertainty.
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
@@ -19,7 +23,6 @@
 # test_optional_storage_fields_absent_before_use_are_not_uncertainties: absent storage lines are unrecorded without uncertainties.
 # test_nested_repository_status_scopes_changes_and_preserves_index: Git facts are scoped to a project inside a larger repository.
 # test_unreadable_enumeration_is_unknown_not_empty: an unreadable directory yields unknown, never an empty inventory.
-# test_representation_review_uses_methodology_identifiers: representation review points at methodology.md.
 # test_none_chosen_is_a_recorded_decision: `none chosen`, backticked or bare `none`, reports availability none chosen, not unrecorded.
 # test_absent_storage_remains_actionable_when_acquisitions_and_releases_exist: absent lines read unrecorded alongside acquisitions and releases.
 
@@ -92,38 +95,45 @@ def test_malformed_table_does_not_count_partial_rows(workbench):
 def package(workbench, flags):
     draft = "deliveries/churn/review/draft"
     write(workbench, draft + "/manifest.json", json.dumps({"revised_at": "2026-10-01T10:00:00-04:00", "revalidation_flags": flags}))
-    write(workbench, draft + "/methodology.md", "Renewal timing is relevant, expressed with a different name.")
     write(workbench, "deliveries/churn/review/released/002/manifest.json", json.dumps({"released_at": "2026-09-29T09:00:00-04:00"}))
     return workbench / draft
 
 
-def test_new_flag_requires_semantic_review_and_never_claims_zero(workbench):
+def flag(disposition, places=("findings text",), reason="Q-004 correction"):
+    return {"finding": "Renewal lag", "reason": reason, "represented_in": list(places), "disposition": disposition}
+
+
+def test_unmatched_flags_are_counted_for_awb_package(workbench):
     package(workbench, "none")
     result = status.collect(workbench)["packages"][0]
     assert result["draft_vs_release"] == "ahead"
     assert result["latest_release"] == "002"
-    assert result["representation_review"] == [{"finding": "Renewal lag", "reason": "Q-004 correction"}]
-    assert result["flags_since_draft"] == "unknown until representation review"
-    assert result["review_methodology"].endswith("draft/methodology.md")
+    assert result["unmatched_flags"] == 1
+    assert result["confirmed_without_disposition"] == 0
+    assert not {"representation_review", "review_methodology", "flags_since_draft", "comparison_is_estimate"} & result.keys()
+
+
+def test_release_only_package_counts_every_flag_unmatched(workbench):
+    package(workbench, "none")
+    __import__("shutil").rmtree(workbench / "deliveries/churn/review/draft")
+    result = status.collect(workbench)
+    assert result["packages"][0]["unmatched_flags"] == 1
+    assert result["packages"][0]["confirmed_without_disposition"] is None
+    assert result["uncertainties"] == []
 
 
 def test_dispositions_require_current_reason(workbench):
-    old = {"finding": "Renewal lag", "reason": "older reason", "represented_in": [{"disposition": "release_with_caveat"}]}
-    draft = package(workbench, [old])
+    draft = package(workbench, [flag("release_with_caveat", reason="older reason")])
     result = status.collect(workbench)["packages"][0]
-    assert result["representation_review"]
-    old["reason"] = "Q-004 correction"
-    old["represented_in"].append({"disposition": "none"})
-    (draft / "manifest.json").write_text(json.dumps({"revised_at": "2026-10-01T10:00:00-04:00", "revalidation_flags": [old]}))
+    assert (result["unmatched_flags"], result["confirmed_flags"]) == (1, [])
+    (draft / "manifest.json").write_text(json.dumps({"revised_at": "2026-10-01T10:00:00-04:00", "revalidation_flags": [flag("none")]}))
     result = status.collect(workbench)["packages"][0]
-    assert result["confirmed_without_disposition"] == 1
-    assert result["representation_review"] == []
+    assert (result["unmatched_flags"], result["confirmed_without_disposition"]) == (0, 1)
 
 
-@pytest.mark.parametrize("places,blocked", [(["omit", "release_with_caveat"], False), (["release_with_caveat", "revalidate"], True), (["none"], True)])
-def test_revalidate_and_none_places_block_release(workbench, places, blocked):
-    flag = {"finding": "Renewal lag", "reason": "Q-004 correction", "represented_in": [{"disposition": d} for d in places]}
-    package(workbench, [flag])
+@pytest.mark.parametrize("disposition,blocked", [("omit", False), ("release_with_caveat", False), ("revalidate", True), ("none", True)])
+def test_revalidate_and_none_dispositions_block_release(workbench, disposition, blocked):
+    package(workbench, [flag(disposition, places=["findings: Renewal lag rose", "chart 1"])])
     result = status.collect(workbench)["packages"][0]
     assert result["confirmed_flags"] == [{"finding": "Renewal lag", "reason": "Q-004 correction", "without_disposition": blocked}]
     assert result["confirmed_without_disposition"] == int(blocked)
@@ -131,9 +141,21 @@ def test_revalidate_and_none_places_block_release(workbench, places, blocked):
 
 def test_flag_the_draft_does_not_represent_needs_no_disposition(workbench):
     package(workbench, [{"finding": "Renewal lag", "reason": "Q-004 correction", "represented_in": "none"}])
-    result = status.collect(workbench)["packages"][0]
-    assert result["confirmed_flags"] == [{"finding": "Renewal lag", "reason": "Q-004 correction", "without_disposition": False}]
-    assert result["confirmed_without_disposition"] == 0
+    result = status.collect(workbench)
+    assert result["packages"][0]["confirmed_flags"] == [{"finding": "Renewal lag", "reason": "Q-004 correction", "without_disposition": False}]
+    assert result["packages"][0]["confirmed_without_disposition"] == 0
+    assert result["uncertainties"] == []
+
+
+@pytest.mark.parametrize("bad", [flag(None), flag("waive"), flag("omit", places=[]), flag("omit", places=[""]), flag("omit", places=[{"chart": "1"}]),
+                                 {"finding": "Renewal lag", "reason": "Q-004 correction", "represented_in": [{"disposition": "omit"}]},
+                                 {"finding": "Renewal lag", "reason": "Q-004 correction", "represented_in": "none", "disposition": "waive"}])
+def test_malformed_flag_shape_leaves_counts_unknown(workbench, bad):
+    package(workbench, [bad])
+    result = status.collect(workbench)
+    assert result["packages"][0]["confirmed_without_disposition"] is None
+    assert result["packages"][0]["unmatched_flags"] is None
+    assert any("revalidation_flags" in u["reason"] for u in result["uncertainties"])
 
 
 @pytest.mark.parametrize("content", ["not json", "[]", '{"revalidation_flags": ["bad"]}', '{"revised_at": "yesterday", "revalidation_flags": "none"}'])
@@ -142,17 +164,48 @@ def test_malformed_manifest_requests_targeted_fallback(workbench, content):
     (draft / "manifest.json").write_text(content)
     result = status.collect(workbench)
     assert any(u["path"].endswith("draft/manifest.json") for u in result["uncertainties"])
-    assert result["packages"][0]["revised_at"] is None or result["packages"][0]["comparison_is_estimate"]
+    assert result["packages"][0]["revised_at"] is None
+    assert result["packages"][0]["draft_vs_release"] is None
 
 
-def test_custom_manifest_preserves_manual_fallback(workbench):
+def test_draft_without_manifest_json_is_an_uncertainty(workbench):
     draft = package(workbench, "none")
     (draft / "manifest.json").unlink()
     (draft / "manifest.yaml").write_text("revised_at: 2026-10-01T10:00:00-04:00")
     result = status.collect(workbench)
     assert result["packages"][0]["revised_at"] is None
     assert result["packages"][0]["confirmed_without_disposition"] is None
-    assert any("established manifest format" in u["reason"] for u in result["uncertainties"])
+    assert [u["path"] for u in result["uncertainties"]] == ["deliveries/churn/review/draft"]
+
+
+@pytest.mark.parametrize("change", ["remove", "yaml", "not json", "no date", "unreadable"])
+def test_frozen_release_manifest_is_tolerated(workbench, monkeypatch, change):
+    package(workbench, "none")
+    release = workbench / "deliveries/churn/review/released/002/manifest.json"
+    if change in {"remove", "yaml"}:
+        release.unlink()
+        if change == "yaml":
+            write(workbench, "deliveries/churn/review/released/002/manifest.yaml", "released_at: 2026-09-29")
+    elif change == "unreadable":
+        original = Path.read_text
+        monkeypatch.setattr(Path, "read_text", lambda path, *a, **k: (_ for _ in ()).throw(PermissionError()) if path == release else original(path, *a, **k))
+    else:
+        release.write_text("not json" if change == "not json" else "{}")
+    result = status.collect(workbench)
+    assert result["packages"][0]["latest_release"] == "002"
+    assert result["packages"][0]["released_at"] is None
+    assert result["packages"][0]["draft_vs_release"] is None
+    assert result["uncertainties"] == []
+
+
+def test_unreadable_draft_manifest_is_unknown(workbench, monkeypatch):
+    draft = package(workbench, "none")
+    original = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda path, *a, **k: (_ for _ in ()).throw(PermissionError()) if path == draft / "manifest.json" else original(path, *a, **k))
+    result = status.collect(workbench)
+    assert result["packages"][0]["revised_at"] is None
+    assert result["packages"][0]["confirmed_without_disposition"] is None
+    assert any(u["path"].endswith("draft/manifest.json") and "PermissionError" in u["reason"] for u in result["uncertainties"])
 
 
 def git(root, *args, env=None):
@@ -309,7 +362,7 @@ def test_nested_repository_status_scopes_changes_and_preserves_index(workbench, 
     assert before == (index.read_bytes(), index.stat().st_mtime_ns)
 
 
-@pytest.mark.parametrize("unreadable,unknown_field", [("investigations", "other_investigations"), ("deliveries/churn", "packages"), ("deliveries/churn/review/released", "releases"), ("deliveries/churn/review/draft", "manifest")])
+@pytest.mark.parametrize("unreadable,unknown_field", [("investigations", "other_investigations"), ("deliveries/churn", "packages"), ("deliveries/churn/review/released", "releases")])
 def test_unreadable_enumeration_is_unknown_not_empty(workbench, monkeypatch, unreadable, unknown_field):
     package(workbench, "none")
     blocked = workbench / unreadable
@@ -331,19 +384,9 @@ def test_unreadable_enumeration_is_unknown_not_empty(workbench, monkeypatch, unr
     assert any(u["path"] == unreadable and "enumerat" in u["reason"].lower() for u in result["uncertainties"])
     if unknown_field in {"other_investigations", "packages"}:
         assert result[unknown_field] is None
-    elif unknown_field == "releases":
+    else:
         assert result["packages"][0]["release_inventory_known"] is False
         assert result["packages"][0]["latest_release"] is None
-    else:
-        assert result["packages"][0]["revised_at"] is None
-        assert result["packages"][0]["confirmed_without_disposition"] is None
-
-
-def test_representation_review_uses_methodology_identifiers(workbench):
-    package(workbench, "none")
-    result = status.collect(workbench)["packages"][0]
-    assert result["review_methodology"].endswith("draft/methodology.md")
-    assert "review_journal" not in result
 
 
 @pytest.mark.parametrize("value", ["`none chosen`", "None chosen", "none"])
