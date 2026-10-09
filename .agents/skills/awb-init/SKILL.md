@@ -1,82 +1,89 @@
 ---
 name: awb-init
-description: Initialize or repair an analytics workbench, start a new investigation in an existing analytics workbench, or resolve a consequential scope change through the scoping interview.
+description: Initialize or repair an analytics workbench. Use when the user sets one up, brings a new business question, changes an investigation's scope, or asks to update the workbench to newer skills, or when a helper reports it predates a command.
 ---
 
 # Initialize an analytics workbench
 
-Build a project around one shared data foundation and zero or more investigations. Initialization establishes conventions and durable records; broad data preparation, an analytical framework, and delivery packages come later and only on request.
+Build a project around one shared data foundation and zero or more investigations. Initialization establishes conventions and durable records; data preparation, analysis, and packages follow on request.
 
-## Resolve the target
+## 1. Resolve the target
 
-1. Use the project root named by the user. Otherwise, use the current working directory only when it is clearly the intended data project.
-2. A directory holding skill sources, design records, or an unrelated codebase is not a data project. If the current directory is one, obtain a separate target path before writing project files.
-3. Inspect the target before changing it. Read its repository instructions, orientation, and ignore rules. For a new question or scope decision, read the named or active investigation's brief first; read state only for resumed work, repair, or related method context as described below. Inspect relevant foundation records and history entries when the request or an inconsistency calls for them. Expand when context is missing, rather than loading every investigation and ledger.
-4. Check whether the target directory or any directory above it holds a host-specific instruction file that the current host reads in preference to `AGENTS.md`. For example, Claude Code reads `CLAUDE.md` and skips `AGENTS.md` when a `CLAUDE.md` or `CLAUDE.local.md` is present. Such a file means the workbench rules in `AGENTS.md` may not be loaded. Never create, edit, or bridge that file; report it at completion.
-5. Merge conservatively. Existing files and project conventions are authoritative. Create missing artifacts, add clearly compatible missing sections when useful, and preserve all existing content. When an existing artifact conflicts with the workbench model, explain the conflict and ask for the project-specific decision instead of overwriting it.
+1. Use the project root the user names, otherwise the current directory when it is clearly the intended data project. A directory holding skill sources, design records, or an unrelated codebase is not one; obtain a separate target path before writing project files.
+2. Inspect the target before changing it: its repository instructions, orientation, and ignore rules, then the investigation records step 2 names.
+3. Check whether the target or any directory above it holds a host-specific instruction file the current host reads in preference to `AGENTS.md`; Claude Code reads `CLAUDE.md` and skips `AGENTS.md` when a `CLAUDE.md` or `CLAUDE.local.md` is present. Such a file means the workbench rules in `AGENTS.md` may not be loaded. Leave that file to the user; report it with the import line that loads `AGENTS.md` (for Claude Code, a path relative to the file holding it: `@AGENTS.md` beside it, `@../AGENTS.md` from `.claude/CLAUDE.md`).
+4. Merge conservatively. Existing files and project conventions are authoritative: create missing artifacts, add clearly compatible missing sections, and preserve existing content. When an existing artifact conflicts with the workbench model, explain the conflict and ask for the project-specific decision.
+5. Use the existing Git repository when the target is inside one. Otherwise initialize a local repository if Git is available, with no commit or remote; if Git is unavailable, report that code history is not established.
 
-A rerun is reconciliation, not a reset: settled records, answered questions, working paths, and customized templates stay as they are.
+A rerun is reconciliation: settled records, answered questions, working paths, and customized templates stay as they are.
 
-Use the existing Git repository when the target is inside one. Otherwise, initialize a local Git repository if Git is available, without creating a commit or configuring a remote. If Git is unavailable, report that limitation rather than claiming code history is established.
+## 2. Decide how much to initialize
 
-## Decide how much to initialize
+An investigation exists only when the user has supplied a business question. For a new project, ask for the question before creating any project file; set up the project and shared foundation without an investigation only when the user explicitly says there is no question yet. A repair needs no new question.
 
-An investigation exists only when the user has supplied a business question. A new project starts from one: when the user asks to initialize a new project without supplying a question, ask for the business question before creating any project file. Set up the project and shared foundation without an investigation only when the user explicitly says there is no question yet. Repairing or reconciling an existing workbench needs no new question.
+For an existing workbench, read the active investigation's brief before deciding whether to extend it or start another; read its findings only when the new investigation is related, as context for method. An expansion of the same ask to a population containing the original group stays in that investigation: revise its brief and ask only about the decisions the expansion reopens, such as purpose, usefulness, or new unknowns, carrying the settled ones forward. The same questions about an independent group start another. Inherit the current method, settings, and package format for a related investigation unless corrected, but start fresh findings and progress. Ask about genuinely ambiguous boundaries rather than applying these examples to every scope change.
 
-For an existing workbench, read the active investigation's brief before deciding whether to extend it or start another; read its findings only when the new investigation is related, as context for method selection. An expansion of the same ask to a population containing the original group stays in that investigation: revise its brief and ask only about the decisions the expansion reopens, such as purpose, usefulness, or new unknowns, carrying the settled ones forward. The same questions about an independent group start another. Inherit the current method, settings, and package format for a related investigation unless corrected, but start fresh findings and progress. Ask about genuinely ambiguous boundaries rather than applying these examples to every scope change.
+## 3. Run the scoping interview
 
-## Run the scoping interview
+When a business question is available and scope or purpose decisions remain open:
 
-When a business question is available and consequential scope or purpose decisions remain unresolved, run this self-contained interview:
+- Follow the decision tree: settle the choices that constrain later choices before their dependent branches. Establish the business question, population or scope, supported decision or exploratory purpose, usefulness criteria, and material unknowns.
+- Ask one decision question at a time, with a recommended answer. Carry settled answers forward; ask only about choices that materially affect the analysis.
+- Look facts up yourself in the repository, source systems, and tools; ask the user only for decisions.
+- Record any reader the user describes in the brief's Audience section; `awb-package` asks for it when a package needs it.
+- Challenge ambiguous terms, test a proposed meaning with a concrete example, and compare it with source data and analytical logic when available. Keep each resolved meaning and carry it into its record in step 4: shared meanings in `foundation/glossary.md`, an investigation's departure in its `brief.md`, dataset and view descriptions in `foundation/catalog.md`, consequential analytical decisions in its history. Record terms there instead of `CONTEXT.md` or ADRs.
 
-- Follow the decision tree: settle the choices that constrain later choices before exploring their dependent branches. Establish the business question, population or scope, supported decision or exploratory purpose, usefulness criteria, and material unknowns.
-- Ask exactly one decision question at a time and include a recommended answer. Carry settled answers forward; ask only about unresolved choices that materially affect the analysis. Routine implementation choices need no question.
-- Resolve facts directly from repository, source systems, and available tools rather than asking the user to retrieve them or dispatching a sub-agent.
-- When the user describes who will read the delivered documents, record it in the brief's Audience section. Do not ask for the audience as a scoping decision; `awb-package` asks when a package needs it and the brief lacks it.
-- Finish when every consequential scope and purpose decision is settled or explicitly recorded as a material unknown. Unknowns may remain visible without blocking exploration. Create the investigation records under the workbench rules without a separate confirmation round.
+The interview is done when the question, population, supported decision or exploratory purpose, usefulness criteria, and material unknowns are each settled or recorded as an unknown in the brief. Unknowns may stay open without blocking exploration. Create the investigation records without a separate confirmation round.
 
-Apply this vocabulary discipline while interviewing and initializing: challenge ambiguous terms, test a proposed meaning with a concrete example, compare it with source data and analytical logic when available, and record the resolved meaning immediately. Shared meanings go in `foundation/glossary.md`; an investigation-specific departure goes in its `brief.md`; dataset and view descriptions go in `foundation/catalog.md`; consequential analytical decisions go in the investigation history. These records replace `CONTEXT.md`, `CONTEXT-MAP.md`, ADRs, `grill-with-docs`, and the unmodified `domain-modeling` skill.
+## 4. Create the project foundation
 
-## Create the project foundation
+Adapt asset files to the target; their instructional comments and example rows are guidance, not project facts. The user-level skills serve every project, so the project holds only these files.
 
-Adapt the asset files to the target; instructional comments and example rows are guidance, not project facts.
+1. Adapt the [orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [agent instructions](assets/workbench/AGENTS.md) into missing root files; merge `.gitignore` rules one by one. Step 5 reconciles existing ones during a repair.
+2. Copy missing `assets/workbench/workbench-guides/{data,analysis}.md` to `workbench-guides/` unread; read a guide only to merge it into an existing one.
+3. Make the root instructions link to both guides relatively.
+4. Install the project helpers and declare their packages, with the interpreter that will run the project's analysis, such as its virtual environment. Run it as a black box; `--check` reports without writing. A repair runs it in step 5 instead.
 
-- For a new workbench or repair, read and adapt the [project orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [project agent instructions](assets/workbench/AGENTS.md). Create missing root files and merge `.gitignore` rules individually. Copy missing `assets/workbench/workbench-guides/{data,analysis}.md` to `workbench-guides/` at the project root; these are project procedures, not skill copies. Preserve existing guide content and conventions, add clearly compatible missing sections only when useful, and surface conflicts. Ensure root instructions route to the guides with relative links; merge routing conservatively into existing instructions. Copy these guides without loading their bodies during ordinary initialization; read only a guide whose task trigger has fired or whose merge requires inspection. The installed user-level skills serve every project; create no project-specific skill copies or vendor-specific instruction files.
-- For a new workbench or repair, once the root files exist, install the project helpers and declare their packages in one call, using this skill's actual directory and the interpreter that will run the project's analysis, such as the project's virtual environment:
+   ```sh
+   python3 <skill-directory>/scripts/install_helpers.py <project-root>
+   ```
 
-  ```sh
-  python3 <skill-directory>/scripts/install_helpers.py <project-root>
-  ```
+   Carry into the report every `files` entry not `installed` or `current`, any `requirements` entry marked `missing`, and the `install` command it prints; the user adds or runs those.
+5. Create shared foundation records as their conditions fire: the [source register](assets/workbench/foundation/sources.md) when a source becomes a real candidate, the [catalog](assets/workbench/foundation/catalog.md) when a dataset, view, or deliberate cache exists, the [quality record](assets/workbench/foundation/quality.md) when a shared limitation, check, or correction is known, and the [glossary](assets/workbench/foundation/glossary.md) when shared vocabulary is resolved. Keep an existing project's format when it serves the same responsibility; create each ledger only with content.
+6. Investigation:
+   - New: adapt the [brief](assets/workbench/investigation/brief.md), [state](assets/workbench/investigation/state.md), and [history](assets/workbench/investigation/history.md), and copy [run.py](assets/workbench/investigation/run.py) with its [settings.toml](assets/workbench/investigation/settings.toml), under `investigations/<stable-slug>/`, with a slug named for the question rather than the population so an expansion keeps it right. Populate them only with settled facts, put open questions in the brief and state, and point README's `Active investigation` line at the state file.
+   - Extending: revise the brief, settings, and state to the settled scope; record superseded findings in the history.
+7. Create `data/raw/`, `data/parquet/`, `data/cache/`, `foundation/views/`, and further code or configuration only when their first content exists.
 
-  Execute it without reading its implementation; `--check` reports without writing. It copies every missing helper under `src/`, including the `src/awb.py` command dispatcher, and never overwrites an existing one. When the project has neither `requirements.txt` nor `pyproject.toml`, it writes a `requirements.txt` naming the packages the helpers need; otherwise it lists missing entries and edits nothing. It checks the interpreter but never installs packages. From its compact JSON, carry into the completion report any `present-earlier` helper (an unmodified older copy that `awb-update` refreshes), any `present-customized` helper (the project's own code, kept), dependency entries missing from an existing file, and missing packages with the `install` command it gives; the user adds or runs those. Package formats and workbench guides are installed by their own steps, not by this script.
-- For the shared foundation, use the [source register](assets/workbench/foundation/sources.md) when a source becomes a real candidate, the [catalog](assets/workbench/foundation/catalog.md) when a dataset, view, or deliberate cache exists, the [quality record](assets/workbench/foundation/quality.md) when a shared limitation, check, or correction is known, and the [glossary](assets/workbench/foundation/glossary.md) when shared vocabulary has been resolved. Read and adapt only the records whose conditions have fired. Retain an existing project's format when it serves the same responsibility; an empty ledger created to complete the directory tree is a defect.
-- When an investigation has been established, read and adapt the [brief](assets/workbench/investigation/brief.md), [current state](assets/workbench/investigation/state.md), and [history](assets/workbench/investigation/history.md), and copy the composition entry skeleton [run.py](assets/workbench/investigation/run.py) with its [settings.toml](assets/workbench/investigation/settings.toml) unless the investigation already has an entry and settings. Create missing records under `investigations/<stable-slug>/`, with a slug named for the question rather than the population so an expansion does not make it wrong, populate them only with settled facts, and point the `Active investigation` line in the project README at its state file. When extending an investigation, revise its brief, settings, and state to the settled scope, record superseded findings in its history, and otherwise preserve existing records. Put unresolved questions in the brief and state rather than filling gaps by assumption.
+Package templates and `deliveries/` stay absent. If the user explicitly asks for a package, finish initialization, then invoke the sibling [`awb-package` skill](../awb-package/SKILL.md).
 
-Beyond the installed helpers, create executable code, configuration, `foundation/views/`, and data directories only when current work needs them. Use cohesive shared preparation and neutral analytical modules plus a thin investigation composition layer; a speculative framework is out of scope.
+## 5. Repair and upgrade
 
-The default batch storage path is always:
+For a repair, an update to newer skills, or a helper that predates a command:
 
-1. independently land completed source artifacts with acquisition provenance;
-2. validate and publish derived Parquet without modifying the landed originals; then
-3. load Git-managed canonical view definitions into each analytical process's own DuckDB session.
+1. Run the installer with `--upgrade`. The user's request authorizes it: it installs missing helpers and replaces only `earlier` copies, unmodified versions the skills shipped, of helpers, package formats, and workbench guides.
 
-Land every acquired API response, SQL extract, or other source before canonical ingestion. Keep incomplete acquisitions and conversion outputs unpublished, following the project's `workbench-guides/data.md` procedures. Initial CSV or JSON may be a landed source format; analytical steps exchange results through views and the runtime rather than intermediate CSV files. A concrete project need may justify another backend; preserve independent landing and the preparation/EDA boundary.
+   ```sh
+   python3 <skill-directory>/scripts/install_helpers.py <project-root> --upgrade
+   ```
 
-Create `data/raw/` only for an acquisition, `data/parquet/` only for validated publication, and `data/cache/` only for a deliberate expensive result whose purpose is recorded in the catalog. Create `foundation/views/` when the first canonical definition exists. Let readers query stable published files while new outputs are prepared elsewhere and validated before publication.
+2. When it reports `customized` files or `unmodified` `retired` files, ask the user once about all of them: show each customized file's difference (`git diff --no-index <project file> <asset>`, the asset from `customized`) and ask whether to replace, keep, or merge it; ask whether to remove the unmodified retired files. Then rerun the installer with `--upgrade`, a `--replace <path>` for each file to replace, and `--remove-retired` if agreed. Make hand merges with ordinary edits, keeping the project's changes. Customized retired files are the project's code; keep and report them.
+3. Reconcile `AGENTS.md` and `README.md` with the [agent instructions](assets/workbench/AGENTS.md) and [orientation](assets/workbench/README.md) templates: add what the template holds and the project lacks, such as routing to every skill, command conventions, and **Asking for things** requests; delete lines naming skills, commands, or paths the template no longer has; keep project-specific content.
 
-Package templates and `deliveries/` remain absent during initialization. If the user explicitly asks for a package, complete initialization and then invoke the sibling [`awb-package` skill](../awb-package/SKILL.md); that skill owns `package-format/` and the package's working draft.
+Repair is done when the last installer output shows every file `installed`, `current`, `replaced`, or kept or merged by the user's choice, every retired file `removed` or kept by choice, and both root files match their templates apart from project content.
 
-## Complete initialization
+## 6. Report
 
-Check that every created link is relative, both project procedure links resolve from the root `AGENTS.md`, and every created record has a clear responsibility. Report:
+Check that every created link is relative and both guide links resolve from the root `AGENTS.md`. Report:
 
 - the target root;
-- files created and existing files preserved or augmented;
-- unresolved decisions or file conflicts;
-- any host-specific instruction file found that the host reads in preference to `AGENTS.md`, with a warning that the workbench rules may not be loaded and how that host imports or enables `AGENTS.md` (for Claude Code, an import line in the found file giving the path from that file to the project's `AGENTS.md`, such as `@AGENTS.md` beside it, `@../AGENTS.md` in `.claude/CLAUDE.md`, or the path down into the project from an ancestor's `CLAUDE.md`, because imports resolve relative to the file that contains them), leaving that change to the user;
-- helpers installed or needing attention, and any package the interpreter lacks with its install command;
-- which lazy directories were intentionally deferred;
-- how work continues: analysis proceeds through normal requests, and nothing is packaged until the user asks for a package, which `awb-package` creates; and
-- the active investigation, or that none exists, followed by a suggestion to use `awb-status` to see where things stand and what can be asked for next.
+- files created, replaced, and existing files preserved or augmented;
+- unresolved decisions, file conflicts, and files left for the user to decide;
+- any host instruction file from step 1, with its import line;
+- installer items needing attention;
+- which lazy directories were deferred;
+- after a repair, each `old_format_drafts` entry, which the next `awb-package` revision rewrites while its releases stay frozen, and each investigation without `run.py`, which gets one before its next rerun;
+- how work continues: analysis through normal requests, a package only when the user asks `awb-package` for one; and
+- the active investigation, or that none exists, followed by a suggestion to use `awb-status` to see where things stand and what to ask next.
 
-Create a Git commit only when the user explicitly requests one. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, the investigation for the user's business question has populated brief/state/history records, and no package or unsolicited analysis has been produced. A project with `Active investigation: none` is a valid completed initialization only when the user explicitly said there is no question yet, or when a repair leaves an existing workbench without one.
+Commit when the user asks; after a repair, suggest committing it as one commit so it can be reviewed and reverted as a unit. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, the investigation for the user's business question has populated brief, state, and history records, and the work has stopped short of packages and analysis the user has not requested.

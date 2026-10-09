@@ -25,6 +25,7 @@
 # test_cli_publish_converts_checks_and_records_the_select: publish command writes Parquet from a project-relative select, runs the check, and records SQL checksums and rows.
 # test_cli_publish_keeps_a_failed_check_or_empty_result_unpublished: check rows or an empty select keep the partial directory unpublished and print the failures.
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
+# test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
 
 import hashlib
 import importlib.util
@@ -571,8 +572,30 @@ def test_cli_publish_requires_from_to_name_exactly_what_the_select_reads(tmp_pat
                  request="second")
     for acquisitions in (["data/raw/orders/r2"], ["data/raw/orders/r1", "data/raw/orders/r2"]):
         with pytest.raises(SystemExit) as error:
-            landing.cli_publish(root, ["orders", "v1", "--from", *acquisitions,
+            landing.cli_publish(root, ["orders", "v1", *(arg for a in acquisitions for arg in ("--from", a)),
                                        "--sql", "prep/orders.sql"])
         assert error.value.code == 2
         assert "--from must name exactly" in capsys.readouterr().err
     assert not (root / "data/parquet").exists()
+
+
+def test_cli_options_take_one_value_each_and_may_precede_positionals(tmp_path, capsys):
+    root = workbench(tmp_path / "project")
+    (tmp_path / "a.csv").write_bytes(b"id\n1\n")
+    (tmp_path / "b.csv").write_bytes(b"id\n2\n3\n")
+    status, out = run(capsys, landing.cli_land, root, "--records", "a.csv=1", "--records", "b.csv=2",
+                      "orders", "r1", tmp_path / "a.csv", tmp_path / "b.csv")
+    assert status == 0 and out["files"] == 2
+    provenance = json.loads((root / "data/raw/orders/r1/provenance.json").read_text())
+    assert [file["records"] for file in provenance["files"]] == [1, 2]
+    pytest.importorskip("duckdb")
+    landing.land(root, "orders", "r2", lambda output: (output / "c.csv").write_bytes(b"id\n4\n"),
+                 request="second")
+    (root / "prep").mkdir()
+    (root / "prep/orders.sql").write_text(
+        "SELECT * FROM read_csv('data/raw/orders/r1/*.csv') UNION ALL "
+        "SELECT * FROM read_csv('data/raw/orders/r2/c.csv')")
+    status, out = run(capsys, landing.cli_publish, root, "--from", "data/raw/orders/r1",
+                      "--from", "data/raw/orders/r2", "--sql", "prep/orders.sql", "orders", "v1")
+    assert status == 0
+    assert out["inputs"] == ["data/raw/orders/r1", "data/raw/orders/r2"] and out["rows"] == 4
