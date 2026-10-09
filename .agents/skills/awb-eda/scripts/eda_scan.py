@@ -4,8 +4,8 @@ Run with Python 3.10+ and duckdb: eda_scan.py PROJECT_ROOT DATASET [options]. DA
 canonical view name, loaded through the project's session() helper, or a project-relative
 publication directory or Parquet file. Scope, measure, and dimensions come from the
 investigation's settings unless options override them. Writes the complete scan to
-investigations/<name>/exploration/eda/<dataset>[-<label>].json and prints a compact summary.
-Writes nothing else: no findings, state, history, or evidence.
+investigations/<name>/exploration/eda/<dataset>[-<label>].json, its only output file, and prints
+a compact summary. --show prints one section of that file without scanning again.
 """
 
 import argparse
@@ -23,6 +23,7 @@ import sys
 FORMAT = "awb-eda/1"
 SETTINGS_KEYS = ("where", "date_column", "period_start", "period_end", "measure", "dimensions",
                  "key", "period")
+PARAMETER_FALLBACKS = {"period_start": "start", "period_end": "end"}
 PERIODS = ("day", "week", "month", "quarter", "year")
 PERIOD_DAYS = {"day": 1, "week": 7, "month": 30.4, "quarter": 91.3, "year": 365.25}
 MAX_PERIODS = 2000
@@ -100,7 +101,8 @@ def load_settings(path):
 
 
 def resolve_settings(data, dataset):
-    """Find each scan key in [eda.<dataset>], [eda], [scope], then the top level."""
+    """Find each scan key in [eda.<dataset>], [eda], [scope], then the top level; the period
+    falls back to run.py's [parameters] start and end. [results.*] belongs to run.py alone."""
     eda = data.get("eda") if isinstance(data.get("eda"), dict) else {}
     tables = [(f"eda.{dataset}", eda.get(dataset)), ("eda", eda),
               ("scope", data.get("scope")), ("", data)]
@@ -111,10 +113,16 @@ def resolve_settings(data, dataset):
                 found[key] = (table[key], f"{name}.{key}" if name else key)
                 used.add(found[key][1])
                 break
-    unused = [key for key in data if key != "eda" and key not in used]
-    if isinstance(data.get("scope"), dict):
-        unused = [key for key in unused if key != "scope"]
-        unused += [f"scope.{key}" for key in data["scope"] if f"scope.{key}" not in used]
+    parameters = data.get("parameters") if isinstance(data.get("parameters"), dict) else {}
+    for key, parameter in PARAMETER_FALLBACKS.items():
+        if key not in found and parameter in parameters and not isinstance(parameters[parameter], dict):
+            found[key] = (parameters[parameter], f"parameters.{parameter}")
+            used.add(found[key][1])
+    unused = [key for key in data if key not in {"eda", "results"} and key not in used]
+    for table in ("scope", "parameters"):
+        if isinstance(data.get(table), dict):
+            unused = [key for key in unused if key != table]
+            unused += [f"{table}.{key}" for key in data[table] if f"{table}.{key}" not in used]
     return found, unused
 
 
@@ -138,6 +146,15 @@ def open_session(root):
         raise ScanError(f"{error}; install duckdb in the interpreter that runs the project") from error
 
 
+def publication_name(root, path):
+    return "-".join(path.relative_to(root).parts[-2:]) if path.is_dir() else path.stem
+
+
+def output_path(folder, name, label):
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.") or "dataset"
+    return folder / "exploration" / "eda" / f"{safe}{f'-{label}' if label else ''}.json"
+
+
 def resolve_source(connection, root, dataset):
     """Return (sql relation, record, output name) for a view or a publication path."""
     exists = connection.execute("SELECT count(*) FROM information_schema.tables WHERE table_name = ?",
@@ -159,7 +176,7 @@ def resolve_source(connection, root, dataset):
         if root not in path.parents:
             raise ScanError(f"{dataset} is outside the project")
         pattern = str(path / "**" / "*.parquet") if path.is_dir() else str(path)
-        name = "-".join(path.relative_to(root).parts[-2:]) if path.is_dir() else path.stem
+        name = publication_name(root, path)
         record = {"name": name, "kind": "publication", "path": str(path.relative_to(root))}
         return f"read_parquet({lit(pattern)}, union_by_name = true)", record, name
     raise ScanError(f"{dataset} is neither a view loaded from foundation/views nor a publication "
@@ -472,7 +489,7 @@ def associations(connection, columns, measure, min_r):
 # ---------------------------------------------------------------- reading the scan
 
 def anomalies(scan, today):
-    """Mechanical flags. Route awb-clean marks a possible shared data problem to confirm first."""
+    """Mechanical anomalies. Route awb-clean marks a possible shared data problem to confirm first."""
     found = []
 
     def add(kind, column, detail, route):
@@ -569,13 +586,13 @@ def suggested_records(scan, path):
         halves = measure["halves"]
         steps.append(f"- Check whether {item['dimension']} {shown(item['group'])} moving against the overall "
                      f"{measure['expression']} trend (mean {fmt(item['before'])} → {fmt(item['after'])}; overall "
-                     f"{fmt(halves['before'])} → {fmt(halves['after'])}) holds in the composition entry.")
+                     f"{fmt(halves['before'])} → {fmt(halves['after'])}) holds in run.py.")
     ranked = sorted((d for d in measure.get("by_dimension", []) if d["eta_squared"] is not None),
                     key=lambda d: -d["eta_squared"])
     if ranked and len(steps) < 5:
         best = ranked[0]
-        steps.append(f"- Test {best['dimension']} as an explanation of {measure['expression']} in the composition "
-                     f"entry (EDA: {best['eta_squared']:.0%} of its variance across {best['groups']} groups).")
+        steps.append(f"- Test {best['dimension']} as an explanation of {measure['expression']} in run.py "
+                     f"(EDA: {best['eta_squared']:.0%} of its variance across {best['groups']} groups).")
     return {"unresolved_issues": issues, "next_steps": steps}
 
 
@@ -661,6 +678,7 @@ def scan_dataset(root, dataset, options):
             dimensions = [{"label": c["name"], "sql": q(c["name"]), "source": "auto"} for c in columns
                           if c["kind"] in {"text", "boolean"} and 2 <= c["distinct"] <= 20
                           and (c["null_rate"] or 0) < 0.5][:5]
+        scope["not_set"] = not_set(chosen, options, measure, dimensions)
         key = as_list(chosen["key"][0]) if "key" in chosen else []
         if key and chosen["key"][1] != "option" and any(k not in names for k in key):
             scope["skipped"].append({"setting": chosen["key"][1],
@@ -684,9 +702,7 @@ def scan_dataset(root, dataset, options):
     finally:
         connection.close()
     scan = deep_plain(scan)
-    label = f"-{options.label}" if options.label else ""
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-.") or "dataset"
-    output = folder / "exploration" / "eda" / f"{safe}{label}.json"
+    output = output_path(folder, name, options.label)
     relative = str(output.relative_to(root))
     scan["anomalies"] = anomalies(scan, date.today())
     scan["suggested_records"] = suggested_records(scan, relative)
@@ -695,6 +711,22 @@ def scan_dataset(root, dataset, options):
     partial.write_text(json.dumps(scan, indent=2) + "\n", encoding="utf-8")
     os.replace(partial, output)
     return scan, relative
+
+
+def not_set(chosen, options, measure, dimensions):
+    """Name each unconfigured choice that changes what the scan computes, with the options to pass."""
+    found = []
+    if not options.no_scope and not {"where", "period_start", "period_end"} & chosen.keys():
+        found.append({"keys": "where, period", "detail": "the scan covers every row; pass --where, "
+                      "or --date-column with --start and --end"})
+    if "measure" not in chosen:
+        found.append({"keys": "measure, dimensions", "detail": "no breakdown, trend, or contrary groups; "
+                      "pass --measure and --dimension (repeatable)"})
+    elif measure and "dimensions" not in chosen:
+        chose = ", ".join(d["label"] for d in dimensions)
+        found.append({"keys": "dimensions", "detail": (f"chose {chose} automatically" if chose else
+                      "no text or boolean column with 2 to 20 values") + "; pass --dimension (repeatable)"})
+    return found
 
 
 def deep_plain(value):
@@ -719,7 +751,7 @@ def scope_filters(chosen, names):
             continue
         value, source = chosen[key]
         if not column:
-            skipped.append({"setting": source, "reason": "no date_column names the period column"})
+            skipped.append({"setting": source, "reason": "no date column is set; pass --date-column"})
         elif column[0] not in names:
             skipped.append({"setting": source, "reason": f"column {column[0]} is not in this dataset"})
         else:
@@ -793,6 +825,8 @@ def markdown(scan, path):
     out.append(f"- rows: {fmt(scan['rows'])} of {fmt(s['rows_before'])}; scope filters: {filters}")
     for item in s["skipped"]:
         out.append(f"- not applied: {item['setting']}: {item['reason']}")
+    for item in s["not_set"]:
+        out.append(f"- not set: {item['keys']}: {item['detail']}")
     if s["settings_note"]:
         out.append(f"- settings: {s['settings_note']}")
     if s["settings_unused"]:
@@ -872,7 +906,7 @@ def compact(scan, path):
         "dataset": scan["dataset"]["name"], "investigation": scan["investigation"], "path": path,
         "rows": scan["rows"], "rows_before_scope": scan["scope"]["rows_before"],
         "filters": [f["sql"] for f in scan["scope"]["applied"]], "skipped": scan["scope"]["skipped"],
-        "settings_unused": scan["scope"]["settings_unused"],
+        "not_set": scan["scope"]["not_set"], "settings_unused": scan["scope"]["settings_unused"],
         "keys": scan["grain"]["single_column_keys"] or scan["grain"]["column_pair_keys"],
         "duplicate_rows": scan["grain"]["duplicate_rows"],
         "measure": None if not measure else {
@@ -883,26 +917,53 @@ def compact(scan, path):
     }
 
 
+SETTINGS_HELP = """settings: the scan reads the investigation's settings.toml (or --settings). Each key comes
+from the first of [eda.<dataset>], [eda], [scope], and the top level; period_start and period_end
+then fall back to [parameters] start and end, the period run.py uses. Keys: where (predicate or
+list, joined with AND), date_column, period_start, period_end (inclusive dates), measure (numeric
+column or expression; a boolean gives a rate), dimensions (list), key (list), period. Options
+replace settings. A setting that does not fit the dataset prints as `not applied` with its reason;
+an unconfigured scope or measure prints as `not set` with the options to pass.
+
+--show PATH: dot-separated keys into the saved scan, where a list item is named by its name,
+dimension, or kind, or by index: columns.site.top, measure.by_dimension.site.values,
+measure.over_time.series, anomalies.0, null_patterns. An unknown key lists the keys there."""
+
+
 def parse(argv):
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0], epilog=SETTINGS_HELP,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("root", help="project root")
-    parser.add_argument("dataset", help="canonical view name, or a project-relative publication path")
+    parser.add_argument("dataset", help="canonical view name (preferred), or a project-relative publication "
+                        "directory or .parquet file that no view reads yet")
     parser.add_argument("--investigation", help="investigation name; default: README's active investigation")
-    parser.add_argument("--settings", help="project-relative settings file; default: the investigation's settings.toml")
-    parser.add_argument("--where", action="append", help="SQL predicate; repeatable; replaces the settings filter")
-    parser.add_argument("--date-column", help="date or timestamp column for scope period and trends")
-    parser.add_argument("--start", help="first date in scope, inclusive (needs a date column)")
-    parser.add_argument("--end", help="last date in scope, inclusive (needs a date column)")
-    parser.add_argument("--no-scope", action="store_true", help="ignore the settings' where and period filters")
-    parser.add_argument("--measure", help="numeric column or SQL expression to break down")
-    parser.add_argument("--dimension", action="append", help="grouping column or SQL expression; repeatable")
-    parser.add_argument("--key", action="append", help="declared grain column; repeatable")
-    parser.add_argument("--period", choices=PERIODS, help="period for coverage and trends; default: by span")
-    parser.add_argument("--top", type=int, default=10, help="top categories kept per column (default 10)")
-    parser.add_argument("--min-group", type=int, default=30, help="minimum rows for group comparisons (default 30)")
-    parser.add_argument("--min-r", type=float, default=0.5, help="|r| shown in the summary (default 0.5)")
-    parser.add_argument("--label", help="suffix for the scan file, for a second scope of the same dataset")
+    parser.add_argument("--settings", help="project-relative TOML settings file; default: the investigation's "
+                        "settings.toml")
+    parser.add_argument("--where", action="append", help="SQL predicate selecting the population; repeatable; "
+                        "replaces the settings where")
+    parser.add_argument("--date-column", help="date or timestamp column for the period filter, coverage, "
+                        "trends, and null shifts; default: the settings date_column, else the most populated one")
+    parser.add_argument("--start", help="first date in scope, inclusive; needs a date column")
+    parser.add_argument("--end", help="last date in scope, inclusive; needs a date column")
+    parser.add_argument("--no-scope", action="store_true", help="ignore the settings where and period (option "
+                        "filters still apply); with --label all, scans the whole dataset beside the scoped scan")
+    parser.add_argument("--measure", help="numeric column or SQL expression to break down; a boolean gives a rate")
+    parser.add_argument("--dimension", action="append", help="grouping column or SQL expression; repeatable; "
+                        "default with a measure: up to five text or boolean columns with 2 to 20 values, "
+                        "marked auto")
+    parser.add_argument("--key", action="append", help="declared grain column to check; repeatable")
+    parser.add_argument("--period", choices=PERIODS, help="period for coverage and trends; default by date span: "
+                        "day up to 92 days, month up to 10 years, year beyond")
+    parser.add_argument("--top", type=int, default=10, help="top values kept per column, and groups compared "
+                        "for contrary trends (default 10)")
+    parser.add_argument("--min-group", type=int, default=30, help="minimum rows in each half for a contrary "
+                        "group, and for the highest and lowest group means (default 30)")
+    parser.add_argument("--min-r", type=float, default=0.5, help="smallest |r| printed (default 0.5); the "
+                        "file holds every pair")
+    parser.add_argument("--label", help="writes <dataset>-<label>.json, so a second scope keeps the first")
     parser.add_argument("--json", action="store_true", help="print compact JSON instead of Markdown")
+    parser.add_argument("--show", metavar="PATH", help="print one section of the saved scan as compact JSON "
+                        "and exit without scanning; see below")
     options = parser.parse_args(argv)
     if options.label and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", options.label):
         parser.error("--label must be a simple name")
@@ -911,9 +972,51 @@ def parse(argv):
     return options
 
 
+def show(root, dataset, options):
+    """Return one section of a saved scan, addressed by dot-separated keys."""
+    root = Path(root).resolve()
+    investigation = options.investigation or active_investigation(root)
+    if not investigation:
+        raise ScanError("no active investigation in README.md; pass --investigation")
+    folder = root / "investigations" / investigation
+    path = (root / dataset).resolve()
+    names = [dataset]
+    if root in path.parents and (path.is_dir() or (path.is_file() and path.suffix == ".parquet")):
+        names.append(publication_name(root, path))
+    files = [output_path(folder, name, options.label) for name in names]
+    file = next((f for f in files if f.is_file()), None)
+    if not file:
+        raise ScanError(f"no saved scan at {files[-1].relative_to(root)}; run the scan first")
+    value, walked = json.loads(file.read_text(encoding="utf-8")), []
+    for part in [p for p in options.show.split(".") if p]:
+        here = ".".join(walked) or "the scan"
+        if isinstance(value, dict) and part in value:
+            value = value[part]
+        elif isinstance(value, list):
+            match = [item for item in value if isinstance(item, dict) and part in
+                     (str(item.get("name")), str(item.get("dimension")), str(item.get("kind")))]
+            if part.isdigit() and int(part) < len(value):
+                value = value[int(part)]
+            elif match:
+                value = match[0] if len(match) == 1 else match
+            else:
+                listed = sorted({str(item[k]) for item in value if isinstance(item, dict)
+                                 for k in ("name", "dimension", "kind") if item.get(k) is not None})
+                there = ", ".join(listed) if listed else f"items 0 to {len(value) - 1}"
+                raise ScanError(f"no {part} under {here}; there: {there}")
+        else:
+            there = ", ".join(value) if isinstance(value, dict) else "a value, not a section"
+            raise ScanError(f"no {part} under {here}; there: {there}")
+        walked.append(part)
+    return value
+
+
 def main(argv=None):
     options = parse(sys.argv[1:] if argv is None else argv)
     try:
+        if options.show is not None:
+            print(json.dumps(show(options.root, options.dataset, options), separators=(",", ":")))
+            return 0
         scan, path = scan_dataset(options.root, options.dataset, options)
     except ScanError as error:
         print(f"eda_scan: {error}", file=sys.stderr)
