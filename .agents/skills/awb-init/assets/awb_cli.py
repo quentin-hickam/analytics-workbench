@@ -23,6 +23,8 @@ COMMANDS = {
                 "profile a view, query file, or SQL text and save the full profile"),
     "land": ("preparation/landing.py", "cli_land",
              "land files as an acquisition, retain the copy, and record the Acquisitions row"),
+    "retain": ("preparation/landing.py", "cli_retain",
+               "retain and record every acquisition missing a retained copy or an Acquisitions row"),
     "publish": ("preparation/landing.py", "cli_publish",
                 "convert acquisitions to validated Parquet with a SQL select"),
     "stale": ("provenance.py", "cli_stale",
