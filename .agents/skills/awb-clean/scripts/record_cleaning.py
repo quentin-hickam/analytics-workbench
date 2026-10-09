@@ -14,9 +14,9 @@ SCAN_NAME names foundation/scans/<SCAN_NAME>.json written by scan_dataset.py. De
 Text may name an issue as {S1}; it becomes the issue's quality ID.
 
 Quality issue rows get the next ID, the scan's counts and examples, and the marker
-`<scan>#<key>` that later scans use to report the issue as recorded; an issue already recorded
-has its judgment cells updated instead, and its observation takes this scan's count and date, so
-later scans compare with the reopened state. Correction rows carry the rescan's before and after
+`<scan>#<key>` with its scan date; later scans use the marker to report the issue as recorded. An
+issue already recorded has its judgment cells updated instead, and its observation takes this
+scan's count and date, so later scans compare with the reopened state. Correction rows carry the rescan's before and after
 counts. A flag sets the finding's status to `revalidation-needed (was <status>)`, adds the reason,
 and updates `Last updated`. Everything is checked before any file is written; --dry-run prints the
 rows that would change and writes nothing. Prints compact JSON.
@@ -186,7 +186,8 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                 observation = _cells(quality[line_index])[2]
                 if f"`{marker}" in observation:  # a reopened issue records this scan's count and date
                     observation = re.sub(r"\(\d+ of \d+\)", f"({issue['count']} of {issue['of']})", observation, count=1)
-                    observation = re.sub(r"(\]\(scans/[^)]*\)) \d{4}-\d{2}-\d{2}",
+                    # The date follows the marker: "scanned <date>", or "in [scan](scans/...) <date>" in older rows.
+                    observation = re.sub(r"(`" + re.escape(marker) + r"[^`]+`(?: scanned| in \[scan\]\([^)]*\))) \d{4}-\d{2}-\d{2}",
                                          rf"\g<1> {scan['scanned_at'][:10]}", observation, count=1)
                     values[active.columns[2]] = observation.replace("\\|", "|")
                 rows.append(active.set(line_index, values))
@@ -199,7 +200,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                                  for e in issue["examples"][:3])
             observation = (f"{issue['summary']} ({issue['count']} of {issue['of']})"
                            + (f"; e.g. {examples}" if examples else "")
-                           + f"; `{marker}{issue['key']}` in [scan](scans/{scan['name']}.json) {scan['scanned_at'][:10]}")
+                           + f"; `{marker}{issue['key']}` scanned {scan['scanned_at'][:10]}")
             column = f", column `{issue['column']}`" if issue["column"] else ""
             obj = decision.get("object") or f"{target['kind']} `{subject}`{column}"
             rows.append(active.append({active.columns[0]: qid, active.columns[1]: _fill(obj, ids),

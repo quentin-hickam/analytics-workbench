@@ -9,7 +9,7 @@ Counts are rows unless noted; `of` is the column's non-null values, or all rows 
 | `duplicate-rows` | rows repeating another row exactly, beyond the first | event data with no timestamp or identifier, where identical rows are separate events |
 | `duplicate-key:<cols>` | extra rows for key values that occur more than once. Explicit `--key` or, without one, near-unique columns and columns named like `id`, `*_id`, or `key` | a near-unique attribute such as an email that is not the grain |
 | `null-key:<cols>` | rows missing part of an explicit key | none |
-| `parse:<col>:<type>` | non-placeholder values that fail to parse when at least 90% (`--typed-threshold`) parse as the type | free-text columns that are mostly numeric |
+| `parse:<col>:<type>` | non-placeholder values that fail to parse when at least 90% parse as the type | free-text columns that are mostly numeric |
 | `date-formats:<col>` | values outside the dominant format when formats mix, or every value when two formats fit them all (day-month order ambiguous) | none |
 | `text-typed:<col>:<type>` | values stored as text that parse as the type, for views and publications only; landed CSV is read as text on purpose | codes and identifiers that look numeric. Leading-zero values stay text |
 | `sentinel:<col>:<value>` | text placeholders (`""`, `N/A`, `null`, `none`, `-`, `?`, `unknown`, `missing`, `tbd`, and similar); numbers such as `-1`, `999`, or `9999` that sit outside every other value; placeholder dates such as `1900-01-01` or `9999-12-31` | `none` or `unknown` as a real category answer; `0` is not a placeholder candidate |
@@ -24,13 +24,13 @@ Counts are rows unless noted; `of` is the column's non-null values, or all rows 
 | `orphans:<col>:<target>.<col>` | non-null rows whose value has no match in the `--ref` target, compared as text | none |
 | `all-null:<col>` | every row null | none |
 
-Text-placeholder and type checks apply to columns DuckDB reads as text. A text column counts as typed when at least the threshold share of its non-placeholder values parse as `BIGINT` (integer text only), `DOUBLE`, `DATE`, `TIMESTAMP`, `BOOLEAN`, or a recognized date format. Numeric and date checks then run on the parsed values. Spelling-variant checks run on untyped text columns with at most 500 distinct values (`--max-categories`). Near-variant checks run on those with at most 200.
+Text-placeholder and type checks apply to columns DuckDB reads as text. A text column counts as typed when at least the threshold share of its non-placeholder values parse as `BIGINT` (integer text only), `DOUBLE`, `DATE`, `TIMESTAMP`, `BOOLEAN`, or a recognized date format. Numeric and date checks then run on the parsed values. Spelling-variant checks run on untyped text columns with at most 500 distinct values. Near-variant checks run on those with at most 200.
 
 Null rates and the commonest co-null column patterns are reported for information only. A rescan reports null-rate changes so that placeholders converted to null can be confirmed.
 
 ## Scan file
 
-`foundation/scans/<name>.json` holds the target, options, row count, per-column type, parsed type, non-null and distinct counts and null rate, candidate keys (complete and unique columns), null patterns, and every issue with up to ten examples. A rescan also holds the `baseline` it compares with and the `delta`. `--rescan <name>` takes the baseline from another scan, such as the view's when scanning a local query. The scan name defaults to the view name, `<dataset>@<publication-id>`, `<source>@<acquisition-id>`, or the file stem; `--name` overrides it.
+`foundation/scans/<name>.json` stays local to the checkout. It holds the target, options, row count, per-column type, parsed type, non-null and distinct counts and null rate, candidate keys (complete and unique columns), null patterns, and every issue with up to ten examples. A rescan also holds the `baseline` it compares with and the `delta`. The scan name defaults to the view name, `<dataset>@<publication-id>`, `<source>@<acquisition-id>`, or the file stem; `--name` overrides it.
 
 Examples are real values, up to ten per issue and 80 characters each.
 
