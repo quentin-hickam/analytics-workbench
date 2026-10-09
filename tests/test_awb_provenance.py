@@ -20,6 +20,10 @@
 # test_compare_evidence_reports_current_state_failures_without_missing_evidence: regressions: deleted current view is a mismatch; missing producing commit has precise detail.
 # test_compare_evidence_outside_root_returns_five_failures: regression: evidence path outside root returns five failures.
 # test_record_evidence_raises_on_git_failure_after_reading_head: regression: a Git failure after HEAD is read raises instead of relabelling the commit uncommitted.
+# test_record_evidence_derives_inputs_from_views: omitted publications/acquisitions equal the explicit ones; results/ is not producing code.
+# test_views_read_follows_view_references: views read by FROM/JOIN/comma, transitively; a column alias is not a read.
+# test_finding_row_reuses_state_text_and_names_check_gaps: the row keeps existing finding text, escapes pipes, names failed and unassessed checks.
+# test_cli_stale_lists_changed_results_with_their_findings: stale lists failing results with state.md rows, missing linked evidence, skips non-evidence JSON, rejects an unknown investigation.
 
 import hashlib
 import importlib.util
@@ -363,3 +367,71 @@ def test_record_evidence_raises_on_git_failure_after_reading_head(project):
     with pytest.raises(subprocess.CalledProcessError):
         record(project)
     assert not (project / "investigations/inv/evidence/r1.json").exists()
+
+
+def test_record_evidence_derives_inputs_from_views(project):
+    explicit = json.loads(record(project).read_text())
+    write(project, "investigations/inv/results/r1.csv", b"a\n1\n")
+    path = provenance.record_evidence(project, "inv", "r1", views=["foundation/views/orders.sql"],
+                                      settings_path="investigations/inv/settings.toml", checks=CHECKS)
+    derived = json.loads(path.read_text())
+    assert [p["path"] for p in derived["publications"]] == ["data/parquet/orders/p1"]
+    assert [a["path"] for a in derived["acquisitions"]] == ["data/raw/crm/a1"]
+    assert derived["publications"] == explicit["publications"]
+    assert derived["acquisitions"] == explicit["acquisitions"]
+    assert "investigations/inv/results/r1.csv" not in derived["producing_paths"]
+    assert [c["outcome"] for c in provenance.compare_evidence(project, path)] == ["pass"] * 5
+
+
+def test_views_read_follows_view_references(project):
+    write(project, "foundation/views/02_monthly.sql",
+          b"CREATE OR REPLACE VIEW monthly AS SELECT month, count(*) AS n FROM main.orders GROUP BY 1;\n")
+    write(project, "foundation/views/03_customers.sql", b"create view customers as select 1 as id;\n")
+    write(project, "foundation/views/orders.sql", b"create view orders as "
+          b"select * from read_parquet('data/parquet/orders/p1/*.parquet');\n")
+    write(project, "investigations/inv/queries/a.sql", b"select month, n as customers from monthly;\n")
+    write(project, "investigations/inv/queries/b.sql", b'select * from customers c, "monthly" m;\n')
+    assert provenance.views_read(project, ["investigations/inv/queries/a.sql"]) == [
+        "foundation/views/02_monthly.sql", "foundation/views/orders.sql"]
+    assert provenance.views_read(project, [project / "investigations/inv/queries/b.sql"]) == [
+        "foundation/views/02_monthly.sql", "foundation/views/03_customers.sql", "foundation/views/orders.sql"]
+
+
+def test_finding_row_reuses_state_text_and_names_check_gaps(project):
+    checks = [{"name": "columns", "outcome": "fail", "detail": "Missing x."},
+              {"name": "joins", "outcome": "not-applicable", "detail": "not assessed"},
+              {"name": "values", "outcome": "not-applicable", "detail": "No value drives it."}]
+    assert provenance.finding_row(project, "inv", "r1", checks, finding="A | B") == (
+        r"| A \| B | [r1](evidence/r1.json) | provisional | failed checks: columns; not assessed: joins |")
+    write(project, "investigations/inv/state.md",
+          b"| Finding | Evidence | Status | Caveat |\n| --- | --- | --- | --- |\n"
+          b"| Orders \\| rose 4% | [r1](evidence/r1.json) | supported | |\n")
+    assert provenance.finding_row(project, "inv", "r1", checks[2:]) == (
+        r"| Orders \| rose 4% | [r1](evidence/r1.json) | provisional |  |")
+    assert provenance.finding_row(project, "inv", "r2", []).startswith("| <state the finding from r2> |")
+
+
+def test_cli_stale_lists_changed_results_with_their_findings(project, capsys):
+    record(project)
+    provenance.record_evidence(project, "inv", "r2", views=[], checks=CHECKS,
+                               settings_path="investigations/inv/settings.toml")
+    row = "| Orders are flat | [r1](evidence/r1.json) | supported | |"
+    write(project, "investigations/inv/state.md",
+          f"| Finding | Evidence | Status | Caveat |\n| --- | --- | --- | --- |\n{row}\n"
+          "| Gone | [r9](./evidence/r9.json) | provisional | |\n".encode())
+    write(project, "investigations/inv/evidence/r1-export-checks.json", b"[]\n")
+    assert provenance.cli_stale(project, []) == 0
+    clean = json.loads(capsys.readouterr().out)
+    assert clean["checked"] == 3 and clean["skipped"] == ["investigations/inv/evidence/r1-export-checks.json"]
+    assert [r["result_id"] for r in clean["results"]] == ["r9"]
+    write(project, "foundation/views/orders.sql", b"select 1;\n")
+    assert provenance.cli_stale(project, ["--investigation", "inv"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    stale = {r["result_id"]: r for r in out["results"]}
+    assert out["stale"] == 2 and set(stale) == {"r1", "r9"}
+    assert stale["r1"]["evidence"] == "investigations/inv/evidence/r1.json"
+    assert stale["r1"]["findings"] == [row]
+    assert [f["name"] for f in stale["r1"]["failed"]] == ["committed-code", "views"]
+    assert "foundation/views/orders.sql" in stale["r1"]["failed"][1]["detail"]
+    assert stale["r9"]["failed"][0]["detail"].startswith("missing evidence:")
+    assert provenance.cli_stale(project, ["--investigation", "absent"]) == 2

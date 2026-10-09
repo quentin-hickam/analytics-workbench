@@ -15,13 +15,19 @@ provenance.json is relative to the directory holding that file, and a publicatio
 inputs[].files[].path to its acquisition directory.
 Data hashes are copied when recording and verified when comparing; TOML date/time
 values use ISO strings in JSON, consistently during comparison.
+
+record_evidence derives omitted publications from the views' data/parquet references and
+omitted acquisitions from those publications' publication.json inputs. cli_stale backs
+`python3 src/awb.py stale`, which compares every recorded result with the current state.
 """
 
+import argparse
 import hashlib
 import json
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
@@ -91,6 +97,56 @@ def _view_publications(root, path):
         return {"unknown": f"{path}: {error}"}
 
 
+_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+_DEFINES = re.compile(r"\bcreate\s+(?:or\s+replace\s+)?(?:temp(?:orary)?\s+)?(?:view|table)\s+"
+                      r"(?:if\s+not\s+exists\s+)?((?:\"[^\"]+\"|\w+)(?:\.(?:\"[^\"]+\"|\w+))*)", re.I)
+
+
+def _publication_acquisitions(root, publications):
+    # landing.py records each input as {source, acquisition_id}: data/raw/<source>/<acquisition_id>.
+    found = set()
+    for publication in publications:
+        try:
+            content = json.loads((root / _relative(root, publication) / "publication.json").read_text())
+            for item in content["inputs"]:
+                names = (item["source"], item["acquisition_id"])
+                if all(isinstance(n, str) and _ID.fullmatch(n) for n in names):
+                    found.add(f"data/raw/{names[0]}/{names[1]}")
+        except (OSError, ValueError, KeyError, TypeError):
+            continue  # The publication's own record names the problem, and compare_evidence fails it.
+    return sorted(found)
+
+
+def _mentions(text, name):
+    # A relation name follows FROM, JOIN, or a comma, optionally schema-qualified or quoted.
+    pattern = rf"(?:\b(?:from|join)\s+|,\s*)(?:(?:\"[^\"]+\"|\w+)\.)*\"?{re.escape(name)}\"?(?![\w\"])"
+    return re.search(pattern, text, re.I) is not None
+
+
+def views_read(project_root, sql_paths: Iterable[str | os.PathLike], *,
+               views_dir: str | os.PathLike = "foundation/views") -> list[str]:
+    """Return the view files the SQL files read by name, plus the view files those read.
+
+    A view file defines the names in its CREATE VIEW and CREATE TABLE statements. A name counts as
+    read where FROM, JOIN, or a comma precedes it, case-insensitively, so a select-list column
+    sharing a view's name after a comma also records that view: detection errs toward recording.
+    """
+    root = Path(project_root).resolve()
+    files = {}
+    for path in sorted((root / _relative(root, views_dir)).glob("*.sql")):
+        text = path.read_text()
+        files[_relative(root, path)] = (text, {m.split(".")[-1].strip('"') for m in _DEFINES.findall(text)})
+    pending = [(root / _relative(root, path)).read_text() for path in sql_paths]
+    found = set()
+    while pending:
+        text = pending.pop()
+        for path, (view_text, names) in files.items():
+            if path not in found and any(_mentions(text, name) for name in names):
+                found.add(path)
+                pending.append(view_text)
+    return sorted(found)
+
+
 def _input_record(root, path, filename, keys):
     path = _relative(root, path)
     entry = _checksum(root, f"{path}/{filename}")
@@ -121,13 +177,16 @@ def _settings(root, path):
 
 
 def record_evidence(project_root, investigation: str, result_id: str, *, views: list[str],
-                    publications: list[str], acquisitions: list[str], settings_path: str | None,
-                    checks: list[dict], notes: str | None = None,
+                    publications: list[str] | None = None, acquisitions: list[str] | None = None,
+                    settings_path: str | None, checks: list[dict], notes: str | None = None,
                     code_paths: list[str] | None = None) -> Path:
-    """Write one result's complete producing state atomically, replacing the same id."""
+    """Write one result's complete producing state atomically, replacing the same id.
+
+    Omitted publications are those the views read; omitted acquisitions are the inputs
+    recorded in those publications' publication.json.
+    """
     root = Path(project_root).resolve()
-    if not all(isinstance(v, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", v)
-               for v in (investigation, result_id)):
+    if not all(isinstance(v, str) and _ID.fullmatch(v) for v in (investigation, result_id)):
         raise ValueError("investigation and result_id must be simple identifiers")
     for check in checks:
         if (not isinstance(check, dict) or set(check) != {"name", "outcome", "detail"}
@@ -140,7 +199,14 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
         prefix = f"investigations/{investigation}/"
         code = [p for p in code if not (p.startswith(prefix) and p[len(prefix):].split("/")[0]
                 # figures/ is excluded for investigations laid out before awb-evidence/2.
-                in {"brief.md", "state.md", "history.md", "evidence", "figures", "exploration"})]
+                in {"brief.md", "state.md", "history.md", "evidence", "figures", "exploration", "results"})]
+    view_entries = [{**e, "publications": _view_publications(root, e["path"])}
+                    for e in file_checksums(views, root=root)]
+    if publications is None:
+        publications = sorted({p for e in view_entries if not _is_unknown(e["publications"])
+                               for p in e["publications"]})
+    if acquisitions is None:
+        acquisitions = _publication_acquisitions(root, publications)
     paths = sorted(set(code + [_relative(root, p) for p in views] +
                        ([_relative(root, settings_path)] if settings_path is not None else [])))
     try:
@@ -173,8 +239,7 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
         "schema": "awb-evidence/2", "investigation": investigation, "result_id": result_id,
         "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "producing_commit": commit, "producing_paths": paths, "producing_uncommitted_changes": changes,
-        "views": [{**e, "publications": _view_publications(root, e["path"])}
-                  for e in file_checksums(views, root=root)],
+        "views": view_entries,
         "publications": [_input_record(root, p, "publication.json", ["inputs", "conversion_commit", "files"])
                          for p in publications],
         "acquisitions": [_input_record(root, p, "provenance.json", ["status", "files"]) for p in acquisitions],
@@ -326,3 +391,90 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
         comparisons.append({"name": name, "paths": paths,
                             "outcome": "fail" if mismatches else "pass", "detail": detail})
     return comparisons
+
+
+_EVIDENCE_LINK = re.compile(r"\]\((?:\./)?evidence/([A-Za-z0-9][A-Za-z0-9._-]*)\.json\)")
+
+
+def finding_rows(state_path: str | os.PathLike) -> dict[str, list[str]]:
+    """Map each result ID to the state.md table rows, as text, that link its evidence file."""
+    rows = {}
+    try:
+        lines = Path(state_path).read_text().splitlines()
+    except OSError:
+        return rows
+    for line in lines:
+        if line.lstrip().startswith("|"):
+            for result_id in dict.fromkeys(_EVIDENCE_LINK.findall(line)):
+                rows.setdefault(result_id, []).append(line.strip())
+    return rows
+
+
+def _cell(text):
+    return " ".join(str(text).split()).replace("|", r"\|")
+
+
+def finding_row(project_root, investigation: str, result_id: str, checks: list[dict], *,
+                finding: str | None = None, status: str = "provisional") -> str:
+    """Return the state.md Current findings row for a recorded result, ready to paste.
+
+    The Finding cell keeps the text of a row already linking this result's evidence, else uses
+    `finding`, else a placeholder to replace. The caveat names failed and not-assessed checks.
+    """
+    existing = finding_rows(Path(project_root) / "investigations" / investigation / "state.md")
+    if result_id in existing:
+        # Split on unescaped pipes; the first cell is the finding text, already escaped.
+        text = re.split(r"(?<!\\)\|", existing[result_id][0])[1].strip()
+    else:
+        text = _cell(finding or f"<state the finding from {result_id}>")
+    failed = [c["name"] for c in checks if c["outcome"] == "fail"]
+    unassessed = [c["name"] for c in checks if c["outcome"] == "not-applicable" and c["detail"] == "not assessed"]
+    caveat = "; ".join(f"{label}: {', '.join(names)}" for label, names in
+                       (("failed checks", failed), ("not assessed", unassessed)) if names)
+    return f"| {text} | [{result_id}](evidence/{result_id}.json) | {_cell(status)} | {_cell(caveat)} |"
+
+
+def _short(detail, limit=3):
+    parts = detail.rstrip(".").split("; ")
+    more = f"; +{len(parts) - limit} more" if len(parts) > limit else ""
+    return "; ".join(parts[:limit]) + more + "."
+
+
+def cli_stale(root: Path, argv: list[str]) -> int:
+    """Print, as compact JSON, each recorded result whose evidence no longer matches the project."""
+    parser = argparse.ArgumentParser(
+        prog="awb.py stale",
+        description="Compare investigations' evidence files with the current state; changes nothing.")
+    parser.add_argument("--investigation", metavar="NAME", help="check one investigation only")
+    args = parser.parse_args(argv)
+    root = Path(root).resolve()
+    base = root / "investigations"
+    if args.investigation is not None:
+        if not _ID.fullmatch(args.investigation) or not (base / args.investigation).is_dir():
+            print(f"no investigation named {args.investigation!r} under investigations/", file=sys.stderr)
+            return 2
+        directories = [base / args.investigation]
+    else:
+        directories = sorted(p for p in base.iterdir() if p.is_dir()) if base.is_dir() else []
+    results, checked, skipped = [], 0, []
+    for directory in directories:
+        rows = finding_rows(directory / "state.md")
+        # Evidence files on disk, plus any a finding links that is missing.
+        ids = {p.stem for p in (directory / "evidence").glob("*.json") if _ID.fullmatch(p.stem)}
+        for result_id in sorted(ids | set(rows)):
+            evidence = f"investigations/{directory.name}/evidence/{result_id}.json"
+            try:
+                content = json.loads((root / evidence).read_text())
+                if not (isinstance(content, dict) and str(content.get("schema", "")).startswith("awb-evidence/")):
+                    skipped.append(evidence)  # Another record kept beside the evidence, such as saved export checks.
+                    continue
+            except (OSError, ValueError):
+                pass  # compare_evidence reports missing or unreadable evidence.
+            checked += 1
+            failed = [{"name": c["name"], "detail": _short(c["detail"])}
+                      for c in compare_evidence(root, evidence) if c["outcome"] == "fail"]
+            if failed:
+                results.append({"investigation": directory.name, "result_id": result_id, "evidence": evidence,
+                                "failed": failed, "findings": rows.get(result_id, [])})
+    print(json.dumps({"checked": checked, "stale": len(results), "skipped": skipped, "results": results}))
+    return 0

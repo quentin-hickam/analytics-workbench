@@ -1,0 +1,20 @@
+# Scope and settings for run.py. Every result's evidence records this whole file, so a
+# change here marks the investigation's recorded results stale until they are rerun.
+
+[parameters]
+# Named query parameters: a result query reads `start` as $start. Use TOML dates for dates.
+# start = 2026-01-01
+# end = 2026-06-30
+
+# One table per result. The ID names its query, saved table, evidence file, and findings row.
+# [results.orders-by-month]
+# queries = ["queries/orders-by-month.sql"]  # default: ["queries/<id>.sql"]; a producer may use more
+#
+# Validation spec for validate(): mechanical checks here, run-time counts from a producer.
+# Omitted judgments are recorded as not assessed, never as passes.
+# [results.orders-by-month.validation]
+# required_columns = ["month", "orders"]
+# nulls = { month = 0.0, orders = 0.0 }
+# scope = { outcome = "pass", detail = "Orders placed from $start to $end, one row per order month." }
+# metrics = { outcome = "pass", detail = "Orders counts distinct order_id by order month." }
+# values = { outcome = "not-applicable", detail = "No categorical value drives this result." }
