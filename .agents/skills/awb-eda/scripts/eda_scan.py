@@ -32,6 +32,8 @@ NUMERIC = re.compile(r"^(U?(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT)|FLOAT|DOUBL
 TEMPORAL = re.compile(r"^(DATE|TIMESTAMP.*)$")
 MAX_PATTERN_COLUMNS = 12
 MAX_ASSOCIATION_COLUMNS = 15
+MIN_R = 0.5  # smallest |r| printed
+SHOWN_CORRELATIONS = 5
 TABLE_ROWS = 15
 
 
@@ -467,23 +469,23 @@ def contrary(connection, m, dimensions, d, min_group, top, result):
     return found
 
 
-def associations(connection, columns, measure, min_r):
-    candidates = [c for c in columns if c["kind"] == "numeric" and not c["unique"] and c["distinct"] > 1]
+def associations(connection, columns, measure):
+    """Pearson correlation of the measure with each other numeric column."""
+    candidates = [c for c in columns if c["kind"] == "numeric" and not c["unique"] and c["distinct"] > 1
+                  and c["name"] != measure["label"]]
     candidates = sorted(candidates, key=lambda c: c["nulls"])[:MAX_ASSOCIATION_COLUMNS]
-    items = [(c["name"], f"CAST({q(c['name'])} AS DOUBLE)") for c in candidates]
-    if measure and measure["label"] not in {name for name, _ in items}:
-        items.append((measure["label"], f"CAST(({measure['sql']}) AS DOUBLE)"))
-    pairs = [(a, b) for i, a in enumerate(items) for b in items[i + 1:]]
-    if not pairs:
-        return {"method": "pearson", "columns": [n for n, _ in items], "pairs": [], "min_r": min_r}
-    exprs = []
-    for (_, a), (_, b) in pairs:
-        exprs += [f"corr({a}, {b})", f"count(*) FILTER (WHERE {a} IS NOT NULL AND {b} IS NOT NULL)"]
-    values = connection.execute(f"SELECT {', '.join(exprs)} FROM __eda").fetchone()
-    found = [{"a": a[0], "b": b[0], "r": plain(values[2 * i]), "n": values[2 * i + 1]}
-             for i, (a, b) in enumerate(pairs)]
-    found.sort(key=lambda p: -abs(p["r"]) if p["r"] is not None else 0)
-    return {"method": "pearson", "columns": [n for n, _ in items], "min_r": min_r, "pairs": found}
+    m = f"CAST(({measure['sql']}) AS DOUBLE)"
+    found = []
+    if candidates:
+        exprs = []
+        for c in candidates:
+            x = f"CAST({q(c['name'])} AS DOUBLE)"
+            exprs += [f"corr({m}, {x})", f"count(*) FILTER (WHERE {m} IS NOT NULL AND {x} IS NOT NULL)"]
+        values = connection.execute(f"SELECT {', '.join(exprs)} FROM __eda").fetchone()
+        found = [{"column": c["name"], "r": plain(values[2 * i]), "n": values[2 * i + 1]}
+                 for i, c in enumerate(candidates)]
+        found.sort(key=lambda p: -abs(p["r"]) if p["r"] is not None else 0)
+    return {"method": "pearson", "measure": measure["label"], "correlations": found}
 
 
 # ---------------------------------------------------------------- reading the scan
@@ -541,11 +543,11 @@ def anomalies(scan, today):
             spans = ", ".join(f"{g['from']}..{g['to']}" if g["from"] != g["to"] else g["from"]
                               for g in cov["gaps"][:3])
             add("period-gaps", name, f"empty {cov['period']}s: {sum(g['periods'] for g in cov['gaps'])}, "
-                f"{spans}{' …' if len(cov['gaps']) > 3 else ''}", "awb-clean")
+                f"{spans}{' …' if len(cov['gaps']) > 3 else ''}", "investigation")
         inner = [p for p in cov.get("low_periods", []) if not p["edge"]]
         if inner:
             add("low-periods", name, f"{len(inner)} {cov['period']}s under half the median rows "
-                f"({cov['median_rows']:,}), first {inner[0]['period']}", "awb-clean")
+                f"({cov['median_rows']:,}), first {inner[0]['period']}", "investigation")
     by_period = (scan["null_patterns"] or {}).get("by_period")
     if by_period:
         rows = [p for p in by_period["series"] if p["rows"] >= 10]
@@ -553,10 +555,7 @@ def anomalies(scan, today):
             rates = [p["null_rates"][name] for p in rows]
             if len(rates) > 1 and max(rates) - min(rates) >= 0.25:
                 add("null-shift", name, f"null rate ranges {min(rates):.0%} to {max(rates):.0%} across "
-                    f"{by_period['period']}s of {by_period['date_column']}", "awb-clean")
-    for pair in scan["associations"]["pairs"]:
-        if pair["r"] is not None and abs(pair["r"]) >= 0.98:
-            add("near-duplicate-columns", f"{pair['a']}, {pair['b']}", f"r = {pair['r']:.3f}", "investigation")
+                    f"{by_period['period']}s of {by_period['date_column']}", "investigation")
     measure = scan.get("measure") or {}
     for item in measure.get("contrary", []):
         halves = measure["halves"]
@@ -574,28 +573,6 @@ def plain_date(value):
     return value if isinstance(value, (date, datetime)) else date.fromisoformat(str(value)[:10])
 
 
-def suggested_records(scan, path):
-    issues, steps = [], []
-    for item in scan["anomalies"]:
-        where = f"{scan['dataset']['name']}.{item['column']}" if item["column"] else scan["dataset"]["name"]
-        if item["route"] == "awb-clean" and len(issues) < 5:
-            issues.append(f"- {where}: {item['detail']}. Possible shared data problem; confirm, then hand "
-                          f"to awb-clean (EDA scan `{path}`).")
-    measure = scan.get("measure") or {}
-    for item in measure.get("contrary", [])[:4]:
-        halves = measure["halves"]
-        steps.append(f"- Check whether {item['dimension']} {shown(item['group'])} moving against the overall "
-                     f"{measure['expression']} trend (mean {fmt(item['before'])} → {fmt(item['after'])}; overall "
-                     f"{fmt(halves['before'])} → {fmt(halves['after'])}) holds in run.py.")
-    ranked = sorted((d for d in measure.get("by_dimension", []) if d["eta_squared"] is not None),
-                    key=lambda d: -d["eta_squared"])
-    if ranked and len(steps) < 5:
-        best = ranked[0]
-        steps.append(f"- Test {best['dimension']} as an explanation of {measure['expression']} in run.py "
-                     f"(EDA: {best['eta_squared']:.0%} of its variance across {best['groups']} groups).")
-    return {"unresolved_issues": issues, "next_steps": steps}
-
-
 # ---------------------------------------------------------------- scan and report
 
 def scan_dataset(root, dataset, options):
@@ -606,7 +583,7 @@ def scan_dataset(root, dataset, options):
     folder = root / "investigations" / investigation
     if not folder.is_dir():
         raise ScanError(f"investigations/{investigation} does not exist")
-    settings_path = root / options.settings if options.settings else folder / "settings.toml"
+    settings_path = folder / "settings.toml"
     data, settings_note = load_settings(settings_path)
     connection = open_session(root)
     try:
@@ -690,7 +667,7 @@ def scan_dataset(root, dataset, options):
             "investigation": investigation, "dataset": record, "scope": scope, "rows": rows,
             "date_column": {"name": date_column, "source": date_source, "period": period},
             "grain": None, "columns": columns, "null_patterns": None, "measure": None,
-            "associations": None, "anomalies": [], "suggested_records": None,
+            "associations": None, "anomalies": [],
         }
         scan["grain"] = grain(connection, columns, rows, key)
         scan["null_patterns"] = null_patterns(connection, columns, date_column, period)
@@ -698,14 +675,13 @@ def scan_dataset(root, dataset, options):
             scan["measure"] = measure_scan(connection, measure, dimensions, date_column, period,
                                            options.min_group, options.top)
             scan["measure"]["dimensions"] = [{"label": d["label"], "source": d["source"]} for d in dimensions]
-        scan["associations"] = associations(connection, columns, measure, options.min_r)
+            scan["associations"] = associations(connection, columns, measure)
     finally:
         connection.close()
     scan = deep_plain(scan)
     output = output_path(folder, name, options.label)
     relative = str(output.relative_to(root))
     scan["anomalies"] = anomalies(scan, date.today())
-    scan["suggested_records"] = suggested_records(scan, relative)
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name(output.name + ".partial")
     partial.write_text(json.dumps(scan, indent=2) + "\n", encoding="utf-8")
@@ -880,44 +856,21 @@ def markdown(scan, path):
                 out.append(f"Over time by {measure['over_time']['period']} ({len(series)} periods): mean "
                            f"{fmt(first['mean'])} ({first['period']}) → {fmt(last['mean'])} ({last['period']}); "
                            f"low {fmt(low['mean'])} ({low['period']}), high {fmt(high['mean'])} ({high['period']}).")
-    strong = [p for p in scan["associations"]["pairs"] if p["r"] is not None and abs(p["r"]) >= scan["associations"]["min_r"]]
+    strong = [p for p in (scan["associations"] or {}).get("correlations", [])
+              if p["r"] is not None and abs(p["r"]) >= MIN_R][:SHOWN_CORRELATIONS]
     if strong:
-        out += ["", f"### Associations (Pearson, |r| ≥ {scan['associations']['min_r']})", ""]
-        out += table(["a", "b", "r", "n"], [[p["a"], p["b"], f"{p['r']:.2f}", fmt(p["n"])] for p in strong[:TABLE_ROWS]])
+        out += ["", f"### Correlations with `{scan['associations']['measure']}` (Pearson, |r| ≥ {MIN_R})", ""]
+        out += table(["column", "r", "n"], [[p["column"], f"{p['r']:.2f}", fmt(p["n"])] for p in strong])
     if scan["anomalies"]:
         out += ["", "### Anomalies", ""]
         out += table(["kind", "column", "detail", "route"],
                      [[a["kind"], a["column"] or "–", a["detail"], a["route"]] for a in scan["anomalies"][:TABLE_ROWS]])
         if len(scan["anomalies"]) > TABLE_ROWS:
             out.append(f"\n{len(scan['anomalies']) - TABLE_ROWS} more anomalies in the full scan.")
-    records = scan["suggested_records"]
-    if records["unresolved_issues"] or records["next_steps"]:
-        out += ["", "### Suggested state.md lines (edit before recording)"]
-        if records["unresolved_issues"]:
-            out += ["", "Unresolved issues:", *records["unresolved_issues"]]
-        if records["next_steps"]:
-            out += ["", "Next steps:", *records["next_steps"]]
     return "\n".join(out)
 
 
-def compact(scan, path):
-    measure = scan.get("measure")
-    return {
-        "dataset": scan["dataset"]["name"], "investigation": scan["investigation"], "path": path,
-        "rows": scan["rows"], "rows_before_scope": scan["scope"]["rows_before"],
-        "filters": [f["sql"] for f in scan["scope"]["applied"]], "skipped": scan["scope"]["skipped"],
-        "not_set": scan["scope"]["not_set"], "settings_unused": scan["scope"]["settings_unused"],
-        "keys": scan["grain"]["single_column_keys"] or scan["grain"]["column_pair_keys"],
-        "duplicate_rows": scan["grain"]["duplicate_rows"],
-        "measure": None if not measure else {
-            "expression": measure["expression"], "overall": measure["overall"],
-            "dimensions": {d["dimension"]: d["eta_squared"] for d in measure["by_dimension"]},
-            "contrary": len(measure["contrary"])},
-        "anomalies": scan["anomalies"][:TABLE_ROWS], "suggested_records": scan["suggested_records"],
-    }
-
-
-SETTINGS_HELP = """settings: the scan reads the investigation's settings.toml (or --settings). Each key comes
+SETTINGS_HELP = """settings: the scan reads the investigation's settings.toml. Each key comes
 from the first of [eda.<dataset>], [eda], [scope], and the top level; period_start and period_end
 then fall back to [parameters] start and end, the period run.py uses. Keys: where (predicate or
 list, joined with AND), date_column, period_start, period_end (inclusive dates), measure (numeric
@@ -937,8 +890,6 @@ def parse(argv):
     parser.add_argument("dataset", help="canonical view name (preferred), or a project-relative publication "
                         "directory or .parquet file that no view reads yet")
     parser.add_argument("--investigation", help="investigation name; default: README's active investigation")
-    parser.add_argument("--settings", help="project-relative TOML settings file; default: the investigation's "
-                        "settings.toml")
     parser.add_argument("--where", action="append", help="SQL predicate selecting the population; repeatable; "
                         "replaces the settings where")
     parser.add_argument("--date-column", help="date or timestamp column for the period filter, coverage, "
@@ -958,10 +909,7 @@ def parse(argv):
                         "for contrary trends (default 10)")
     parser.add_argument("--min-group", type=int, default=30, help="minimum rows in each half for a contrary "
                         "group, and for the highest and lowest group means (default 30)")
-    parser.add_argument("--min-r", type=float, default=0.5, help="smallest |r| printed (default 0.5); the "
-                        "file holds every pair")
     parser.add_argument("--label", help="writes <dataset>-<label>.json, so a second scope keeps the first")
-    parser.add_argument("--json", action="store_true", help="print compact JSON instead of Markdown")
     parser.add_argument("--show", metavar="PATH", help="print one section of the saved scan as compact JSON "
                         "and exit without scanning; see below")
     options = parser.parse_args(argv)
@@ -1021,7 +969,7 @@ def main(argv=None):
     except ScanError as error:
         print(f"eda_scan: {error}", file=sys.stderr)
         return 2
-    print(json.dumps(compact(scan, path), separators=(",", ":")) if options.json else markdown(scan, path))
+    print(markdown(scan, path))
     return 0
 
 

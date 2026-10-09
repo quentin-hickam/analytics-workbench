@@ -3,7 +3,9 @@
 # test_active_investigation_reads_link_path_or_slug: README pointer forms resolve to the investigation name.
 # test_missing_session_helper_exits_with_installer_remedy: no src/preparation/landing.py exits 2 naming the installer.
 # test_scan_applies_settings_scope_and_writes_only_its_exploration_file: settings filters applied with sources; one file written; compact stdout.
-# test_shared_data_problems_route_to_clean_and_contrary_trends_stay_local: duplicates, variants, gaps, null shift route to awb-clean; contrary group flagged.
+# test_shared_data_problems_route_to_clean_and_coverage_stays_with_the_investigation: key violations and variants route to awb-clean; gaps and null shift route to the investigation; contrary group flagged; no suggested state lines.
+# test_correlations_pair_only_the_measure_and_print_the_top_five: the measure correlates with each other numeric column, not itself; at most five with |r| >= 0.5 print.
+# test_removed_options_are_rejected: --json, --settings, and --min-r are gone.
 # test_variance_explained_matches_hand_computation: eta squared and group means for a two-group measure.
 # test_options_override_settings_and_unfit_settings_are_skipped: options replace settings; unfit settings print as not applied; a bad option or empty scope exits 2.
 # test_publication_path_with_label_and_float_columns_keep_distributions: publication directory scanned to a labelled file; unique floats are not keys.
@@ -147,23 +149,45 @@ def test_scan_applies_settings_scope_and_writes_only_its_exploration_file(shifts
     assert len(out.splitlines()) < 80
 
 
-def test_shared_data_problems_route_to_clean_and_contrary_trends_stay_local(shifts, capsys):
-    status, out, _ = run(shifts, "shifts", "--no-scope", "--json", capsys=capsys)
+def test_shared_data_problems_route_to_clean_and_coverage_stays_with_the_investigation(shifts, capsys):
+    status, out, _ = run(shifts, "shifts", "--no-scope", capsys=capsys)
     assert status == 0
-    summary = json.loads(out)
-    routes = {(a["kind"], a["column"]): a["route"] for a in summary["anomalies"]}
+    scan = json.loads((shifts / "investigations/overtime/exploration/eda/shifts.json").read_text())
+    routes = {(a["kind"], a["column"]): a["route"] for a in scan["anomalies"]}
     assert routes[("key-violated", "shift_id")] == "awb-clean"
     assert routes[("case-or-space-variants", "site")] == "awb-clean"
-    assert routes[("period-gaps", "shift_date")] == "awb-clean"
-    assert routes[("null-shift", "note")] == "awb-clean"
+    assert routes[("period-gaps", "shift_date")] == "investigation"
+    assert routes[("null-shift", "note")] == "investigation"
     assert routes[("contrary-trend", "site")] == "investigation"
-    contrary = [a["detail"] for a in summary["anomalies"] if a["kind"] == "contrary-trend"]
+    contrary = [a["detail"] for a in scan["anomalies"] if a["kind"] == "contrary-trend"]
     assert len(contrary) == 1 and contrary[0].startswith("South:")
-    variants = next(a for a in summary["anomalies"] if a["kind"] == "case-or-space-variants")
+    variants = next(a for a in scan["anomalies"] if a["kind"] == "case-or-space-variants")
     assert 'West / "west "' in variants["detail"]
-    issues = summary["suggested_records"]["unresolved_issues"]
-    assert any("shifts.site" in line and "awb-clean" in line for line in issues)
-    assert any("site South" in line for line in summary["suggested_records"]["next_steps"])
+    assert "suggested_records" not in scan and "Suggested" not in out
+
+
+def test_correlations_pair_only_the_measure_and_print_the_top_five(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    root = project(tmp_path, settings="")
+    multiples = ", ".join(f"(i // 2) * {k} AS a{k}" for k in range(1, 7))
+    write(root, "foundation/views/01_parts.sql",
+          f"CREATE VIEW parts AS SELECT i // 2 AS x, {multiples}, i % 3 AS u FROM range(40) t(i);\n")
+    status, out, _ = run(root, "parts", "--measure", "x", "--dimension", "u", capsys=capsys)
+    assert status == 0
+    scan = json.loads((root / "investigations/overtime/exploration/eda/parts.json").read_text())
+    found = {c["column"]: c["r"] for c in scan["associations"]["correlations"]}
+    assert scan["associations"]["measure"] == "x" and set(found) == {"a1", "a2", "a3", "a4", "a5", "a6", "u"}
+    assert all(found[f"a{k}"] == pytest.approx(1.0) for k in range(1, 7)) and abs(found["u"]) < 0.5
+    assert "### Correlations with `x` (Pearson, |r| ≥ 0.5)" in out
+    section = out.split("### Correlations")[1].split("###")[0]
+    assert len([line for line in section.splitlines() if line.startswith("| a")]) == 5
+    assert "near-duplicate-columns" not in out
+
+
+def test_removed_options_are_rejected(shifts):
+    for extra in (["--json"], ["--settings", "x.toml"], ["--min-r", "0.3"]):
+        with pytest.raises(SystemExit):
+            eda.main([str(shifts), "shifts", *extra])
 
 
 def test_variance_explained_matches_hand_computation(tmp_path, capsys):

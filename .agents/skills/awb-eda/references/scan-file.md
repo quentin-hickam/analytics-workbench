@@ -11,6 +11,5 @@ Top-level keys:
 - `columns`: name, type, kind, nulls, null_rate, distinct, and unique. Numeric columns add min, max, mean, sd, quantiles p1 to p99, zeros, negatives, and outliers beyond 1.5 and 3 IQR. Text columns add blank strings and case-or-space variants with examples. Temporal columns add min, max, and coverage: period, series, gaps, and low periods. Text, boolean, and low-cardinality numeric columns add `top` values with each value's share of non-null rows and `other_share`.
 - `null_patterns`: the most common combinations of null columns, and null rates by period of the date column.
 - `measure`: overall n, mean, sd, sum, and median. `by_dimension` holds each dimension's group count, variance explained (`eta_squared`), group statistics in `values`, and highest and lowest groups. `over_time` holds the series; `halves` holds the means before and after the midpoint of the date range; `contrary` lists the groups that moved against the overall trend.
-- `associations`: Pearson correlation for every pair of up to 15 numeric columns plus the measure, with pair counts.
+- `associations`: with a measure, its Pearson correlation with each of up to 15 other numeric columns, with pair counts.
 - `anomalies`: kind, column, detail, and route; the kinds are in [reading the scan](reading-the-scan.md).
-- `suggested_records`: draft `unresolved_issues` and `next_steps` lines for `state.md`.
