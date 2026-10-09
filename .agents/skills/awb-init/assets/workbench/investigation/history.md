@@ -12,4 +12,4 @@ Keep a chronological record of meaningful findings, analytical decisions, caveat
 - **Impact and caveats:**
 - **Supersedes or revalidation link:**
 
-Add entries when the investigation's understanding changes. Preserve older entries when a later result supersedes them.
+Preserve older entries when a later result supersedes them.

@@ -74,6 +74,8 @@ def produce_result(connection, result_id, config, parameters):
     sql = [(HERE / query).read_text() for query in queries]
     frame, measured = PRODUCERS.get(result_id, produce)(connection, sql, parameters)
     checks = validate(frame, _spec(config.get("validation", {}), measured))
+    # Evidence describes the saved table, so drop it before the table changes; a failed run leaves none.
+    (HERE / "evidence" / f"{result_id}.json").unlink(missing_ok=True)
     output = HERE / "results"
     output.mkdir(exist_ok=True)
     # The saved table holds the computed values that packaging later serializes for charts.

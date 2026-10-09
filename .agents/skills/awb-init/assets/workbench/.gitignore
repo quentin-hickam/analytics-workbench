@@ -14,6 +14,9 @@ __pycache__/
 *.duckdb
 *.duckdb.wal
 
+# Cleaning scans quote source values and stay local to the checkout
+/foundation/scans/
+
 # Package drafts and releases are kept outside Git
 /deliveries/
 

@@ -2,10 +2,6 @@
 
 Last updated: <!-- use an ISO date -->
 
-## Active question and scope
-
-Summarize the current question and material scope settings. Link to the brief for full context.
-
 ## Current findings
 
 | Finding | Evidence | Status | Revalidation reason or caveat |
