@@ -64,7 +64,8 @@
       "asset": "awb-init/assets/awb_provenance.py",
       "previous": [
         "244a7118ba3e177365abe7e3fa8c2621bd2c7a91889f8ff027bf140fe8bdfb03",
-        "5aa4dd83a6b3388d9126224a61a27ad1f7a7016716acbc528b1dadc716472204"
+        "5aa4dd83a6b3388d9126224a61a27ad1f7a7016716acbc528b1dadc716472204",
+        "e5c94b09f51b583e0cad46e0055aceccce0f92332bf3a839dc07ca4597381416"
       ]
     },
     {
@@ -95,7 +96,9 @@
       "asset": "awb-init/assets/workbench/workbench-guides/analysis.md",
       "previous": [
         "43da4183f342b0013c5dc426559d14f91ac7e75411ae88226b57abc164c292f0",
-        "780eb0bf5ff9d8d836dd0052bc3cb8fc6cce960506447be7aa01e73c9e21e060"
+        "4504cf1cc72d4046b08b19cc02382daf794e26f5ec2526384b5ebb6e1ee6f6cb",
+        "780eb0bf5ff9d8d836dd0052bc3cb8fc6cce960506447be7aa01e73c9e21e060",
+        "cd845cd32c14e5c79209a3fa20c869820403b3ee5a347a2ba8a4108e7d63f6b2"
       ]
     }
   ],
