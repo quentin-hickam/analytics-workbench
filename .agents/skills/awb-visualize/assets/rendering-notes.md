@@ -1,6 +1,6 @@
 # Rendering notes
 
-Checked 2026-10-02. Refresh these notes when a host changes behavior, then revise the output contract in the [skill](../SKILL.md) only to the confidence re-established here. "User-confirmed" means the analyst observed it in their own setup; it is not documented behavior.
+Checked 2026-10-02. Refresh these notes when a host changes behavior, then revise the [figure-delivery contract](../references/figure-delivery.md) only to the confidence re-established here. "User-confirmed" means the analyst observed it in their own setup; it is not documented behavior.
 
 ## Confirmed
 
@@ -25,3 +25,12 @@ Checked 2026-10-02. Refresh these notes when a host changes behavior, then revis
 - What a copy from rendered chat Markdown pastes into Word, Outlook, or Google Docs. Raw Markdown pasted into desktop Word stays literal pipe text according to secondary sources; no Microsoft statement was found.
 - Mermaid in Word, Outlook, or Google Docs: no documented support; treat Mermaid source as text there.
 - Chat panel pixel width varies with the user's layout; the image carousel gives full-size zoom.
+
+## Output rationale
+
+- PNG provides a common format for chat, Google Docs, Microsoft 365, and email. SVG remains an optional user-requested vector companion for supported destinations.
+- The 6.5 in page width fits a typical document text area, while 200 dpi stays below Microsoft 365's default compression target. Inspect document insertion because applications may choose another width. At half-size in a narrow chat panel, 10 pt labels are still roughly 14 px tall; viewers can zoom.
+- Opaque white keeps dark text readable across chat themes and document backgrounds.
+- The caption lives in the containing document so explanations remain readable and editable without crowding the image.
+- The companion table exposes exact claimed values for checking and remains usable when images cannot display, in plain-text email, or with screen readers.
+- Interactive HTML needs a host renderer and cannot run in ordinary documents; requested interactive files therefore keep PNG, document caption, and table companions.
