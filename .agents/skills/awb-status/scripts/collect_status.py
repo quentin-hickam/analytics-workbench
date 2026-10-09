@@ -84,7 +84,10 @@ def collect(root):
 
     def storage(value):
         cleaned = (value or "").strip().strip("`").strip()
-        if not cleaned or cleaned.lower() in {"none", "none chosen", "not yet recorded", "unknown"}:
+        # A declined location is the user's recorded decision, distinct from a line never recorded.
+        if cleaned.lower() in {"none", "none chosen"}:
+            return {"location": value, "availability": "none chosen"}
+        if not cleaned or cleaned.lower() in {"not yet recorded", "unknown"}:
             return {"location": value, "availability": "unrecorded"}
         # A URI or prose needs its established connector, never a speculative network call.
         if "://" in cleaned or not (cleaned.startswith(("/", "~", "./", "../"))):
@@ -248,7 +251,8 @@ def collect(root):
             for finding in flagged:
                 matches = [f for f in flags if f["finding"] == finding["Finding"] and f["reason"] == finding["Revalidation reason or caveat"]] if valid_flags else []
                 if matches:
-                    exact.append({"finding": finding["Finding"], "reason": finding["Revalidation reason or caveat"], "without_disposition": any(p["disposition"] == "none" for f in matches for p in f["represented_in"])})
+                    # `none` and `revalidate` both block a release, so neither counts as a disposition here.
+                    exact.append({"finding": finding["Finding"], "reason": finding["Revalidation reason or caveat"], "without_disposition": any(p["disposition"] in {"none", "revalidate"} for f in matches for p in f["represented_in"])})
                 elif draft.is_dir() or latest:
                     review.append({"finding": finding["Finding"], "reason": finding["Revalidation reason or caveat"]})
             entry["confirmed_flags"] = exact
@@ -316,7 +320,7 @@ def git_status(root, slug, state_date, uncertain):
     if missing:
         result["undated_changes"] = missing
         for name in missing:
-            uncertain(root / name, "Uncommitted change lacks a readable mtime (for example deletion); staleness uncertain")
+            uncertain(root / name, "Uncommitted change lacks a readable mtime (for example deletion); state date check uncertain")
     if has_head:
         repo_prefix = project_prefix + prefix
         log = git("log", "-1", "--format=%cs", "--", ":(top,literal)" + repo_prefix, ":(top,exclude,literal)" + repo_prefix + "state.md")
@@ -332,9 +336,9 @@ def git_status(root, slug, state_date, uncertain):
         if state_date:
             difference = (newest - state_date).days
             result["days_after_state"] = difference
-            result["staleness"] = "stale" if difference > 0 else "indeterminate at date precision" if difference == 0 else "unknown" if missing else "current"
-    if "staleness" not in result:
-        result["staleness"] = "unknown" if missing or state_date is None else "no newer dated change found"
+            result["state_status"] = "out of date" if difference > 0 else "indeterminate at date precision" if difference == 0 else "unknown" if missing else "up to date"
+    if "state_status" not in result:
+        result["state_status"] = "unknown" if missing or state_date is None else "no newer dated change found"
     return result
 
 

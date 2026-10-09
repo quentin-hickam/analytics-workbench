@@ -1,3 +1,27 @@
+# Kept cases:
+# test_collect_standard_records_without_writes_or_other_conclusions: counts normalize flagged statuses; nothing is written; other investigations give only name and date.
+# test_missing_and_custom_tables_are_unknown_not_zero: an unsupported state table or absent sources record is null with an uncertainty, never zero.
+# test_malformed_table_does_not_count_partial_rows: one malformed findings row makes the counts unknown.
+# test_new_flag_requires_semantic_review_and_never_claims_zero: a flag absent from the manifest goes to representation review with the methodology path.
+# test_dispositions_require_current_reason: a disposition applies only while finding and reason match the state row exactly.
+# test_revalidate_and_none_places_block_release: a confirmed flag with any `none` or `revalidate` place counts as lacking a disposition; `omit` and `release_with_caveat` do not.
+# test_malformed_manifest_requests_targeted_fallback: invalid manifests name the manifest under uncertainties.
+# test_custom_manifest_preserves_manual_fallback: a non-JSON manifest leaves dates and disposition counts null.
+# test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
+# test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
+# test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
+# test_absent_project_and_unsafe_active_pointer: a missing project is not a workbench; an unsafe pointer is an uncertainty.
+# test_standard_active_state_pointer: link, path, and backticked pointer forms resolve to the investigation.
+# test_other_state_reader_stops_before_conclusions: another investigation's state is read only up to its first section.
+# test_blank_fields_do_not_capture_following_lines: a blank field is missing, never the next line's text.
+# test_backticked_checkout_only_is_missing_retained_copy: a backticked `this checkout only` counts as no retained copy.
+# test_optional_storage_fields_absent_before_use_are_not_uncertainties: absent storage lines are unrecorded without uncertainties.
+# test_nested_repository_status_scopes_changes_and_preserves_index: Git facts are scoped to a project inside a larger repository.
+# test_unreadable_enumeration_is_unknown_not_empty: an unreadable directory yields unknown, never an empty inventory.
+# test_representation_review_uses_methodology_identifiers: representation review points at methodology.md.
+# test_none_chosen_is_a_recorded_decision: `none chosen`, backticked or bare `none`, reports availability none chosen, not unrecorded.
+# test_absent_storage_remains_actionable_when_acquisitions_and_releases_exist: absent lines read unrecorded alongside acquisitions and releases.
+
 """Status observations stay read-only and conservative when records need interpretation."""
 import importlib.util
 import json
@@ -95,6 +119,15 @@ def test_dispositions_require_current_reason(workbench):
     assert result["representation_review"] == []
 
 
+@pytest.mark.parametrize("places,blocked", [(["omit", "release_with_caveat"], False), (["release_with_caveat", "revalidate"], True), (["none"], True)])
+def test_revalidate_and_none_places_block_release(workbench, places, blocked):
+    flag = {"finding": "Renewal lag", "reason": "Q-004 correction", "represented_in": [{"disposition": d} for d in places]}
+    package(workbench, [flag])
+    result = status.collect(workbench)["packages"][0]
+    assert result["confirmed_flags"] == [{"finding": "Renewal lag", "reason": "Q-004 correction", "without_disposition": blocked}]
+    assert result["confirmed_without_disposition"] == int(blocked)
+
+
 @pytest.mark.parametrize("content", ["not json", "[]", '{"revalidation_flags": ["bad"]}', '{"revised_at": "yesterday", "revalidation_flags": "none"}'])
 def test_malformed_manifest_requests_targeted_fallback(workbench, content):
     draft = package(workbench, "none")
@@ -132,21 +165,21 @@ def test_git_no_commits_dirty_date_precision_and_no_index_writes(workbench):
     result = status.collect(workbench)["git"]
     assert result["has_commits"] is False
     assert result["commit_comparison"] == "no commits yet; all work uncommitted"
-    assert result["staleness"] == "indeterminate at date precision"
+    assert result["state_status"] == "indeterminate at date precision"
     assert before == (index.read_bytes(), index.stat().st_mtime_ns)
     os.utime(file, (epoch + 2 * 86400, epoch + 2 * 86400))
     result = status.collect(workbench)["git"]
-    assert result["staleness"] == "stale"
+    assert result["state_status"] == "out of date"
     assert result["days_after_state"] == 2
 
 
-def test_commit_staleness_and_undated_deletion(workbench):
+def test_commit_out_of_date_state_and_undated_deletion(workbench):
     git(workbench, "init")
     git(workbench, "add", ".")
     env = {**os.environ, "GIT_AUTHOR_DATE": "2026-10-02T12:00:00Z", "GIT_COMMITTER_DATE": "2026-10-02T12:00:00Z"}
     git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "fixture", env=env)
     result = status.collect(workbench)["git"]
-    assert result["staleness"] == "stale"
+    assert result["state_status"] == "out of date"
     assert result["days_after_state"] == 1
     (workbench / "investigations/churn/brief.md").unlink()
     result = status.collect(workbench)
@@ -159,7 +192,8 @@ def test_acquisitions_and_storage_risks(workbench):
     path.write_text(path.read_text() + "\n| a1 | s1 | today | request | data/raw/a | this checkout only | check | | |\n| a2 | s1 | today | request | data/raw/b | | check | | |\n")
     result = status.collect(workbench)
     assert result["acquisitions"] == {"count": 2, "without_retained_copy": 2}
-    assert result["landed_data_storage"]["availability"] == "unrecorded"
+    assert result["landed_data_storage"] == {"location": "none chosen", "availability": "none chosen"}
+    assert result["release_storage"]["availability"] == "unrecorded"
 
 
 def test_absent_project_and_unsafe_active_pointer(tmp_path, workbench):
@@ -304,10 +338,13 @@ def test_representation_review_uses_methodology_identifiers(workbench):
     assert "review_journal" not in result
 
 
-def test_backticked_none_chosen_is_unrecorded(workbench):
+@pytest.mark.parametrize("value", ["`none chosen`", "None chosen", "none"])
+def test_none_chosen_is_a_recorded_decision(workbench, value):
     path = workbench / "README.md"
-    path.write_text(path.read_text().replace("none chosen", "`none chosen`"))
-    assert status.collect(workbench)["landed_data_storage"]["availability"] == "unrecorded"
+    path.write_text(path.read_text().replace("Landed data is kept at: none chosen", "Landed data is kept at: " + value).replace("not yet recorded", value))
+    result = status.collect(workbench)
+    assert result["landed_data_storage"] == {"location": value, "availability": "none chosen"}
+    assert result["release_storage"] == {"location": value, "availability": "none chosen"}
 
 
 def test_absent_storage_remains_actionable_when_acquisitions_and_releases_exist(workbench):

@@ -1,35 +1,53 @@
 ---
 name: awb-status
-description: Report analytics workbench status, revalidation flags, package and storage state, and relevant next requests. Use when the user asks where things stand or what to do next. Read-only.
+description: Report where an analytics workbench stands and what to ask next. Use when the user asks for status or what to do next.
 ---
 
 # Report workbench status
 
-Give a read-only snapshot and the requests that fit now. Change no files, run no analysis, refresh no caches, query no sources, and make no commit. Mention fixes as possible next requests.
+Stay *read-only*: report what the records say, and turn every fix into a next request.
 
 ## Collect
 
-Run the bundled helper, using this skill's actual directory to resolve its path:
+Use the user-named project, otherwise the current directory. Run the helper without reading it:
 
 ```sh
 python3 <skill-directory>/scripts/collect_status.py <project-root>
 ```
 
-Use the user-named project, otherwise the current directory. The helper uses Python's standard library and emits compact JSON; execute it without reading its implementation. It reads standard Markdown records, JSON manifests, local storage availability, and Git with optional locks disabled, including projects inside larger repositories. It reads other investigations only for names and state dates. A non-workbench result means stop and suggest `awb-init`.
-
-Treat `null`, `unknown`, and `uncertainties` as targeted fallback requests, never as empty findings or zero risk. Read only the named record or field needed to resolve each uncertainty. Established custom formats remain valid: inspect their manifests directly when the helper cannot parse them. Missing records are facts to report, not permission to create them. Absent optional storage lines mean unrecorded storage; they matter when acquisitions or releases exist. Unknown directory inventories remain unknown, including `release_inventory_known: false`. For unavailable Git, make a read-only check using the repository's actual root if needed, or report the limitation. Skip history, source data, and other investigations' conclusions.
-
-## Interpret
-
-- Count statuses from the active findings; `revalidation-needed (was supported)` belongs only in needs revalidation. Give every flagged finding its current reason. Read `foundation/quality.md` correction rows only when a reason points to one and needs explanation.
-- For each package's `representation_review`, read its `review_methodology` (`methodology.md`, which names finding identifiers) to decide whether it represents each unmatched flagged finding. An unmatched finding represented there was flagged since the draft revision. Count it as lacking a disposition; also count each `confirmed_flags` finding whose `without_disposition` is true. A disposition applies only to the same finding and current reason, and every represented place must have a disposition other than `none`. Helper counts are confirmed subsets until semantic review finishes; customized or malformed flags need manual review.
-- Use the helper's commit/change dates and day difference for staleness. Same-day comparisons are indeterminate at date precision; deleted files lack modification dates. With no commits, say “no commits yet; all work uncommitted.” Modification dates use the host timezone; if it differs from the user's reporting timezone and changes the comparison, convert those timestamps before reporting.
-- Compare draft `revised_at` with the highest numeric release's `released_at`. File modification time is an estimate only when a field is absent; malformed values remain unknown.
-- An open decision must be explicitly recorded in the brief or state. Material unknowns alone do not establish one.
-- Landed-data storage is at risk when acquisitions exist and storage is unrecorded, unreachable, or an acquisition has a blank retained copy or `this checkout only`. Release storage is at risk when a release exists and storage is unrecorded or unreachable. Unknown availability needs a read-only check through the established access method or an explicit “not verified.”
+When `workbench` is false, stop and suggest `awb-init`. Treat `null`, `unknown`, and each `uncertainties` entry as a targeted lookup: read only the named record or field, and inspect a custom-format manifest directly. Report missing records as missing. When `git.available` is false, report its `reason`. Leave history, source data, and other investigations' conclusions unread.
 
 ## Report
 
-Keep the report to one screen: active question and state date/staleness; findings counts and every flag/reason; unresolved issues and next steps; other investigation names/dates; each package's draft/latest release dates, comparison, findings without dispositions, and findings flagged since draft; relevant storage risks. Preserve the investigation's wording, shortened. Omit empty sections; expose material uncertainties.
+Keep the report to one screen, in this order. Report the collector's values as given, in the investigation's wording shortened, and omit empty items.
 
-Finish with up to five relevant **You can ask for** requests, risk first then progress. Read [next-requests.md](references/next-requests.md) to select requests and their handlers; offer only applicable entries from that map. Reporting never performs those follow-up actions.
+- **Question and state.** `active.question` and `active.last_updated`, then `git.state_status`; for `out of date`, add `days_after_state` and `latest_change`. Add `git.commit_comparison` when present. Modification dates use the host timezone: convert `latest_change.date` only when the user's timezone differs and the conversion moves the date.
+- **Findings.** `active.counts`, then every flagged finding in `active.findings` with its `reason`. Read a `foundation/quality.md` correction row only when a reason cites one that needs explaining.
+- **Open work.** `unresolved_issues` and `next_steps`. Report an open decision only when the brief or state records it as one; list `material_unknowns` as unknowns.
+- **Other investigations.** Each name and `last_updated`.
+- **Packages.** For each: `revised_at`, `latest_release` with `released_at`, and `draft_vs_release` (an estimate when `comparison_is_estimate` is true). Then the flagged findings that block its next release. A recorded disposition applies while its finding and reason match the current `state.md` row exactly; `confirmed_without_disposition` counts matched findings with any place still `none` or `revalidate`. For each `representation_review` entry, read `review_methodology` (it names finding identifiers) and decide whether the package represents that finding; a represented one was flagged since the draft and also lacks a disposition.
+- **Storage.** `landed_data_storage` and `release_storage` by `availability`, and `acquisitions.without_retained_copy` as acquisitions held only in this checkout. `unrecorded` or `unreachable` is a risk once acquisitions or releases exist. `none chosen` is the user's recorded decision: report that this checkout holds the only copy. For `unknown`, check through the project's established access method or say "not verified".
+- **Uncertainties** the targeted lookups left unresolved.
+
+## You can ask for
+
+Finish with up to five requests whose state applies, risk rows first, then progress. Phrase each as a sentence the user could type, with its handler in parentheses so hosts without a skill menu still route it.
+
+| State | Request | Handler | Kind |
+| --- | --- | --- | --- |
+| `active.counts` has `revalidation-needed` | "Rerun the flagged findings" | `python3 investigations/<name>/run.py` | risk |
+| A package represents a flagged finding that lacks a disposition | "Revise the <package> draft to carry the new caveats" | `awb-package` | risk |
+| A release exists and `release_storage` is `unrecorded` or `unreachable` | "Record where releases are kept" | `awb-release` | risk |
+| Acquisitions exist and `landed_data_storage` is `unrecorded` or `unreachable`, or `reachable` with acquisitions held only in this checkout | "Record where landed data is kept" | AGENTS.md record maintenance | risk |
+| `git.state_status` is `out of date` | "Update the investigation state" | AGENTS.md record maintenance | risk |
+| An `uncertainties` entry names a missing standard record, or the user mentions newer workbench skills | "Bring the workbench up to date" | `awb-init` | risk |
+| No active investigation | "Start an investigation into <question>" | `awb-init` | progress |
+| The brief or state records an open scope or purpose decision | "Resolve the <topic> scope change" | `awb-init` | progress |
+| A dataset the investigation uses has no row in the quality record, or unresolved issues or next steps name data errors | "Clean the <dataset> data" | `awb-clean` | progress |
+| No findings yet, or a next step calls for exploring a dataset | "Explore <dataset> for this investigation" | `awb-eda` | progress |
+| Supported findings and no draft | "Prepare a draft package" | `awb-package` | progress |
+| `draft_vs_release` is `ahead`, or a draft has no release | "Mark the <package> package delivered" | `awb-release` | progress |
+| Next steps call for preparation beyond the active question | "Prepare <source> more broadly" | analytical work under AGENTS.md | progress |
+| `other_investigations` lists any | "Checkpoint this investigation and switch to <name>" | AGENTS.md record maintenance | progress |
+| `git.uncommitted_paths` is above zero | "Commit the current work" | explicit commit request | progress |
+| `next_steps` lists a step and no other progress row applies | "Continue: <first next step, shortened>" | analytical work under AGENTS.md | progress |
