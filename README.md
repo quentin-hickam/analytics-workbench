@@ -6,13 +6,12 @@ A portable, agent-agnostic workflow for shared data preparation, distinct invest
 
 Every skill name carries the `awb-` prefix, so typing `awb-` in a host that lists skills as commands shows every workbench action.
 
-- [awb-init](.agents/skills/awb-init/SKILL.md): initialize or repair a project, start an investigation, or resolve a consequential scope change. Its [project AGENTS.md template](.agents/skills/awb-init/assets/workbench/AGENTS.md) governs everyday analysis and recordkeeping.
-- [awb-clean](.agents/skills/awb-clean/SKILL.md): clean one dataset at the shared foundation level: scan it for candidate issues in one call, decide with you where meaning changes, correct them through canonical views, and record the quality rows, catalog cells, and revalidation flags in one call.
+- [awb-init](.agents/skills/awb-init/SKILL.md): initialize a project, repair it or bring it up to date after installing newer skills, start an investigation, or resolve a consequential scope change. Its [project AGENTS.md template](.agents/skills/awb-init/assets/workbench/AGENTS.md) governs everyday analysis and recordkeeping.
+- [awb-clean](.agents/skills/awb-clean/SKILL.md): clean one dataset at the shared foundation level: scan it for candidate issues in one call, decide with you where meaning changes, correct them through canonical views, and record the quality rows and catalog cells and flag affected findings in one call.
 - [awb-eda](.agents/skills/awb-eda/SKILL.md): explore one dataset for the active investigation with one scan within its scope and settings, follow up with saved queries, and record what was learned; shared data problems go to `awb-clean`, and exploration records no findings.
 - [awb-status](.agents/skills/awb-status/SKILL.md): read-only report of where the project stands and the requests that fit right now.
 - [awb-package](.agents/skills/awb-package/SKILL.md): create or revise a delivery package's working draft.
-- [awb-release](.agents/skills/awb-release/SKILL.md): preserve a numbered release when you mark a package delivered, and record and copy releases to the project's storage location.
-- [awb-update](.agents/skills/awb-update/SKILL.md): bring an existing workbench up to date after installing newer skills: refresh copied package formats, helpers, and project guides, retire files no longer shipped, and apply instruction migrations.
+- [awb-release](.agents/skills/awb-release/SKILL.md): preserve a frozen, numbered release when you mark a package delivered, and copy releases to the project's recorded storage location.
 
 ## Requirements
 
@@ -27,7 +26,7 @@ Every skill name carries the `awb-` prefix, so typing `awb-` in a host that list
 
 ## Install
 
-Download `analytics-workbench-skills-vX.Y.Z.zip` from the repository's GitHub releases and unzip it anywhere. It unpacks to one folder, `analytics-workbench-skills/`, holding the seven `awb-*` skill folders beside this README, `LICENSE`, and `CHANGELOG.md`. Copy the seven `awb-*` folders into your agent host's user-level skills directory, replacing any earlier copies. Do not unzip the archive into the skills directory itself: a host looks for `<skills directory>/<skill name>/SKILL.md`, and the extra folder level hides the skills. In a clone of this repository, the same seven folders are under `.agents/skills/`.
+Download `analytics-workbench-skills-vX.Y.Z.zip` from the repository's GitHub releases and unzip it anywhere. It unpacks to one folder, `analytics-workbench-skills/`, holding the six `awb-*` skill folders beside this README, `LICENSE`, and `CHANGELOG.md`. Copy the six `awb-*` folders into your agent host's user-level skills directory, replacing any earlier copies, and delete an `awb-update` folder left by an earlier release: its job now belongs to `awb-init`. Do not unzip the archive into the skills directory itself: a host looks for `<skills directory>/<skill name>/SKILL.md`, and the extra folder level hides the skills. In a clone of this repository, the same six folders are under `.agents/skills/`.
 
 The skills serve every project from the user-level directory; projects need no local copies.
 
@@ -53,7 +52,7 @@ In the target project's agent session, start from the business question:
 
 If you ask without a question, `awb-init` asks for one; say there is no question yet to set up the project alone. Continue analytical work normally using the generated AGENTS.md instructions. The default data flow is independent source landing, validated Parquet datasets, and DuckDB views loaded into separate analytical sessions. Data gathering never writes directly into the canonical database as its only retained representation.
 
-`awb-init` installs the project helpers under `src/` once and writes a `requirements.txt` when the project declares no dependencies. Mechanical work then runs as single commands, so the agent neither retypes helper output into records nor writes throwaway scripts: `python3 src/awb.py --help` lists them (`sql`, `profile`, `land`, `retain`, `publish`, `stale`, `check-draft`, `draft-provenance`, `export`, `release`). Each investigation's `run.py` produces, validates, and records its results in one run and prints the `state.md` rows to paste.
+`awb-init` installs the project helpers under `src/` with its installer, `scripts/install_helpers.py`, and writes a `requirements.txt` when the project declares no dependencies; the installer's `--upgrade` brings earlier shipped copies up to date. Mechanical work then runs as single commands whose output the agent reports verbatim, and computation runs as saved queries rather than scratch scripts: `python3 src/awb.py --help` lists the commands (`sql`, `profile`, `land`, `retain`, `publish`, `stale`, `check-draft`, `draft-provenance`, `export`, `release`, `copy-releases`). Each investigation's run script, `run.py`, produces, validates, and records its results in one run and prints the `state.md` rows to paste.
 
 To see where things stand and what you can ask for next:
 
@@ -67,13 +66,15 @@ The skill asks which datasets to include. Subsequent requests revise the same dr
 
 > Use awb-release — mark the package delivered.
 
-That preserves the next numbered release after any outstanding revalidation decisions. Releases live under `deliveries/`, which the generated ignore rules exclude from Git, so before the first release `awb-release` asks where released packages are kept, records it in the project README, and copies each release there when the location is reachable. M365 receives the audience-facing findings, written as a slide-by-slide deck outline, an internal methodology reference, one data file per chart, chosen exports, and assembly instructions. In the Microsoft 365 Copilot app, the PowerPoint agent builds the deck from the outline, draws each chart as a native chart from its data file under the assembly's chart rules, and asks you when something is unclear. Checking the storyline means reading the outline's headings before anything is built.
-
-After installing a newer release of the skills, bring each existing workbench up to date:
-
-> Use awb-update to update this workbench.
+That preserves the next numbered release, frozen from then on, once you have chosen a disposition for each flagged finding the draft represents. Releases live under `deliveries/`, which the generated ignore rules exclude from Git, so before the first release `awb-release` asks where released packages are kept, records it in the project README, and copies each release there when the location is reachable; `python3 src/awb.py copy-releases` copies existing releases when the location is recorded or changed later. M365 receives the audience-facing findings, written as a slide-by-slide deck outline, an internal methodology reference, one data file per chart, chosen exports, and assembly instructions. In the Microsoft 365 Copilot app, the PowerPoint agent builds the deck from the outline, draws each chart as a native chart from its data file under the assembly's chart rules, and asks you when something is unclear. Checking the storyline means reading the outline's headings before anything is built.
 
 Landed source data gets the same treatment. `data/raw/` is also excluded from Git, and a landed original often cannot be fetched again, so before the first acquisition is landed the agent asks where landed originals are kept outside the checkout, records it on the project README's `Landed data is kept at` line, and copies each completed landing there when the location is reachable. `awb-status` reports landed data that exists only in the checkout.
+
+After installing a newer release of the skills, bring each existing workbench up to date with `awb-init`'s repair:
+
+> Use awb-init to repair this workbench.
+
+Repair runs the helper installer with `--upgrade`. It replaces only unmodified copies of earlier shipped helpers, package formats, and workbench guides, which it recognizes from the record of every version the skills have shipped; it reports customized copies for you to decide and removes retired files only when you ask. The agent then reconciles the project's adapted `AGENTS.md` and `README.md` against the current templates.
 
 <!-- dist:exclude -->
 ## Design and validation
