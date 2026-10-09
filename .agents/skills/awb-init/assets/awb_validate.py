@@ -1,15 +1,22 @@
 """Shared result validation for an analytics workbench project (Python 3.10+, pandas only).
 
-Copy this file to the project's src/exploration/validate.py on first use and import it from there;
+Copy this file to the project's src/exploration/validate.py and import it from there;
 never from the skill folder. It measures without interpreting.
 
 validate() returns the validation record: a list of checks {name, outcome, detail}, one per name in
 CHECK_NAMES and in that order, with outcome one of OUTCOMES and every value a str. Store the list
 unchanged with the result's evidence. profile() reports the counts and values to inspect.
+src/awb.py runs cli_profile() as `python3 src/awb.py profile`; it also needs DuckDB and the
+project's src/preparation/landing.py for its session.
 """
 
+import argparse
+import importlib.util
 import json
 import numbers
+import re
+import sys
+from pathlib import Path
 
 import pandas as pd
 
@@ -158,3 +165,75 @@ def validate(frame, spec) -> list[dict]:
         else:
             checks.append(_measured(name, *measure(frame, spec[key])))
     return checks
+
+
+PROFILE_MAX_ROWS = 1_000_000
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _landing(root):
+    """Load the project's landing helper by path; awb.py puts only this folder on sys.path."""
+    path = Path(root) / "src/preparation/landing.py"
+    if not path.is_file():
+        raise FileNotFoundError(f"profile needs {path} for its session")
+    spec = importlib.util.spec_from_file_location("awb_profile_landing", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def cli_profile(root: Path, argv: list[str]) -> int:
+    """Profile a view, query file, or SQL text in a fresh session; print a per-column summary."""
+    parser = argparse.ArgumentParser(prog="awb.py profile", description=cli_profile.__doc__)
+    parser.add_argument("source",
+                        help="view name, query file (absolute or project-relative), or SQL text")
+    parser.add_argument("--out", help="write the full profile JSON to this file")
+    parser.add_argument("--max-rows", type=int, default=PROFILE_MAX_ROWS,
+                        help="profile a repeatable sample of this many rows when the result is "
+                             f"larger (default {PROFILE_MAX_ROWS})")
+    args = parser.parse_args(argv)
+    if args.max_rows < 1:
+        parser.error("--max-rows must be 1 or more")
+    out = None
+    try:
+        landing = _landing(root)
+        out = landing._under(root, args.out) if args.out else None
+        with landing.session(root) as connection:
+            if _IDENTIFIER.fullmatch(args.source) and connection.execute(
+                    "SELECT 1 FROM information_schema.tables WHERE lower(table_name) = lower(?)",
+                    [args.source]).fetchall():
+                text = f'SELECT * FROM "{args.source}"'
+            else:
+                text = landing._sql_argument(root, args.source)
+                if text == args.source and _IDENTIFIER.fullmatch(text):
+                    raise ValueError(f"no view or query file named {args.source}")
+            relation = connection.sql(text)
+            if relation is None:
+                raise ValueError("the SQL returns no rows; end it with a query")
+            total = relation.aggregate("count(*)").fetchone()[0]
+            if total > args.max_rows:
+                # A seeded reservoir sample bounds memory and repeats across runs.
+                relation = relation.query("awb_profiled", "SELECT * FROM awb_profiled USING SAMPLE "
+                                          f"reservoir({args.max_rows} ROWS) REPEATABLE (0)")
+            result = profile(relation.df())
+        if total > result["row_count"]:
+            result["sampled_from"] = total
+        if out is not None:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    except Exception as error:
+        message = f"{error}: {error.__cause__}" if error.__cause__ else str(error)
+        print(f"profile: {' '.join(message.split())}", file=sys.stderr)
+        return 1
+    if "sampled_from" in result:
+        print(f"rows: {result['row_count']} profiled of {total} (repeatable sample; null rates and "
+              "distinct counts are estimates)")
+    else:
+        print(f"rows: {total}")
+    print(landing._markdown_table(
+        ["column", "type", "null rate", "distinct"],
+        [(name, column["dtype"], column["null_rate"], column["distinct_count"])
+         for name, column in result["columns"].items()]))
+    if out is not None:
+        print(f"full profile in {args.out}")
+    return 0

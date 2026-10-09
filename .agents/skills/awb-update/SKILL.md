@@ -20,7 +20,7 @@ It is read-only without flags and emits compact JSON; execute it without reading
 - `current`: already matches; nothing to do.
 - `earlier`: an unmodified copy of an earlier version; safe to replace.
 - `customized`: matches no shipped version; the project changed it.
-- `absent`: not installed; the owning skill installs it on first use. Leave it absent.
+- `absent`: not installed; `awb-init`'s `scripts/install_helpers.py` installs missing helpers, and `awb-package` copies a missing package format when a package needs it.
 
 Under `retired`, it lists files the skills no longer ship that the project still holds, `unmodified` or `customized`. Under `old_format_drafts`, it lists package drafts in an earlier format, with reasons.
 
@@ -36,6 +36,14 @@ Combine flags in one call when the user's answers allow, and report the helper's
 ## Migrations
 
 Newest first. Each applies when its condition holds, whatever the project's starting version.
+
+### Commands, run scripts, and per-dataset skills
+
+- **`src/awb.py` is absent:** run `awb-init`'s `scripts/install_helpers.py` on the project; it installs the dispatcher and any other missing helper, never overwriting, and reports dependencies and packages.
+- **`AGENTS.md` does not mention `src/awb.py`:** add to its analytical invariants: "Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists the commands. When a helper or package is missing, run the `awb-init` skill's `scripts/install_helpers.py`, which restores missing helpers without overwriting any and reports missing packages."
+- **`AGENTS.md` does not route to `awb-clean` and `awb-eda`:** extend its sentence naming `awb-status` so it also says to use `awb-clean` to clean one dataset at the foundation level and `awb-eda` to explore one dataset for the active investigation.
+- **`README.md` lacks them under **Asking for things**:** add the `awb-clean`, `awb-eda`, and `awb-update` lines from the current `awb-init` README template.
+- **An investigation has no `run.py`:** change nothing now. When its findings are next rerun, offer to adapt `awb-init`'s `assets/workbench/investigation/run.py` and `settings.toml` around its existing composition entry, so results, validation, evidence, and `state.md` rows come from one run.
 
 ### Charts move to the M365 handoff; the deck replaces Word and Excel
 

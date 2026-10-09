@@ -14,6 +14,17 @@
 # test_land_refuses_existing_id_before_fetch: existing completed acquisition is refused before fetching.
 # test_retain_requires_source_and_acquisition_directly_under_raw: regression: retain enforces source/acquisition depth under data/raw.
 # test_session_refuses_a_project_root_containing_a_comma: regression: comma-containing project root is rejected before opening a connection.
+# test_cli_sql_prints_first_rows_and_total_and_writes_full_result: sql runs a project-relative query file or SQL text, prints a capped Markdown table and the total, and writes CSV or Parquet.
+# test_cli_sql_reports_failures_on_one_line: SQL errors, failing view files and non-query SQL print one stderr line and return 1; a bad --out extension is a usage error.
+# test_cli_land_copies_files_retains_and_writes_ledger_rows: land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
+# test_cli_land_skips_unusable_retention_location: unrecorded, none chosen, unreachable and non-filesystem locations skip retention and record this checkout only.
+# test_cli_land_lands_without_a_ledger_and_reports_the_missing_row: missing sources.md still lands and exits 1 naming the unwritten row.
+# test_cli_land_refuses_unusable_inputs_before_landing: missing inputs, clashing names and malformed record counts exit 2 before landing.
+# test_cli_retain_retains_unretained_acquisitions_and_fills_their_rows: retain command writes missing rows without a location, then retains and updates rows once one is recorded, then does nothing.
+# test_cli_retain_reports_a_discrepant_existing_copy: a discrepant existing copy exits 1 and leaves the row this checkout only.
+# test_cli_publish_converts_checks_and_records_the_select: publish command writes Parquet from a project-relative select, runs the check, and records SQL checksums and rows.
+# test_cli_publish_keeps_a_failed_check_or_empty_result_unpublished: check rows or an empty select keep the partial directory unpublished and print the failures.
+# test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 
 import hashlib
 import importlib.util
@@ -304,3 +315,264 @@ def test_session_refuses_a_project_root_containing_a_comma(tmp_path, monkeypatch
     with pytest.raises(ValueError, match="comma"):
         landing.session(root)
     assert opened == []
+
+
+def sql_project(root):
+    views = root / "foundation/views"
+    views.mkdir(parents=True)
+    (views / "01_orders.sql").write_text(
+        "CREATE VIEW orders AS SELECT range AS id, 'a|b' AS note FROM range(5);")
+    (root / "queries").mkdir()
+    (root / "queries/large.sql").write_text("SELECT id FROM orders WHERE id >= 1 ORDER BY id;\n")
+
+
+def test_cli_sql_prints_first_rows_and_total_and_writes_full_result(tmp_path, monkeypatch, capsys):
+    duckdb = pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    monkeypatch.chdir(tmp_path.parent)  # the query file and --out are project-relative
+    assert landing.cli_sql(tmp_path, ["queries/large.sql", "--limit", "2",
+                                      "--out", "out/large.csv"]) == 0
+    assert capsys.readouterr().out == (
+        "| id |\n|---|\n| 1 |\n| 2 |\n2 of 4 rows shown; full result in out/large.csv\n")
+    assert (tmp_path / "out/large.csv").read_text().split() == ["id", "1", "2", "3", "4"]
+    assert landing.cli_sql(tmp_path, ["SELECT note, NULL AS gap FROM orders LIMIT 1",
+                                      "--out", "out/note.parquet"]) == 0
+    assert capsys.readouterr().out == (
+        "| note | gap |\n|---|---|\n| a\\|b | NULL |\n"
+        "1 of 1 rows shown; full result in out/note.parquet\n")
+    with duckdb.connect() as connection:
+        assert connection.execute("SELECT * FROM read_parquet(?)",
+                                  [str(tmp_path / "out/note.parquet")]).fetchall() == [("a|b", None)]
+
+
+def test_cli_sql_reports_failures_on_one_line(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    for query in ("SELECT * FROM absent", "CREATE TABLE t AS SELECT 1"):
+        assert landing.cli_sql(tmp_path, [query]) == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.startswith("sql: ") and captured.err.count("\n") == 1
+    failing = tmp_path / "foundation/views/02_invalid.sql"
+    failing.write_text("CREATE VIEW invalid AS SELECT * FROM absent;")
+    assert landing.cli_sql(tmp_path, ["SELECT 1"]) == 1
+    error = capsys.readouterr().err
+    assert str(failing) in error and "absent" in error and error.count("\n") == 1
+    with pytest.raises(SystemExit) as exit:
+        landing.cli_sql(tmp_path, ["SELECT 1", "--out", "result.json"])
+    assert exit.value.code == 2
+    assert not (tmp_path / "result.json").exists()
+WORKBENCH = ASSET.parent / "workbench"
+
+
+def workbench(root, location="not yet recorded"):
+    """A project holding the template README and sources register, with one candidate source."""
+    (root / "foundation").mkdir(parents=True)
+    readme = (WORKBENCH / "README.md").read_text(encoding="utf-8")
+    (root / "README.md").write_text(readme.replace(
+        "Landed data is kept at: not yet recorded", f"Landed data is kept at: {location}"))
+    sources = (WORKBENCH / "foundation/sources.md").read_text(encoding="utf-8")
+    delimiter = "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+    (root / "foundation/sources.md").write_text(sources.replace(
+        delimiter, delimiter + "| orders | ERP | one row per order | Ann | file | fit | candidate | |\n", 1))
+    return root
+
+
+def run(capsys, command, root, *argv):
+    status = command(root, [str(arg) for arg in argv])
+    return status, json.loads(capsys.readouterr().out)
+
+
+def acquisition_rows(root):
+    lines = (root / "foundation/sources.md").read_text().split("## Acquisitions")[1].splitlines()
+    rows = [line for line in lines if line.startswith("|")][2:]
+    return [[cell.strip() for cell in row.strip("|").split("|")] for row in rows]
+
+
+def test_cli_land_copies_files_retains_and_writes_ledger_rows(tmp_path, capsys):
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    root = workbench(tmp_path / "project", storage)
+    received = tmp_path / "received"
+    (received / "pages").mkdir(parents=True)
+    (received / "orders.csv").write_bytes(b"id\r\n1\r\n2\r\n")
+    (received / "pages/1.json").write_bytes(b"{}")
+    status, out = run(capsys, landing.cli_land, root, "orders", "r1", received / "orders.csv",
+                      received / "pages", "--request", "email from Ann", "--records", "orders.csv=2",
+                      "--notes", "a|b")
+    assert status == 0
+    acquired = root / "data/raw/orders/r1"
+    destination = storage / "data/raw/orders/r1"
+    assert out == {"landed": "data/raw/orders/r1/", "files": 2, "bytes": 12,
+                   "retention": {"destination": str(destination), "copied": True, "conflict": False,
+                                 "discrepancies": []},
+                   "ledger": {"row": "added", "source_status": "acquired"}}
+    assert (acquired / "orders.csv").read_bytes() == b"id\r\n1\r\n2\r\n"
+    assert (destination / "pages/1.json").read_bytes() == b"{}"
+    provenance = json.loads((acquired / "provenance.json").read_text())
+    assert provenance["request"] == "email from Ann"
+    assert [file["records"] for file in provenance["files"]] == [2, None]
+    # The escaped pipe in Notes splits under this test's naive parser.
+    assert acquisition_rows(root) == [[
+        "r1", "orders", provenance["completed_at"], "email from Ann", "`data/raw/orders/r1/`",
+        f"`{destination}`",
+        "2 files, 12 bytes; SHA-256 per file in provenance.json; records: orders.csv 2", "", "a\\",
+        "b"]]
+    assert "| orders | ERP | one row per order | Ann | file | fit | acquired |  |" in (
+        root / "foundation/sources.md").read_text()
+
+
+@pytest.mark.parametrize("location, skipped", [("not yet recorded", "unrecorded"),
+                                               ("none chosen", "none chosen"),
+                                               ("`../absent`", "unreachable"),
+                                               ("s3://bucket/raw", "not a filesystem path")])
+def test_cli_land_skips_unusable_retention_location(tmp_path, capsys, location, skipped):
+    root = workbench(tmp_path, location)
+    (tmp_path / "orders.csv").write_bytes(b"id\n1\n")
+    status, out = run(capsys, landing.cli_land, root, "orders", "r1", tmp_path / "orders.csv")
+    assert status == 0
+    assert out["retention"]["skipped"] == skipped
+    assert acquisition_rows(root)[0][3:6] == [
+        f"copied from {(tmp_path / 'orders.csv').resolve()}", "`data/raw/orders/r1/`",
+        "this checkout only"]
+
+
+def test_cli_land_lands_without_a_ledger_and_reports_the_missing_row(tmp_path, capsys):
+    (tmp_path / "orders.csv").write_bytes(b"id\n1\n")
+    status, out = run(capsys, landing.cli_land, tmp_path, "orders", "r1", tmp_path / "orders.csv")
+    assert status == 1
+    assert (tmp_path / "data/raw/orders/r1/orders.csv").read_bytes() == b"id\n1\n"
+    assert out["retention"]["skipped"] == "unrecorded"
+    assert out["ledger"]["row"] == "not written"
+    assert "sources.md" in out["ledger"]["error"]
+
+
+def test_cli_land_refuses_unusable_inputs_before_landing(tmp_path, capsys):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a/x.csv").write_bytes(b"1")
+    (tmp_path / "x.csv").write_bytes(b"2")
+    for argv in ([tmp_path / "missing.csv"], [tmp_path / "x.csv", tmp_path / "a/x.csv"],
+                 [tmp_path / "x.csv", "--records", "x.csv=many"]):
+        with pytest.raises(SystemExit) as error:
+            landing.cli_land(tmp_path, ["orders", "r1", *map(str, argv)])
+        assert error.value.code == 2
+    assert not (tmp_path / "data").exists()
+
+
+def test_cli_retain_retains_unretained_acquisitions_and_fills_their_rows(tmp_path, capsys):
+    root = workbench(tmp_path / "project")
+    (tmp_path / "orders.csv").write_bytes(b"id\n1\n")
+    run(capsys, landing.cli_land, root, "orders", "r1", tmp_path / "orders.csv")
+    landing.land(root, "orders", "r2", lambda output: (output / "page.json").write_bytes(b"{}"),
+                 request={"page": 1})
+    (root / "data/raw/orders/r3.partial").mkdir()
+    status, out = run(capsys, landing.cli_retain, root)
+    assert status == 0
+    assert out["location"]["skipped"] == "unrecorded"
+    assert out["acted_on"] == [{"acquisition": "data/raw/orders/r2/",
+                                "ledger": {"row": "added", "source_status": "acquired"}}]
+    assert out["still_this_checkout_only"] == 1
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    readme = root / "README.md"
+    readme.write_text(readme.read_text().replace("kept at: not yet recorded", "kept at: ../storage", 1))
+    status, out = run(capsys, landing.cli_retain, root)
+    assert status == 0
+    assert [(item["acquisition"], item["retention"]["copied"], item["ledger"]["row"])
+            for item in out["acted_on"]] == [("data/raw/orders/r1/", True, "updated"),
+                                             ("data/raw/orders/r2/", True, "updated")]
+    rows = acquisition_rows(root)
+    storage = storage.resolve()
+    assert [row[5] for row in rows] == [f"`{storage / 'data/raw/orders/r1'}`",
+                                        f"`{storage / 'data/raw/orders/r2'}`"]
+    assert rows[1][3] == '{"page": 1}'
+    status, out = run(capsys, landing.cli_retain, root)
+    assert (status, out["acted_on"], out["already_retained"]) == (0, [], 2)
+
+
+def test_cli_retain_reports_a_discrepant_existing_copy(tmp_path, capsys):
+    storage = tmp_path / "storage"
+    root = workbench(tmp_path / "project", storage)
+    (tmp_path / "orders.csv").write_bytes(b"id\n1\n")
+    run(capsys, landing.cli_land, root, "orders", "r1", tmp_path / "orders.csv")
+    (storage / "data/raw/orders/r1").mkdir(parents=True)
+    status, out = run(capsys, landing.cli_retain, root)
+    assert status == 1
+    assert out["acted_on"][0]["retention"]["discrepancies"] == [
+        "missing at destination: orders.csv", "missing at destination: provenance.json"]
+    assert out["acted_on"][0]["ledger"]["row"] == "unchanged"
+    assert acquisition_rows(root)[0][5] == "this checkout only"
+
+
+def published_project(tmp_path, capsys):
+    root = workbench(tmp_path / "project")
+    (tmp_path / "orders.csv").write_bytes(b"id,amount\n1,10\n2,20\n")
+    run(capsys, landing.cli_land, root, "orders", "r1", tmp_path / "orders.csv")
+    (root / "prep").mkdir()
+    (root / "prep/orders.sql").write_text(
+        "SELECT id, amount * 2 AS doubled FROM read_csv('data/raw/orders/r1/orders.csv');\n")
+    return root
+
+
+def test_cli_publish_converts_checks_and_records_the_select(tmp_path, capsys, monkeypatch):
+    duckdb = pytest.importorskip("duckdb")
+    root = published_project(tmp_path, capsys)
+    (root / "prep/check.sql").write_text("SELECT * FROM publication WHERE doubled IS NULL")
+    monkeypatch.chdir(tmp_path)
+    status, out = run(capsys, landing.cli_publish, root, "orders", "v1", "--from", "data/raw/orders/r1",
+                      "--sql", "prep/orders.sql", "--check", "prep/check.sql", "--notes", "first")
+    assert status == 0
+    final = root / "data/parquet/orders/v1"
+    assert out["published"] == "data/parquet/orders/v1/"
+    assert out["rows"] == 2
+    assert out["inputs"] == ["data/raw/orders/r1"]
+    assert out["catalog_row"] == ("| orders | Parquet publication |  | `data/raw/orders/r1/` | "
+                                  "`data/parquet/orders/v1/` | `prep/orders.sql` | "
+                                  "`prep/check.sql` returns no rows |  |")
+    assert duckdb.sql(f"SELECT * FROM '{final / 'orders.parquet'}' ORDER BY id").fetchall() == [
+        (1, 20), (2, 40)]
+    publication = json.loads((final / "publication.json").read_text())
+    assert [file["path"] for file in publication["files"]] == ["orders.parquet"]
+    assert publication["inputs"][0]["acquisition_id"] == "r1"
+    assert publication["notes"] == {
+        "select": "prep/orders.sql",
+        "select_sha256": hashlib.sha256((root / "prep/orders.sql").read_bytes()).hexdigest(),
+        "check": "prep/check.sql",
+        "check_sha256": hashlib.sha256((root / "prep/check.sql").read_bytes()).hexdigest(),
+        "rows": 2, "comment": "first"}
+
+
+@pytest.mark.parametrize("check, failing", [("SELECT * FROM publication WHERE doubled > 30", 1),
+                                            (None, 0)])
+def test_cli_publish_keeps_a_failed_check_or_empty_result_unpublished(tmp_path, capsys, check, failing):
+    pytest.importorskip("duckdb")
+    root = published_project(tmp_path, capsys)
+    argv = ["orders", "v1", "--from", "data/raw/orders/r1", "--sql", "prep/orders.sql"]
+    if check:
+        (root / "prep/check.sql").write_text(check)
+        argv += ["--check", "prep/check.sql"]
+    else:
+        (root / "prep/orders.sql").write_text(
+            "SELECT * FROM read_csv('data/raw/orders/r1/orders.csv') WHERE id > 5")
+    status, out = run(capsys, landing.cli_publish, root, *argv)
+    assert status == 1
+    assert out["published"] is False
+    assert out["partial"] == "data/parquet/orders/v1.partial"
+    assert out.get("failing_rows", 0) == failing
+    if failing:
+        assert out["first"] == [{"id": 2, "doubled": 40}]
+    assert not (root / "data/parquet/orders/v1").exists()
+    assert not (root / "data/parquet/orders/v1.partial/publication.json").exists()
+
+
+def test_cli_publish_requires_from_to_name_exactly_what_the_select_reads(tmp_path, capsys):
+    root = published_project(tmp_path, capsys)
+    landing.land(root, "orders", "r2", lambda output: (output / "orders.csv").write_bytes(b"id\n3\n"),
+                 request="second")
+    for acquisitions in (["data/raw/orders/r2"], ["data/raw/orders/r1", "data/raw/orders/r2"]):
+        with pytest.raises(SystemExit) as error:
+            landing.cli_publish(root, ["orders", "v1", "--from", *acquisitions,
+                                       "--sql", "prep/orders.sql"])
+        assert error.value.code == 2
+        assert "--from must name exactly" in capsys.readouterr().err
+    assert not (root / "data/parquet").exists()

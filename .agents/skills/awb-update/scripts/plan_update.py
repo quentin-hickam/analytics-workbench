@@ -53,6 +53,8 @@ def plan(root, *, apply=False, replace=(), remove_retired=False):
     files, retired = [], []
     for entry in versions["copied"]:
         target, asset = root / entry["path"], SKILLS / entry["asset"]
+        if not asset.is_file():
+            continue  # recorded by a newer skills release than the one installed
         if not target.is_file():
             files.append({"path": entry["path"], "status": "absent", "action": "none"})
             continue

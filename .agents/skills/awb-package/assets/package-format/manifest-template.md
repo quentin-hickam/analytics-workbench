@@ -12,7 +12,7 @@ Every draft and release manifest records these fields under the field names show
 - `revised_at`: when this draft revision was written; a release keeps the value of the draft it copies;
 - `released_at`: when the release was made; empty on a draft;
 - `prior_release`: the latest numbered release before this one, such as `released/001`, or `none`; and
-- `inventory`: every file in the package directory, each with its path relative to the package directory using `/` separators, byte size, and SHA-256; directories are not listed. The manifest lists itself by path only, with no size or checksum, since writing them would change them. Produce the rows with `inventory` in `src/packaging/manifest.py` and serialize them in order under the keys `path`, `bytes`, and `sha256`.
+- `inventory`: every file in the package directory, each with its path relative to the package directory using `/` separators, byte size, and SHA-256; directories are not listed. The manifest lists itself by path only, with no size or checksum, since writing them would change them. Produce the rows with `inventory` in `src/packaging/manifest.py` and serialize them in order under the keys `path`, `bytes`, and `sha256`; `python3 src/awb.py check-draft` does both for a JSON manifest.
 
 ## Producing state
 
@@ -24,6 +24,8 @@ The analytical results this package represents.
 - `analytical_settings`: the analytical settings represented by the results; and
 - `scope`: the population, period, and other scope the results cover.
 
+`python3 src/awb.py draft-provenance` writes the first four fields into a JSON manifest from the results' evidence files. When every result records the same value, the field holds it; when results differ, it holds each distinct value with the results that recorded it, under `value` and `results`. `inputs` holds `publications`, `acquisitions`, and `views` lists copied from the evidence; list entries name the results that recorded them under `results`. An unknown is `{"unknown": "<reason>"}`. For an `uncommitted` state, `producing_uncommitted_changes` holds the checksum of every producing file.
+
 ## Packaging state
 
 The operation that assembled this package, recorded separately from the producing state.
@@ -31,6 +33,8 @@ The operation that assembled this package, recorded separately from the producin
 - `packaging_commit`: the packaging checkout commit;
 - `packaging_uncommitted_changes`: `none`, or the relevant uncommitted package-source paths; and
 - `export_checks`: for each exported dataset and chart file, the output of `compare_evidence` in `src/provenance.py`, run before its export: the five named comparisons showing that the current code and data match the complete producing state (committed result code paths against the producing commit, uncommitted producing changes against their recorded checksums or every producing file for an `uncommitted` state, view definitions and the publications they read against the recorded ones, input publication and acquisition files against their recorded checksums, and resolved settings against the recorded settings), each with its paths or identifiers and outcome. A revision that reuses an export carries its checks forward unchanged; with no exported datasets or charts, `none`.
+
+`draft-provenance` writes `packaging_commit` and `packaging_uncommitted_changes` (paths under `src/` and `package-format/`), and with `--export-checks` writes `export_checks` as one entry per result, each with `result_id`, `evidence`, and the unchanged `comparisons`.
 
 ## Selection and caveats
 

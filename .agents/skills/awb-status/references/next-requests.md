@@ -6,7 +6,9 @@ End with the handful of requests the current state makes relevant, each phrased 
 | --- | --- | --- | --- |
 | No active investigation | "Start an investigation into <question>" | `awb-init` | progress |
 | A consequential scope or purpose decision is open in the brief or state | "Resolve the <topic> scope change" | `awb-init` | progress |
-| Findings flagged for revalidation | "Rerun the flagged findings" | run the composition entry under AGENTS.md | risk |
+| Findings flagged for revalidation | "Rerun the flagged findings" | `python3 investigations/<name>/run.py` under AGENTS.md | risk |
+| A dataset the active investigation uses has no row in the quality record, or unresolved issues or next steps name data errors | "Clean the <dataset> data" | `awb-clean` | progress |
+| An active investigation with no findings yet, or a next step that calls for exploring a dataset | "Explore <dataset> for this investigation" | `awb-eda` | progress |
 | A draft or release represents a finding flagged since the draft was revised | "Revise the <package> draft to carry the new caveats" | `awb-package` | risk |
 | Supported findings and no draft | "Prepare a draft package" | `awb-package` | progress |
 | Draft ahead of the latest release, or never released | "Mark the <package> package delivered" | `awb-release` | progress |
