@@ -61,7 +61,7 @@ def main():
                               [AGENTS, skill('awb-release'), CONTRACT]),
         'narrative_revision': ([AGENTS, skill('awb-package')], [AGENTS, skill('awb-package'), CONTRACT]),
         'clean': ([AGENTS], [AGENTS, skill('awb-clean')]),
-        'eda': ([AGENTS], [AGENTS, skill('awb-eda'), SKILLS + 'awb-eda/references/follow-up-queries.md']),
+        'eda': ([AGENTS], [AGENTS, skill('awb-eda')]),
     }
     result = {'measurement': 'Static instruction words and characters, not model tokens or full-run cost',
               'baseline': args.baseline, 'scenarios': {}}
