@@ -14,6 +14,7 @@ Released packages are kept at: not yet recorded
 
 - `foundation/` records sources, canonical datasets and views, shared data quality, and common vocabulary.
 - `investigations/` keeps each question's brief, current state, meaningful history, settings, thin composition code, and local exploration.
+- `src/awb.py` runs the workbench helpers under `src/` as commands: `python3 src/awb.py --help` lists them. `requirements.txt` names the packages they need unless the project declares dependencies elsewhere.
 - `src/preparation/` holds acquisition, landing, conversion, session-loading, and reusable normalization and correction code when such code exists.
 - `src/exploration/` holds neutral analytical operations when such code exists.
 - `src/packaging/` holds shared package assembly code when such code exists.
@@ -22,7 +23,7 @@ Released packages are kept at: not yet recorded
 - `data/cache/` holds only deliberate, rebuildable expensive results recorded in the foundation catalog.
 - `deliveries/` is created only through an explicit packaging request. It is excluded from Git, so numbered releases persist only where the project copies them. Releases are made with `awb-release`, which asks for that location on the first release and records it in the `Released packages are kept at` line above.
 
-Directories are created when needed, so a new workbench may contain only the foundation records and its first investigation.
+Directories are created when needed, so a new workbench may contain only the foundation records, the helpers under `src/`, and its first investigation.
 
 ## Data path
 

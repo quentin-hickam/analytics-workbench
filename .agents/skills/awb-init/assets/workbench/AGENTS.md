@@ -21,7 +21,7 @@ Let the active question bound preparation; broader preparation requires an expli
 
 Compute before interpreting. Apart from related findings used to select methods, read other investigations' or projects' conclusions only after this investigation produces its own results unless the user requests otherwise. Preserve results that challenge the expected explanation.
 
-Only an investigation's composition entry run with its settings can produce a finding. Validate every result before presentation or recording; retain the complete checks with its evidence, and understand and record failures before promoting a finding. Track analytical code in Git and record producing state, input provenance, views, settings, and validation through the project evidence helper. Reuse helpers and save queries or checks executed a second time for rerunning by path.
+Only an investigation's composition entry run with its settings can produce a finding. Validate every result before presentation or recording; retain the complete checks with its evidence, and understand and record failures before promoting a finding. Track analytical code in Git and record producing state, input provenance, views, settings, and validation through the project evidence helper. Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists the commands. When a helper or package is missing, run the `awb-init` skill's `scripts/install_helpers.py`, which restores missing helpers without overwriting any and reports missing packages. Reuse helpers and save queries or checks executed a second time for rerunning by path.
 
 ## Maintain records and delivery boundaries
 

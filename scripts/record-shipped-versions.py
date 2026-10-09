@@ -28,6 +28,8 @@ COPIED = {
     "src/packaging/manifest.py": "awb-package/assets/awb_manifest.py",
     "src/packaging/findings.py": "awb-package/assets/awb_findings.py",
     "src/packaging/charts.py": "awb-package/assets/awb_charts.py",
+    "src/packaging/draft.py": "awb-package/assets/awb_draft.py",
+    "src/awb.py": "awb-init/assets/awb_cli.py",
     "src/provenance.py": "awb-init/assets/awb_provenance.py",
     "src/preparation/landing.py": "awb-init/assets/awb_landing.py",
     "src/exploration/validate.py": "awb-init/assets/awb_validate.py",
@@ -68,6 +70,10 @@ def committed_hashes(paths):
 def build():
     copied = []
     for project_path, asset in COPIED.items():
+        if not (ROOT / SKILLS / asset).is_file():
+            # A mapped asset that has not landed on this branch yet; it is recorded once it exists.
+            print(f"skipped {project_path}: {SKILLS}{asset} does not exist", file=sys.stderr)
+            continue
         current = hashlib.sha256((ROOT / SKILLS / asset).read_bytes()).hexdigest()
         known = committed_hashes([asset, *EARLIER.get(project_path, [])])
         copied.append({"path": project_path, "asset": asset,
