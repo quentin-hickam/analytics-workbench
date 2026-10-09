@@ -34,6 +34,7 @@
         "40124cbeee3c39fd3f2f0869d58c0cf4890d0429ca02c1506709e5621b9a2076",
         "8fc746048ef4967d3d7803de44d95dbbc555bc807c4038185d47783276ef943d",
         "a3a424f06aa6c92eb2227e66fe32ca240c15e6d072953230e15545fbe79bfdfb",
+        "c2b6d9d5d19d82e5c251abdfe476ef1340c16a4c4762ae4b95b93c9659fb1697",
         "cb8f7920593f87c20e7dd6b3b6609868ec62654958381a65c34822ddece47823"
       ]
     },
@@ -52,6 +53,13 @@
     {
       "path": "src/packaging/charts.py",
       "asset": "awb-package/assets/awb_charts.py",
+      "previous": [
+        "ba42fca5b6bcb8b4f34d3d0d2cfd4ec51426e68540a2c8296cf1428a772db313"
+      ]
+    },
+    {
+      "path": "src/packaging/draft.py",
+      "asset": "awb-package/assets/awb_draft.py",
       "previous": []
     },
     {
