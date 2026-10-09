@@ -4,8 +4,11 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-09
+
 ### Changed
 
+- The release archive carries only the five `awb-*` skills, `README.md`, `LICENSE`, and `CHANGELOG.md`. The specification, design notes, and efficiency validation under `docs/`, and the README's design, validation, and build notes, stay in the repository.
 - Reconciled conditional package and figure references with the audience-facing findings/methodology layout: both release verification passes run the findings check, figures use document captions and the current style API, and status reads methodology for affected findings. Instruction-size comparisons now use the PR #6 merge as their baseline.
 - Reduced routine instruction load: the generated `AGENTS.md` routes to project data and analysis guides; visualization routes by output type; release reads a focused shared package contract; narrative revisions begin with relevant records and still verify the complete draft.
 - Investigation scoping is self-contained in `awb-init`, removing the external `grilling` dependency while retaining one consequential question at a time, recommendations, settled answers, and explicit material unknowns.
@@ -129,7 +132,8 @@ First release.
 - The knowledge vault, which carries knowledge about systems, databases, schemas, and tables from one project to the next through `WORKBENCH_VAULT`.
 - The specification, design notes, and an archive build script that packages an explicit allowlist of tracked files.
 
-[Unreleased]: https://github.com/quentin-hickam/analytics-workbench/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/quentin-hickam/analytics-workbench/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/quentin-hickam/analytics-workbench/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/quentin-hickam/analytics-workbench/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/quentin-hickam/analytics-workbench/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/quentin-hickam/analytics-workbench/releases/tag/v0.1.0
