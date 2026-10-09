@@ -20,7 +20,7 @@ It is read-only without flags and emits compact JSON; execute it without reading
 - `current`: already matches; nothing to do.
 - `earlier`: an unmodified copy of an earlier version; safe to replace.
 - `customized`: matches no shipped version; the project changed it.
-- `absent`: not installed; the owning skill installs it on first use. Leave it absent.
+- `absent`: not installed; `awb-init`'s `scripts/install_helpers.py` installs missing helpers, and `awb-package` copies a missing package format when a package needs it.
 
 Under `retired`, it lists files the skills no longer ship that the project still holds, `unmodified` or `customized`. Under `old_format_drafts`, it lists package drafts in an earlier format, with reasons.
 

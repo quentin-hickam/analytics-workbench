@@ -1,5 +1,5 @@
 # Kept cases:
-# test_names_cover_project_records: names hold investigation/package, created views, sources without CTEs or table functions, nested settings keys, and result IDs from evidence and state links.
+# test_names_cover_project_records: names hold investigation/package, created views, sources without CTEs or table functions, top-level settings keys and dotted paths (not bare nested keys), and result IDs from evidence and state links.
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten and other manifest fields kept; the audit record holds the names set.
 # test_check_draft_reports_each_helper_problem: an internal name, a chart without a file, and a missing settings file each fail with the helper's rows unchanged.
 # test_verify_only_never_rewrites_inventory: a changed file is reported against the recorded inventory, which stays as recorded.
@@ -114,8 +114,9 @@ def test_names_cover_project_records(project):
     names, problems = draft.project_names(project, "inv", "pkg")
     assert problems == []
     assert {"inv", "pkg", "orders_view", "regions_table", "main.regions_table", "minimum_count",
-            "period", "start", "period.start", "r-001", "r-002", "r-009"} <= set(names)
-    assert not {"recent", "read_parquet", "ordered_at", "orders_comment_name", "r-001-export-checks"} & set(names)
+            "period", "period.start", "r-001", "r-002", "r-009"} <= set(names)
+    assert not {"start", "recent", "read_parquet", "ordered_at", "orders_comment_name",
+                "r-001-export-checks"} & set(names)
 
 
 def test_check_draft_rewrites_inventory_and_passes(project, capsys):

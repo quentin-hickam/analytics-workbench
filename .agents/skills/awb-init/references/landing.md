@@ -1,6 +1,6 @@
 # Landing helper
 
-If the project lacks `src/preparation/landing.py`, copy [awb_landing.py](../assets/awb_landing.py) there. Preserve an existing customized helper and import the project copy. Run examples from the project root with its `src` importable. Replace illustrative paths and identifiers with the actual source and acquisition. Follow the project's acquisition, retention, and publication rules before calling these interfaces.
+The [installer](../scripts/install_helpers.py) places this helper at `src/preparation/landing.py` and restores it when missing; run it, never copy by hand. Preserve a customized helper and call the project copy. Run examples from the project root with its `src` importable. Replace illustrative paths and identifiers with the actual source and acquisition. Follow the project's acquisition, retention, and publication rules before calling these interfaces.
 
 ## Acquire and publish
 

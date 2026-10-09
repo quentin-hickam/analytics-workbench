@@ -14,7 +14,7 @@ Use one project helper per repeated operation, including landing, publication, r
 
 ## Validate results
 
-Read the installed `awb-init` skill's `references/validation.md` for setup, the `profile` command, `profile()` and `validate(frame, spec)` interfaces, and examples. Copy the supplied helper to `src/exploration/validate.py` only if missing; preserve customized copies and import from the project. Non-Python projects port its interface and check record.
+Read the installed `awb-init` skill's `references/validation.md` for setup, the `profile` command, `profile()` and `validate(frame, spec)` interfaces, and examples. Preserve a customized helper and import from the project. Non-Python projects port its interface and check record.
 
 Run four mechanical checks: required columns; plausible counts before and after each filter; joins without unexpected multiplication, inspecting key uniqueness whenever counts change; and missing-value rates for important fields. For counts, null rates, and distinct values, run `python3 src/awb.py profile <view | query.sql | "SQL"> --out <path>.json` rather than ad hoc counting queries or snippets; it saves the full `profile()` result and prints a per-column summary. The composition entry calls `profile()` and `validate()` directly.
 
@@ -22,7 +22,7 @@ Supply three judgment checks to `validate()` as outcomes with one-sentence detai
 
 ## Record evidence and rerun
 
-Read the installed `awb-init` skill's `references/provenance.md` before recording evidence or comparing producing state. Copy its helper to `src/provenance.py` only if missing; preserve customized helpers and import the project copy. Non-Python projects port the interface and file format.
+Read the installed `awb-init` skill's `references/provenance.md` before recording evidence or comparing producing state. Preserve a customized helper and import the project copy. Non-Python projects port the interface and file format.
 
 Produce results by running the composition entry, `python3 investigations/<name>/run.py [result-id ...]`; do not write separate recording scripts. In one call per run it produces each result from canonical views, validates it, saves its table and profile under `results/`, and records evidence through `record_evidence()`, which writes `investigations/<name>/evidence/<result-id>.json` with producing commit, uncommitted producing-file checksums, the views and the publications and acquisitions they read with their recorded checksums, resolved settings, and validation checks. It prints one JSON line per result with the evidence path, failed and unassessed checks, and the `state.md` findings row to paste. A new result is a `[results.<result-id>]` table in `settings.toml` and a query in `queries/<result-id>.sql`; adapt the entry rather than rewriting it. Before a first commit, evidence records `uncommitted` and producing-file checksums; suggest a commit so later results carry a SHA. This evidence distinguishes the producing state from a later checkout.
 

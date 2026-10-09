@@ -1,6 +1,6 @@
 # Result validation helper
 
-If the project lacks `src/exploration/validate.py`, copy [awb_validate.py](../assets/awb_validate.py) there. Preserve an existing customized helper and import the project copy. It requires Python 3.10+ and pandas. A non-Python project ports the same interface and check record.
+The [installer](../scripts/install_helpers.py) places this helper at `src/exploration/validate.py` and restores it when missing; run it, never copy by hand. Preserve a customized helper and call the project copy. It requires Python 3.10+ and pandas. A non-Python project ports the same interface and check record.
 
 `profile(frame, *, max_distinct=20) -> dict` accepts a pandas DataFrame and returns `row_count` plus each column's `dtype`, `null_rate`, `distinct_count`, and most frequent `sample_values`. Save the complete profile to a file; inspect relevant columns and expand beyond the sample when the business interpretation depends on other distinct values.
 

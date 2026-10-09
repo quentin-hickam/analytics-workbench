@@ -1,6 +1,6 @@
 # Result evidence helper
 
-If the project lacks `src/provenance.py`, copy [awb_provenance.py](../assets/awb_provenance.py) there. Preserve an existing customized helper and import the project copy. The helper uses Python 3.10+ and the standard library; parsed TOML settings require `tomllib` (Python 3.11+). A non-Python project ports the same interface and `awb-evidence/2` format.
+The [installer](../scripts/install_helpers.py) places this helper at `src/provenance.py` and restores it when missing; run it, never copy by hand. Preserve a customized helper and call the project copy. The helper uses Python 3.10+ and the standard library; parsed TOML settings require `tomllib` (Python 3.11+). A non-Python project ports the same interface and `awb-evidence/2` format.
 
 ## Produce and record results
 

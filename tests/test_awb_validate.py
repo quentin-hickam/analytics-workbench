@@ -138,7 +138,8 @@ def test_profile_reports_type_nulls_distincts_and_capped_frequent_samples():
                           7: [3, 3, 2, 3, 2, 1]})
     result = validation.profile(frame, max_distinct=2)
     assert result == {"row_count": 6, "columns": {
-        "region": {"dtype": "object", "null_rate": 0.1667, "distinct_count": 3,
+        # pandas 3 reports string columns as "str", earlier versions as "object".
+        "region": {"dtype": str(frame["region"].dtype), "null_rate": 0.1667, "distinct_count": 3,
                    "sample_values": ["west", "east"]},
         "7": {"dtype": "int64", "null_rate": 0.0, "distinct_count": 3,
               "sample_values": [3, 2]},

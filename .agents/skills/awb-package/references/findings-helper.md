@@ -1,6 +1,6 @@
 # Findings helper interface
 
-Read when interpreting the `findings` rows `check-draft` reports or calling the helper directly. If `src/packaging/findings.py` is missing, copy [awb_findings.py](../assets/awb_findings.py) there. Preserve existing helpers and call the project copy; inspect implementation only for incompatible interfaces or diagnosis.
+Read when interpreting the `findings` rows `check-draft` reports or calling the helper directly. `awb-init`'s `scripts/install_helpers.py` places this helper at `src/packaging/findings.py` and restores it when missing; never copy by hand. Preserve a customized helper and call the project copy; inspect implementation only for incompatible interfaces or diagnosis.
 
 `check(path, *, names=()) -> list[dict]` scans Markdown for code, paths, filenames, identifiers, SHAs, and supplied internal names. Rows retain `line`, `kind`, and `text`, ordered by line and column. It ignores HTML comments and Markdown link targets. `[]` means this mechanical check passed; audience suitability, supported claims, matching headings, and caveats still require the package contract's review. Read errors fail the check.
 

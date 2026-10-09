@@ -1,6 +1,6 @@
 # Charts helper interface
 
-Read when a draft's `findings.md` specifies charts. If `src/packaging/charts.py` is missing, copy [awb_charts.py](../assets/awb_charts.py) there. Preserve existing helpers and call the project copy; inspect implementation only for incompatible interfaces or diagnosis. `write_charts` needs pandas; `check_charts` needs only the standard library.
+Read when a draft's `findings.md` specifies charts. `awb-init`'s `scripts/install_helpers.py` places this helper at `src/packaging/charts.py` and restores it when missing; never copy by hand. Preserve a customized helper and call the project copy; inspect implementation only for incompatible interfaces or diagnosis. `write_charts` needs pandas; `check_charts` needs only the standard library.
 
 `write_charts(charts_dir, charts) -> list[Path]` takes one DataFrame per chart, in the order the **Chart N.** specifications appear in `findings.md`, and writes `charts_dir/chart-1.csv`, `chart-2.csv`, and so on, removing chart files a previous revision left beyond the new count. Each frame holds exactly the plotted values, in display order and at the slide's rounding, with display-name headers carrying units and interval bounds as their own columns. It raises, writing nothing, for an empty list, an empty frame, a blank or repeated header, or a header that looks like an internal name (an underscore or a dot between letters).
 

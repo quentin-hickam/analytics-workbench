@@ -60,7 +60,9 @@
     {
       "path": "src/packaging/draft.py",
       "asset": "awb-package/assets/awb_draft.py",
-      "previous": []
+      "previous": [
+        "3b5bb96bcdc4c37f0b435ba141364d72a5cdee7fa131d2f90391bd13db60eac5"
+      ]
     },
     {
       "path": "src/awb.py",
@@ -92,6 +94,7 @@
       "path": "src/exploration/validate.py",
       "asset": "awb-init/assets/awb_validate.py",
       "previous": [
+        "1b46277657f7455584c275100177ad501de7c4b12571acbdbe9bdc5e2bfb7a75",
         "67c424272cb0f651a0bae501e564272991da10811674883e4515baa25c9936bb",
         "f51cbd20c2f672e03ac761820414520e0cdd958d88aa44cdd9fee4e0615658b7"
       ]

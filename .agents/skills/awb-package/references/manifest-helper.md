@@ -1,6 +1,6 @@
 # Manifest helper interface
 
-Use this when interpreting the inventory and copy comparisons that `check-draft` and `release` report, or when comparing a copied release by hand. If the project lacks `src/packaging/manifest.py`, copy [awb_manifest.py](../assets/awb_manifest.py) there. Preserve an existing helper. Call the project copy; source inspection is needed only for an incompatible interface or a failure requiring diagnosis.
+Use this when interpreting the inventory and copy comparisons that `check-draft` and `release` report, or when comparing a copied release by hand. `awb-init`'s `scripts/install_helpers.py` places this helper at `src/packaging/manifest.py` and restores it when missing; never copy by hand. Preserve a customized helper. Call the project copy; source inspection is needed only for an incompatible interface or a failure requiring diagnosis.
 
 ## Calls
 

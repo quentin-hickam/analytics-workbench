@@ -1,6 +1,6 @@
 """Shared result validation for an analytics workbench project (Python 3.10+, pandas only).
 
-Copy this file to the project's src/exploration/validate.py on first use and import it from there;
+Copy this file to the project's src/exploration/validate.py and import it from there;
 never from the skill folder. It measures without interpreting.
 
 validate() returns the validation record: a list of checks {name, outcome, detail}, one per name in

@@ -148,8 +148,9 @@ def _keys(value, prefix=""):
     names = set()
     if isinstance(value, dict) and not _is_unknown(value):
         for key, item in value.items():
+            # A nested key alone is often a plain word ("start"); only its dotted path is a name.
             dotted = f"{prefix}.{key}" if prefix else str(key)
-            names.update({str(key), dotted}, _keys(item, dotted))
+            names.update({dotted}, _keys(item, dotted))
     elif isinstance(value, list):
         for item in value:
             names.update(_keys(item, prefix))
@@ -163,10 +164,9 @@ def _toml_keys(text):
         names = set()
         for header in re.findall(r"^\s*\[\[?\s*([^\]]+?)\s*\]\]?", text, re.MULTILINE):
             parts = [part.strip().strip("\"'") for part in header.split(".")]
-            names.update(parts + [".".join(parts[:i]) for i in range(2, len(parts) + 1)])
+            names.update(".".join(parts[:i]) for i in range(1, len(parts) + 1))
         for key in re.findall(r"^\s*([A-Za-z0-9_\-\"'.]+)\s*=", text, re.MULTILINE):
-            parts = [part.strip("\"'") for part in key.split(".")]
-            names.update(parts + [".".join(parts)])
+            names.add(".".join(part.strip("\"'") for part in key.split(".")))
         return names
     return _keys(tomllib.loads(text))
 

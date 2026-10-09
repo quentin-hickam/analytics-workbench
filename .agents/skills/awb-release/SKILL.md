@@ -23,7 +23,7 @@ When that line is absent or reads `not yet recorded`, ask the user where release
 
 ## Verify the draft
 
-Check every **Structural consistency** rule in the [package contract](../awb-package/references/package-contract.md). Install each bundled helper only if its project copy is missing. Run `python3 src/awb.py check-draft <investigation> <package> --verify-only`, described under **Commands** in the contract. It runs the findings `check` with the complete names set, `check_charts`, and `verify` against the manifest's recorded `inventory` without rebuilding it, and exits 0 only when all pass; report each returned row and discrepancy unchanged. Hand checks never substitute. Only JSON manifests are automated; for another format, follow the helper interfaces it names.
+Check every **Structural consistency** rule in the [package contract](../awb-package/references/package-contract.md). Run `python3 src/awb.py check-draft <investigation> <package> --verify-only`, described under **Commands** in the contract. It runs the findings `check` with the complete names set, `check_charts`, and `verify` against the manifest's recorded `inventory` without rebuilding it, and exits 0 only when all pass; report each returned row and discrepancy unchanged. Hand checks never substitute. Only JSON manifests are automated; for another format, follow the helper interfaces it names.
 
 Defer the contract's **Revalidation caveats** to **Resolve revalidation flags**: a draft can predate a flag, and that gap is settled by a disposition, not reported here. When a structural rule fails, list each discrepancy and stop; repairs are package revisions through awb-package, never reconstructed here.
 

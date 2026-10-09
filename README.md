@@ -15,7 +15,7 @@ Every skill name carries the `awb-` prefix, so typing `awb-` in a host that list
 ## Requirements
 
 - For package chart files, the chart helper that `awb-package` ships needs Python 3.10 or later and pandas.
-- For the landing helper that `awb-init` ships, the analysis project's Python environment needs Python 3.10 or later; its `session()` also needs the `duckdb` package. `land()`, `publish()`, and `retain()` use only the standard library.
+- The project helpers need Python 3.10 or later (3.11 or later, or `tomli`, for TOML settings). `awb-init`'s installer declares and checks their packages: pandas for validation and charts, and `duckdb` for sessions, queries, and publication. `land()`, `publish()`, and `retain()` themselves use only the standard library.
 - For result validation under the project `AGENTS.md`, the analysis project's Python environment needs Python 3.10 or later and pandas. The shared validation file was tested with pandas 2.2.
 - The read-only status collector needs Python 3.10 or later and the standard library; unsupported project record formats use targeted manual reads.
 <!-- dist:exclude -->
@@ -49,6 +49,8 @@ In the target project's agent session, start from the business question:
 > Use awb-init to initialize this analytics project. The question is …
 
 If you ask without a question, `awb-init` asks for one; say there is no question yet to set up the project alone. Continue analytical work normally using the generated AGENTS.md instructions. The default data flow is independent source landing, validated Parquet datasets, and DuckDB views loaded into separate analytical sessions. Data gathering never writes directly into the canonical database as its only retained representation.
+
+`awb-init` installs the project helpers under `src/` once and writes a `requirements.txt` when the project declares no dependencies. Mechanical work then runs as single commands, so the agent neither retypes helper output into records nor writes throwaway scripts: `python3 src/awb.py --help` lists them (`sql`, `profile`, `land`, `retain`, `publish`, `stale`, `check-draft`, `draft-provenance`, `release`). Each investigation's `run.py` produces, validates, and records its results in one run and prints the `state.md` rows to paste.
 
 To see where things stand and what you can ask for next:
 
