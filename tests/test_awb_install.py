@@ -1,5 +1,6 @@
 # Kept cases:
 # test_installs_every_missing_helper_and_declares_packages: a bare workbench gets every src/ helper, src/awb.py included, and a requirements.txt; nothing else.
+# test_fallback_imports_are_not_requirements: an import inside an except ImportError handler, such as tomli for tomllib, is not declared.
 # test_present_helpers_are_classified_and_kept: current, earlier and customized copies are reported and left byte for byte.
 # test_check_writes_nothing: --check reports missing helpers and the absent requirements file without writing.
 # test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited.
@@ -163,3 +164,9 @@ def test_refuses_non_workbench_and_old_python(tmp_path, project, monkeypatch):
     result = installer.install(project)
     assert not result["python"]["ok"] and "error" in result
     assert snapshot(project) == before
+
+
+def test_fallback_imports_are_not_requirements(tmp_path):
+    helper = tmp_path / "helper.py"
+    helper.write_text("import duckdb\ntry:\n    import tomllib\nexcept ImportError:\n    import tomli as tomllib\n")
+    assert installer._needed([("src/helper.py", helper, None)]) == {"duckdb": "duckdb"}
