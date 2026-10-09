@@ -38,10 +38,10 @@ A neutral, reusable computation that produces measurements or comparisons indepe
 An inquiry into a business question, with its own scope, analytical choices, progress, and findings, that draws on the project's data foundation. It combines analytical operations and interprets their results for that question.
 
 **Delivery package**:
-A collection of audience-facing outputs representing an investigation at a particular point, with provenance identifying the code, inputs, and analytical parameters that produced it.
+A collection of audience-facing outputs, with an internal methodology reference, representing an investigation at a particular point, with provenance identifying the code, inputs, and analytical parameters that produced it.
 
 **Package format**:
-The shared conventions for package structure and presentation, including the journal, executive summary, and M365 assembly instructions. It is independent of an investigation's scope, narrative, and results.
+The shared conventions for package structure and presentation, including the audience-facing findings document, the internal methodology reference, and the M365 assembly instructions under which M365 distills the executive summary. It is independent of an investigation's scope, narrative, and results.
 
 **Cache**:
 A stored result retained to avoid expensive recomputation of an analysis or data preparation step.

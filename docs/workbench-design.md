@@ -60,15 +60,19 @@ Draft packages may include findings awaiting revalidation, with a clear caveat b
 
 Each package has one stable name and one current working draft. Revisions update that draft until the user explicitly marks it as delivered. That milestone preserves a numbered delivery; subsequent edits begin the next working revision. Numbered deliveries are created only at explicit delivery milestones.
 
-An investigation has one delivery package by default, containing both the detailed journal and executive summary. Additional packages are created only for an independent scope or delivery schedule.
+An investigation has one delivery package by default. Its draft holds an audience-facing findings document and an internal methodology reference; the executive summary is distilled in M365, not written in the workbench. Additional packages are created only for an independent scope or delivery schedule.
 
-Package structure is a shared format choice, not an investigation choice. Related investigations inherit the journal, executive-summary, and M365 assembly conventions; their narrative and results are specific to the investigation.
+Package structure is a shared format choice, not an investigation choice. Related investigations inherit the findings, methodology, and M365 assembly conventions; their narrative and results are specific to the investigation.
 
-Each delivery's detailed journal is self-contained and explains the analysis represented by that delivery. When applicable, include a brief section describing changes since the previous delivery.
+Each delivery's findings document is self-contained for the audience recorded in the investigation brief and is the only source of document content. It is written in that audience's business terms: file names, view and column names, settings keys, internal identifiers, and code terms stay out, and a packaging helper checks for them. The methodology document is self-contained as the account of the analysis and is where those identifiers belong; it lets the M365 agent and analysts look up the internal logic behind a decision. The two agree in claims, numbers, qualifications, and caveats, and each finding has a section under the same heading in both. When applicable, both include a brief section describing changes since the previous delivery.
+
+An earlier format packaged a journal that served both as the internal record of decisions and as source text for the audience document, and M365 built its report by narrativizing it, carrying file and column names into delivered documents. Separating the two documents keeps that internal record out of what M365 renders.
+
+Figures carry no caption in the image. The caption, with its unit, population, period, count, plain-language source, exclusions, and caveat reasons, lives in the document that contains the figure: in chat, an italic line beneath the image; in records, beside the figure link; in a package, the italic `*Figure N. ...*` line beneath the image in `findings.md`, from which M365 makes a Word caption. Every text element in the image is plain business language.
 
 ## M365 handoff
 
-The approved direction is the workbench to M365. Each package contains a cohesive, complete narrative and any accompanying datasets and assembly instructions. M365's role is presentation and formatting in Word and Excel. Reverse synchronization from M365 is out of scope; substantive narrative revisions belong in the package sources.
+The approved direction is the workbench to M365. Each package contains a cohesive, complete findings narrative, an internal methodology reference, and any accompanying figures, datasets, and assembly instructions. M365's role is presentation and formatting in Word and Excel, plus distilling the executive summary from the findings under the assembly guidelines. M365 Copilot asks the requester before drafting when the audience, decision, length, or the effect of a caveat is unclear, and it consults the methodology reference only to understand a decision, never copying its identifiers into a document. Reverse synchronization from M365 is out of scope; substantive narrative revisions belong in the package sources.
 
 ## Workflow responsibilities
 
@@ -98,9 +102,9 @@ Keep definitions separate from scope and configuration: a selected population or
 
 ## Investigation records
 
-At investigation creation, capture the business question, population or scope, the decision the analysis will support, and what would make the answer useful. Allow an exploratory purpose and explicitly record unknowns rather than requiring a predetermined decision or outcome. Use this brief to guide source relevance and preparation effort.
+At investigation creation, capture the business question, population or scope, the decision the analysis will support, and what would make the answer useful. Record who will read the delivered documents when the user says; packaging asks for it when it is still missing. Allow an exploratory purpose and explicitly record unknowns rather than requiring a predetermined decision or outcome. Use this brief to guide source relevance and preparation effort.
 
-Separate a concise current-state summary from a chronological history of meaningful learnings and decisions. The current state supports resuming work; the history retains analytical reasoning, caveats, superseded conclusions, and relevant data limitations or errors. Routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding are excluded from both the investigation history and the delivery journal. A methodological mistake that changed a finding or explains why an earlier conclusion was wrong is retained, because the account must explain how the conclusion was reached. Shared data preparation and quality knowledge remain part of the data foundation.
+Separate a concise current-state summary from a chronological history of meaningful learnings and decisions. The current state supports resuming work; the history retains analytical reasoning, caveats, superseded conclusions, and relevant data limitations or errors. Routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding are excluded from both the investigation history and the package's methodology document. A methodological mistake that changed a finding or explains why an earlier conclusion was wrong is retained, because the account must explain how the conclusion was reached. Shared data preparation and quality knowledge remain part of the data foundation.
 
 The agent maintains these records automatically when a finding, decision, or next step changes. Explicit checkpoints are also available before switching investigations.
 
