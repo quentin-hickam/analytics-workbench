@@ -6,10 +6,12 @@
 # Archive layout, independent of the checkout directory's name:
 #   analytics-workbench-skills/
 #     awb-init/ awb-package/ awb-release/ awb-status/ awb-visualize/
-#     docs/ CHANGELOG.md LICENSE README.md
+#     CHANGELOG.md LICENSE README.md
 # The skill folders sit at the top level so they can be copied as-is into a
 # host's user-level skills directory. README links into .agents/skills/ are
-# rewritten to match.
+# rewritten to match. Internal documentation (docs/, CONTEXT.md) stays in the
+# repository, and README blocks between <!-- dist:exclude --> and
+# <!-- /dist:exclude --> lines are dropped from the archive copy.
 set -eu
 root="$(cd "$(dirname "$0")/.." && pwd)"
 top="analytics-workbench-skills"
@@ -21,7 +23,6 @@ allowlist="
 .agents/skills/awb-release
 .agents/skills/awb-status
 .agents/skills/awb-visualize
-docs
 CHANGELOG.md
 LICENSE
 README.md
@@ -47,7 +48,12 @@ git ls-files -- $allowlist | while IFS= read -r file; do
   mkdir -p "$(dirname "$dest")"
   cp -p "$file" "$dest"
 done
-sed "s|](\.agents/skills/|](|g" README.md > "$stage/$top/README.md"
+sed -e '/^<!-- dist:exclude -->$/,/^<!-- \/dist:exclude -->$/d' \
+  -e "s|](\.agents/skills/|](|g" README.md | cat -s > "$stage/$top/README.md"
+if grep -n -e "](docs/" -e "dist:exclude" "$stage/$top/README.md" >&2; then
+  echo "archive README links internal documentation or has unbalanced markers" >&2
+  exit 1
+fi
 mkdir -p dist
 rm -f "$out"
 (cd "$stage" && zip -q -r -X "$out" "$top")

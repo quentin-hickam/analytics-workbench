@@ -18,11 +18,13 @@ Every skill name carries the `awb-` prefix, so typing `awb-` in a host that list
 - For the landing helper that `awb-init` ships, the analysis project's Python environment needs Python 3.10 or later; its `session()` also needs the `duckdb` package. `land()`, `publish()`, and `retain()` use only the standard library.
 - For result validation under the project `AGENTS.md`, the analysis project's Python environment needs Python 3.10 or later and pandas. The shared validation file was tested with pandas 2.2.
 - The read-only status collector needs Python 3.10 or later and the standard library; unsupported project record formats use targeted manual reads.
+<!-- dist:exclude -->
 - pytest is needed only to run this repository's own tests under `tests/`; they exercise the shipped helper files and are not part of the distributed archive.
+<!-- /dist:exclude -->
 
 ## Install
 
-Download `analytics-workbench-skills-vX.Y.Z.zip` from the repository's GitHub releases and unzip it anywhere. It unpacks to one folder, `analytics-workbench-skills/`, holding the five `awb-*` skill folders beside this README, `LICENSE`, `CHANGELOG.md`, and `docs/`. Copy the five `awb-*` folders into your agent host's user-level skills directory, replacing any earlier copies. Do not unzip the archive into the skills directory itself: a host looks for `<skills directory>/<skill name>/SKILL.md`, and the extra folder level hides the skills. In a clone of this repository, the same five folders are under `.agents/skills/`.
+Download `analytics-workbench-skills-vX.Y.Z.zip` from the repository's GitHub releases and unzip it anywhere. It unpacks to one folder, `analytics-workbench-skills/`, holding the five `awb-*` skill folders beside this README, `LICENSE`, and `CHANGELOG.md`. Copy the five `awb-*` folders into your agent host's user-level skills directory, replacing any earlier copies. Do not unzip the archive into the skills directory itself: a host looks for `<skills directory>/<skill name>/SKILL.md`, and the extra folder level hides the skills. In a clone of this repository, the same five folders are under `.agents/skills/`.
 
 The skills serve every project from the user-level directory; projects need no local copies.
 
@@ -64,6 +66,7 @@ That preserves the next numbered release after any outstanding revalidation deci
 
 Landed source data gets the same treatment. `data/raw/` is also excluded from Git, and a landed original often cannot be fetched again, so before the first acquisition is landed the agent asks where landed originals are kept outside the checkout, records it on the project README's `Landed data is kept at` line, and copies each completed landing there when the location is reachable. `awb-status` reports landed data that exists only in the checkout.
 
+<!-- dist:exclude -->
 ## Design and validation
 
 The [specification](docs/workbench-spec.md) defines the workflow and acceptance scenarios. The [design notes](docs/workbench-design.md) preserve the decisions behind it. Backend exceptions and exact cache-retention mechanics remain project-specific choices.
@@ -81,10 +84,15 @@ Historical validation of the `awb-*` skills, run 2026-10-07 by four isolated age
 The runs also surfaced places where the instructions were silent or conflicted, including the order of verification and revalidation dispositions in `awb-release`, the manifest field names `awb-status` reads, the landing and publication layout, where acquisition and settings code lives, and how an expansion is scoped. Those were corrected in the skills afterwards; the corrected wording has not itself been rerun. No API acquisition, production data conversion, or M365 assembly was performed. The runs used the earlier package format, a `journal.md` and an `executive-summary.md` written in the workbench, with captions drawn into figure images; the `findings.md` and `methodology.md` format that replaced it, the findings check, and caption-free figures were not exercised in those historical runs. Current helper and recipe checks are recorded in the efficiency validation below; real M365 assembly remains untested.
 
 The token-efficiency revision separates conditional procedures, adds a read-only status collector, and narrows revision reads. [Efficiency validation](docs/token-efficiency.md) describes how to compare instruction load and full agent runs without confusing file size with token usage.
+<!-- /dist:exclude -->
 
 ## Versioning
 
-Releases are Git tags `vX.Y.Z`, each with a zip asset named `analytics-workbench-skills-vX.Y.Z.zip`. `scripts/build-dist.sh` builds the archive as `dist/analytics-workbench-skills.zip`; add the version when attaching it to the release. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+Releases are Git tags `vX.Y.Z`, each with a zip asset named `analytics-workbench-skills-vX.Y.Z.zip`. Changes are listed in [CHANGELOG.md](CHANGELOG.md).
+
+<!-- dist:exclude -->
+`scripts/build-dist.sh` builds the archive as `dist/analytics-workbench-skills.zip`; add the version when attaching it to the release. The archive carries the skills, this README without its design, validation, and build notes, `LICENSE`, and `CHANGELOG.md`; `docs/` and `CONTEXT.md` stay in the repository.
+<!-- /dist:exclude -->
 
 ## License
 
