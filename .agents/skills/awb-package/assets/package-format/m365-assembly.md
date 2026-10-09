@@ -16,19 +16,19 @@ The draft replaces this section with the investigation brief's **Audience** sect
 The draft replaces this list with every file it includes, one path per line relative to the package directory. Write **None** under charts or datasets when the package has none.
 
 - `findings.md`: the deck outline; the source of all slide content.
-- `methodology.md`: internal reference for the reasoning behind decisions; never shown.
-- `m365-assembly.md`: these instructions; never shown.
-- `manifest.<format>`: provenance record; never shown.
+- `methodology.md`: internal reference for the reasoning behind decisions; kept off slides.
+- `m365-assembly.md`: these instructions; kept off slides.
+- `manifest.<format>`: provenance record; kept off slides.
 - Charts: `charts/chart-N.csv`, one file per chart, `chart-1.csv` holding the data for the specification **Chart 1.** in `findings.md`, and so on.
-- Datasets: `datasets/<dataset>.<format>`, each described on the **Supporting datasets** slide; delivered beside the deck, never charted.
+- Datasets: `datasets/<dataset>.<format>`, each described on the **Supporting datasets** slide; delivered beside the deck.
 
 ## Before you start
 
-The requester starts a chat in the Microsoft 365 Copilot app, adds the PowerPoint agent to the prompt, and attaches `findings.md`, every file in `charts/`, `methodology.md`, and these instructions; the datasets are not attached. The prompt asks for a deck built under these instructions.
+You have `findings.md`, every `charts/` file, `methodology.md`, and these instructions; datasets travel beside the deck and are not attached.
 
 ## Using methodology.md
 
-Consult `methodology.md` to understand why a decision was made, or to answer the requester's question about one in plain language. Its sections for each finding use the same headings as the finding slides. Never quote it, and never copy its identifiers, file names, settings, or code terms onto a slide or into notes. If a slide needs a method point that only `methodology.md` has, do not add it: raise it with the requester as a gap to fix upstream in the workbench.
+Use `methodology.md` to understand reasoning, or to answer the requester's question about a decision in plain language; its sections for each finding use the same headings as the finding slides. Slides and notes use only the outline's words, so never quote it or copy its identifiers, file names, settings, or code terms. A method point only it holds is a gap: raise it as in **Ask before building**.
 
 ## Ask before building
 
@@ -46,15 +46,14 @@ When none holds, build without asking.
 
 - **One slide per outline slide.** The `#` heading and subtitle line make the title slide. Each `##` section is one slide, except **Findings**, which becomes a PowerPoint section holding one slide per `###` finding. Keep the outline's order; add no slide, and drop none.
 - **Headlines verbatim.** The `###` heading, or the text after **Headline:**, goes in the slide's title placeholder as written.
-- **Bullets as written.** Keep every bullet, number, rounding, unit, and qualifier exactly as the outline gives them; never re-round, recompute, or combine them. You may tighten wording only where no claim, number, or qualifier changes.
+- **Bullets verbatim.** Every bullet, number, rounding, unit, and qualifier as written; tighten wording only where no claim, number, or qualifier changes.
 - **Caveats stay on their slide.** A **Caveat:** or **Awaiting revalidation:** bullet stays on the slide of the claim it qualifies, visible on the slide, not only in the notes.
 - **Notes.** The **Notes:** paragraph goes into the slide's speaker notes, unchanged in substance.
 - **Nothing new.** Add no claim, metric, comparison, recommendation, or summary slide that the outline does not make. The **Answer** slide is the executive summary.
-- **No internal names** on slides, in notes, or in alt text: no file names, paths, or internal names of any kind.
 
 ## Charts
 
-Build each chart as a native, editable PowerPoint chart whose data is its file in `charts/`, not as a picture. Plot every row of the file in the file's order, and never retype, recompute, round, aggregate, filter, or re-sort the values. When a chart cannot be built as a native chart from its file, or its data does not match the file, say so to the requester and name the slide, so they can insert the chart in PowerPoint and paste the file's values into its data; never substitute an image or estimated values.
+Build each chart as a native, editable PowerPoint chart whose data is its file in `charts/`, not as a picture. Chart data verbatim: plot every row of its file, in the file's order, at the file's values. When a chart cannot be built as a native chart from its file, or its data does not match the file, say so to the requester and name the slide, so they can insert the chart in PowerPoint and paste the file's values into its data; never substitute an image or estimated values.
 
 ### Chart forms
 
@@ -97,12 +96,16 @@ Never use 3D, a second value axis, or decorative effects. Put a second measure i
 
 ## Supporting datasets
 
-Deliver each dataset file beside the deck as supplied. Do not chart it, summarize it on slides, or build workbooks from it; the **Supporting datasets** slide describes it.
+Deliver each dataset file beside the deck as supplied; the **Supporting datasets** slide is its only presence in the deck.
 
 ## Theme and accessibility
 
-Apply the organization's approved template, typography, and page furniture when available. Keep every headline in its slide's title placeholder so the reading order and slide titles stay correct, keep body text at 18 pt or larger, and run PowerPoint's accessibility checker before handing the deck back.
+Apply the organization's approved template, typography, and page furniture when available. Keep every headline in its slide's title placeholder so the reading order and slide titles stay correct, keep body text at 18 pt or larger, and run PowerPoint's accessibility checker.
 
 ## Revision boundary
 
-When a requested change affects the storyline, wording, findings, numbers, charts, scope, or dataset contents, make that revision in the upstream workbench draft, send the refreshed package forward, and build the deck again. Deck edits are not synchronized back into the workbench. Layout, theme, and visual polish within the rules above are made here.
+When a requested change affects the storyline, wording, findings, numbers, charts, scope, or dataset contents, make that revision in the upstream workbench draft, send the refreshed package forward, and build the deck again. Deck edits stay in the deck. Layout, theme, and visual polish within the rules above are made here.
+
+## Before handing back
+
+Confirm: one slide per outline slide, in order; every chart native from its file; every **Caveat:** and **Awaiting revalidation:** bullet visible on its slide; the accessibility checker clean.

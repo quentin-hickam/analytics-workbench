@@ -40,6 +40,7 @@ COMMANDS = {
                     "checks a release candidate"),
     "release": ("packaging/draft.py", "cli_release",
                 "copy the verified draft to the next numbered release and to release storage"),
+    "copy-releases": ("packaging/draft.py", "cli_copy_releases", "copy existing releases to newly recorded release storage and compare each copy"),
 }
 
 
