@@ -38,8 +38,6 @@ def main():
         'project_entry': ([AGENTS], [AGENTS]),
         'analysis_procedures': ([AGENTS], [AGENTS, DATA, ANALYSIS]),
         'status_entry': ([AGENTS, skill('awb-status')], [AGENTS, skill('awb-status'), SKILLS + 'awb-status/references/next-requests.md']),
-        'table': ([AGENTS, skill('awb-visualize')],
-                  [AGENTS, ANALYSIS, skill('awb-visualize'), SKILLS + 'awb-visualize/references/tables.md']),
         'release_without_revision': ([AGENTS, skill('awb-release'), skill('awb-package')],
                     [AGENTS, skill('awb-release'), SKILLS + 'awb-package/references/package-contract.md',
                      SKILLS + 'awb-package/references/manifest-helper.md',

@@ -1,14 +1,14 @@
 # Result evidence helper
 
-If the project lacks `src/provenance.py`, copy [awb_provenance.py](../assets/awb_provenance.py) there. Preserve an existing customized helper and import the project copy. The helper uses Python 3.10+ and the standard library; parsed TOML settings require `tomllib` (Python 3.11+). A non-Python project ports the same interface and `awb-evidence/1` format.
+If the project lacks `src/provenance.py`, copy [awb_provenance.py](../assets/awb_provenance.py) there. Preserve an existing customized helper and import the project copy. The helper uses Python 3.10+ and the standard library; parsed TOML settings require `tomllib` (Python 3.11+). A non-Python project ports the same interface and `awb-evidence/2` format.
 
 ## Record a produced result
 
-`record_evidence(root, investigation, result_id, *, views, publications, acquisitions, settings_path, checks, figure=None, notes=None, code_paths=None) -> Path` writes the full evidence atomically at `investigations/<investigation>/evidence/<result_id>.json`, replacing that result ID's previous record. Call from the investigation's composition entry after producing and validating the result.
+`record_evidence(root, investigation, result_id, *, views, publications, acquisitions, settings_path, checks, notes=None, code_paths=None) -> Path` writes the full evidence atomically at `investigations/<investigation>/evidence/<result_id>.json`, replacing that result ID's previous record. Call from the investigation's composition entry after producing and validating the result.
 
-Use project-relative paths for views, input directories, settings, figure, and code; paths must remain within the project. `investigation` and `result_id` are simple identifiers starting with an alphanumeric character and continuing with alphanumerics, `.`, `_`, or `-`. Supply every actual input explicitly; view references are inspected, but input lists are not inferred. `checks` is the unchanged validation list of `{name, outcome, detail}` strings. `settings_path=None` records unknown settings, not an empty known configuration. Settings parsing is TOML; projects with another configuration format adapt the project helper to record their resolved settings.
+Use project-relative paths for views, input directories, settings, and code; paths must remain within the project. `investigation` and `result_id` are simple identifiers starting with an alphanumeric character and continuing with alphanumerics, `.`, `_`, or `-`. Supply every actual input explicitly; view references are inspected, but input lists are not inferred. `checks` is the unchanged validation list of `{name, outcome, detail}` strings. `settings_path=None` records unknown settings, not an empty known configuration. Settings parsing is TOML; projects with another configuration format adapt the project helper to record their resolved settings.
 
-`code_paths` accepts producing files or directories. Its default covers `src` and investigation files while excluding brief/state/history and the evidence, figures, and exploration directories. Supply explicit paths when producing code lies outside that default, including saved exploratory SQL consumed by the composition entry.
+`code_paths` accepts producing files or directories. Its default covers `src` and investigation files while excluding brief/state/history and the evidence and exploration directories (and `figures/` in older layouts). Supply explicit paths when producing code lies outside that default, including saved exploratory SQL consumed by the composition entry.
 
 ```python
 from pathlib import Path
@@ -31,7 +31,7 @@ evidence_path = record_evidence(
 print({'result_id': 'orders-001', 'checks': len(checks), 'evidence_path': str(evidence_path)})
 ```
 
-The file preserves producing commit and uncommitted-file hashes, view definitions, publications, acquisitions, resolved settings, checks, optional figure, and notes. Unknowns are `{"unknown": "reason"}`. Data hashes are copied from acquisition/publication metadata during recording and checked against files during comparison. Before a first commit, evidence records `uncommitted` and producing-file hashes; suggest a commit so later results carry a SHA. Track analytical code in Git.
+The file preserves producing commit and uncommitted-file hashes, view definitions, publications, acquisitions, resolved settings, checks, and notes. `compare_evidence` also reads `awb-evidence/1` files written before figures left the workbench, ignoring their figure entry. Unknowns are `{"unknown": "reason"}`. Data hashes are copied from acquisition/publication metadata during recording and checked against files during comparison. Before a first commit, evidence records `uncommitted` and producing-file hashes; suggest a commit so later results carry a SHA. Track analytical code in Git.
 
 ## Compare before an export
 

@@ -6,13 +6,12 @@ This repository shares one data foundation across multiple investigations. Sourc
 
 Resume the active investigation linked from `README.md` unless the user names another, and briefly identify it. Read its `brief.md` and `state.md`; read relevant history entries when prior reasoning matters. Point the README's `Active investigation` link at the investigation's `state.md` when creating or switching investigations. Ask before changing records when an ask could belong to several investigations.
 
-Use `awb-init` to establish or repair structure, start an investigation, or resolve a consequential scope change. The same ask about a broader population containing the current population expands the existing investigation and reopens only affected decisions. A related question about an independent population starts a new investigation with fresh findings, state, and history; inherit method, settings, and package format as starting points subject to correction. Prior findings guide method selection, not evidence about the new population. Use `awb-status` for status and possible next requests.
+Use `awb-init` to establish or repair structure, start an investigation, or resolve a consequential scope change. The same ask about a broader population containing the current population expands the existing investigation and reopens only affected decisions. A related question about an independent population starts a new investigation with fresh findings, state, and history; inherit method, settings, and package format as starting points subject to correction. Prior findings guide method selection, not evidence about the new population. Use `awb-status` for status and possible next requests, and `awb-update` to bring the workbench up to date after newer skills are installed.
 
 ## Load the relevant procedures
 
 - Before assessing sources, acquiring or retaining data, configuring canonical sessions, changing preparation or publication, or adding a cache, read [data procedures](workbench-guides/data.md).
 - Before writing analytical code, presenting any result, recording a finding, or correcting shared data and revalidating findings, read [analysis procedures](workbench-guides/analysis.md).
-- Whenever producing a chart, figure, diagram, or formatted results table, invoke `awb-visualize`.
 
 Read only the procedures needed for the current work. Once loaded, reuse their context until a relevant change requires rereading. Preserve existing project conventions; resolve conflicts explicitly instead of overwriting customized records or code.
 

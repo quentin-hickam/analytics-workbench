@@ -2,13 +2,14 @@
 
 Copy this file to `src/provenance.py`; do not import it from the skill folder.
 
-Schema awb-evidence/1, in order: schema, investigation, result_id, recorded_at
+Schema awb-evidence/2, in order: schema, investigation, result_id, recorded_at
 (local ISO time), producing_commit (SHA/uncommitted/unknown), producing_paths
 (sorted), producing_uncommitted_changes (path/status/bytes/sha256), views
 (path/bytes/sha256/publications), publications (path/publication_file/inputs/
 conversion_commit/files), acquisitions (path/provenance_file/status/files),
-settings (path/bytes/sha256/content), checks (name/outcome/detail), figure
-(path/bytes/sha256 or null), notes (text or null). Unknowns are {"unknown": reason}.
+settings (path/bytes/sha256/content), checks (name/outcome/detail), notes (text or null).
+Unknowns are {"unknown": reason}. awb-evidence/1 files also carry a figure entry, which
+compare_evidence ignores; it compares both versions.
 Paths are project-relative POSIX, except that a files[].path copied from publication.json or
 provenance.json is relative to the directory holding that file, and a publication's
 inputs[].files[].path to its acquisition directory.
@@ -121,7 +122,7 @@ def _settings(root, path):
 
 def record_evidence(project_root, investigation: str, result_id: str, *, views: list[str],
                     publications: list[str], acquisitions: list[str], settings_path: str | None,
-                    checks: list[dict], figure: str | None = None, notes: str | None = None,
+                    checks: list[dict], notes: str | None = None,
                     code_paths: list[str] | None = None) -> Path:
     """Write one result's complete producing state atomically, replacing the same id."""
     root = Path(project_root).resolve()
@@ -138,6 +139,7 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
     if code_paths is None:
         prefix = f"investigations/{investigation}/"
         code = [p for p in code if not (p.startswith(prefix) and p[len(prefix):].split("/")[0]
+                # figures/ is excluded for investigations laid out before awb-evidence/2.
                 in {"brief.md", "state.md", "history.md", "evidence", "figures", "exploration"})]
     paths = sorted(set(code + [_relative(root, p) for p in views] +
                        ([_relative(root, settings_path)] if settings_path is not None else [])))
@@ -168,7 +170,7 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
         changes = [{"path": e["path"], "status": "uncommitted" if in_git else "no-vcs", **e}
                    for e in file_checksums(paths, root=root)]
     evidence = {
-        "schema": "awb-evidence/1", "investigation": investigation, "result_id": result_id,
+        "schema": "awb-evidence/2", "investigation": investigation, "result_id": result_id,
         "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "producing_commit": commit, "producing_paths": paths, "producing_uncommitted_changes": changes,
         "views": [{**e, "publications": _view_publications(root, e["path"])}
@@ -178,7 +180,7 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
         "acquisitions": [_input_record(root, p, "provenance.json", ["status", "files"]) for p in acquisitions],
         "settings": _settings(root, settings_path) if settings_path is not None else
                     {"unknown": "no settings file given"},
-        "checks": checks, "figure": _checksum(root, figure) if figure else None, "notes": notes,
+        "checks": checks, "notes": notes,
     }
     path = root / _relative(root, f"investigations/{investigation}/evidence/{result_id}.json")
     if not path.parent.resolve().is_relative_to(root):
@@ -231,7 +233,7 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
     try:
         evidence_path = _relative(root, evidence_path)
         evidence = json.loads((root / evidence_path).read_text())
-        if evidence["schema"] != "awb-evidence/1":
+        if evidence["schema"] not in ("awb-evidence/1", "awb-evidence/2"):
             raise ValueError("wrong schema")
     except (OSError, ValueError, KeyError, TypeError) as error:
         return [{"name": name, "paths": [evidence_path], "outcome": "fail",

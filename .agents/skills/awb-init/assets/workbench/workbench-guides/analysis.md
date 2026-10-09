@@ -4,7 +4,7 @@ Paths are relative to the workbench root. Follow the universal analytical and re
 
 ## Structure and execute
 
-Use `src/preparation/` for acquisition, landing, conversion, session loading, normalization, and corrections; `src/exploration/` for neutral measurements, comparisons, profiles, and graph operations; `src/packaging/` for shared package assembly; and `src/presentation/` for figure style and builders. Keep presentation logic out of neutral operations.
+Use `src/preparation/` for acquisition, landing, conversion, session loading, normalization, and corrections; `src/exploration/` for neutral measurements, comparisons, profiles, and graph operations; and `src/packaging/` for shared package assembly. Keep presentation logic out of neutral operations.
 
 Each investigation has its own runnable composition entry and one named settings file in the project's configuration format (`settings.toml` by default). This thin layer selects shared operations and supplies scope and settings. Group meaningful variation in named configuration with sensible defaults; give distinct workflows distinct entry points. Reuse existing operations first. A CLI is optional and exposes only the controls its task needs.
 

@@ -14,13 +14,12 @@ The baseline is `40a0e9330607686e1326f699c684da04c55c13a3`, the PR #6 merge on m
 
 ## Agent-run comparison
 
-Compare the baseline and revised skills using fresh chats, the same model/settings, identical isolated fixture projects, and the same user prompts. Repeat each scenario to distinguish variance from improvements. Use these five requests:
+Compare the baseline and revised skills using fresh chats, the same model/settings, identical isolated fixture projects, and the same user prompts. Repeat each scenario to distinguish variance from improvements. Use these four requests:
 
 1. “Where do things stand?” Include no-commit and dirty-work cases, a current revalidation flag absent from the draft, and a customized record format. Require accurate uncertainty, no writes, and no reading of other investigations' conclusions.
-2. “Show the regional rates as a table.” Supply computed, validated values. Require correct values, units, rounding, sample sizes, and caveats; table-only work should not load chart recipes.
-3. “Calculate the regional rate comparison and record the finding.” Supply canonical inputs and settings. Require the composition entry to produce the result, all seven validation categories to be assessed, full evidence, and accurate state/history updates.
-4. “Revise the draft to explain this recorded limitation.” Include unrelated older history and existing exports. Require a complete consistent narrative, current caveats, byte-identical reused results and exports, and final findings and manifest verification.
-5. “Mark this package delivered.” Test both an unchanged draft and a newly flagged finding. Require both findings-check and manifest-verification passes, a valid disposition before release, immutable prior releases, exact copying, and verified storage or an explicit copy instruction.
+2. “Calculate the regional rate comparison and record the finding.” Supply canonical inputs and settings. Require the composition entry to produce the result, all seven validation categories to be assessed, full evidence, and accurate state/history updates.
+3. “Revise the draft to explain this recorded limitation.” Include unrelated older history and existing exports. Require a complete consistent narrative, current caveats, byte-identical reused results and exports, and final findings and manifest verification.
+4. “Mark this package delivered.” Test both an unchanged draft and a newly flagged finding. Require both findings-check and manifest-verification passes, a valid disposition before release, immutable prior releases, exact copying, and verified storage or an explicit copy instruction.
 
 Record input/output tokens and cached input separately where the host exposes them, reasoning tokens when available, tool-output size, tool calls, retries, and correctness outcomes. Record unavailable measurements as unavailable. Compare equivalent completed outcomes; a run that skips required work is not an efficiency win. Do not run live acquisitions, publish artifacts, or overwrite project data to benchmark instructions.
 
@@ -46,5 +45,7 @@ Measured instruction words for the declared reading paths:
 - Table presentation: 4,490 → 1,635 (63.6% fewer).
 - Release without revision: 5,574 → 3,292 (40.9% fewer).
 - Narrative revision: 4,292 → 3,789 (11.7% fewer).
+
+The table presentation path was retired when `awb-visualize` was removed; its measurement above is kept as recorded.
 
 These are file-size measurements, not whole-run token savings. Required findings and manifest interfaces are included in the release/revision paths; project records, helper implementation reads, and conditional figure work are not. A matched baseline/revised run with token telemetry has not been performed. The agent-run procedure above remains the method for measuring actual token savings.

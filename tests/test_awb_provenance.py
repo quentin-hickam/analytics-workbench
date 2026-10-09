@@ -1,7 +1,8 @@
 # Kept cases:
 # test_record_evidence_records_clean_producing_state: evidence JSON schema/key order and clean producing state.
 # test_record_evidence_captures_modified_code: uncommitted producing paths retain status, size and checksum.
-# test_record_evidence_rejects_invalid_checks_and_records_figure: a check outside the validation record shape raises; the evidence figure carries its path, size and checksum.
+# test_record_evidence_rejects_invalid_checks: a check outside the validation record shape raises.
+# test_compare_evidence_accepts_schema_1_evidence: evidence written before awb-evidence/2, with its figure entry, still compares clean.
 # test_compare_evidence_clean_committed_state_passes_five_comparisons: clean state passes all five ordered comparisons in the contract shape.
 # test_compare_evidence_detects_view_changed_after_recording: view mutation fails the views comparison.
 # test_compare_evidence_names_changed_setting: settings mutation fails the settings comparison.
@@ -99,9 +100,9 @@ def test_record_evidence_records_clean_producing_state(project):
     assert list(evidence) == [
         "schema", "investigation", "result_id", "recorded_at", "producing_commit",
         "producing_paths", "producing_uncommitted_changes", "views", "publications",
-        "acquisitions", "settings", "checks", "figure", "notes",
+        "acquisitions", "settings", "checks", "notes",
     ]
-    assert raw.endswith("\n") and raw.startswith('{\n  "schema": "awb-evidence/1",')
+    assert raw.endswith("\n") and raw.startswith('{\n  "schema": "awb-evidence/2",')
     assert evidence["producing_commit"] == git(project, "rev-parse", "HEAD")
     assert evidence["producing_paths"] == ["foundation/views/orders.sql",
         "investigations/inv/run.py", "investigations/inv/settings.toml", "src/ops.py"]
@@ -113,7 +114,7 @@ def test_record_evidence_records_clean_producing_state(project):
     assert evidence["publications"][0]["files"] == [{"path": "part-0.parquet", "bytes": 13,
         "sha256": hashlib.sha256(b"parquet bytes").hexdigest()}]
     assert evidence["acquisitions"][0]["status"] == "complete"
-    assert evidence["figure"] is None and evidence["notes"] is None
+    assert evidence["notes"] is None
 
 
 def test_record_evidence_captures_modified_code(project):
@@ -124,14 +125,19 @@ def test_record_evidence_captures_modified_code(project):
          "sha256": hashlib.sha256(b"x = 2\n").hexdigest()}]
 
 
-def test_record_evidence_rejects_invalid_checks_and_records_figure(project):
+def test_record_evidence_rejects_invalid_checks(project):
     with pytest.raises(ValueError):
         provenance.record_evidence(project, "inv", "r1", views=[], publications=[], acquisitions=[],
             settings_path=None, checks=[{"name": "scope", "outcome": "ok", "detail": "wrong"}])
-    write(project, "investigations/inv/figures/result.png", b"figure bytes")
-    evidence = json.loads(record(project, figure="investigations/inv/figures/result.png").read_text())
-    assert evidence["figure"] == {"path": "investigations/inv/figures/result.png", "bytes": 12,
-                                 "sha256": hashlib.sha256(b"figure bytes").hexdigest()}
+
+
+def test_compare_evidence_accepts_schema_1_evidence(project):
+    path = record(project)
+    evidence = json.loads(path.read_text())
+    evidence["schema"] = "awb-evidence/1"
+    evidence["figure"] = None
+    path.write_text(json.dumps(evidence))
+    assert [c["outcome"] for c in provenance.compare_evidence(project, path)] == ["pass"] * 5
 
 
 NAMES = ["committed-code", "uncommitted-code", "views", "inputs", "settings"]
