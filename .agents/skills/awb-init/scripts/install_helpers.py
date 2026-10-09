@@ -49,7 +49,14 @@ def _needed(helpers):
     needed = {}
     for _, asset, _ in helpers:
         source = asset.read_text(encoding="utf-8")
-        for node in ast.walk(ast.parse(source)):
+        tree = ast.parse(source)
+        # An import inside an except handler is a fallback for an older Python, such as tomli for
+        # tomllib on 3.10, not a requirement on every interpreter.
+        fallbacks = {id(inner) for handler in ast.walk(tree) if isinstance(handler, ast.ExceptHandler)
+                     for statement in handler.body for inner in ast.walk(statement)}
+        for node in ast.walk(tree):
+            if id(node) in fallbacks:
+                continue
             if isinstance(node, ast.Import):
                 names = [alias.name for alias in node.names]
             elif isinstance(node, ast.ImportFrom) and not node.level:
