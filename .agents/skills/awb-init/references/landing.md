@@ -46,12 +46,14 @@ Both helpers refuse existing final or partial destinations. Failures leave an un
 
 `retain(root, acquisition_dir, location) -> dict` copies to `<location>/data/raw/<source>/<acquisition-id>/` without overwriting. Its result has `destination`, `copied`, `conflict`, and `discrepancies`. Use the recorded retained location, preserve the full result in the acquisition record or supporting JSON, and report conflicts. A verified copy has no discrepancies; an existing destination can match while still reporting a conflict.
 
-`session(root, *, views_dir='foundation/views')` returns a new in-memory DuckDB connection (requires `duckdb`). It loads `*.sql` in filename order; dependent views sort after their inputs. Project-relative data paths resolve against `root`. Run saved queries by path and close the connection:
+`session(root, *, views_dir='foundation/views')` returns a new in-memory DuckDB connection (requires `duckdb`). It loads `*.sql` in filename order; dependent views sort after their inputs. Project-relative data paths resolve against `root`. A composition entry imports it, executes its saved queries by path, and closes the connection.
 
-```python
-from src.preparation.landing import session
+To run a saved query or a one-off query, use the command instead of writing a snippet:
 
-with session(root) as connection:
-    query = root / 'investigations/order-quality/exploration/missing-ids.sql'
-    result = connection.execute(query.read_text()).df()
+```sh
+python3 src/awb.py sql investigations/order-quality/exploration/missing-ids.sql
+python3 src/awb.py sql "select status, count(*) from orders group by all" --limit 50
+python3 src/awb.py sql investigations/order-quality/exploration/missing-ids.sql --out investigations/order-quality/exploration/missing-ids.parquet
 ```
+
+The argument is a query file when it names an existing file (absolute or project-relative), otherwise SQL text. Each run opens a fresh `session(root)`, runs every statement, and prints the last statement's result: the first `--limit` rows (default 20) as a Markdown table, then the total row count. `--out` writes the full result to a `.csv` or `.parquet` file through DuckDB; relative paths are project-relative. Errors print one line on stderr and exit 1.

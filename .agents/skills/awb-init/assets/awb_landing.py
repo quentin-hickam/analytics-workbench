@@ -1,7 +1,7 @@
 """Land, publish, retain, and open analytical sessions for a workbench.
 
 Copy this file to src/preparation/landing.py and import it from there, never
-from the skill folder.
+from the skill folder. src/awb.py runs cli_sql() as `python3 src/awb.py sql`.
 
 data/raw/<source>/<acquisition-id>/provenance.json:
     {source, acquisition_id, request, started_at, completed_at, status,
@@ -15,11 +15,13 @@ data/parquet/<dataset>/<publication-id>/publication.json:
 Paths are sorted POSIX paths relative to their acquisition or publication.
 """
 
+import argparse
 import hashlib
 import json
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -239,3 +241,66 @@ def session(project_root: str | Path, *,
         connection.close()
         raise
     return connection
+
+
+def _sql_argument(root, argument):
+    """Return the text of the query file argument names, else argument itself as SQL text."""
+    try:
+        path = _under(root, argument)
+        is_file = path.is_file()
+    except (OSError, ValueError):  # SQL text can be too long, or hold a NUL, for a path
+        is_file = False
+    return path.read_text(encoding="utf-8") if is_file else argument
+
+
+def _cell(value, width=80):
+    text = "NULL" if value is None else str(value)
+    text = text.replace("|", "\\|").replace("\r", "\\r").replace("\n", "\\n")
+    return text if len(text) <= width else text[:width - 1] + "…"
+
+
+def _markdown_table(header, rows):
+    lines = ["| " + " | ".join(map(_cell, header)) + " |", "|" + "---|" * len(header)]
+    lines += ["| " + " | ".join(map(_cell, row)) + " |" for row in rows]
+    return "\n".join(lines)
+
+
+def _fail(command, error):
+    """Print the error, with its cause, as one line on stderr and return exit status 1."""
+    message = f"{error}: {error.__cause__}" if error.__cause__ else str(error)
+    print(f"{command}: {' '.join(message.split())}", file=sys.stderr)
+    return 1
+
+
+def cli_sql(root: Path, argv: list[str]) -> int:
+    """Run a query file or SQL text in a fresh session; print the first rows and the row count."""
+    parser = argparse.ArgumentParser(prog="awb.py sql", description=cli_sql.__doc__)
+    parser.add_argument("query", help="query file (absolute or project-relative) or SQL text")
+    parser.add_argument("--limit", type=int, default=20, help="rows to print (default 20)")
+    parser.add_argument("--out", help="write the full result to this .csv or .parquet file")
+    args = parser.parse_args(argv)
+    if args.limit < 0:
+        parser.error("--limit must be 0 or more")
+    out = _under(root, args.out) if args.out else None
+    if out is not None and out.suffix.lower() not in {".csv", ".parquet"}:
+        parser.error("--out must end in .csv or .parquet")
+    try:
+        with session(root) as connection:
+            # sql() runs every statement and returns the last one's result, or None.
+            relation = connection.sql(_sql_argument(root, args.query))
+            if relation is None:
+                raise ValueError("the SQL returns no rows; end it with a query")
+            if out is not None:
+                # DuckDB writes both formats itself; neither needs pandas or pyarrow.
+                out.parent.mkdir(parents=True, exist_ok=True)
+                if out.suffix.lower() == ".csv":
+                    relation.write_csv(str(out), header=True)
+                else:
+                    relation.write_parquet(str(out))
+            header, rows = relation.columns, relation.limit(args.limit).fetchall()
+            total = relation.aggregate("count(*)").fetchone()[0]
+    except Exception as error:
+        return _fail("sql", error)
+    print(_markdown_table(header, rows))
+    print(f"{len(rows)} of {total} rows shown" + (f"; full result in {args.out}" if out else ""))
+    return 0
