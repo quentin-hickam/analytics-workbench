@@ -20,7 +20,7 @@ Convert landed inputs into validated Parquet with `python3 src/awb.py publish`, 
 
 `session()` opens each process's own DuckDB session and loads `foundation/views/*.sql` in filename order; dependent definitions must sort after their inputs. `python3 src/awb.py sql <query.sql | "SQL">` runs a query in such a session and prints the first rows and the row count.
 
-Preparation owns reusable parsing, normalization, checks, and corrections; record limitations and correction rationale in `foundation/quality.md`. EDA consumes canonical data, with population, periods, filters, exclusions, and assumptions local to the investigation. Preparation and EDA may iterate before cleaning finishes. Generally valid exploratory rules can be promoted into preparation and saved queries into `foundation/views/`.
+Preparation owns reusable parsing, normalization, checks, and corrections; record limitations and correction rationale in `foundation/quality.md`. To scan one dataset for cleaning issues, correct them in canonical views, and record them, use the `awb-clean` skill rather than ad hoc checks. EDA consumes canonical data, with population, periods, filters, exclusions, and assumptions local to the investigation. Preparation and EDA may iterate before cleaning finishes. Generally valid exploratory rules can be promoted into preparation and saved queries into `foundation/views/`.
 
 For source profiling, run `python3 src/awb.py profile <view | query.sql | "SQL"> --out <path>.json` rather than ad hoc counting queries; it applies `profile()` from `src/exploration/validate.py`, and the installed `awb-init` skill's `references/validation.md` describes its output and large-result sampling.
 

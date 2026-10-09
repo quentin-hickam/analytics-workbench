@@ -41,4 +41,6 @@ Name the workbench skill in a plain request:
 - `awb-status` reports where things stand and what can be asked for next: "Use awb-status — where are we?"
 - `awb-package` creates or revises a package's working draft: "Use awb-package to draft a package for this investigation."
 - `awb-release` preserves a numbered release from the draft: "Use awb-release — mark the package delivered."
+- `awb-clean` checks one dataset for errors and corrects them in the shared views: "Use awb-clean to clean the orders data."
+- `awb-eda` explores one dataset for the active investigation: "Use awb-eda to explore the shifts view."
 - `awb-update` brings the workbench up to date after installing newer skills: "Use awb-update to update this workbench."
