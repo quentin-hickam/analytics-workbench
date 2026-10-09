@@ -241,7 +241,7 @@ def collect(root):
             flags = obj.get("revalidation_flags") if obj is not None else None
             if flags == "none":
                 flags = []
-            valid_flags = isinstance(flags, list) and all(isinstance(f, dict) and isinstance(f.get("finding"), str) and isinstance(f.get("reason"), str) and isinstance(f.get("represented_in"), list) and f["represented_in"] and all(isinstance(place, dict) and place.get("disposition") in {"none", "revalidate", "omit", "release_with_caveat"} for place in f["represented_in"]) for f in flags)
+            valid_flags = isinstance(flags, list) and all(isinstance(f, dict) and isinstance(f.get("finding"), str) and isinstance(f.get("reason"), str) and (f.get("represented_in") == "none" or (isinstance(f.get("represented_in"), list) and f["represented_in"] and all(isinstance(place, dict) and place.get("disposition") in {"none", "revalidate", "omit", "release_with_caveat"} for place in f["represented_in"]))) for f in flags)
             if draft.is_dir() and not valid_flags:
                 uncertain(path or draft, "Missing or malformed revalidation_flags; disposition counts unknown")
             exact = []
@@ -252,7 +252,7 @@ def collect(root):
                 matches = [f for f in flags if f["finding"] == finding["Finding"] and f["reason"] == finding["Revalidation reason or caveat"]] if valid_flags else []
                 if matches:
                     # `none` and `revalidate` both block a release, so neither counts as a disposition here.
-                    exact.append({"finding": finding["Finding"], "reason": finding["Revalidation reason or caveat"], "without_disposition": any(p["disposition"] in {"none", "revalidate"} for f in matches for p in f["represented_in"])})
+                    exact.append({"finding": finding["Finding"], "reason": finding["Revalidation reason or caveat"], "without_disposition": any(p["disposition"] in {"none", "revalidate"} for f in matches if isinstance(f["represented_in"], list) for p in f["represented_in"])})
                 elif draft.is_dir() or latest:
                     review.append({"finding": finding["Finding"], "reason": finding["Revalidation reason or caveat"]})
             entry["confirmed_flags"] = exact

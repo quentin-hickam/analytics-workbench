@@ -5,6 +5,7 @@
 # test_new_flag_requires_semantic_review_and_never_claims_zero: a flag absent from the manifest goes to representation review with the methodology path.
 # test_dispositions_require_current_reason: a disposition applies only while finding and reason match the state row exactly.
 # test_revalidate_and_none_places_block_release: a confirmed flag with any `none` or `revalidate` place counts as lacking a disposition; `omit` and `release_with_caveat` do not.
+# test_flag_the_draft_does_not_represent_needs_no_disposition: a flag recorded with represented_in "none" is valid and blocks nothing.
 # test_malformed_manifest_requests_targeted_fallback: invalid manifests name the manifest under uncertainties.
 # test_custom_manifest_preserves_manual_fallback: a non-JSON manifest leaves dates and disposition counts null.
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
@@ -126,6 +127,13 @@ def test_revalidate_and_none_places_block_release(workbench, places, blocked):
     result = status.collect(workbench)["packages"][0]
     assert result["confirmed_flags"] == [{"finding": "Renewal lag", "reason": "Q-004 correction", "without_disposition": blocked}]
     assert result["confirmed_without_disposition"] == int(blocked)
+
+
+def test_flag_the_draft_does_not_represent_needs_no_disposition(workbench):
+    package(workbench, [{"finding": "Renewal lag", "reason": "Q-004 correction", "represented_in": "none"}])
+    result = status.collect(workbench)["packages"][0]
+    assert result["confirmed_flags"] == [{"finding": "Renewal lag", "reason": "Q-004 correction", "without_disposition": False}]
+    assert result["confirmed_without_disposition"] == 0
 
 
 @pytest.mark.parametrize("content", ["not json", "[]", '{"revalidation_flags": ["bad"]}', '{"revised_at": "yesterday", "revalidation_flags": "none"}'])

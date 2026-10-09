@@ -38,7 +38,7 @@ from findings import check  # noqa: E402
 from manifest import compare_trees, inventory, verify  # noqa: E402
 
 _SIMPLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-_EVIDENCE_SCHEMAS = ("awb-evidence/1", "awb-evidence/2")
+_EVIDENCE_SCHEMAS = ("awb-evidence/1", "awb-evidence/2", "awb-evidence/3")
 _EVIDENCE_LINK = re.compile(r"evidence/([A-Za-z0-9][A-Za-z0-9._-]*)\.json")
 _DISPOSITIONS = ("omit", "release_with_caveat")
 _STORAGE_LINE = "Released packages are kept at:"
