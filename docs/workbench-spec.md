@@ -14,7 +14,7 @@ Keep the skills as agent-agnostic folders under `.agents/skills/`. Generated pro
 
 The eventual implementation must provide these artifacts:
 
-1. **Initialization skill (`awb-init`).** Establishes the project structure, working conventions, shared data foundation, and the first investigation. A new project starts from a business question; the skill asks for one when none is supplied and completes setup without an investigation only when the user explicitly has none yet. It also starts later investigations and resolves consequential scope changes, directly invoking the `grilling` skill as described below. It does not create a delivery package.
+1. **Initialization skill (`awb-init`).** Establishes the project structure, working conventions, shared data foundation, and the first investigation. A new project starts from a business question; the skill asks for one when none is supplied and completes setup without an investigation only when the user explicitly has none yet. It also starts later investigations and resolves consequential scope changes, using the self-contained scoping interview below. It does not create a delivery package.
 2. **Project `AGENTS.md` template.** Governs daily analytical work, architectural boundaries, automatic record maintenance, source and cache handling, investigation switching, and the prohibition on unsolicited deliverables.
 3. **Status skill (`awb-status`).** A read-only report of the active investigation, findings and revalidation flags, unresolved issues, package and release state, and landed data and release storage, ending with the requests that are relevant now. It changes nothing and makes the workbench's request-gated capabilities discoverable to the analyst.
 4. **Packaging skill (`awb-package`).** Creates or revises a named delivery package's working draft only when the user explicitly requests it. It gathers the package's dataset selection, records provenance, carries caveats for findings awaiting revalidation, and produces an audience-facing findings document, an internal methodology reference, and M365 assembly instructions. It owns the draft layout, shared package format, manifest fields, and draft consistency rules.
@@ -98,23 +98,23 @@ The glossary defines terminology; the catalog describes actual datasets, canonic
 
 The workflow must embed an analytics-specific domain-modeling discipline: challenge ambiguous terms, test definitions with concrete scenarios, compare definitions with source data and analytical logic, and record resolved meanings immediately in the correct analytics artifact. It must not invoke the unmodified `domain-modeling` skill, require `CONTEXT.md`, create `CONTEXT-MAP.md`, or use ADRs. The `CONTEXT.md` in this repository belongs only to the design session and is not generated in initialized workbenches.
 
-## Grilling behavior
+## Scoping behavior
 
-The initialization and investigation-scoping instructions must invoke the `grilling` skill directly when establishing a question and scope or resolving a consequential scope change. They must not invoke `grill-with-docs`.
+Initialization and consequential scope changes use a self-contained interview in `awb-init`. Follow the decisions that depend on each scope or purpose choice:
 
-`grilling` is an external, preinstalled dependency. Do not bundle or redistribute its implementation. Resolve it through the host's skill discovery rather than assuming a sibling file in the distribution.
+- ask one unresolved consequential decision question at a time, with a recommended answer;
+- carry settled answers forward;
+- resolve facts directly from the environment;
+- capture the question, population, decision or exploratory purpose, usefulness criteria, and material unknowns; and
+- finish when consequential decisions are settled or explicitly recorded as material unknowns, then create the records without a separate confirmation round.
 
-Adapt the skill's interview mechanics to the user's established preference:
+Routine implementation choices need no interview. The vocabulary discipline above is embedded in this workflow. No external interview or domain-modeling skill is required.
 
-- ask one decision question at a time;
-- include a recommended answer;
-- carry settled answers forward rather than reopening them;
-- ask only questions that materially affect the analysis; and
-- resolve facts from the environment directly instead of asking the user to look them up.
+## Instruction loading
 
-Routine implementation choices do not require an interview. The adapted domain-modeling behavior above is embedded in the workflow instructions; it is not a second skill invocation.
+Keep universal invariants and task routing in the generated `AGENTS.md`; copy acquisition and analytical procedures into `workbench-guides/` and require the relevant guide before that operation. Preserve customized guides during reconciliation. Skill references are loaded by branch: table-only work needs table guidance, unchanged release needs the shared package contract, and bounded narrative revisions begin with the current draft and relevant records before expanding when evidence is incomplete or inconsistent. Complete draft verification still applies.
 
-The installed `grilling` skill asks its whole frontier in one round and completes only when nothing remains unassumed. The workbench rules above replace that round format and completion criterion: one question per turn, and a material unknown may stay open. The direct invocation supplies grilling's design-tree discipline and environment fact-finding, and the workbench instructions state that their rules win where the two differ.
+The status collector reports mechanical facts read-only and identifies unsupported formats or uncertain values for targeted manual inspection. Semantic claim matching remains the agent's responsibility. Full audit evidence stays in durable files; routine tool output uses counts, failures, and paths instead of repeating inventories and checksums.
 
 ## Directory convention
 
@@ -124,6 +124,9 @@ The generated workbench uses the following logical structure. Concrete filenames
 project-root/
 ├── AGENTS.md
 ├── README.md
+├── workbench-guides/             # Procedures read only for the applicable operation
+│   ├── data.md
+│   └── analysis.md
 ├── src/
 │   ├── preparation/              # Reusable normalization and correction logic
 │   ├── exploration/              # Neutral profiling and analytical operations
@@ -224,7 +227,7 @@ Expected behavior:
 - create a new investigation with fresh state, history, and findings;
 - begin with the current method, parameters, and package format inherited from the related investigation unless the user changes them;
 - reuse foundation preparation and shared analytical operations;
-- run the grilling flow one question at a time only for unresolved scope or purpose decisions; and
+- run the scoping interview one question at a time only for unresolved scope or purpose decisions; and
 - treat findings from the original population as context for method selection, not evidence about the new group.
 
 ### 3. Shared-data correction discovered through EDA

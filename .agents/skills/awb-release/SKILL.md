@@ -5,7 +5,7 @@ description: Preserve a numbered release of an analytics workbench delivery pack
 
 # Release a delivery package
 
-Preserve one numbered release of an existing working draft at an explicit delivery milestone. A release is a frozen copy of the draft; it never drafts, revises, or reruns analysis. Draft layout, shared `package-format/` files, the manifest field list, and draft consistency rules belong to [awb-package](../awb-package/SKILL.md); apply them from there.
+Preserve one numbered release of an existing working draft at an explicit delivery milestone. A release is a frozen copy of the draft; it never drafts, revises, or reruns analysis. For a delivery milestone, read the focused [package contract](../awb-package/references/package-contract.md), which defines layout, shared formats, manifest fields, and all consistency rules. Load [awb-package](../awb-package/SKILL.md) only when a draft needs creation or revision. A storage-only request goes directly to **Record storage without releasing**.
 
 Resolve every repository path from the project root.
 
@@ -23,7 +23,9 @@ When that line is absent or reads `not yet recorded`, ask the user where release
 
 ## Verify the draft
 
-Check the draft against the structural consistency rules in **Assemble the draft** of [awb-package](../awb-package/SKILL.md): `findings.md` is self-contained for its audience and `check` from `src/packaging/findings.py`, run on it, returns no results; `methodology.md` is self-contained as the account of the analysis; the two agree in claims, numbers, qualifications, and caveats, and every `###` finding heading in `findings.md` has a section with the same heading text in `methodology.md`; the selected exports are present; and `verify` from `src/packaging/manifest.py`, run on the draft with the manifest's recorded `inventory`, returns no discrepancies. If `src/packaging/findings.py` is missing, copy [awb_findings.py](../awb-package/assets/awb_findings.py) there first; if `src/packaging/manifest.py` is missing, copy [awb_manifest.py](../awb-package/assets/awb_manifest.py) there first. Report each result `check` returns and each discrepancy `verify` returns as the helper returns it; a check or comparison made by hand does not substitute for the helper. Defer the caveat rule for findings awaiting revalidation to the re-verification in **Resolve revalidation flags**: a draft can predate a flag, and that gap is settled by a disposition, not reported here. When a structural rule fails, list each discrepancy and stop; repairs are package revisions made through awb-package, never reconstructed here.
+Check every **Structural consistency** rule in the [package contract](../awb-package/references/package-contract.md). Read the [findings helper interface](../awb-package/references/findings-helper.md) and [manifest helper interface](../awb-package/references/manifest-helper.md); install each bundled helper only if its project copy is missing. Run `check` from `src/packaging/findings.py` on `findings.md` with the complete `names` set specified in the contract, and `verify` from `src/packaging/manifest.py` with the manifest's recorded `inventory`. Both must return no results; report each result and discrepancy unchanged. Hand checks never substitute. Read and verify the recorded inventory without rebuilding it.
+
+Defer the contract's **Revalidation caveats** to **Resolve revalidation flags**: a draft can predate a flag, and that gap is settled by a disposition, not reported here. When a structural rule fails, list each discrepancy and stop; repairs are package revisions through awb-package, never reconstructed here.
 
 ## Resolve revalidation flags
 
@@ -37,7 +39,7 @@ An affected conclusion includes every place the draft represents it: findings te
 
 Release is never authority to revalidate or rerun analysis. A revalidation choice pauses the release until separate analytical work updates the investigation and the draft; the user then requests the release again. For omission or an accepted caveat, revise the draft through [awb-package](../awb-package/SKILL.md) so each listed place omits the conclusion or carries the caveat beside it and the draft lists the finding as unresolved, and record each disposition in the draft manifest's `revalidation_flags`. An applicable disposition whose omission or caveat is missing from the draft also requires that revision before release. A recorded disposition stays applicable while the finding and its evidence remain materially the same.
 
-Once every represented flag has an applicable disposition, re-verify the draft against all the consistency rules, the structural rules and the deferred caveat rule together, even when this release needed no new disposition. Run `verify` again on the draft as it now stands; never reuse the earlier result. When a rule fails, list each discrepancy and stop as in **Verify the draft**.
+Once every represented flag has an applicable disposition, re-verify the draft against the entire package contract, structural rules and deferred caveat rules together, even when this release needed no new disposition. Run both `check` with the complete `names` set and `verify` again on the draft as it now stands; never reuse either earlier result. When a rule fails, list each discrepancy and stop as in **Verify the draft**.
 
 ## Create the release
 

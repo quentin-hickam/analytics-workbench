@@ -11,7 +11,7 @@ Build a project around one shared data foundation and zero or more investigation
 
 1. Use the project root named by the user. Otherwise, use the current working directory only when it is clearly the intended data project.
 2. A directory holding skill sources, design records, or an unrelated codebase is not a data project. If the current directory is one, obtain a separate target path before writing project files.
-3. Inspect the target before changing it. Read its repository instructions, orientation, ignore rules, foundation records, and investigation records when present.
+3. Inspect the target before changing it. Read its repository instructions, orientation, and ignore rules. For a new question or scope decision, read the named or active investigation's brief first; read state only for resumed work, repair, or related method context as described below. Inspect relevant foundation records and history entries when the request or an inconsistency calls for them. Expand when context is missing, rather than loading every investigation and ledger.
 4. Check whether the target directory or any directory above it holds a host-specific instruction file that the current host reads in preference to `AGENTS.md`. For example, Claude Code reads `CLAUDE.md` and skips `AGENTS.md` when a `CLAUDE.md` or `CLAUDE.local.md` is present. Such a file means the workbench rules in `AGENTS.md` may not be loaded. Never create, edit, or bridge that file; report it at completion.
 5. Merge conservatively. Existing files and project conventions are authoritative. Create missing artifacts, add clearly compatible missing sections when useful, and preserve all existing content. When an existing artifact conflicts with the workbench model, explain the conflict and ask for the project-specific decision instead of overwriting it.
 
@@ -27,16 +27,13 @@ For an existing workbench, read the active investigation's brief before deciding
 
 ## Run the scoping interview
 
-When a business question is available and its consequential scope or purpose decisions remain unresolved, invoke the separately installed `grilling` skill through the host's skill discovery. When more than one `grilling` is discoverable, use the one installed in the same user-level skills directory as the `awb-*` skills. It is an external dependency, not part of this bundle. If it is unavailable, report the missing dependency and pause the scoping interview; independent workspace setup may continue.
+When a business question is available and consequential scope or purpose decisions remain unresolved, run this self-contained interview:
 
-`grilling` contributes the design-tree discipline: every decision branches into the decisions that hang off it, and facts come from the environment rather than the user. The rules below replace its round format, its sub-agent fact dispatch, its completion rule, and its confirmation before acting; where the two differ, these win:
-
-- Ask exactly one decision question at a time and include a recommended answer.
-- Carry every settled answer forward. Ask only about unresolved choices that materially affect the analysis; routine implementation choices need no question.
-- Resolve facts directly from the repository, source systems, and available tools rather than asking the user to retrieve them or dispatching a sub-agent.
-- Establish the business question, population or scope, supported decision or exploratory purpose, usefulness criteria, and material unknowns.
-- When the user describes who will read the delivered documents, record it in the brief's Audience section. Do not ask for the audience as a scoping decision; `awb-package` asks for it when a package needs it and the brief lacks it.
-- The interview is complete when every consequential scope and purpose decision is either settled or explicitly recorded as a material unknown. Unknowns may remain visible without blocking exploration. Create the investigation records at that point under the workbench rules, without a separate confirmation round.
+- Follow the decision tree: settle the choices that constrain later choices before exploring their dependent branches. Establish the business question, population or scope, supported decision or exploratory purpose, usefulness criteria, and material unknowns.
+- Ask exactly one decision question at a time and include a recommended answer. Carry settled answers forward; ask only about unresolved choices that materially affect the analysis. Routine implementation choices need no question.
+- Resolve facts directly from repository, source systems, and available tools rather than asking the user to retrieve them or dispatching a sub-agent.
+- When the user describes who will read the delivered documents, record it in the brief's Audience section. Do not ask for the audience as a scoping decision; `awb-package` asks when a package needs it and the brief lacks it.
+- Finish when every consequential scope and purpose decision is settled or explicitly recorded as a material unknown. Unknowns may remain visible without blocking exploration. Create the investigation records under the workbench rules without a separate confirmation round.
 
 Apply this vocabulary discipline while interviewing and initializing: challenge ambiguous terms, test a proposed meaning with a concrete example, compare it with source data and analytical logic when available, and record the resolved meaning immediately. Shared meanings go in `foundation/glossary.md`; an investigation-specific departure goes in its `brief.md`; dataset and view descriptions go in `foundation/catalog.md`; consequential analytical decisions go in the investigation history. These records replace `CONTEXT.md`, `CONTEXT-MAP.md`, ADRs, `grill-with-docs`, and the unmodified `domain-modeling` skill.
 
@@ -44,7 +41,7 @@ Apply this vocabulary discipline while interviewing and initializing: challenge 
 
 Adapt the asset files to the target; instructional comments and example rows are guidance, not project facts.
 
-- For every new workbench, read and adapt the [project orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [project agent instructions](assets/workbench/AGENTS.md). Create each missing target file at the project root. Merge `.gitignore` rules individually when that file already exists. The installed user-level skills serve every project; project-specific skill copies and vendor-specific instruction files are unnecessary.
+- For a new workbench or repair, read and adapt the [project orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [project agent instructions](assets/workbench/AGENTS.md). Create missing root files and merge `.gitignore` rules individually. Copy missing `assets/workbench/workbench-guides/{data,analysis}.md` to `workbench-guides/` at the project root; these are project procedures, not skill copies. Preserve existing guide content and conventions, add clearly compatible missing sections only when useful, and surface conflicts. Ensure root instructions route to the guides with relative links; merge routing conservatively into existing instructions. Copy these guides without loading their bodies during ordinary initialization; read only a guide whose task trigger has fired or whose merge requires inspection. The installed user-level skills serve every project; create no project-specific skill copies or vendor-specific instruction files.
 - For the shared foundation, use the [source register](assets/workbench/foundation/sources.md) when a source becomes a real candidate, the [catalog](assets/workbench/foundation/catalog.md) when a dataset, view, or deliberate cache exists, the [quality record](assets/workbench/foundation/quality.md) when a shared limitation, check, or correction is known, and the [glossary](assets/workbench/foundation/glossary.md) when shared vocabulary has been resolved. Read and adapt only the records whose conditions have fired. Retain an existing project's format when it serves the same responsibility; an empty ledger created to complete the directory tree is a defect.
 - When an investigation has been established, read and adapt the [brief](assets/workbench/investigation/brief.md), [current state](assets/workbench/investigation/state.md), and [history](assets/workbench/investigation/history.md). Create missing records under `investigations/<stable-slug>/`, with a slug named for the question rather than the population so an expansion does not make it wrong, populate them only with settled facts, and point the `Active investigation` line in the project README at its state file. When extending an investigation, revise its brief, settings, and state to the settled scope, record superseded findings in its history, and otherwise preserve existing records. Put unresolved questions in the brief and state rather than filling gaps by assumption.
 
@@ -56,7 +53,7 @@ The default batch storage path is always:
 2. validate and publish derived Parquet without modifying the landed originals; then
 3. load Git-managed canonical view definitions into each analytical process's own DuckDB session.
 
-Land every acquired API response, SQL extract, or other source before canonical ingestion. Keep incomplete acquisitions and conversion outputs unpublished, following the landing and publication layout in the project `AGENTS.md`. Initial CSV or JSON may be a landed source format; analytical steps exchange results through views and the runtime rather than intermediate CSV files. A concrete project need may justify another backend; preserve independent landing and the preparation/EDA boundary.
+Land every acquired API response, SQL extract, or other source before canonical ingestion. Keep incomplete acquisitions and conversion outputs unpublished, following the project's `workbench-guides/data.md` procedures. Initial CSV or JSON may be a landed source format; analytical steps exchange results through views and the runtime rather than intermediate CSV files. A concrete project need may justify another backend; preserve independent landing and the preparation/EDA boundary.
 
 Create `data/raw/` only for an acquisition, `data/parquet/` only for validated publication, and `data/cache/` only for a deliberate expensive result whose purpose is recorded in the catalog. Create `foundation/views/` when the first canonical definition exists. Let readers query stable published files while new outputs are prepared elsewhere and validated before publication.
 
@@ -64,7 +61,7 @@ Package templates and `deliveries/` remain absent during initialization. If the 
 
 ## Complete initialization
 
-Check that every created link is relative and every created record has a clear responsibility. Report:
+Check that every created link is relative, both project procedure links resolve from the root `AGENTS.md`, and every created record has a clear responsibility. Report:
 
 - the target root;
 - files created and existing files preserved or augmented;
