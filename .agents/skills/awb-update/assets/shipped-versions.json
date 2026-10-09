@@ -55,6 +55,11 @@
       "previous": []
     },
     {
+      "path": "src/awb.py",
+      "asset": "awb-init/assets/awb_cli.py",
+      "previous": []
+    },
+    {
       "path": "src/provenance.py",
       "asset": "awb-init/assets/awb_provenance.py",
       "previous": [
