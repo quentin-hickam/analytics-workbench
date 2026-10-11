@@ -1,0 +1,7 @@
+USER-ROUNDTRIP init scoping: population/purpose/usefulness/unknowns asked together with recommendations
+USER-ROUNDTRIP land: where are landed originals kept?
+USER-ROUNDTRIP clean: one table asking S1/S2 duplicates, S4 sentinel, S10 extremes, S11 orphans
+USER-ROUNDTRIP package: which datasets to include (offer none)
+USER-ROUNDTRIP release: where are released packages kept (asked after release ran)
+USER-ROUNDTRIP release2: disposition for the flagged finding (revalidate / omit / release_with_caveat)
+USER-ROUNDTRIP newinv: scoping decisions for channel-returns (purpose, usefulness, unknowns) with recommendations
