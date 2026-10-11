@@ -31,7 +31,7 @@ Acquired records are landed durably before canonical ingestion. Completed landed
 
 ## Resume work
 
-Open the active investigation's `state.md` for current findings, flagged findings, unresolved issues, and next steps. Use its `brief.md` for scope and purpose, and `history.md` for meaningful analytical decisions and superseded conclusions. Findings come from the investigation's `run.py` run with its `settings.toml`, so a rerun is running `run.py` again; saved queries live in the investigation's `exploration/` and are rerun by path.
+Run `python3 src/awb.py state` for the active investigation's question, current and flagged findings, unresolved issues, and next steps, kept in its `state.md`. Use its `brief.md` for scope and purpose, and `history.md` for meaningful analytical decisions and superseded conclusions. Findings come from the investigation's `run.py` run with its `settings.toml`, so a rerun is running `run.py` again; saved queries live in the investigation's `exploration/` and are rerun by path.
 
 ## Asking for things
 

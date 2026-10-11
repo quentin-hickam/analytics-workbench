@@ -10,6 +10,7 @@
 # One table per result. The ID names its query, saved table, evidence file, and findings row.
 # [results.orders-by-month]
 # queries = ["queries/orders-by-month.sql"]  # default: ["queries/<id>.sql"]; a producer may use more
+# finding = "Orders rose 4% from Q1 to Q2."  # optional first wording of its state.md row; never stales it
 #
 # Validation spec for validate(): static checks here, run-time counts from a run.py producer.
 #   required_columns = [names that must exist]

@@ -39,7 +39,7 @@ Finish with up to five requests whose state applies, risk rows first, then progr
 | A package's `unmatched_flags` is above zero | "Revise the <package> draft to carry the new caveats" | `awb-package` | risk |
 | A release exists and `release_storage` is `unrecorded` or `unreachable` | "Record where releases are kept" | `awb-release` | risk |
 | Acquisitions exist and `landed_data_storage` is `unrecorded` or `unreachable`, or `reachable` with acquisitions held only in this checkout | "Record where landed data is kept" | AGENTS.md record maintenance | risk |
-| `git.state_status` is `out of date` | "Update the investigation state" | AGENTS.md record maintenance | risk |
+| `git.state_status` is `out of date` | "Update the investigation state" | `python3 src/awb.py state` | risk |
 | An `uncertainties` entry names a missing standard record, or the user mentions newer workbench skills | "Bring the workbench up to date" | `awb-init` | risk |
 | No active investigation | "Start an investigation into <question>" | `awb-init` | progress |
 | The brief or state records an open scope or purpose decision | "Resolve the <topic> scope change" | `awb-init` | progress |

@@ -4,7 +4,7 @@ One data foundation serves every investigation here. Source knowledge, quality r
 
 ## Start or resume
 
-For investigation work, resume the investigation on README's `Active investigation` line unless the user names another, and name it briefly. Read its `brief.md` and `state.md`, and history entries when prior reasoning matters. When switching, repoint that line at the new `state.md`. When an ask could belong to several investigations, ask which before changing records.
+For investigation work, run `python3 src/awb.py state` to resume README's active investigation (`--investigation <name>` for another) and name it briefly; read history when prior reasoning matters. Switch with `state switch <name>`. When an ask could belong to several investigations, ask which before changing records.
 
 Use the workbench skills for their work even when you start it yourself; take a consequential scope change, such as a broader or different population, through `awb-init`'s scoping interview.
 
@@ -31,7 +31,7 @@ Only a result from the investigation's `run.py`, run with its settings, can beco
 
 Settle ambiguous terms with concrete examples and the data. Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and dataset, view, and cache descriptions in `foundation/catalog.md`; these replace context maps and ADRs.
 
-Update `state.md` when findings, issues, flags, or next steps change; append to `history.md` when a finding becomes supported, is superseded, or changes its conclusion, or when a scope, method, caveat, or data limitation changes the investigation's understanding. Rerun flagged findings and revise conclusions only on request. When the user names who will read the deliverables, record it in the brief's Audience section.
+`run.py` writes findings rows. Record status and wording changes with `awb.py state finding`, which writes their `history.md` entry, and issues and next steps with `state issue`, `next`, and `done`. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. When the user names who will read the deliverables, record it in the brief's Audience section.
 
 Commit when the user asks; suggest one when analytical code is uncommitted, so evidence carries a SHA.
 

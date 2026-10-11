@@ -1,5 +1,5 @@
 # Kept cases:
-# test_help_lists_every_command: --help and no arguments print every command with its summary and the per-command help pointer; the ten commands, export covering --result, draft-provenance gone.
+# test_help_lists_every_command: --help and no arguments print every command with its summary and the per-command help pointer; the eleven commands with state before stale, export covering --result, draft-provenance gone.
 # test_dispatches_to_helper_function: a command loads its helper by path and passes the project root and remaining arguments.
 # test_missing_helper_or_function_and_unknown_command: each exits 2 with a message naming the remedy.
 
@@ -28,7 +28,7 @@ def test_help_lists_every_command(tmp_path, capsys):
         out = capsys.readouterr().out
         assert all(name in out for name in cli.COMMANDS)
         assert "<command> --help" in out and "Exit status" in out
-    assert list(cli.COMMANDS) == ["land", "retain", "publish", "sql", "profile", "stale", "export",
+    assert list(cli.COMMANDS) == ["land", "retain", "publish", "sql", "profile", "state", "stale", "export",
                                   "check-draft", "release", "copy-releases"]
     assert "--result" in cli.COMMANDS["export"][2]
 
