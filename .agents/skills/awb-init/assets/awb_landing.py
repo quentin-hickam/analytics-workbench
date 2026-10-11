@@ -179,7 +179,11 @@ def publish(project_root: str | Path, dataset: str, publication_id: str,
 
 def retain(project_root: str | Path, acquisition_dir: str | Path,
            location: str | Path) -> dict:
-    """Copy an acquisition to the retained location without overwriting, then compare checksums."""
+    """Copy an acquisition to the retained location without overwriting, then compare checksums.
+
+    Returns {destination, copied, conflict, matched, discrepancies}: matched when the
+    destination holds the same files and checksums, conflict when an existing destination differs.
+    """
     root = Path(project_root)
     directory = _under(root, acquisition_dir).resolve()
     raw = (root / "data/raw").resolve()
@@ -189,8 +193,8 @@ def retain(project_root: str | Path, acquisition_dir: str | Path,
     _check_name(directory.parent.name)
     _check_name(directory.name)
     destination = Path(location) / "data/raw" / directory.parent.name / directory.name
-    conflict = destination.exists() or destination.is_symlink()
-    if not conflict:
+    existed = destination.exists() or destination.is_symlink()
+    if not existed:
         partial = destination.with_name(destination.name + ".partial")
         shutil.copytree(directory, partial)
         _refuse_existing(destination)
@@ -205,14 +209,44 @@ def retain(project_root: str | Path, acquisition_dir: str | Path,
     for path in sorted(local_files & retained_files):
         if _sha256(directory / path) != _sha256(destination / path):
             discrepancies.append(f"sha256 differs: {path}")
-    return {"destination": str(destination), "copied": not conflict,
-            "conflict": conflict, "discrepancies": discrepancies}
+    # An existing destination conflicts only when it differs; an identical one matches.
+    matched = not discrepancies and destination.is_dir()
+    return {"destination": str(destination), "copied": not existed,
+            "conflict": existed and not matched, "matched": matched,
+            "discrepancies": discrepancies}
 
 
 # Ledger rows. Helpers write the facts they produce into foundation/sources.md themselves;
 # columns that need human judgment (Restrictions, Sources-table descriptions) stay as they are.
 
 _NO_RETAINED_COPY = "this checkout only"
+
+# foundation/sources.md as awb-init installs it; record_acquisition writes it when absent.
+SOURCES_TEMPLATE = """\
+# Source register
+
+Record source provenance, relevance, and fitness here. Add a source when it becomes a real candidate.
+
+## Sources
+
+| Source ID | System or provider | Contents and grain | Owner or contact | Acquisition method | Relevance and fitness | Status | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
+Status is one of:
+
+- `candidate`: identified as possibly relevant; no acquisition has completed.
+- `acquired`: at least one acquisition has completed and the source has not been rejected.
+- `rejected`: assessed as irrelevant or unfit; give the reason under Relevance and fitness and stop preparing it.
+
+Note failed acquisition attempts in the source's Notes. Use stable source IDs in the catalog, quality record, and investigation records.
+
+## Acquisitions
+
+`land` and `retain` write these rows, one per completed acquisition directory under `data/raw/<source>/<acquisition-id>/` unless the project has its own layout. Fill Restrictions yourself, and update Retained copy once a manual copy is verified.
+
+| Acquisition ID | Source ID | Acquired at | Source version, query, or request | Landed directory | Retained copy | Integrity or completeness check | Restrictions | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+"""
 
 
 def _split_row(line):
@@ -305,19 +339,18 @@ def record_acquisition(project_root: str | Path, acquisition_dir: str | Path,
     retained_copy is a destination retain() verified with no discrepancies, or None for
     `this checkout only`. An existing row is never rewritten, except that a verified copy
     fills a Retained copy cell that is empty or `this checkout only`. A Sources row with
-    status `candidate` becomes `acquired`. Returns {"row": "added" | "updated" |
-    "unchanged", "source_status": <status> | "missing"}; raises LookupError when the
-    Acquisitions table is missing.
+    status `candidate` becomes `acquired`. A missing foundation/sources.md is written from
+    SOURCES_TEMPLATE with the row. Returns {"row": "added" | "updated" | "unchanged",
+    "source_status": <status> | "missing"}, plus "created": True when the file was written
+    from the template; raises LookupError when an existing file has no Acquisitions table.
     """
     root = Path(project_root)
     directory = _under(root, acquisition_dir)
     provenance = _complete_provenance(directory)
     source, acquisition_id = provenance["source"], provenance["acquisition_id"]
     path = root / "foundation/sources.md"
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        raise LookupError(f"Missing {path}") from None
+    created = not (path.exists() or path.is_symlink())
+    text = SOURCES_TEMPLATE if created else path.read_text(encoding="utf-8")
     lines = text.split("\n")
     table = _table(lines, "Acquisitions", "Acquisition ID")
     if table is None:
@@ -360,9 +393,11 @@ def record_acquisition(project_root: str | Path, acquisition_dir: str | Path,
         }
         lines.insert(end, _join_row([values.get(column, "") for column in columns]))
     status = _mark_source_acquired(lines, source)
-    if "\n".join(lines) != text:
+    if created:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    if created or "\n".join(lines) != text:
         path.write_text("\n".join(lines), encoding="utf-8")
-    return {"row": outcome, "source_status": status}
+    return {"row": outcome, "source_status": status, **({"created": True} if created else {})}
 
 
 # Command-line entry points, run as `python3 src/awb.py land|retain|publish ...`. Each prints
@@ -446,11 +481,12 @@ def cli_land(root: Path, argv: list[str]) -> int:
         description="Copy files byte for byte into data/raw/<source>/<acquisition-id>/, retain "
                     "the acquisition at README's Landed data location, and record its Acquisitions row.",
         epilog="Retention runs when README's `Landed data is kept at` line names a reachable filesystem "
-               "path. The Acquisitions row goes in foundation/sources.md and sets a candidate source to "
-               "acquired; fill its Restrictions yourself. Prints one JSON line: landed, files, bytes, "
-               "retention (the retained copy's destination, copied, conflict, and discrepancies, or "
-               "skipped with a warning to act on), and ledger (row, source_status; missing means the "
-               "source still needs its Sources row). Exit 1 means the files landed but retention or the "
+               "path. The Acquisitions row goes in foundation/sources.md, created from the template when "
+               "absent, and sets a candidate source to acquired; fill its Restrictions yourself. Prints "
+               "one JSON line: landed, files, bytes, retention (the retained copy's destination, copied, "
+               "conflict, matched, and discrepancies, or skipped with a warning to act on), and ledger "
+               "(row, source_status, and created when sources.md was created; missing means the source "
+               "still needs its Sources row). Exit 1 means the files landed but retention or the "
                "row failed; exit 2 means unusable arguments, with nothing landed.")
     parser.add_argument("source", help="source directory name under data/raw/ (one name, not ending "
                                        "in .partial)")
@@ -511,10 +547,10 @@ def cli_retain(root: Path, argv: list[str]) -> int:
         epilog="Run it after a library land() and whenever README's `Landed data is kept at` line is "
                "first recorded or changed; without a reachable filesystem location it only writes "
                "missing rows. Copies never overwrite. Prints one JSON line: location (or the skip "
-               "reason), acted_on (each acquisition's retention result and row outcome), "
-               "already_retained, and still_this_checkout_only. Report every conflict and discrepancy; "
-               "an existing destination can match and still report a conflict. Exit 1 when a "
-               "retention or row failed.").parse_args(argv)
+               "reason), acted_on (each acquisition's retention result, with matched when the destination "
+               "holds an identical copy, and its ledger row outcome, with created when sources.md was "
+               "created), already_retained, and still_this_checkout_only. Report every conflict and "
+               "discrepancy. Exit 1 when a retention or row failed.").parse_args(argv)
     location, skipped = _landed_location(root)
     rows = _acquisition_rows(root) or {}
     raw = Path(root) / "data/raw"
@@ -552,10 +588,10 @@ def cli_publish(root: Path, argv: list[str]) -> int:
                     "<dataset>.parquet, check it, and publish it with publication.json.",
         epilog="Commit the SQL first so conversion_commit holds it; otherwise the output carries a "
                "warning. Prints one JSON line. On success: published, rows, bytes, inputs, "
-               "conversion_commit, and catalog_row, a foundation/catalog.md row to complete with grain "
-               "and availability. On refusal (exit 1): published false, error, failing_rows with up to "
-               "20 under first, and the partial directory left behind. A select returning no rows is "
-               "refused. Needs duckdb.")
+               "conversion_commit, view_sql, a canonical view definition for foundation/views/, and "
+               "catalog_row, a foundation/catalog.md row to complete with grain and availability. On "
+               "refusal (exit 1): published false, error, failing_rows with up to 20 under first, and "
+               "the partial directory left behind. A select returning no rows is refused. Needs duckdb.")
     parser.add_argument("dataset", help="dataset directory name under data/parquet/")
     parser.add_argument("publication_id", metavar="publication-id",
                         help="new publication directory name under data/parquet/<dataset>/")
@@ -643,11 +679,14 @@ def cli_publish(root: Path, argv: list[str]) -> int:
         connection.close()
     publication = json.loads((final / "publication.json").read_text(encoding="utf-8"))
     location = _relative(root, final) + "/"
+    view_name = '"' + args.dataset.replace('"', '""') + '"'
     quality = f"`{notes['check']}` returns no rows" if notes["check"] else "nonzero row count"
     result = {
         "published": location, "rows": notes["rows"],
         "bytes": sum(file["bytes"] for file in publication["files"]),
         "inputs": sorted(named), "conversion_commit": publication["conversion_commit"],
+        "view_sql": (f"CREATE VIEW {view_name} AS SELECT * FROM "
+                     f"read_parquet({literal(location + args.dataset + '.parquet')});"),
         # Grain and availability need judgment; the agent completes and places the row.
         "catalog_row": _join_row([_cell(args.dataset), "Parquet publication", "",
                                   ", ".join(f"`{name}/`" for name in sorted(named)),

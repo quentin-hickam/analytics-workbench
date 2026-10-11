@@ -6,8 +6,8 @@
 # test_publish_keeps_rejected_validation_unpublished: raised and False validation failures keep partial files and write no publication.
 # test_publish_refuses_existing_id_before_conversion: existing completed publication is refused before conversion.
 # test_publish_keeps_invalid_conversion_unpublished: raised conversion failure keeps partial files and writes no publication.
-# test_retain_copies_and_verifies_then_reports_existing_copy: verified copy succeeds; second call reports conflict without overwriting.
-# test_retain_reports_checksum_discrepancy_without_changing_existing_copy: changed retained copy reports a discrepancy without overwriting.
+# test_retain_copies_and_verifies_then_reports_existing_copy: verified copy succeeds and matches; a second call reports the identical existing copy as matched, not a conflict.
+# test_retain_reports_checksum_discrepancy_without_changing_existing_copy: changed retained copy reports a conflict and a discrepancy, unmatched, without overwriting.
 # test_session_loads_views_in_name_order_without_recursing: session loads two views with the second depending on the first.
 # test_session_resolves_project_paths_from_another_working_directory: session resolves project-relative paths from another working directory.
 # test_session_names_failing_view_and_closes_connection: regression: failed view loading closes the session connection.
@@ -18,11 +18,14 @@
 # test_cli_sql_reports_failures_on_one_line: SQL errors, failing view files and non-query SQL print one stderr line and return 1; a bad --out extension is a usage error.
 # test_cli_land_copies_files_retains_and_writes_ledger_rows: land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
 # test_cli_land_skips_unusable_retention_location: unrecorded, none chosen, unreachable and non-filesystem locations skip retention and record this checkout only.
-# test_cli_land_lands_without_a_ledger_and_reports_the_missing_row: missing sources.md still lands and exits 1 naming the unwritten row.
+# test_cli_land_creates_a_missing_ledger_from_the_template: missing sources.md is written from the template with the row, reported as created.
+# test_sources_template_matches_the_installed_register: SOURCES_TEMPLATE is byte-equal to the shipped foundation/sources.md.
+# test_cli_land_reports_a_ledger_without_an_acquisitions_table: an existing sources.md without an Acquisitions table is left unchanged and exits 1.
 # test_cli_land_refuses_unusable_inputs_before_landing: missing inputs, clashing names and malformed record counts exit 2 before landing.
 # test_cli_retain_retains_unretained_acquisitions_and_fills_their_rows: retain command writes missing rows without a location, then retains and updates rows once one is recorded, then does nothing.
 # test_cli_retain_reports_a_discrepant_existing_copy: a discrepant existing copy exits 1 and leaves the row this checkout only.
 # test_cli_publish_converts_checks_and_records_the_select: publish command writes Parquet from a project-relative select, runs the check, and records SQL checksums and rows.
+# test_cli_publish_view_sql_loads_through_session: the printed view_sql escapes the dataset name and loads as a view file.
 # test_cli_publish_keeps_a_failed_check_or_empty_result_unpublished: check rows or an empty select keep the partial directory unpublished and print the failures.
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
@@ -208,15 +211,19 @@ def test_retain_copies_and_verifies_then_reports_existing_copy(tmp_path):
     location = tmp_path / "storage"
     destination = location / "data/raw/api/batch-1"
     assert landing.retain(str(root), original.relative_to(root), str(location)) == {
-        "destination": str(destination), "copied": True, "conflict": False, "discrepancies": [],
+        "destination": str(destination), "copied": True, "conflict": False, "matched": True,
+        "discrepancies": [],
     }
     assert sorted(path.name for path in destination.iterdir()) == ["page.json", "provenance.json"]
     assert (destination / "page.json").read_bytes() == b"abc"
     assert (destination / "provenance.json").read_bytes() == (original / "provenance.json").read_bytes()
     assert not destination.with_name("batch-1.partial").exists()
+    before = {path: path.stat().st_mtime_ns for path in destination.iterdir()}
     assert landing.retain(root, original, location) == {
-        "destination": str(destination), "copied": False, "conflict": True, "discrepancies": [],
+        "destination": str(destination), "copied": False, "conflict": False, "matched": True,
+        "discrepancies": [],
     }
+    assert {path: path.stat().st_mtime_ns for path in destination.iterdir()} == before
 
 
 def test_retain_reports_checksum_discrepancy_without_changing_existing_copy(tmp_path):
@@ -227,7 +234,7 @@ def test_retain_reports_checksum_discrepancy_without_changing_existing_copy(tmp_
     landing.retain(root, original, location)
     (destination / "page.json").write_bytes(b"changed")
     assert landing.retain(root, original, location) == {
-        "destination": str(destination), "copied": False, "conflict": True,
+        "destination": str(destination), "copied": False, "conflict": True, "matched": False,
         "discrepancies": ["sha256 differs: page.json"],
     }
     assert (destination / "page.json").read_bytes() == b"changed"
@@ -406,7 +413,7 @@ def test_cli_land_copies_files_retains_and_writes_ledger_rows(tmp_path, capsys):
     destination = storage / "data/raw/orders/r1"
     assert out == {"landed": "data/raw/orders/r1/", "files": 2, "bytes": 12,
                    "retention": {"destination": str(destination), "copied": True, "conflict": False,
-                                 "discrepancies": []},
+                                 "matched": True, "discrepancies": []},
                    "ledger": {"row": "added", "source_status": "acquired"}}
     assert (acquired / "orders.csv").read_bytes() == b"id\r\n1\r\n2\r\n"
     assert (destination / "pages/1.json").read_bytes() == b"{}"
@@ -438,14 +445,38 @@ def test_cli_land_skips_unusable_retention_location(tmp_path, capsys, location, 
         "this checkout only"]
 
 
-def test_cli_land_lands_without_a_ledger_and_reports_the_missing_row(tmp_path, capsys):
+def test_cli_land_creates_a_missing_ledger_from_the_template(tmp_path, capsys):
+    (tmp_path / "orders.csv").write_bytes(b"id\n1\n")
+    status, out = run(capsys, landing.cli_land, tmp_path, "orders", "r1", tmp_path / "orders.csv")
+    assert status == 0
+    assert (tmp_path / "data/raw/orders/r1/orders.csv").read_bytes() == b"id\n1\n"
+    assert out["retention"]["skipped"] == "unrecorded"
+    assert out["ledger"] == {"row": "added", "source_status": "missing", "created": True}
+    text = (tmp_path / "foundation/sources.md").read_text(encoding="utf-8")
+    assert text.startswith(landing.SOURCES_TEMPLATE.split("## Acquisitions")[0])
+    assert [row[:2] + row[4:6] for row in acquisition_rows(tmp_path)] == [
+        ["r1", "orders", "`data/raw/orders/r1/`", "this checkout only"]]
+    landing.land(tmp_path, "orders", "r2", lambda output: (output / "a.csv").write_bytes(b"id\n2\n"),
+                 request="second")
+    status, out = run(capsys, landing.cli_retain, tmp_path)
+    assert status == 0
+    assert out["acted_on"][0]["ledger"] == {"row": "added", "source_status": "missing"}
+
+
+def test_sources_template_matches_the_installed_register():
+    assert landing.SOURCES_TEMPLATE.encode("utf-8") == (WORKBENCH / "foundation/sources.md").read_bytes()
+
+
+def test_cli_land_reports_a_ledger_without_an_acquisitions_table(tmp_path, capsys):
+    (tmp_path / "foundation").mkdir()
+    (tmp_path / "foundation/sources.md").write_text("# Source register\n")
     (tmp_path / "orders.csv").write_bytes(b"id\n1\n")
     status, out = run(capsys, landing.cli_land, tmp_path, "orders", "r1", tmp_path / "orders.csv")
     assert status == 1
     assert (tmp_path / "data/raw/orders/r1/orders.csv").read_bytes() == b"id\n1\n"
-    assert out["retention"]["skipped"] == "unrecorded"
     assert out["ledger"]["row"] == "not written"
-    assert "sources.md" in out["ledger"]["error"]
+    assert "Acquisitions" in out["ledger"]["error"]
+    assert (tmp_path / "foundation/sources.md").read_text() == "# Source register\n"
 
 
 def test_cli_land_refuses_unusable_inputs_before_landing(tmp_path, capsys):
@@ -599,3 +630,20 @@ def test_cli_options_take_one_value_each_and_may_precede_positionals(tmp_path, c
                       "--from", "data/raw/orders/r2", "--sql", "prep/orders.sql", "orders", "v1")
     assert status == 0
     assert out["inputs"] == ["data/raw/orders/r1", "data/raw/orders/r2"] and out["rows"] == 4
+
+
+@pytest.mark.parametrize("dataset", ["orders", "order-items", "o'brien", 'say"hi'])
+def test_cli_publish_view_sql_loads_through_session(tmp_path, capsys, dataset):
+    pytest.importorskip("duckdb")
+    root = published_project(tmp_path, capsys)
+    status, out = run(capsys, landing.cli_publish, root, dataset, "v1", "--from", "data/raw/orders/r1",
+                      "--sql", "prep/orders.sql")
+    assert status == 0
+    name = '"' + dataset.replace('"', '""') + '"'
+    location = f"data/parquet/{dataset}/v1/{dataset}.parquet".replace("'", "''")
+    assert out["view_sql"] == f"CREATE VIEW {name} AS SELECT * FROM read_parquet('{location}');"
+    assert list(out).index("view_sql") < list(out).index("catalog_row")
+    (root / "foundation/views").mkdir()
+    (root / "foundation/views/01_view.sql").write_text(out["view_sql"] + "\n", encoding="utf-8")
+    with landing.session(root) as connection:
+        assert connection.execute(f"SELECT * FROM {name} ORDER BY id").fetchall() == [(1, 20), (2, 40)]
