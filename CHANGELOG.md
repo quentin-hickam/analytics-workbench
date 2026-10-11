@@ -15,6 +15,19 @@ All notable changes to this project are recorded in this file. The format is bas
 - `land --records` and `publish --from` take one value per flag, so the printed usage can be copied as is. Generated requirements declare `tomli; python_version < "3.11"` when a project asset falls back to it.
 - `awb-status` counts a `revalidate` disposition as blocking a release, reports a recorded `none chosen` storage line as the user's decision, accepts flags the draft does not represent, renames its state check to `git.state_status` (`out of date` / `up to date`), and carries its request map in `SKILL.md`.
 
+### Fixed
+
+These come from the tool-call audit in `docs/tool-call-audit-2026-10-11/`, which found about 22 avoidable calls in a 123-call lifecycle.
+
+- `export` now keeps the manifest's `revalidation_flags` in step with `state.md` on every write. It records `none` when nothing is flagged. A flagged finding gets an entry with its finding and reason copied verbatim, `represented_in: []`, and disposition `none`. An entry whose finding and reason still match is kept as it was, and an entry for a cleared flag is dropped. `export` lists the unfinished entries as `flags_pending`, and reports `flags_error` when `state.md` cannot be read. `check-draft` reports malformed or unfinished entries as `flag_entries` and fails on them. Previously a draft with no flags passed `check-draft` and was then refused by `release`.
+- When display names are missing, `export` prints `display_stub`: a ready-to-paste line under `[columns]` for each absent name. A blank display name now counts as missing and gets its own error. `awb-package` settles display names before writing the outline, so chart **Data:** lines use the exported headers.
+- `awb-package` says that a revision which only adds caveats runs `export --result` alone, because `--chart`, `--dataset`, and `--no-datasets` re-serialize. It reviews each flag's places and asks for the disposition during the revision. `awb-release` asks where releases are kept before the first release, so `release` copies the release itself.
+- `land` creates a missing `foundation/sources.md` from the template and writes its Acquisitions row, reporting `"created": true`. Previously it exited 1 after landing. `retain` reports `matched` for a retained copy with no discrepancies, and `conflict` only for an existing copy that differs.
+- `publish` prints `view_sql`, the canonical view definition with the dataset name and path escaped, beside `catalog_row`.
+- `record_cleaning.py` accepts a recorded quality ID such as `Q-004` as an `issues` key, so a decision on an issue the scan no longer lists revises its row and can append a correction. It refuses a row recorded from another scan, two keys that name the same row, and unknown keys.
+- `awb-eda` names the `state issues` and `state next` commands. `analysis.md` says `state finding` takes `--text`, `--status`, `--reason`, and `--caveat` in one call.
+- Upgrading to these helpers replaces `src/preparation/landing.py`, which is producing code. Existing findings therefore show as stale until `run.py` reruns them.
+
 ### Added
 
 - Mechanical work runs as single commands through a project dispatcher, `python3 src/awb.py <command>`, so agents stop writing throwaway helper scripts and retyping helper output into records:
