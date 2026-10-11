@@ -17,7 +17,7 @@
 # test_export_writes_charts_datasets_and_manifest: display names, mapped codes, and rounding shape a saved result into a chart and a dataset; the manifest records charts, selection, passing export checks for serialized results only, and producing state for every represented result.
 # test_export_checks_follow_the_represented_set: a represented result not serialized keeps its entry; a result outside the represented set drops; an export without --chart removes the chart files and records charts none.
 # test_export_names_every_gap_and_blocks_stale_results: every missing display name is listed at once; a changed setting blocks a serializing export with a stop message and writes nothing; --no-datasets records none; --chart without a dataset choice is refused.
-# test_export_display_stub_names_each_gap_once: missing and blank display names on chart and dataset paths give one quoted [columns] line each, deduplicated, a dotted column kept as one key.
+# test_export_display_stub_names_each_gap_once: missing display names on chart and dataset paths give one quoted [columns] line each, deduplicated, a dotted column kept as one key; a blank name gets its own error and no stub line, so the stub pastes as valid TOML.
 # test_release_refuses_failed_check_or_pending_disposition: a failing verify, an unmatched flag, or a none/revalidate disposition creates no release; a missing or unknown disposition or malformed places fail the check's flag_entries; represented_in none needs no disposition.
 # test_release_reports_fields_for_the_report: datasets, dispositions marked new against the prior release's manifest (unknown when it is unreadable), provenance gaps, checkout-only acquisitions, and a clean local verify.
 # test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy compared.
@@ -505,10 +505,11 @@ def test_export_display_stub_names_each_gap_once(project, capsys):
                     "--chart", "r-002", "--dataset", "wide=r-001")
     assert code == 1 and not out["written"]
     assert out["errors"][0] == "r-001: column 'late_rate' has a blank display name in foundation/display.toml [columns]"
-    # Deduplicated across the chart and dataset paths; the dotted column stays one quoted key.
-    assert out["display_stub"] == '"late_rate" = ""\n"n" = ""\n"share.west" = ""'
-    assert tomllib.loads("[columns]\n" + out["display_stub"])["columns"] == {
-        "late_rate": "", "n": "", "share.west": ""}
+    # Deduplicated across the chart and dataset paths; the dotted column stays one quoted key; the
+    # blank late_rate already has its key, so the stub leaves it out and pasting it stays valid TOML.
+    assert out["display_stub"] == '"n" = ""\n"share.west" = ""'
+    assert tomllib.loads('[columns]\nregion = "Region"\nlate_rate = "  "\n' + out["display_stub"])["columns"] == {
+        "region": "Region", "late_rate": "  ", "n": "", "share.west": ""}
     write(project, "foundation/display.toml", '[columns]\nregion = "Region"\nlate_rate = "Late"\nn = "Cases"\n')
     code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-002", "--dataset", "wide=r-001")
     assert code == 1 and out["display_stub"] == '"share.west" = ""'

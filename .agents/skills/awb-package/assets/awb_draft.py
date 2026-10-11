@@ -909,9 +909,11 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
             if not problems:
                 shaped.append((kind, label, result_id, headers, rows))
                 sources += [f"{label}: {line}" for line in lines]
-        if gaps:
-            # Ready to paste under [columns] once each name is filled in from the glossary.
-            report["display_stub"] = "\n".join(f'{_toml_key(c)} = ""' for c in dict.fromkeys(gaps))
+        # Ready to paste under [columns] once each name is filled in from the glossary. A blank name
+        # already has its key, so it is fixed in place from its error and left out, keeping a paste valid.
+        absent = [c for c in dict.fromkeys(gaps) if c not in display["columns"]]
+        if absent:
+            report["display_stub"] = "\n".join(f'{_toml_key(c)} = ""' for c in absent)
     else:
         recorded = record.get("charts") if isinstance(record.get("charts"), list) else []
         report["errors"] += [f"{c.get('path')} serializes {c.get('result_id')}, which this call does not name; "
@@ -1019,7 +1021,7 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "and dataset selection: no --chart records charts none. With only --result it records "
                "provenance and leaves exported files untouched.\nEvery exported column needs a non-blank "
                "display name in foundation/display.toml; gaps are listed together with display_stub, lines "
-               "to fill in under [columns], and nothing is written.\nWrites nothing when an evidence file is "
+               "for absent names to fill in under [columns] (a blank name is fixed in place), and nothing is written.\nWrites nothing when an evidence file is "
                "missing or any comparison fails (exports_blocked).\nEach write sets revalidation_flags from "
                "state.md's flags (none when it flags nothing), keeping an entry whose finding and reason match "
                "exactly and adding others with represented_in [] and disposition none; flags_pending lists "
