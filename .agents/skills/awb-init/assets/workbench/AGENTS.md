@@ -31,7 +31,7 @@ Only a result from the investigation's `run.py`, run with its settings, can beco
 
 Settle ambiguous terms with concrete examples and the data. Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and dataset, view, and cache descriptions in `foundation/catalog.md`; these replace context maps and ADRs.
 
-`run.py` writes findings rows. Record status and wording changes with `awb.py state finding`, which writes their `history.md` entry, and issues and next steps with `state issue`, `next`, and `done`. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. When the user names who will read the deliverables, record it in the brief's Audience section.
+`run.py` writes findings rows. Change wording, status, or caveats with `awb.py state finding`, which writes any history entry due, and issues and next steps with `state issues` or `state next`. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. When the user names who will read the deliverables, record it in the brief's Audience section.
 
 Commit when the user asks; suggest one when analytical code is uncommitted, so evidence carries a SHA.
 

@@ -1,19 +1,28 @@
 # Kept cases:
-# test_show_prints_the_active_investigation: one call gives brief lines, rows, counts by status, numbered open items, and Last updated; template guidance reads "not recorded"; --investigation overrides; no active investigation exits 1 and an unknown name 2.
-# test_run_rows_are_added_refreshed_and_flags_cleared: a new result gets a provisional row; an existing row keeps wording, status, and caveat notes; a flagged row becomes provisional with a history entry citing the prior commit; other bytes are untouched.
-# test_finding_change_writes_history: a status or wording change appends a history entry with prior and new text and status, reason, and evidence commit; no change writes nothing; a flagged finding cannot be promoted.
-# test_issue_next_and_done: issue and next add bullets; done removes by number or text, restoring the file; an ambiguous or missing match exits 1 and writes nothing; CRLF files keep CRLF.
-# test_switch_keeps_the_pointer_form: switch rewrites only the pointer in its link, path, backticked, or slug form and prints the new view; a customized pointer exits 1 unwritten and an unknown investigation 2.
-# test_malformed_records_write_nothing: missing or repeated sections and lines, a wrong table, a short row, or a missing history file exit 1 or raise, leaving every file byte for byte.
-# test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helper write.
+# test_show_prints_brief_and_state_verbatim: resume prints brief.md and state.md verbatim with a warning per row whose evidence is missing, writes nothing, honours --investigation, lists investigations when none is active, and exits 2 for an unknown one.
+# test_run_rows_are_added_kept_and_refreshed: a new result gets a placeholder row; an exact-match rerun leaves state.md and history.md untouched; a changed rerun keeps wording and notes, demotes supported with a history entry, keeps superseded, and demotes provisional silently.
+# test_flagged_rerun_always_writes_history: a flagged row returns to provisional, or superseded when it was, with a reset caveat and a history entry naming the flag reason and the exact match.
+# test_failed_state_write_removes_new_evidence: a malformed state.md or a failed state replacement removes the new evidence; a failed history replacement raises with the prior row after state.md was replaced.
+# test_signals_wait_for_the_replacements: SIGINT during the replacements reaches the previous handler only after it is restored.
+# test_evidence_commit_cites_verified_commits: HEAD's full SHA for committed unchanged evidence; otherwise the last commit holding a version, verified, or uncommitted.
+# test_finding_guards_and_history: missing rows or evidence, stale or unexplained promotion, flagged promotion or caveat, and reserved caveat prefixes are refused; --reason is required exactly when history is due; one entry per call; provisional rewording is silent; no-ops write nothing.
+# test_issues_and_next_edit_lists_in_one_call: adds and drops resolve against the original list, ambiguous or missing drops exit 2 listing candidates, only list lines change, numbering continues.
+# test_switch_keeps_the_pointer_form: switch rewrites only the pointer in its link, path, backticked or slug form, which collect_status accepts, and prints the view; a missing state.md exits 1 and a customized pointer is refused.
+# test_malformed_records_write_nothing: a missing or repeated Last updated or section, a wrong header, a short row, two rows for one result, or a missing history file exit 1 and leave every file byte for byte.
+# test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helpers write.
 
 from datetime import date
 import importlib.util
+import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
 
 import pytest
+
+if shutil.which("git") is None:
+    pytest.skip("git is required", allow_module_level=True)
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / ".agents/skills/awb-init/assets/workbench"
@@ -29,26 +38,27 @@ def load(name, path):
 provenance = load("awb_provenance_state", ".agents/skills/awb-init/assets/awb_provenance.py")
 status = load("awb_status_state", ".agents/skills/awb-status/scripts/collect_status.py")
 
-TODAY = "2026-10-11"
-CHECKS = [{"name": "columns", "outcome": "fail", "detail": "Missing x."},
-          {"name": "joins", "outcome": "not-applicable", "detail": "not assessed"},
-          {"name": "values", "outcome": "pass", "detail": "Checked."}]
-STATE = "investigations/churn/state.md"
-HISTORY = "investigations/churn/history.md"
+TODAY = date.today().isoformat()
+INV = "investigations/churn"
+STATE, HISTORY = f"{INV}/state.md", f"{INV}/history.md"
+OK = [{"name": "columns", "outcome": "pass", "detail": "Required columns present: 1."}]
+GAPS = [{"name": "columns", "outcome": "fail", "detail": "Missing x."},
+        {"name": "joins", "outcome": "not-applicable", "detail": "not assessed"}]
 
 
 def git(root, *args):
     return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def commit(root, message="work"):
+def commit(root):
     git(root, "add", "-A")
     git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false",
-        "commit", "-qm", message)
+        "commit", "-qm", "work")
+    return git(root, "rev-parse", "HEAD")
 
 
-def read(root, path):
-    return (root / path).read_bytes()
+def text(root, path):
+    return (root / path).read_text()
 
 
 def snapshot(root):
@@ -56,33 +66,49 @@ def snapshot(root):
             if p.is_file() and ".git" not in p.parts}
 
 
-def rows(*lines):
-    return "| --- | --- | --- | --- |\n" + "".join(line + "\n" for line in lines)
-
-
 @pytest.fixture
 def project(tmp_path):
+    git(tmp_path, "init")
     readme = (TEMPLATES / "README.md").read_text().replace(
         "Active investigation: none", "Active investigation: [churn](investigations/churn/state.md)")
     (tmp_path / "README.md").write_text(readme)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/ops.py").write_text("x = 1\n")
     for name in ("churn", "pricing"):
         directory = tmp_path / "investigations" / name
-        directory.mkdir(parents=True)
+        (directory / "queries").mkdir(parents=True)
         for record in ("state.md", "history.md", "brief.md"):
             shutil.copyfile(TEMPLATES / "investigation" / record, directory / record)
-    brief = tmp_path / "investigations/churn/brief.md"
-    brief.write_text(brief.read_text()
-                     .replace("State the question this investigation will answer.",
-                              "Why did churn rise in Q3 among annual-plan customers?")
-                     .replace("Record the decision this analysis will support, or state that its purpose is "
-                              "exploratory.", "Decide whether to fund the retention offer. " + "x" * 200))
+        (directory / "settings.toml").write_text(
+            "[parameters]\nyear = 2026\n" + "".join(f"\n[results.r{i}]\n" for i in range(1, 6)))
+        for i in range(1, 6):
+            (directory / f"queries/r{i}.sql").write_text(f"select {i}\n")
     state = tmp_path / STATE
-    state.write_text(state.read_text().replace("<!-- use an ISO date -->", "2026-09-01").replace(
-        "| --- | --- | --- | --- |\n", rows(
-            "| Churn rose 3 points | [r1](evidence/r1.json) | supported | |",
-            "| Renewal lag \\| grew | [r2](evidence/r2.json) | revalidation-needed (was supported) | Q-004 correction |",
-            "| Early guess | [r0](evidence/r0.json) | superseded | |")))
+    state.write_text(state.read_text().replace("<!-- use an ISO date -->", "2026-09-01"))
+    commit(tmp_path)
     return tmp_path
+
+
+def produce(project, result_id, table="n\n1\n", checks=OK):
+    """What run.py does for one result: capture the prior, replace evidence and table, write the row."""
+    prior = provenance.prior_result(project, "churn", result_id)
+    (project / INV / "evidence" / f"{result_id}.json").unlink(missing_ok=True)
+    (project / INV / "results").mkdir(exist_ok=True)
+    (project / INV / "results" / f"{result_id}.csv").write_text(table)
+    provenance.record_evidence(project, "churn", result_id, views=[], checks=checks,
+                               settings_path=f"{INV}/settings.toml")
+    return provenance.record_finding(project, "churn", result_id, checks, prior=prior, today=TODAY)
+
+
+def set_row(project, result_id, finding=None, row_status=None, caveat=None):
+    """Edit a row as an agent or record_cleaning would."""
+    lines = text(project, STATE).splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if f"[{result_id}](evidence/{result_id}.json)" in line:
+            cells = [c.strip() for c in line.strip().strip("|").split(" | ")]
+            cells = [finding or cells[0], cells[1], row_status or cells[2], cells[3] if caveat is None else caveat]
+            lines[i] = "| " + " | ".join(cells) + " |\n"
+    (project / STATE).write_text("".join(lines))
 
 
 def run(project, capsys, *argv):
@@ -91,146 +117,232 @@ def run(project, capsys, *argv):
     return code, out.out, out.err
 
 
-def test_show_prints_the_active_investigation(project, capsys):
-    provenance.add_item(project, "churn", "Next steps", "Explore the shifts view", today=TODAY)
+def entries(project):
+    return [entry for entry in text(project, HISTORY).split("\n### ")[1:] if entry[:1].isdigit()]
+
+
+def test_show_prints_brief_and_state_verbatim(project, capsys):
+    produce(project, "r1")
+    (project / f"{INV}/evidence/r1.json").unlink()
+    before = snapshot(project)
     code, out, _ = run(project, capsys)
-    lines = out.splitlines()
-    assert code == 0
-    assert lines[0] == f"churn (Last updated: {TODAY})"
-    assert lines[1] == "Question: Why did churn rise in Q3 among annual-plan customers?"
-    assert lines[2].startswith("Purpose: Decide whether") and lines[2].endswith("…") and len(lines[2]) < 175
-    assert lines[3] == "Audience: not recorded"
-    assert lines[4] == "Findings: 1 supported, 1 revalidation-needed, 1 superseded"
-    assert lines[5] == "| Churn rose 3 points | [r1](evidence/r1.json) | supported | |"
-    assert lines[8:] == ["Unresolved issues: none", "Next steps:", "1. Explore the shifts view"]
-    assert run(project, capsys, "--investigation", "pricing")[1].splitlines()[4] == "Findings: none"
+    assert code == 0 and snapshot(project) == before
+    assert f"==> {INV}/brief.md <==\n" + text(project, f"{INV}/brief.md").rstrip() in out
+    assert f"==> {STATE} <==\n" + text(project, STATE).rstrip() in out
+    assert out.rstrip().endswith("warning: r1 links evidence/r1.json, which does not exist")
+    code, out, _ = run(project, capsys, "--investigation", "pricing")
+    assert code == 0 and "==> investigations/pricing/state.md <==" in out and "warning" not in out
     assert run(project, capsys, "--investigation", "absent")[0] == 2
     readme = project / "README.md"
     readme.write_text(readme.read_text().replace("[churn](investigations/churn/state.md)", "none"))
-    code, out, err = run(project, capsys)
-    assert code == 1 and not out and "no active investigation" in err
+    code, out, _ = run(project, capsys)
+    assert code == 0 and out.startswith("No active investigation. Investigations: churn, pricing.")
+    assert run(project, capsys, "issues", "--add", "x")[0] == 1
 
 
-def test_run_rows_are_added_refreshed_and_flags_cleared(project):
-    git(project, "init")
-    (project / "investigations/churn/evidence").mkdir()
-    (project / "investigations/churn/evidence/r2.json").write_text("{}\n")
-    commit(project)
-    head = git(project, "rev-parse", "HEAD")
-    prior = provenance.evidence_commit(project, "churn", "r2")
-    assert prior == head
-    (project / "investigations/churn/evidence/r2.json").write_text('{"rerun": true}\n')
-    assert provenance.evidence_commit(project, "churn", "r2") == f"uncommitted; last committed at {head}"
-    assert provenance.evidence_commit(project, "churn", "r9") == "uncommitted"
-    before = read(project, STATE).decode()
+def test_run_rows_are_added_kept_and_refreshed(project):
+    assert produce(project, "r1") == {"action": "added", "status": "provisional", "history": False}
+    row = "| <state the finding from r1> | [r1](evidence/r1.json) | provisional | |"
+    assert row in text(project, STATE) and f"Last updated: {TODAY}" in text(project, STATE)
+    assert produce(project, "r2", checks=GAPS)["action"] == "added"
+    assert "| provisional | failed checks: columns; not assessed: joins |" in text(project, STATE)
 
-    added = provenance.record_finding(project, "churn", "r3", CHECKS, finding="Tenure | matters", today=TODAY)
-    assert added == {"action": "added", "status": "provisional", "row":
-                     r"| Tenure \| matters | [r3](evidence/r3.json) | provisional | "
-                     "failed checks: columns; not assessed: joins |"}
-    text = read(project, STATE).decode()
-    assert text == before.replace("Last updated: 2026-09-01", f"Last updated: {TODAY}").replace(
-        "| Early guess | [r0](evidence/r0.json) | superseded | |\n",
-        "| Early guess | [r0](evidence/r0.json) | superseded | |\n" + added["row"] + "\n")
-    placeholder = provenance.record_finding(project, "churn", "r4", [], today=TODAY)
-    assert placeholder["row"].startswith("| <state the finding from r4> |")
+    set_row(project, "r1", "Churn rose 3 points", "supported", "joins: one table")
+    records = snapshot(project)
+    kept = produce(project, "r1")
+    assert kept == {"action": "kept", "status": "supported", "history": False}
+    assert text(project, STATE).encode() == records[STATE] and text(project, HISTORY).encode() == records[HISTORY]
 
-    # An existing row keeps its wording, status, and notes; the checks' caveat is refreshed.
-    lines = read(project, STATE).decode().replace(
-        "| Churn rose 3 points | [r1](evidence/r1.json) | supported | |",
-        "| Churn rose 3 points | [r1](evidence/r1.json) | supported | not assessed: nulls; joins: one table |")
-    (project / STATE).write_text(lines)
-    refreshed = provenance.record_finding(project, "churn", "r1", CHECKS[:1], finding="ignored", today=TODAY)
-    assert refreshed["action"] == "refreshed"
-    assert refreshed["row"] == ("| Churn rose 3 points | [r1](evidence/r1.json) | supported | "
-                                "failed checks: columns; joins: one table |")
-    assert read(project, HISTORY) == (TEMPLATES / "investigation/history.md").read_bytes()
+    refreshed = produce(project, "r1", table="n\n2\n", checks=GAPS)
+    assert refreshed == {"action": "refreshed", "status": "provisional", "history": True}
+    assert ("| Churn rose 3 points | [r1](evidence/r1.json) | provisional | "
+            "failed checks: columns; not assessed: joins; joins: one table |") in text(project, STATE)
+    [entry] = entries(project)
+    assert entry.startswith(f"{TODAY} — r1 rerun: supported → provisional\n")
+    assert "prior row `| Churn rose 3 points | [r1](evidence/r1.json) | supported | joins: one table |`" in entry
+    assert "- **Reasoning or decision:** rerun\n" in entry
+    assert "- **Impact and caveats:** provisional; re-promote with `awb.py state finding`." in entry
 
-    cleared = provenance.record_finding(project, "churn", "r2", CHECKS[2:], prior_commit=prior, today=TODAY)
-    assert cleared == {"action": "flag cleared", "status": "provisional",
-                       "row": r"| Renewal lag \| grew | [r2](evidence/r2.json) | provisional | |"}
-    history = read(project, HISTORY).decode()
-    entry = history[len((TEMPLATES / "investigation/history.md").read_text()):]
-    assert entry == (f"\n### {TODAY} — r2 rerun clears its flag\n\n"
-                     "- **Change or finding:** \"Renewal lag | grew\" (provisional).\n"
-                     f"- **Evidence:** [r2](evidence/r2.json); prior evidence at commit {head}.\n"
-                     "- **Reasoning or decision:** rerun for the flag: Q-004 correction.\n"
-                     "- **Impact and caveats:** none.\n"
-                     "- **Supersedes or revalidation link:** supersedes \"Renewal lag | grew\" "
-                     "(revalidation-needed (was supported)).\n")
+    produce(project, "r1", table="n\n3\n")  # provisional and changed: no history
+    assert len(entries(project)) == 1
+    set_row(project, "r1", row_status="superseded")
+    assert produce(project, "r1", table="n\n4\n")["status"] == "superseded"
+    assert len(entries(project)) == 1
 
 
-def test_finding_change_writes_history(project, capsys):
-    git(project, "init")
-    (project / "investigations/churn/evidence").mkdir()
-    (project / "investigations/churn/evidence/r1.json").write_text("{}\n")
-    commit(project)
-    head = git(project, "rev-parse", "HEAD")
-    code, out, _ = run(project, capsys, "finding", "r1", "--status", "superseded", "--text",
-                       "Churn rose 2 points", "--reason", "The Q-004 correction removed duplicate cancellations.")
-    day = date.today().isoformat()
-    assert code == 0
-    assert out == ("| Churn rose 2 points | [r1](evidence/r1.json) | superseded | |\n"
-                   f"history.md: ### {day} — r1 reworded and set to superseded\n")
-    entry = read(project, HISTORY).decode().split("\n### ")[-1]
-    assert entry == (f"{day} — r1 reworded and set to superseded\n\n"
-                     "- **Change or finding:** \"Churn rose 2 points\" (superseded).\n"
-                     f"- **Evidence:** [r1](evidence/r1.json); prior evidence at commit {head}.\n"
-                     "- **Reasoning or decision:** The Q-004 correction removed duplicate cancellations.\n"
-                     "- **Impact and caveats:** none.\n"
-                     "- **Supersedes or revalidation link:** supersedes \"Churn rose 3 points\" (supported).\n")
-    assert f"Last updated: {day}" in read(project, STATE).decode()
+def test_flagged_rerun_always_writes_history(project):
+    produce(project, "r1", checks=GAPS)
+    produce(project, "r2")
+    set_row(project, "r1", "Churn rose", "revalidation-needed (was supported)",
+            "failed checks: columns; not assessed: joins; joins: one table; Q-004 correction")
+    set_row(project, "r2", "Old view", "revalidation-needed (was superseded)", "Q-005 correction")
+    head = commit(project)
+    cleared = produce(project, "r1", checks=GAPS)
+    assert cleared == {"action": "flag cleared", "status": "provisional", "history": True}
+    assert "| Churn rose | [r1](evidence/r1.json) | provisional | failed checks: columns; not assessed: joins |" \
+        in text(project, STATE)
+    entry = entries(project)[-1]
+    assert entry.startswith(f"{TODAY} — r1 rerun: revalidation-needed (was supported) → provisional\n")
+    assert "; table, checks and settings unchanged." in entry
+    assert f"prior evidence at commit {head}." in entry
+    assert "- **Reasoning or decision:** rerun; flag reason: joins: one table; Q-004 correction\n" in entry
+    assert produce(project, "r2", table="n\n9\n")["status"] == "superseded"
+    entry = entries(project)[-1]
+    assert "rerun: revalidation-needed (was superseded) → superseded" in entry
+    assert "- **Impact and caveats:** superseded; no promotion required." in entry
+    assert "unchanged" not in entry and entry.endswith("- **Supersedes or revalidation link:**\n")
 
+
+def test_failed_state_write_removes_new_evidence(project, monkeypatch):
+    produce(project, "r1")
+    set_row(project, "r1", "Churn rose", "supported")
+    evidence = project / f"{INV}/evidence/r1.json"
+    (project / STATE).write_text(text(project, STATE).replace("| Finding | Evidence |", "| Result | Evidence |"))
     before = snapshot(project)
-    code, out, _ = run(project, capsys, "finding", "r1", "--status", "superseded")
-    assert code == 0 and out.startswith("unchanged: ") and snapshot(project) == before
-    # A caveat note changes neither status nor wording, so history stays as it is.
-    assert run(project, capsys, "finding", "r1", "--caveat", "joins: one table")[0] == 0
-    assert read(project, HISTORY) == before[HISTORY]
-    assert "| superseded | joins: one table |" in read(project, STATE).decode()
+    with pytest.raises(provenance.StateError, match="Current findings needs a table"):
+        produce(project, "r1", table="n\n2\n")
+    assert not evidence.exists()
+    assert {k: v for k, v in snapshot(project).items() if "/results/" not in k} == \
+        {k: v for k, v in before.items() if "/results/" not in k and k != f"{INV}/evidence/r1.json"}
 
+    (project / STATE).write_text(text(project, STATE).replace("| Result | Evidence |", "| Finding | Evidence |"))
+    produce(project, "r1", table="n\n5\n")
+    set_row(project, "r1", row_status="supported")
+    real, calls = os.replace, []
+
+    def failing(source, target):
+        calls.append(Path(target).name)
+        if Path(target).name == fail_on:
+            raise OSError("disk full")
+        return real(source, target)
+
+    monkeypatch.setattr(provenance.os, "replace", failing)
+    fail_on, before = "state.md", snapshot(project)
+    with pytest.raises(provenance.StateError, match="state.md not written"):
+        produce(project, "r1", table="n\n6\n")
+    assert not evidence.exists() and text(project, STATE).encode() == before[STATE]
+    assert not [p for p in (project / INV).iterdir() if p.name.endswith(".tmp")]
+    fail_on = "history.md"
+    with pytest.raises(provenance.StateError, match=r"history.md not written .*prior rows it lacks: \| Churn"):
+        produce(project, "r1", table="n\n7\n")
+    assert evidence.exists() and "| provisional |" in text(project, STATE)
+    assert calls[-2:] == ["state.md", "history.md"]
+
+
+def test_signals_wait_for_the_replacements():
+    import signal
+    seen = []
+    previous = signal.signal(signal.SIGINT, lambda number, frame: seen.append(signal.getsignal(signal.SIGINT)))
+    try:
+        handler = signal.getsignal(signal.SIGINT)
+        with provenance._signals_deferred():
+            signal.raise_signal(signal.SIGINT)
+            assert seen == [] and signal.getsignal(signal.SIGINT) is not handler
+        assert seen == [handler]
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
+def test_evidence_commit_cites_verified_commits(project):
+    path = project / f"{INV}/evidence/r1.json"
+    path.parent.mkdir()
+    assert provenance.evidence_commit(project, "churn", "r1") == "uncommitted"
+    path.write_text("{}\n")
+    first = commit(project)
+    assert provenance.evidence_commit(project, "churn", "r1") == first and len(first) == 40
+    path.write_text('{"rerun": 1}\n')
+    assert provenance.evidence_commit(project, "churn", "r1") == f"uncommitted; last committed at {first}"
+    path.unlink()
+    commit(project)  # a commit that deletes the file holds no version of it
+    path.write_text('{"rerun": 2}\n')
+    assert provenance.evidence_commit(project, "churn", "r1") == f"uncommitted; last committed at {first}"
+
+
+def test_finding_guards_and_history(project, capsys):
+    produce(project, "r1")
+    produce(project, "r2")
+    produce(project, "r3", checks=GAPS)
+    produce(project, "r4")
+    set_row(project, "r4", "Old", "revalidation-needed (was supported)", "Q-004 correction")
+    commit(project)
+
+    code, out, _ = run(project, capsys, "finding", "r1", "--text", "Churn | rose 3 points")
+    assert code == 0 and out == r"| Churn \| rose 3 points | [r1](evidence/r1.json) | provisional | |" + "\n"
+    assert entries(project) == []  # provisional rewording is silent
     before = snapshot(project)
-    code, _, err = run(project, capsys, "finding", "r2", "--status", "supported")
-    assert code == 1 and "rerun it with run.py" in err and snapshot(project) == before
-    assert run(project, capsys, "finding", "r9", "--status", "supported")[0] == 1
-    assert run(project, capsys, "finding", "r1")[0] == 2
-    assert run(project, capsys, "finding", "r1", "--status", "done")[0] == 2
+    assert run(project, capsys, "finding", "r1", "--text", "Churn | rose 3 points")[1].startswith("unchanged: r1")
     assert snapshot(project) == before
 
-    code, _, _ = run(project, capsys, "finding", "r2", "--status", "superseded")
-    entry = read(project, HISTORY).decode().split("\n### ")[-1]
-    assert code == 0 and "r2 set to superseded" in entry and "prior evidence uncommitted." in entry
-    assert "- **Reasoning or decision:** not given." in entry
+    refusals = [
+        (["finding", "r1", "--status", "supported"], 2, "--reason is required"),
+        (["finding", "r9", "--status", "superseded", "--reason", "x"], 1, "no findings row links r9"),
+        (["finding", "r3", "--status", "supported", "--reason", "x"], 1, "explain them with --caveat"),
+        (["finding", "r4", "--status", "supported", "--reason", "x"], 1, "only a rerun clears the flag"),
+        (["finding", "r4", "--caveat", "fine"], 1, "only a rerun clears the flag"),
+        (["finding", "r3", "--caveat", "not assessed: none"], 2, "reserved prefixes"),
+        (["finding", "r1", "r2", "--text", "x"], 2, "several result IDs"),
+        (["finding", "r1"], 2, "give --status"),
+        (["finding", "r1", "--status", "done"], 2, "invalid choice"),
+    ]
+    for argv, expected, message in refusals:
+        code, _, err = run(project, capsys, *argv)
+        assert (code, message in err) == (expected, True), argv
+        assert snapshot(project) == before, argv
+    (project / f"{INV}/evidence/r2.json").rename(project / "r2.json")
+    assert "evidence/r2.json does not exist" in run(project, capsys, "finding", "r2", "--text", "x")[2]
+    (project / "r2.json").rename(project / f"{INV}/evidence/r2.json")
+    (project / "src/ops.py").write_text("x = 2\n")
+    code, _, err = run(project, capsys, "finding", "r1", "--status", "supported", "--reason", "x")
+    assert code == 1 and "is stale" in err and snapshot(project) == {**before, "src/ops.py": b"x = 2\n"}
+    (project / "src/ops.py").write_text("x = 1\n")
+
+    assert run(project, capsys, "finding", "r3", "--caveat", "joins: single table")[0] == 0
+    head = git(project, "rev-parse", "HEAD")
+    code, out, _ = run(project, capsys, "finding", "r1", "r3", "--status", "supported",
+                       "--reason", "Checked against the Q3 renewals.")
+    assert code == 0 and out.endswith(f"history.md: ### {TODAY} — r1, r3 promoted to supported\n")
+    [entry] = entries(project)
+    assert "r1 was `| Churn \\| rose 3 points | [r1](evidence/r1.json) | provisional | |`; now " \
+           "\"Churn \\| rose 3 points\" (supported)." in entry
+    assert f"[r1](evidence/r1.json) at commit {head}; [r3](evidence/r3.json) at commit {head}." in entry
+    assert "- **Reasoning or decision:** Checked against the Q3 renewals.\n" in entry
+    assert "r3: failed checks: columns; not assessed: joins; joins: single table." in entry
+
+    code, out, _ = run(project, capsys, "finding", "r4", "--text", "Older", "--reason", "Renamed.")
+    assert code == 0 and out.startswith("warning: r4 is flagged; package dispositions") and len(entries(project)) == 2
+    assert run(project, capsys, "finding", "r4", "--status", "superseded")[0] == 2
+    assert run(project, capsys, "finding", "r4", "--status", "superseded", "--reason", "Replaced by r1.")[0] == 0
+    assert "| Older | [r4](evidence/r4.json) | superseded | Q-004 correction |" in text(project, STATE)
+    assert entries(project)[-1].startswith(f"{TODAY} — r4 set to superseded\n")
 
 
-def test_issue_next_and_done(project, capsys):
-    original = read(project, STATE)
-    assert run(project, capsys, "issue", "Is the  Q3 dip\na data gap?")[1] == "added Unresolved issues item 1\n"
-    assert run(project, capsys, "next", "Explore the shifts view")[1] == "added Next steps item 2\n"
-    assert run(project, capsys, "next", "Explore the orders view")[1] == "added Next steps item 3\n"
-    text = read(project, STATE).decode()
-    assert "Keep this a short list.\n\n- Is the Q3 dip a data gap?\n\n## Next steps" in text
-    assert text.endswith("Keep this a short list.\n\n- Explore the shifts view\n- Explore the orders view\n")
+def test_issues_and_next_edit_lists_in_one_call(project, capsys):
+    original = text(project, STATE)
+    code, out, _ = run(project, capsys, "issues", "--add", "Is the  Q3 dip a gap?", "--add", "Tenure coding")
+    assert code == 0 and out == "Unresolved issues: added 2, dropped 0\n"
+    assert run(project, capsys, "next", "--add", "Explore shifts", "--add", "Explore orders")[0] == 0
+    current = text(project, STATE)
+    assert "Keep this a short list.\n- Is the Q3 dip a gap?\n- Tenure coding\n\n## Next steps" in current
+    assert current.endswith("Keep this a short list.\n- Explore shifts\n- Explore orders\n")
 
     before = snapshot(project)
-    code, _, err = run(project, capsys, "done", "explore")
-    assert code == 1 and "matches items 2, 3" in err and snapshot(project) == before
-    assert run(project, capsys, "done", "nothing like it")[0] == 1
-    assert run(project, capsys, "done", "7")[0] == 1
-    assert snapshot(project) == before
+    for argv, listed in ((["next", "--drop", "Explore"], "1. Explore shifts; 2. Explore orders"),
+                         (["next", "--drop", "explore shifts"], "1. Explore shifts; 2. Explore orders"),
+                         (["next", "--drop", "orders", "--drop", "9"], "1. Explore shifts")):
+        code, _, err = run(project, capsys, *argv)
+        assert code == 2 and listed in err and snapshot(project) == before, argv
+    code, out, _ = run(project, capsys, "next", "--drop", "2", "--drop", "shifts", "--add", "Profile tenure")
+    assert code == 0 and out == "Next steps: added 1, dropped 2\n  - Explore orders\n  - Explore shifts\n"
+    assert text(project, STATE).endswith("Keep this a short list.\n- Profile tenure\n")
+    assert run(project, capsys, "next", "--drop", "1")[0] == 0
+    assert run(project, capsys, "issues", "--drop", "Q3", "--drop", "Tenure")[0] == 0
+    assert text(project, STATE) == original.replace("2026-09-01", TODAY)
 
-    assert run(project, capsys, "done", "SHIFTS")[1] == "removed from Next steps: Explore the shifts view\n"
-    assert run(project, capsys, "done", "1")[1] == "removed from Unresolved issues: Is the Q3 dip a data gap?\n"
-    assert run(project, capsys, "done", "Explore the orders view")[0] == 0
-    day = read(project, STATE).decode().split("Last updated: ")[1][:10]
-    assert read(project, STATE) == original.replace(b"2026-09-01", day.encode())
-
-    numbered = original.replace(b"Keep this a short list.\n\n## Next", b"Keep this a short list.\n\n1. First\n"
-                                b"   continued\n\n## Next").replace(b"\n", b"\r\n")
-    (project / STATE).write_bytes(numbered)
-    provenance.add_item(project, "churn", "Unresolved issues", "Second", today=TODAY)
-    assert b"1. First\r\n   continued\r\n2. Second\r\n\r\n## Next" in read(project, STATE)
-    assert provenance.remove_item(project, "churn", "continued", today=TODAY) == ("Unresolved issues", "First continued")
+    (project / STATE).write_text(original.replace("Keep this a short list.\n\n## Next",
+                                                  "Keep this a short list.\n\n1. First\n   continued\n\n## Next"))
+    assert run(project, capsys, "issues", "--add", "Second", "--add", "Third")[0] == 0
+    assert "1. First\n   continued\n2. Second\n3. Third\n\n## Next" in text(project, STATE)
+    assert run(project, capsys, "issues", "--drop", "continued")[1].endswith("  - First continued\n")
 
 
 @pytest.mark.parametrize("pointer, expected", [
@@ -243,19 +355,22 @@ def test_issue_next_and_done(project, capsys):
 ])
 def test_switch_keeps_the_pointer_form(project, capsys, pointer, expected):
     readme = project / "README.md"
-    text = readme.read_text().replace("[churn](investigations/churn/state.md)", pointer)
-    readme.write_text(text)
+    original = readme.read_text().replace("[churn](investigations/churn/state.md)", pointer)
+    readme.write_text(original)
     code, out, _ = run(project, capsys, "switch", "pricing")
-    assert code == 0 and out.startswith("Active investigation now pricing (Last updated:")
-    assert readme.read_text() == text.replace(f"Active investigation: {pointer}", f"Active investigation: {expected}")
+    assert code == 0 and out.startswith("Active investigation: pricing\n==> investigations/pricing/brief.md <==")
+    assert readme.read_text() == original.replace(f"Active investigation: {pointer}",
+                                                  f"Active investigation: {expected}")
     assert status.collect(project)["active"]["name"] == "pricing"
-    code, out, _ = run(project, capsys, "switch", "pricing")
-    assert code == 0 and out.startswith("Already active: pricing")
-
+    assert run(project, capsys, "switch", "pricing")[1].startswith("Already active: pricing")
     assert run(project, capsys, "switch", "absent")[0] == 2
-    readme.write_text(text.replace(f"Active investigation: {pointer}", "Active investigation: see the wiki"))
+    (project / "investigations/empty").mkdir()
     before = snapshot(project)
-    code, _, err = run(project, capsys, "switch", "pricing")
+    code, _, err = run(project, capsys, "switch", "empty")
+    assert code == 1 and "state.md does not exist" in err and snapshot(project) == before
+    readme.write_text(original.replace(f"Active investigation: {pointer}", "Active investigation: see the wiki"))
+    before = snapshot(project)
+    code, _, err = run(project, capsys, "switch", "churn")
     assert code == 1 and "customized" in err and snapshot(project) == before
 
 
@@ -263,55 +378,50 @@ def test_switch_keeps_the_pointer_form(project, capsys, pointer, expected):
     (STATE, "Last updated: 2026-09-01\n", ""),
     (STATE, "Last updated: 2026-09-01\n", "Last updated: 2026-09-01\nLast updated: 2026-09-02\n"),
     (STATE, "## Next steps", "## Later"),
-    (STATE, "## Unresolved issues", "## Current findings"),
+    (STATE, "## Unresolved issues", "## Next steps"),
     (STATE, "| Finding | Evidence |", "| Result | Evidence |"),
-    (STATE, "| Early guess | [r0](evidence/r0.json) | superseded | |", "| Early guess | [r0](evidence/r0.json) |"),
-    (STATE, "[r0](evidence/r0.json)", "[r1](evidence/r1.json)"),  # two rows link r1: only r1 writes fail
+    (STATE, "| provisional | |", "| provisional |"),
+    (STATE, "[r2](evidence/r2.json)", "[r1](evidence/r1.json)"),
     (HISTORY, None, None),
 ])
 def test_malformed_records_write_nothing(project, capsys, record, old, new):
+    produce(project, "r1")
+    produce(project, "r2")
     path = project / record
     if old is None:
         path.unlink()
+        commands = [["finding", "r1", "--status", "superseded", "--reason", "x"]]
     else:
-        text = path.read_text()
-        assert old in text
-        path.write_text(text.replace(old, new, 1))
+        old, new = old.replace("2026-09-01", TODAY), new.replace("2026-09-01\n", f"{TODAY}\n", 1)
+        assert old in path.read_text()
+        path.write_text(path.read_text().replace(old, new, 1))
+        lists = [["issues", "--add", "x"]] if "Unresolved" in old else [["next", "--add", "x"]]
+        commands = lists if "## " in old else [["finding", "r1", "--text", "x"], ["issues", "--add", "x"]]
     before = snapshot(project)
-    commands = [["finding", "r1", "--status", "superseded"], ["finding", "r1", "--text", "x"]]
-    if old == "[r0](evidence/r0.json)":
-        commands += [["finding", "r1", "--caveat", "x"]]
-    elif record == STATE:
-        commands += [[], ["issue", "x"], ["next", "x"], ["done", "1"], ["switch", "pricing"]]
     for argv in commands:
-        if argv[:1] == ["switch"]:  # switch reads the target's records, so break the target.
-            shutil.copyfile(path, project / "investigations/pricing/state.md")
-            before = snapshot(project)
         code, out, err = run(project, capsys, *argv)
-        assert code == 1, argv
-        assert len(err.strip().splitlines()) == 1 and not out, argv
+        assert code == 1 and not out and len(err.strip().splitlines()) == 1, argv
         assert snapshot(project) == before, argv
-    if record == STATE:
-        with pytest.raises(provenance.StateError):
-            provenance.record_finding(project, "churn", "r1", CHECKS)
-        assert snapshot(project) == before
 
 
 def test_parsers_read_written_files(project, capsys):
-    provenance.record_finding(project, "churn", "r3", CHECKS, finding="Tenure | matters", today=TODAY)
-    provenance.record_finding(project, "churn", "r2", CHECKS, today=TODAY)
-    assert run(project, capsys, "finding", "r3", "--status", "supported", "--text", "Tenure | matters most")[0] == 0
-    assert run(project, capsys, "issue", "Q3 coverage gap")[0] == 0
-    assert run(project, capsys, "next", "Explore shifts")[0] == 0
+    produce(project, "r1")
+    produce(project, "r2", checks=GAPS)
+    produce(project, "r3")
+    set_row(project, "r3", row_status="revalidation-needed (was supported)", caveat="Q-004 correction")
+    produce(project, "r3")
+    assert run(project, capsys, "finding", "r1", "--text", "Churn | rose", "--status", "supported",
+               "--reason", "Checked.")[0] == 0
+    assert run(project, capsys, "issues", "--add", "Q3 coverage gap")[0] == 0
+    assert run(project, capsys, "next", "--add", "Explore shifts")[0] == 0
     result = status.collect(project)
     assert not [u for u in result["uncertainties"] if u["path"] == STATE]
     active = result["active"]
-    assert active["last_updated"] == read(project, STATE).decode().split("Last updated: ")[1][:10]
-    assert active["counts"] == {"supported": 2, "provisional": 1, "superseded": 1}
-    assert {"finding": r"Tenure \| matters most", "status": "supported",
-            "reason": "failed checks: columns; not assessed: joins"} in active["findings"]
+    assert active["last_updated"] == TODAY
+    assert active["counts"] == {"supported": 1, "provisional": 2}
+    assert {"finding": r"Churn \| rose", "status": "supported", "reason": ""} in active["findings"]
     assert "- Q3 coverage gap" in active["unresolved_issues"] and "- Explore shifts" in active["next_steps"]
     found = provenance.finding_rows(project / STATE)
-    assert sorted(found) == ["r0", "r1", "r2", "r3"]
-    assert found["r3"] == [r"| Tenure \| matters most | [r3](evidence/r3.json) | supported | "
+    assert sorted(found) == ["r1", "r2", "r3"] and all(len(rows) == 1 for rows in found.values())
+    assert found["r2"] == ["| <state the finding from r2> | [r2](evidence/r2.json) | provisional | "
                            "failed checks: columns; not assessed: joins |"]
