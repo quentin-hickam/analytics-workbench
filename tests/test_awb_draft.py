@@ -4,15 +4,21 @@
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten, revised_at stamped only when it changes, other manifest fields kept; nothing is written outside the draft.
 # test_check_draft_reports_each_helper_problem: an internal name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
+# test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
 # test_verify_only_never_writes: a changed file is reported against the recorded inventory; the manifest stays byte-identical.
 # test_missing_manifest_runs_other_checks: without manifest.json the findings and chart checks still run; verify is not run and the check fails.
 # test_export_results_records_provenance_only: --result alone writes shared commit, inputs, settings, and packaging state, creates the manifest with its identity fields, leaves chart files untouched, and is not gated by a changed setting.
+# test_export_creates_revalidation_flags_from_state: from an absent manifest, export records none when state.md flags nothing, else each flag verbatim with represented_in [] and disposition none, listed in flags_pending.
+# test_export_syncs_revalidation_flags_with_state: entries follow state.md row order; exact matches are kept whole; a changed reason starts a fresh entry; a cleared flag drops; flags_pending lists [] places and kept entries at none; no flags left records none.
+# test_export_keeps_flags_when_state_is_unreadable: export still writes, reports flags_error, and leaves revalidation_flags as it was.
+# test_flag_raised_after_none_fails_until_export_records_it: a flag raised after none fails check-draft and release through unmatched_flags; the next export records it as pending.
 # test_export_keeps_differences_and_unknowns: differing commits are listed per result and an unknown keeps its reason.
 # test_export_refuses_missing_evidence_or_unnamed_chart_result: a missing evidence file, or a --result call that leaves out a charted result, writes nothing.
 # test_export_writes_charts_datasets_and_manifest: display names, mapped codes, and rounding shape a saved result into a chart and a dataset; the manifest records charts, selection, passing export checks for serialized results only, and producing state for every represented result.
 # test_export_checks_follow_the_represented_set: a represented result not serialized keeps its entry; a result outside the represented set drops; an export without --chart removes the chart files and records charts none.
 # test_export_names_every_gap_and_blocks_stale_results: every missing display name is listed at once; a changed setting blocks a serializing export with a stop message and writes nothing; --no-datasets records none; --chart without a dataset choice is refused.
-# test_release_refuses_failed_check_or_pending_disposition: a failing verify, an unmatched flag, a none/revalidate/missing disposition, or malformed places creates no release; represented_in none needs no disposition.
+# test_export_display_stub_names_each_gap_once: missing and blank display names on chart and dataset paths give one quoted [columns] line each, deduplicated, a dotted column kept as one key.
+# test_release_refuses_failed_check_or_pending_disposition: a failing verify, an unmatched flag, or a none/revalidate disposition creates no release; a missing or unknown disposition or malformed places fail the check's flag_entries; represented_in none needs no disposition.
 # test_release_reports_fields_for_the_report: datasets, dispositions marked new against the prior release's manifest (unknown when it is unreadable), provenance gaps, checkout-only acquisitions, and a clean local verify.
 # test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy compared.
 # test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do.
@@ -59,6 +65,7 @@ STATE = """# Current investigation state
 """
 FLAGGED = STATE.format(status="revalidation-needed (was supported)", reason="Q-3 corrected west dates")
 FLAG = {"finding": "Late orders rose in the west", "reason": "Q-3 corrected west dates"}
+PLACES_PROBLEM = "represented_in is not none or a list of places; list them or record none"
 
 
 def git(root, *args):
@@ -217,6 +224,39 @@ def test_check_draft_reports_unmatched_flags(project, capsys):
     assert "no Current findings table" in report["errors"][0]
 
 
+def test_check_draft_and_release_refuse_malformed_flag_entries(project, capsys):
+    path = project / "deliveries/inv/pkg/draft/manifest.json"
+    record = json.loads(path.read_text())
+    del record["revalidation_flags"]
+    path.write_text(json.dumps(record))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["unmatched_flags"] == [] and report["flag_entries"] == [
+        {"finding": None, "problem": "revalidation_flags is missing; rerun export"}]
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
+    assert report["check"]["flag_entries"][0]["problem"] == "revalidation_flags is missing; rerun export"
+    write(project, "investigations/inv/state.md", FLAGGED)
+    entry_problem = "entry is not an object with a text finding and reason; rerun export"
+    for flags, rows in [
+            ({"finding": "x"}, [{"finding": None,
+                                 "problem": "revalidation_flags is not none or a list; rerun export"}]),
+            (["x", {"finding": "F2", "represented_in": "none"}],
+             [{"finding": None, "problem": entry_problem}, {"finding": "F2", "problem": entry_problem}]),
+            ([{**FLAG, "represented_in": [], "disposition": "none"}],
+             [{"finding": FLAG["finding"], "problem": PLACES_PROBLEM}]),
+            ([{**FLAG, "represented_in": [" "], "disposition": "omit"}],
+             [{"finding": FLAG["finding"], "problem": PLACES_PROBLEM}])]:
+        set_flags(project, flags)
+        for command in ("check-draft", "release"):
+            code, report = run(project, capsys, command, "inv", "pkg")
+            check = report if command == "check-draft" else report["check"]
+            assert code == 1 and not check["passed"] and check["flag_entries"] == rows
+    set_flags(project, [{**FLAG, "represented_in": ["chart 1"], "disposition": "revalidate"}])
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["flag_entries"] == []
+    assert not (project / "deliveries/inv/pkg/released").exists()
+
+
 def test_verify_only_never_writes(project, capsys):
     run(project, capsys, "check-draft", "inv", "pkg")
     before = (project / "deliveries/inv/pkg/draft/manifest.json").read_bytes()
@@ -259,6 +299,89 @@ def test_export_results_records_provenance_only(project, capsys):
     assert record["packaging_commit"] == head and record["packaging_uncommitted_changes"] == "none"
     assert record["export_checks"] == "none" and "charts" not in record and "dataset_selection" not in record
     assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes() == chart
+
+
+def state_rows(*rows):
+    """A state.md whose Current findings table holds (finding, status, reason) rows."""
+    lines = "".join(f"| {finding} | [r-001](evidence/r-001.json) | {status} | {reason} |\n"
+                    for finding, status, reason in rows)
+    return STATE.split("| Late orders")[0] + lines + "\n## Next steps\n"
+
+
+LONG_REASON = ("Q-3 corrected west dates after the vendor re-sent the March file; the late share was computed "
+               "on the uncorrected dates, so the rise in the west may be an artifact of the correction (`Q-3`)")
+SECOND = {"finding": "East held steady", "reason": "Q-5 dropped duplicate east rows"}
+
+
+def test_export_creates_revalidation_flags_from_state(project, capsys):
+    path = project / "deliveries/inv/pkg/draft/manifest.json"
+    path.unlink()
+    code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-001")
+    assert code == 0 and out["created"] and out["flags_pending"] == [] and "flags_error" not in out
+    assert manifest(project)["revalidation_flags"] == "none"
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["flag_entries"] == [] and report["unmatched_flags"] == []
+    path.unlink()
+    write(project, "investigations/inv/state.md", state_rows(
+        (FLAG["finding"], "revalidation-needed (was supported)", LONG_REASON), ("Other finding", "supported", "")))
+    code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-001")
+    assert code == 0 and out["created"] and manifest(project)["revalidation_flags"] == [
+        {"finding": FLAG["finding"], "reason": LONG_REASON, "represented_in": [], "disposition": "none"}]
+    assert out["flags_pending"] == [{"finding": FLAG["finding"], "needs": "represented_in"}]
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["unmatched_flags"] == [] and report["flag_entries"] == [
+        {"finding": FLAG["finding"], "problem": PLACES_PROBLEM}]
+
+
+def test_export_syncs_revalidation_flags_with_state(project, capsys):
+    write(project, "investigations/inv/state.md", state_rows(
+        (FLAG["finding"], "revalidation-needed (was supported)", FLAG["reason"]),
+        (SECOND["finding"], "revalidation-needed", SECOND["reason"]),
+        ("Third finding", "revalidation-needed", "Q-6 new")))
+    chosen = {**FLAG, "represented_in": ["chart 1"], "disposition": "release_with_caveat", "note": "kept"}
+    waiting = {**SECOND, "represented_in": ["findings: East"], "disposition": "none"}
+    cleared = {"finding": "Gone", "reason": "fixed", "represented_in": "none"}
+    stale = {"finding": "Third finding", "reason": "Q-6 old", "represented_in": ["chart 1"], "disposition": "omit"}
+    set_flags(project, [stale, waiting, cleared, chosen])
+    code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-001")
+    assert code == 0 and out["written"]
+    # State row order; exact matches kept whole; a changed reason starts fresh; a cleared flag drops.
+    assert manifest(project)["revalidation_flags"] == [
+        chosen, waiting, {"finding": "Third finding", "reason": "Q-6 new", "represented_in": [], "disposition": "none"}]
+    assert out["flags_pending"] == [{"finding": SECOND["finding"], "needs": "disposition"},
+                                    {"finding": "Third finding", "needs": "represented_in"}]
+    write(project, "investigations/inv/state.md", STATE.format(status="supported", reason=""))
+    code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-001")
+    assert code == 0 and manifest(project)["revalidation_flags"] == "none" and out["flags_pending"] == []
+
+
+def test_export_keeps_flags_when_state_is_unreadable(project, capsys):
+    prior = [{**FLAG, "represented_in": ["chart 1"], "disposition": "none"}]
+    set_flags(project, prior)
+    write(project, "investigations/inv/state.md", b"\xff\xfe not text")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-001")
+    assert code == 0 and out["written"]
+    assert out["flags_error"].startswith("investigations/inv/state.md: unreadable")
+    record = manifest(project)
+    assert record["revalidation_flags"] == prior and "producing_commit" in record
+    assert out["flags_pending"] == [{"finding": FLAG["finding"], "needs": "disposition"}]
+
+
+def test_flag_raised_after_none_fails_until_export_records_it(project, capsys):
+    code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-001")
+    assert code == 0 and manifest(project)["revalidation_flags"] == "none"
+    run(project, capsys, "check-draft", "inv", "pkg")
+    write(project, "investigations/inv/state.md", FLAGGED)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["flag_entries"] == [] and report["unmatched_flags"] == [FLAG]
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == "flagged findings without a release disposition"
+    assert report["unmatched_flags"] == [FLAG]
+    code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-001")
+    assert out["flags_pending"] == [{"finding": FLAG["finding"], "needs": "represented_in"}]
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["unmatched_flags"] == [] and report["flag_entries"] == [
+        {"finding": FLAG["finding"], "problem": PLACES_PROBLEM}]
 
 
 def test_export_keeps_differences_and_unknowns(project, capsys):
@@ -373,6 +496,26 @@ def test_export_names_every_gap_and_blocks_stale_results(project, capsys):
         run(project, capsys, "export", "inv", "pkg", "--chart", "r-001")
 
 
+def test_export_display_stub_names_each_gap_once(project, capsys):
+    tomllib = pytest.importorskip("tomllib")
+    write(project, "investigations/inv/results/r-001.csv", "region,late_rate,n,share.west\nW,21.3,10,0.5\n")
+    write(project, "investigations/inv/results/r-002.csv", "region,n\nW,10\n")
+    write(project, "foundation/display.toml", '[columns]\nregion = "Region"\nlate_rate = "  "\n')
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,late_rate",
+                    "--chart", "r-002", "--dataset", "wide=r-001")
+    assert code == 1 and not out["written"]
+    assert out["errors"][0] == "r-001: column 'late_rate' has a blank display name in foundation/display.toml [columns]"
+    # Deduplicated across the chart and dataset paths; the dotted column stays one quoted key.
+    assert out["display_stub"] == '"late_rate" = ""\n"n" = ""\n"share.west" = ""'
+    assert tomllib.loads("[columns]\n" + out["display_stub"])["columns"] == {
+        "late_rate": "", "n": "", "share.west": ""}
+    write(project, "foundation/display.toml", '[columns]\nregion = "Region"\nlate_rate = "Late"\nn = "Cases"\n')
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-002", "--dataset", "wide=r-001")
+    assert code == 1 and out["display_stub"] == '"share.west" = ""'
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-002", "--dataset", "wide=r-001:region,n")
+    assert out["written"] and "display_stub" not in out
+
+
 def test_release_refuses_failed_check_or_pending_disposition(project, capsys):
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
@@ -383,17 +526,21 @@ def test_release_refuses_failed_check_or_pending_disposition(project, capsys):
     assert report["unmatched_flags"] == [FLAG]
     unrelated = {"finding": "F2", "reason": "unrelated", "represented_in": "none"}
     places = ["findings: Late orders", "chart 1"]
-    for flag, problem in [({"disposition": "none"}, "no disposition"), ({}, "no disposition"),
-                          ({"disposition": "revalidate"}, "revalidation pending"),
-                          ({"disposition": "later"}, "unknown disposition 'later'"),
-                          ({"represented_in": [], "disposition": "omit"},
-                           "represented_in is not a list of places; list them or record none"),
-                          ({"represented_in": [{"place": "chart 1"}], "disposition": "omit"},
-                           "represented_in is not a list of places; list them or record none")]:
+    for flag, problem in [({"disposition": "none"}, "no disposition"),
+                          ({"disposition": "revalidate"}, "revalidation pending")]:
         set_flags(project, [{**FLAG, "represented_in": places, **flag}, unrelated])
         code, report = run(project, capsys, "release", "inv", "pkg")
         assert code == 1 and report["unmatched_flags"] == [] and report["dispositions"] == [
             {"finding": FLAG["finding"], "problem": problem}]
+    # Malformed entries fail check-draft itself, so release refuses on the check with its flag_entries.
+    unknown = "unknown disposition {!r}; record none, revalidate, omit, or release_with_caveat"
+    for flag, problem in [({}, unknown.format(None)), ({"disposition": "later"}, unknown.format("later")),
+                          ({"represented_in": [], "disposition": "omit"}, PLACES_PROBLEM),
+                          ({"represented_in": [{"place": "chart 1"}], "disposition": "omit"}, PLACES_PROBLEM)]:
+        set_flags(project, [{**FLAG, "represented_in": places, **flag}, unrelated])
+        code, report = run(project, capsys, "release", "inv", "pkg")
+        assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
+        assert report["check"]["flag_entries"] == [{"finding": FLAG["finding"], "problem": problem}]
     assert not (project / "deliveries/inv/pkg/released").exists()
 
 

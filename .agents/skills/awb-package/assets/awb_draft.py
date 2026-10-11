@@ -382,6 +382,62 @@ def unmatched_flags(record: dict, flags: list[dict]) -> list[dict]:
     return [flag for flag in flags if (flag["finding"], flag["reason"]) not in recorded]
 
 
+def sync_flags(recorded, flags: list[dict]):
+    """Return revalidation_flags for the current flags: an exact-match entry kept, others fresh, none when empty."""
+    prior = recorded if isinstance(recorded, list) else []
+    kept = {(e.get("finding"), e.get("reason")): e for e in prior if isinstance(e, dict)}
+    # A fresh entry copies state.md verbatim; the agent fills represented_in and the user's disposition.
+    entries = [kept.get((flag["finding"], flag["reason"]))
+               or {"finding": flag["finding"], "reason": flag["reason"], "represented_in": [], "disposition": "none"}
+               for flag in flags]
+    return entries or "none"
+
+
+def pending_flags(recorded) -> list[dict]:
+    """List each entry still needing its places ([]) or, once represented, the user's disposition."""
+    pending = []
+    for entry in recorded if isinstance(recorded, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        places = entry.get("represented_in")
+        if places == []:
+            pending.append({"finding": entry.get("finding"), "needs": "represented_in"})
+        elif isinstance(places, list) and entry.get("disposition") in (None, "none"):
+            pending.append({"finding": entry.get("finding"), "needs": "disposition"})
+    return pending
+
+
+def flag_entry_problems(record: dict) -> list[dict]:
+    """List each malformed revalidation_flags value or entry; dispositions are judged at release."""
+    if "revalidation_flags" not in record:
+        return [{"finding": None, "problem": "revalidation_flags is missing; rerun export"}]
+    flags = record["revalidation_flags"]
+    if flags == "none":
+        return []
+    if not isinstance(flags, list):
+        return [{"finding": None, "problem": "revalidation_flags is not none or a list; rerun export"}]
+    problems = []
+    for entry in flags:
+        if not (isinstance(entry, dict) and isinstance(entry.get("finding"), str)
+                and isinstance(entry.get("reason"), str)):
+            finding = entry.get("finding") if isinstance(entry, dict) else None
+            problems.append({"finding": finding if isinstance(finding, str) else None,
+                             "problem": "entry is not an object with a text finding and reason; rerun export"})
+            continue
+        places, disposition = entry.get("represented_in"), entry.get("disposition")
+        if places == "none":
+            continue
+        if not isinstance(places, list) or not places or not all(
+                isinstance(place, str) and place.strip() for place in places):
+            problems.append({"finding": entry["finding"],
+                             "problem": "represented_in is not none or a list of places; list them or record none"})
+        elif disposition not in ("none", "revalidate", *_DISPOSITIONS):
+            problems.append({"finding": entry["finding"],
+                             "problem": f"unknown disposition {disposition!r}; record none, revalidate, omit, "
+                                        "or release_with_caveat"})
+    return problems
+
+
 def _headings(path):
     headings, fenced = [], False
     for line in Path(path).read_text(encoding="utf-8").splitlines():
@@ -570,7 +626,8 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
 
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
-            and report["charts"] == [] and report["headings"] == [] and report["verify"] == [])
+            and report["charts"] == [] and report["headings"] == [] and report["verify"] == []
+            and report["flag_entries"] == [])
 
 
 def check_draft(root, investigation, package, *, verify_only=False) -> dict:
@@ -579,7 +636,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
               "charts": None, "headings": None, "inventory": None, "verify": None,
-              "unmatched_flags": None, "errors": [], "passed": False}
+              "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
         return report
@@ -610,6 +667,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         if not path.is_file():
             raise ValueError(f"no manifest at {_rel(root, path)}; run export first")
         record = _read_json(path)
+        report["flag_entries"] = flag_entry_problems(record)
         if not verify_only:
             rows = inventory(draft)
             if rows != record.get("inventory"):
@@ -643,8 +701,10 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                     "and rewrite the manifest inventory, stamping revised_at when it changes; "
                     "--verify-only checks a release candidate and writes nothing.",
         epilog="Prints one JSON line.\nunmatched_flags lists each finding state.md flags whose exact finding "
-               "and reason the manifest's revalidation_flags does not record.\nExit 0 only when "
-               "names_problems, findings, charts, headings, verify, unmatched_flags, and errors are all empty.")
+               "and reason the manifest's revalidation_flags does not record.\nflag_entries lists a missing or "
+               "malformed revalidation_flags, an entry without text finding and reason, represented_in that is "
+               "neither none nor a list of places, and an unknown disposition.\nExit 0 only when names_problems, "
+               "findings, charts, headings, verify, flag_entries, unmatched_flags, and errors are all empty.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
                         help="verify against the recorded inventory without rewriting it (the release gate)")
@@ -766,8 +826,23 @@ def _rounded(value, places):
     return str(number.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP))
 
 
-def _shape(root, investigation, result_id, columns, display, rounding):
-    """Read a saved result table and return (headers, rows, sources, problems) for the audience."""
+def _display_name(display, column):
+    """A column's display name, or None when absent or blank."""
+    name = display["columns"].get(column)
+    return name if isinstance(name, str) and name.strip() else None
+
+
+def _toml_key(name):
+    # A quoted key, so a dotted or spaced column stays one key under [columns].
+    escaped = name.replace("\\", "\\\\").replace('"', '\\"')
+    return '"' + re.sub(r"[\x00-\x1f\x7f]", lambda match: f"\\u{ord(match.group()):04X}", escaped) + '"'
+
+
+def _shape(root, investigation, result_id, columns, display, rounding, gaps):
+    """Read a saved result table and return (headers, rows, sources, problems) for the audience.
+
+    Each available column without a display name is appended to `gaps`.
+    """
     path = Path(root) / "investigations" / investigation / "results" / f"{result_id}.csv"
     if not path.is_file():
         return None, None, None, [f"{_rel(root, path)} is missing. Stop: saving a result table needs "
@@ -777,8 +852,11 @@ def _shape(root, investigation, result_id, columns, display, rounding):
         available, rows = list(reader.fieldnames or []), list(reader)
     chosen = columns or available
     problems = [f"{result_id}: no column {c!r} (has {', '.join(available)})" for c in chosen if c not in available]
-    problems += [f"{result_id}: column {c!r} has no display name in {_DISPLAY} [columns]"
-                 for c in chosen if c in available and c not in display["columns"]]
+    missing = [c for c in chosen if c in available and _display_name(display, c) is None]
+    problems += [f"{result_id}: column {c!r} has "
+                 f"{'a blank' if c in display['columns'] else 'no'} display name in {_DISPLAY} [columns]"
+                 for c in missing]
+    gaps += missing
     if problems:
         return None, None, None, problems
     headers = [display["columns"][c] for c in chosen]
@@ -820,17 +898,20 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
         report["errors"].append(str(error))
         return report
 
-    shaped, sources = [], []
+    shaped, sources, gaps = [], [], []
     if full:
         rounding = {**display["round"], **(rounding or {})}
         for kind, label, (result_id, columns) in (
                 [("chart", f"chart-{i}", spec) for i, spec in enumerate(charts, 1)]
                 + [("dataset", n, spec) for n, spec in datasets]):
-            headers, rows, lines, problems = _shape(root, investigation, result_id, columns, display, rounding)
+            headers, rows, lines, problems = _shape(root, investigation, result_id, columns, display, rounding, gaps)
             report["errors"] += problems
             if not problems:
                 shaped.append((kind, label, result_id, headers, rows))
                 sources += [f"{label}: {line}" for line in lines]
+        if gaps:
+            # Ready to paste under [columns] once each name is filled in from the glossary.
+            report["display_stub"] = "\n".join(f'{_toml_key(c)} = ""' for c in dict.fromkeys(gaps))
     else:
         recorded = record.get("charts") if isinstance(record.get("charts"), list) else []
         report["errors"] += [f"{c.get('path')} serializes {c.get('result_id')}, which this call does not name; "
@@ -908,6 +989,11 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     fields = producing_state(evidence)
     fields["packaging_commit"], fields["packaging_uncommitted_changes"] = packaging_state(root)
     record.update(fields)
+    # revalidation_flags follows state.md on every write; an unreadable state.md leaves it as it was.
+    try:
+        record["revalidation_flags"] = sync_flags(record.get("revalidation_flags"), state_flags(root, investigation))
+    except ValueError as error:
+        report["flags_error"] = str(error)
     _write_json(path, record)
     report["written"] = True
     commits, changes = fields["producing_commit"], fields["producing_uncommitted_changes"]
@@ -916,6 +1002,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     report["producing_uncommitted_changes"] = len(changes) if isinstance(changes, list) else 0
     report["packaging_commit"] = fields["packaging_commit"]
     report["packaging_uncommitted_changes"] = fields["packaging_uncommitted_changes"]
+    report["flags_pending"] = pending_flags(record.get("revalidation_flags"))
     if (draft / "findings.md").is_file():
         report["check_charts"] = check_charts(draft / "findings.md", draft / "charts")
     return report
@@ -930,9 +1017,14 @@ def cli_export(root: Path, argv: list[str]) -> int:
                     "of every represented result. Creates the manifest when absent.",
         epilog="Prints one JSON line.\nAny --chart, --dataset, or --no-datasets replaces the whole chart set "
                "and dataset selection: no --chart records charts none. With only --result it records "
-               "provenance and leaves exported files untouched.\nEvery exported column needs a display name "
-               "in foundation/display.toml; gaps are listed together and nothing is written.\nWrites nothing "
-               "when an evidence file is missing or any comparison fails (exports_blocked).\nExit 0 only "
+               "provenance and leaves exported files untouched.\nEvery exported column needs a non-blank "
+               "display name in foundation/display.toml; gaps are listed together with display_stub, lines "
+               "to fill in under [columns], and nothing is written.\nWrites nothing when an evidence file is "
+               "missing or any comparison fails (exports_blocked).\nEach write sets revalidation_flags from "
+               "state.md's flags (none when it flags nothing), keeping an entry whose finding and reason match "
+               "exactly and adding others with represented_in [] and disposition none; flags_pending lists "
+               "each entry that needs represented_in or, once represented, a disposition. When state.md "
+               "cannot be read, flags_error says why and revalidation_flags is left as it was.\nExit 0 only "
                "when written and check_charts is empty.")
     _package_arguments(parser)
     parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS]",
