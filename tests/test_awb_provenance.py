@@ -6,7 +6,7 @@
 # test_compare_evidence_clean_committed_state_passes_five_comparisons: clean state passes all five ordered comparisons in the contract shape.
 # test_compare_evidence_detects_view_changed_after_recording: view mutation fails the views comparison.
 # test_compare_evidence_names_changed_setting: settings mutation fails the settings comparison.
-# test_scoped_settings_ignore_other_results_and_tables: only [parameters] and the result's own table count; the file leaves the code comparisons.
+# test_scoped_settings_ignore_other_results_and_tables: only [parameters] and the result's own table, less its finding wording, count; the file leaves the code comparisons.
 # test_compare_evidence_detects_missing_input_and_missing_metadata: missing input file or unavailable metadata fails inputs.
 # test_compare_evidence_checks_dirty_code_against_recorded_bytes: uncommitted code mutation fails uncommitted-code.
 # test_record_evidence_rejects_destination_symlink_outside_root: regression: evidence destination cannot escape through a symlink.
@@ -28,7 +28,7 @@
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
 # test_producing_paths_follow_the_result: run.py, the result's queries, other investigation code, src/ minus awb.py, provenance.py and packaging/, plus code_paths; other results' queries and the excluded helpers never stale it.
 # test_settings_fall_back_to_tomli: without tomllib, settings parse through tomli, and without either the content is unknown.
-# test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: the run.py template records a result; a run failing after the table is rewritten leaves no evidence.
+# test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: the run.py template records a result and writes its state.md row, or reports state_error with the evidence kept; a run failing after the table is rewritten leaves no evidence.
 
 import hashlib
 import importlib.util
@@ -195,6 +195,7 @@ SCOPED = (b'[parameters]\nstart = 2026-01-01\n\n[results.r1]\nqueries = ["querie
 @pytest.mark.parametrize("edit, fails", [
     (b'\n[results.r2]\nqueries = ["queries/r2.sql"]\n', False),
     (b'\n[eda]\nmax_rows = 10\n', False),
+    (b'finding', False),
     (b'\n[results.r1.validation.nulls]\nmonth = 0.0\n', True),
     (None, True),
 ])
@@ -212,6 +213,8 @@ def test_scoped_settings_ignore_other_results_and_tables(project, edit, fails):
     if edit is None:
         text = text.replace(b"2026-01-01", b"2026-02-01")
         text = text.replace(b"[results.r0]\nqueries = []", b"[results.r0]\nqueries = [\"x\"]")
+    elif edit == b"finding":
+        text = text.replace(b'r1.sql"]\n', b'r1.sql"]\nfinding = "Orders rose."\n')
     else:
         text += edit
     write(project, "investigations/inv/settings.toml", text)
@@ -535,11 +538,18 @@ def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(p
                              ("awb_validate.py", "exploration/validate.py")):
         write(project, f"src/{installed}", (assets / asset).read_bytes())
     write(project, "investigations/inv/run.py", (assets / "workbench/investigation/run.py").read_bytes())
+    write(project, "investigations/inv/state.md", (assets / "workbench/investigation/state.md").read_bytes())
     write(project, "foundation/views/orders.sql", b"create view orders as select range as n from range(3);\n")
     run = [sys.executable, str(project / "investigations/inv/run.py"), "r1"]
     done = subprocess.run(run, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
     line = json.loads(done.stdout)
+    assert (line["state"], line["status"]) == ("added", "provisional") and "state_row" not in line
+    assert list(provenance.finding_rows(project / "investigations/inv/state.md")) == ["r1"]
+    (project / "investigations/inv/state.md").unlink()
+    unwritten = subprocess.run(run, capture_output=True, text=True)
+    assert unwritten.returncode == 1 and "state.md does not exist" in json.loads(unwritten.stdout)["state_error"]
+    assert (project / "investigations/inv/evidence/r1.json").exists()
     evidence = json.loads((project / line["evidence"]).read_text())
     assert "investigations/inv/queries/r1.sql" in evidence["producing_paths"]
     assert evidence["views"][0]["path"] == "foundation/views/orders.sql"

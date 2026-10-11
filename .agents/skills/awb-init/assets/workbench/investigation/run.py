@@ -4,8 +4,8 @@
 Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With no IDs it
 produces every result in settings.toml. For each result it runs the result's saved queries in a
 fresh session of canonical views, validates the result, saves the table and its profile under
-results/, records evidence under evidence/, and prints one compact JSON line with the paths,
-failed and unassessed checks, and the state.md findings row to paste.
+results/, records evidence under evidence/, writes its state.md findings row, and prints one
+compact JSON line with the paths, failed and unassessed checks, and what it did to the row.
 
 Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml
 and its query in queries/<id>.sql. Add a producer below only when a result needs more than its
@@ -31,7 +31,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.exploration.validate import profile, validate  # noqa: E402
 from src.preparation.landing import session  # noqa: E402
-from src.provenance import finding_row, record_evidence, views_read  # noqa: E402
+from src.provenance import evidence_commit, record_evidence, record_finding, views_read  # noqa: E402
 
 
 def run(connection, sql, parameters):
@@ -74,6 +74,8 @@ def produce_result(connection, result_id, config, parameters):
     sql = [(HERE / query).read_text() for query in queries]
     frame, measured = PRODUCERS.get(result_id, produce)(connection, sql, parameters)
     checks = validate(frame, _spec(config.get("validation", {}), measured))
+    # A rerun that clears a flag cites the commit holding the evidence it replaces.
+    prior = evidence_commit(ROOT, NAME, result_id)
     # Evidence describes the saved table, so drop it before the table changes; a failed run leaves none.
     (HERE / "evidence" / f"{result_id}.json").unlink(missing_ok=True)
     output = HERE / "results"
@@ -85,6 +87,12 @@ def produce_result(connection, result_id, config, parameters):
     # Settings `views` overrides detection when a result reads views its queries do not name.
     views = config.get("views") or views_read(ROOT, [HERE / query for query in queries])
     evidence = record_evidence(ROOT, NAME, result_id, views=views, settings_path=SETTINGS, checks=checks)
+    # Adds a provisional row, or refreshes the row's caveat; settings `finding` words a new row.
+    try:
+        state = record_finding(ROOT, NAME, result_id, checks, finding=config.get("finding"), prior_commit=prior)
+        state = {"state": state["action"], "status": state["status"]}
+    except ValueError as error:  # The evidence stands; repair state.md and rerun to write the row.
+        state = {"state_error": str(error)}
     return {
         "result_id": result_id, "rows": len(frame),
         "failed_checks": [c["name"] for c in checks if c["outcome"] == "fail"],
@@ -92,7 +100,7 @@ def produce_result(connection, result_id, config, parameters):
         "evidence": evidence.relative_to(ROOT).as_posix(),
         "table": table.relative_to(ROOT).as_posix(),
         "profile": profile_path.relative_to(ROOT).as_posix(),
-        "state_row": finding_row(ROOT, NAME, result_id, checks),
+        **state,
     }
 
 
@@ -114,6 +122,7 @@ def main(argv):
             except Exception as error:  # Report and continue; the other results still run.
                 traceback.print_exc()
                 line, status = {"result_id": result_id, "error": f"{type(error).__name__}: {error}"}, 1
+            status = 1 if "state_error" in line else status
             print(json.dumps(line))
     return status
 

@@ -10,7 +10,8 @@ conversion_commit/files), acquisitions (path/provenance_file/status/files),
 settings (path/bytes/sha256/[result]/content), checks (name/outcome/detail), notes (text or null).
 Unknowns are {"unknown": reason}.
 Settings are scoped: the settings file must hold a [results.<id>] table for the result; settings
-carries "result", content holds only [parameters] and that table, and the settings file is left
+carries "result", content holds only [parameters] and that table (less its `finding` wording,
+which is not a setting), and the settings file is left
 out of producing_paths, so other results' tables and other top-level tables never make this
 result stale. Producing paths are the investigation's code (run.py and other files outside its
 records, queries/ and settings), the result's own queries, and src/ except the helpers that only
@@ -27,6 +28,11 @@ values use ISO strings in JSON, consistently during comparison.
 record_evidence derives omitted publications from the views' data/parquet references and
 omitted acquisitions from those publications' publication.json inputs. cli_stale backs
 `python3 src/awb.py stale`, which compares every recorded result with the current state.
+
+record_finding writes a recorded result's state.md findings row for run.py, and cli_state backs
+`python3 src/awb.py state`, which shows and updates investigation state. Both keep the Markdown
+records' shipped format, change only the lines they touch, and write history.md entries for
+status and wording changes.
 """
 
 import argparse
@@ -171,9 +177,14 @@ def _input_record(root, path, filename, keys):
 
 
 def _scoped(content, result_id):
-    """The part of parsed settings one result reads: [parameters] and its own [results.<id>]."""
+    """The part of parsed settings one result reads: [parameters] and its own [results.<id>].
+
+    The table's `finding` key is the first wording of the result's findings row, not a setting.
+    """
     results = content.get("results")
     table = results.get(result_id) if isinstance(results, dict) else None
+    if isinstance(table, dict):
+        table = {key: value for key, value in table.items() if key != "finding"}
     return {**({"parameters": content["parameters"]} if "parameters" in content else {}),
             "results": {result_id: table}}
 
@@ -470,12 +481,24 @@ def _cell(text):
     return " ".join(str(text).split()).replace("|", r"\|")
 
 
+# Caveat segments that run.py writes from the checks; any other segment is a note an agent added.
+_CHECK_LABELS = ("failed checks: ", "not assessed: ")
+
+
+def _check_caveat(checks):
+    failed = [c["name"] for c in checks if c["outcome"] == "fail"]
+    unassessed = [c["name"] for c in checks if c["outcome"] == "not-applicable" and c["detail"] == "not assessed"]
+    return "; ".join(f"{label}{', '.join(names)}" for label, names in zip(_CHECK_LABELS, (failed, unassessed))
+                     if names)
+
+
 def finding_row(project_root, investigation: str, result_id: str, checks: list[dict], *,
                 finding: str | None = None, status: str = "provisional") -> str:
-    """Return the state.md Current findings row for a recorded result, ready to paste.
+    """Return the state.md Current findings row for a recorded result, without writing it.
 
     The Finding cell keeps the text of a row already linking this result's evidence, else uses
     `finding`, else a placeholder to replace. The caveat names failed and not-assessed checks.
+    record_finding writes the row; this stays for run.py copies that print it.
     """
     existing = finding_rows(Path(project_root) / "investigations" / investigation / "state.md")
     if result_id in existing:
@@ -483,11 +506,526 @@ def finding_row(project_root, investigation: str, result_id: str, checks: list[d
         text = re.split(r"(?<!\\)\|", existing[result_id][0])[1].strip()
     else:
         text = _cell(finding or f"<state the finding from {result_id}>")
-    failed = [c["name"] for c in checks if c["outcome"] == "fail"]
-    unassessed = [c["name"] for c in checks if c["outcome"] == "not-applicable" and c["detail"] == "not assessed"]
-    caveat = "; ".join(f"{label}: {', '.join(names)}" for label, names in
-                       (("failed checks", failed), ("not assessed", unassessed)) if names)
-    return f"| {text} | [{result_id}](evidence/{result_id}.json) | {_cell(status)} | {_cell(caveat)} |"
+    return f"| {text} | [{result_id}](evidence/{result_id}.json) | {_cell(status)} | {_cell(_check_caveat(checks))} |"
+
+
+# Investigation state: state.md, history.md, and README's Active investigation line.
+# Every write rewrites only the lines it changes and replaces the file atomically; a missing or
+# malformed record raises StateError before anything is written.
+
+class StateError(ValueError):
+    """A record is missing or not in the shipped format; nothing was written."""
+
+
+_COLUMNS = ["Finding", "Evidence", "Status", "Revalidation reason or caveat"]
+_STATUSES = ("provisional", "supported", "superseded")
+_FLAGGED = "revalidation-needed"
+_ITEM = re.compile(r"([-*+]|(\d+)([.)]))[ \t]+(.*)")
+# Opening words of the shipped templates' guidance, shown as "not recorded" or left out of lists.
+_GUIDANCE = ("State the question this investigation will answer", "Record the decision this analysis will support",
+             "Record who will read the", "List open analytical questions", "List the smallest concrete steps")
+
+
+def _read(path, label):
+    try:
+        with open(path, encoding="utf-8", newline="") as stream:
+            text = stream.read()
+    except FileNotFoundError:
+        raise StateError(f"{label} does not exist") from None
+    except (OSError, UnicodeError) as error:
+        raise StateError(f"{label} is unreadable: {error}") from None
+    lines = [line + "\n" for line in text.split("\n")]
+    lines[-1] = lines[-1][:-1]
+    return lines if lines[-1] else lines[:-1]
+
+
+def _write(path, lines):
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with open(temporary, "w", encoding="utf-8", newline="") as stream:
+            stream.write("".join(lines))
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _bare(line):
+    return line.rstrip("\r\n")
+
+
+def _cells(line):
+    return [cell.strip() for cell in re.split(r"(?<!\\)\|", _bare(line).strip().strip("|"))]
+
+
+def _row(cells):
+    return "|" + "|".join(f" {cell} " if cell else " " for cell in cells) + "|"
+
+
+def _unescape(cell):
+    return cell.replace(r"\|", "|")
+
+
+class _Record:
+    """A Markdown record's lines, edited in place so untouched lines keep their bytes."""
+
+    def __init__(self, path, label):
+        self.path, self.label = path, label
+        self.lines = _read(path, label)
+        self.newline = "\r\n" if self.lines and self.lines[0].endswith("\r\n") else "\n"
+
+    def section(self, title):
+        """Return (heading index, end index) of the one `## title` section."""
+        found = [i for i, line in enumerate(self.lines) if re.fullmatch(rf"## {re.escape(title)}\s*", _bare(line))]
+        if len(found) != 1:
+            raise StateError(f"{self.label}: {'no' if not found else 'repeated'} '## {title}' section")
+        end = next((i for i in range(found[0] + 1, len(self.lines)) if re.match(r"#{1,2} ", self.lines[i])),
+                   len(self.lines))
+        return found[0], end
+
+    def insert(self, index, new_lines):
+        if index and not self.lines[index - 1].endswith("\n"):
+            self.lines[index - 1] += self.newline
+        self.lines[index:index] = [line + self.newline for line in new_lines]
+
+    def text(self, title):
+        """First content line of a section, without template guidance; None when absent."""
+        start, end = self.section(title)
+        for line in self.lines[start + 1:end]:
+            line = _bare(line).strip()
+            if line and not re.fullmatch(r"<!--.*-->", line):
+                return None if line.startswith(_GUIDANCE) else line
+        return None
+
+
+class _State(_Record):
+    def __init__(self, root, investigation):
+        super().__init__(root / "investigations" / investigation / "state.md",
+                         f"investigations/{investigation}/state.md")
+        updated = [i for i, line in enumerate(self.lines) if line.startswith("Last updated:")]
+        if len(updated) != 1:
+            raise StateError(f"{self.label}: {'no' if not updated else 'repeated'} 'Last updated:' line")
+        self.updated = updated[0]
+        self.section("Unresolved issues"), self.section("Next steps")  # the shipped layout, checked before any write
+        start, end = self.section("Current findings")
+        header = next((i for i in range(start + 1, end) if self.lines[i].lstrip().startswith("|")), None)
+        if header is None or header + 1 >= end or _cells(self.lines[header]) != _COLUMNS \
+                or not all(re.fullmatch(r":?-+:?", c) for c in _cells(self.lines[header + 1])):
+            raise StateError(f"{self.label}: Current findings needs a table with columns {' | '.join(_COLUMNS)}")
+        self.rows_start = self.rows_end = header + 2
+        while self.rows_end < end and self.lines[self.rows_end].lstrip().startswith("|"):
+            if len(_cells(self.lines[self.rows_end])) != len(_COLUMNS):
+                raise StateError(f"{self.label}: findings row {self.rows_end + 1} does not have four cells")
+            self.rows_end += 1
+
+    def rows(self):
+        return [(i, _cells(self.lines[i])) for i in range(self.rows_start, self.rows_end)]
+
+    def row_for(self, result_id):
+        """The one row whose Evidence cell links this result's evidence file, or None."""
+        found = [(i, cells) for i, cells in self.rows() if result_id in _EVIDENCE_LINK.findall(cells[1])]
+        if len(found) > 1:
+            raise StateError(f"{self.label}: {len(found)} findings rows link {result_id}")
+        return found[0] if found else None
+
+    def set_row(self, index, cells):
+        ending = self.lines[index][len(_bare(self.lines[index])):] or self.newline
+        self.lines[index] = _row(cells) + ending
+
+    def add_row(self, cells):
+        self.insert(self.rows_end, [_row(cells)])
+        self.rows_end += 1
+
+    def touch(self, today):
+        line = self.lines[self.updated]
+        self.lines[self.updated] = f"Last updated: {today}" + line[len(_bare(line)):]
+
+    def items(self, title):
+        """The list items of a section as (first line, end line, text), and its other lines."""
+        start, end = self.section(title)
+        items, notes, i = [], [], start + 1
+        while i < end:
+            line = _bare(self.lines[i])
+            match = _ITEM.fullmatch(line)
+            if match:
+                j, parts = i + 1, [match[4].strip()]
+                while j < end and self.lines[j].strip() and self.lines[j][0] in " \t":
+                    parts.append(self.lines[j].strip())
+                    j += 1
+                items.append((i, j, " ".join(parts)))
+                i = j
+                continue
+            line = line.strip()
+            if line and not line.startswith(_GUIDANCE) and not re.fullmatch(r"<!--.*-->", line):
+                notes.append(line)
+            i += 1
+        return items, notes
+
+    def add_item(self, title, text):
+        start, end = self.section(title)
+        items, _ = self.items(title)
+        if items:
+            match = _ITEM.fullmatch(_bare(self.lines[items[-1][0]]))
+            marker = f"{int(match[2]) + 1}{match[3]}" if match[2] else match[1]
+            self.insert(items[-1][1], [f"{marker} {text}"])
+        else:
+            last = max((i for i in range(start, end) if self.lines[i].strip()), default=start)
+            self.insert(last + 1, ["", f"- {text}"])
+
+    def remove_item(self, first, stop):
+        del self.lines[first:stop]
+        # Drop the blank line left doubled, so removing the only bullet undoes adding it.
+        if first and not self.lines[first - 1].strip() and (first >= len(self.lines) or not self.lines[first].strip()):
+            del self.lines[first - 1]
+
+
+def _pointer(value):
+    """Parse an Active investigation value: (slug or 'none', rewrite function), or None if customized."""
+    value = value.strip()
+    match = re.fullmatch(r"\[[^\]]*\]\((\./)?investigations/([A-Za-z0-9][A-Za-z0-9._-]*)/state\.md\)", value)
+    if match:
+        return match[2], lambda new: f"[{new}]({match[1] or ''}investigations/{new}/state.md)"
+    match = re.fullmatch(r"(`?)(\./)?investigations/([A-Za-z0-9][A-Za-z0-9._-]*)/state\.md\1", value)
+    if match:
+        return match[3], lambda new: f"{match[1]}{match[2] or ''}investigations/{new}/state.md{match[1]}"
+    if value == "none":
+        return value, lambda new: f"[{new}](investigations/{new}/state.md)"
+    if _ID.fullmatch(value):
+        return value, lambda new: new
+    return None
+
+
+def _readme_pointer(root):
+    readme = _Record(root / "README.md", "README.md")
+    found = [i for i, line in enumerate(readme.lines) if line.startswith("Active investigation:")]
+    if len(found) != 1:
+        raise StateError(f"README.md: {'no' if not found else 'repeated'} 'Active investigation:' line")
+    value = _bare(readme.lines[found[0]])[len("Active investigation:"):]
+    parsed = _pointer(value)
+    if parsed is None:
+        raise StateError(f"README.md: customized Active investigation line ({value.strip()}); edit it by hand")
+    return readme, found[0], parsed
+
+
+def _active(root):
+    """README's active investigation; StateError when it names none or a missing directory."""
+    _, _, (name, _) = _readme_pointer(root)
+    if name == "none":
+        raise StateError("README.md names no active investigation; run `awb.py state switch <name>`")
+    if not (root / "investigations" / name).is_dir():
+        raise StateError(f"README.md names {name}, which has no directory under investigations/")
+    return name
+
+
+def evidence_commit(project_root, investigation: str, result_id: str) -> str:
+    """The commit holding a result's current evidence file: HEAD when it is committed and unchanged.
+
+    Otherwise `uncommitted`, followed by `; last committed at <sha>` when an earlier version is
+    committed, as after a rerun that replaced committed evidence.
+    """
+    root = Path(project_root).resolve()
+    path = f"investigations/{investigation}/evidence/{result_id}.json"
+    try:
+        _git(root, "ls-files", "--error-unmatch", "--", path)
+        _git(root, "diff", "--quiet", "HEAD", "--", path)
+        return _git(root, "rev-parse", "--verify", "HEAD").strip()
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    try:
+        last = _git(root, "log", "-1", "--format=%H", "--", path).strip()
+    except (OSError, subprocess.CalledProcessError):
+        last = ""
+    return f"uncommitted; last committed at {last}" if last else "uncommitted"
+
+
+def _history_entry(today, title, result_id, now, was, reason, caveat, commit):
+    (text, status), (old_text, old_status) = now, was
+    return ["", f"### {today} — {title}", "",
+            f"- **Change or finding:** \"{_unescape(text)}\" ({status}).",
+            f"- **Evidence:** [{result_id}](evidence/{result_id}.json); prior evidence "
+            + (f"{commit}." if commit.startswith("uncommitted") else f"at commit {commit}."),
+            f"- **Reasoning or decision:** {' '.join(reason.split()) if reason else 'not given.'}",
+            f"- **Impact and caveats:** {_unescape(caveat) or 'none.'}",
+            f"- **Supersedes or revalidation link:** supersedes \"{_unescape(old_text)}\" ({old_status})."]
+
+
+def _append_history(root, investigation, entry):
+    history = _Record(root / "investigations" / investigation / "history.md",
+                      f"investigations/{investigation}/history.md")
+    history.insert(len(history.lines), entry)
+    return history
+
+
+def record_finding(project_root, investigation: str, result_id: str, checks: list[dict], *,
+                   finding: str | None = None, prior_commit: str = "uncommitted", today: str | None = None) -> dict:
+    """Write a recorded result's state.md findings row, matched by its evidence link.
+
+    A new result gets a provisional row with `finding` or a placeholder. An existing row keeps its
+    wording and status and gets the checks' caveat, keeping caveat notes an agent added. A flagged
+    row becomes provisional, and history.md records the cleared flag, citing prior_commit, the
+    commit holding the evidence before this rerun (evidence_commit, taken before it changed).
+    Sets Last updated. Returns {action: added|refreshed|flag cleared, status, row}.
+    """
+    root = Path(project_root).resolve()
+    today = today or datetime.now().date().isoformat()
+    state = _State(root, investigation)
+    caveat, link = _cell(_check_caveat(checks)), f"[{result_id}](evidence/{result_id}.json)"
+    found, history = state.row_for(result_id), None
+    if found is None:
+        cells = [_cell(finding or f"<state the finding from {result_id}>"), link, "provisional", caveat]
+        state.add_row(cells)
+        action = "added"
+    else:
+        index, old = found
+        if old[2].startswith(_FLAGGED):
+            cells, action = [old[0], old[1], "provisional", caveat], "flag cleared"
+            history = _append_history(root, investigation, _history_entry(
+                today, f"{result_id} rerun clears its flag", result_id, (old[0], "provisional"),
+                (old[0], old[2]), "rerun for the flag" + (f": {_unescape(old[3])}" if old[3] else "") + ".",
+                caveat, prior_commit))
+        else:
+            notes = [s for s in old[3].split("; ") if s and not s.startswith(_CHECK_LABELS)]
+            cells, action = [old[0], old[1], old[2], "; ".join(([caveat] if caveat else []) + notes)], "refreshed"
+        state.set_row(index, cells)
+    state.touch(today)
+    if history is not None:
+        _write(history.path, history.lines)
+    _write(state.path, state.lines)
+    return {"action": action, "status": cells[2], "row": _row(cells)}
+
+
+def update_finding(project_root, investigation: str, result_id: str, *, status: str | None = None,
+                   text: str | None = None, caveat: str | None = None, reason: str | None = None,
+                   today: str | None = None) -> dict:
+    """Change a findings row's status, wording, or caveat note; history.md records a status or wording change.
+
+    The history entry cites the commit holding the current evidence file (evidence_commit). A
+    flagged row can be superseded or reworded but not promoted: rerun it with run.py. Returns
+    {changed, row, history (the entry's heading, or None)}.
+    """
+    root = Path(project_root).resolve()
+    today = today or datetime.now().date().isoformat()
+    if status is not None and status not in _STATUSES:
+        raise ValueError(f"status must be one of {', '.join(_STATUSES)}")
+    if text is not None and not text.strip():
+        raise ValueError("the finding text is empty")
+    state = _State(root, investigation)
+    found = state.row_for(result_id)
+    if found is None:
+        raise StateError(f"{state.label}: no findings row links {result_id}; record it with run.py first")
+    index, old = found
+    flagged = old[2].startswith(_FLAGGED)
+    if flagged and status in ("provisional", "supported"):
+        raise StateError(f"{result_id} is flagged ({old[2]}); rerun it with run.py before promoting it")
+    if flagged and caveat is not None:
+        raise StateError(f"{result_id} is flagged; its caveat holds the flag reason, which stays until a rerun")
+    cells = list(old)
+    if text is not None:
+        cells[0] = _cell(text)
+    if status is not None:
+        cells[2] = status
+    if caveat is not None:
+        generated = [s for s in old[3].split("; ") if s.startswith(_CHECK_LABELS)]
+        cells[3] = "; ".join(generated + ([_cell(caveat)] if caveat.strip() else []))
+    if cells == old:
+        return {"changed": False, "row": _bare(state.lines[index]).strip(), "history": None}
+    history = heading = None
+    if cells[:3] != old[:3]:
+        changes = (["reworded"] if cells[0] != old[0] else []) + (
+            [f"{'promoted' if status == 'supported' else 'set'} to {status}"] if cells[2] != old[2] else [])
+        entry = _history_entry(today, f"{result_id} {' and '.join(changes)}", result_id, (cells[0], cells[2]),
+                               (old[0], old[2]), reason, cells[3], evidence_commit(root, investigation, result_id))
+        history, heading = _append_history(root, investigation, entry), entry[1]
+    state.set_row(index, cells)
+    state.touch(today)
+    if history is not None:
+        _write(history.path, history.lines)
+    _write(state.path, state.lines)
+    return {"changed": True, "row": _row(cells), "history": heading}
+
+
+def _brief_line(root, investigation, title):
+    try:
+        line = _Record(root / "investigations" / investigation / "brief.md", "brief.md").text(title)
+    except StateError as error:
+        return f"({error})"
+    if line is None:
+        return "not recorded"
+    return line if len(line) <= 160 else line[:159].rstrip() + "…"
+
+
+def state_view(project_root, investigation: str) -> str:
+    """The compact resume view: brief lines, findings rows and counts, open lists, and Last updated."""
+    root = Path(project_root).resolve()
+    state = _State(root, investigation)
+    rows = state.rows()
+    counts = {}
+    for _, cells in rows:
+        status = _FLAGGED if cells[2].startswith(_FLAGGED) else cells[2] or "blank"
+        counts[status] = counts.get(status, 0) + 1
+    updated = _bare(state.lines[state.updated])[len("Last updated:"):].strip()
+    out = [f"{investigation} (Last updated: {updated or 'blank'})"]
+    out += [f"{label}: {_brief_line(root, investigation, title)}" for label, title in
+            (("Question", "Business question"), ("Purpose", "Purpose"), ("Audience", "Audience"))]
+    out.append("Findings: " + (", ".join(f"{n} {s}" for s, n in counts.items()) or "none"))
+    out += [_bare(state.lines[i]).strip() for i, _ in rows]
+    number = 0
+    for title in ("Unresolved issues", "Next steps"):
+        items, notes = state.items(title)
+        out.append(f"{title}:" + ("" if items or notes else " none"))
+        for _, _, text in items:
+            number += 1
+            out.append(f"{number}. {text}")
+        out += [f"   {note}" for note in notes]
+    return "\n".join(out)
+
+
+def _open_items(state):
+    """Unresolved issues then Next steps, numbered together as state_view shows them."""
+    return [(title, *item) for title in ("Unresolved issues", "Next steps") for item in state.items(title)[0]]
+
+
+def add_item(project_root, investigation: str, title: str, text: str, *, today: str | None = None) -> int:
+    """Add one bullet to Unresolved issues or Next steps; return its number in state_view."""
+    root = Path(project_root).resolve()
+    text = " ".join(text.split())
+    if not text:
+        raise ValueError("the text is empty")
+    state = _State(root, investigation)
+    state.add_item(title, text)
+    state.touch(today or datetime.now().date().isoformat())
+    number = [i for i, (t, *_rest) in enumerate(_open_items(state), 1) if t == title][-1]
+    _write(state.path, state.lines)
+    return number
+
+
+def remove_item(project_root, investigation: str, which: str, *, today: str | None = None) -> tuple[str, str]:
+    """Remove the Unresolved issues or Next steps bullet numbered `which`, or the one bullet whose
+    text contains it (case-insensitively; an exact match wins). Returns (section, text)."""
+    root = Path(project_root).resolve()
+    state = _State(root, investigation)
+    items = _open_items(state)
+    if which.strip().isdigit():
+        number = int(which)
+        if not 1 <= number <= len(items):
+            raise StateError(f"no open item {number}; there are {len(items)}")
+        chosen = [items[number - 1]]
+    else:
+        wanted = " ".join(which.split()).casefold()
+        chosen = [item for item in items if item[3].casefold() == wanted] or \
+                 [item for item in items if wanted and wanted in item[3].casefold()]
+        if len(chosen) != 1:
+            if not chosen:
+                raise StateError(f"no open item contains {which!r}")
+            numbers = [str(items.index(item) + 1) for item in chosen]
+            raise StateError(f"{which!r} matches items {', '.join(numbers)}; pass the number")
+    title, first, stop, text = chosen[0]
+    state.remove_item(first, stop)
+    state.touch(today or datetime.now().date().isoformat())
+    _write(state.path, state.lines)
+    return title, text
+
+
+def switch_active(project_root, investigation: str) -> bool:
+    """Point README's Active investigation line at an investigation, keeping its link form.
+
+    The investigation's state.md must parse. Returns whether the line changed.
+    """
+    root = Path(project_root).resolve()
+    _State(root, investigation)
+    readme, index, (current, rewrite) = _readme_pointer(root)
+    if current == investigation:
+        return False
+    line = _bare(readme.lines[index])
+    value = line[len("Active investigation:"):]
+    spacing = value[:len(value) - len(value.lstrip())] or " "
+    readme.lines[index] = f"Active investigation:{spacing}{rewrite(investigation)}" + readme.lines[index][len(line):]
+    _write(readme.path, readme.lines)
+    return True
+
+
+_STATE_EXIT = "Exit status: 0 done; 1 a record is missing or malformed, or nothing matched (one line on stderr, " \
+              "nothing written); 2 unusable arguments or an unknown investigation."
+
+
+def cli_state(root: Path, argv: list[str]) -> int:
+    """Show or update the active investigation's state.md, history.md, and README pointer."""
+    root = Path(root).resolve()
+    actions = {
+        "finding": "change a finding's status or wording; history.md records the prior ones",
+        "issue": "add a bullet to Unresolved issues",
+        "next": "add a bullet to Next steps",
+        "done": "remove an Unresolved issues or Next steps bullet by number or text",
+        "switch": "point README's Active investigation line at another investigation and show it",
+    }
+    action = argv[0] if argv and argv[0] in actions else None
+    parser = argparse.ArgumentParser(
+        prog="awb.py state" + (f" {action}" if action else ""),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=actions[action] if action else
+        "Show the active investigation (README's Active investigation line): its brief's question, purpose, "
+        "and audience, findings rows with counts by status, Unresolved issues and Next steps numbered "
+        "together, and Last updated. run.py writes findings rows itself.",
+        epilog=("Writes change only the affected lines and set state.md's Last updated to today.\n"
+                if action and action != "switch" else "Rewrites only README's Active investigation line, "
+                "keeping its link form; the investigation's state.md must parse.\n" if action else "") +
+        ("subcommands:\n" + "\n".join(f"  {name:<8} {summary}" for name, summary in actions.items()) +
+         "\nRun `awb.py state <subcommand> --help` for its arguments.\n" if not action else "") + _STATE_EXIT)
+    if action != "switch":
+        parser.add_argument("--investigation", metavar="NAME",
+                            help="act on this investigation instead of the active one")
+    if action == "finding":
+        parser.add_argument("result_id", help="the result ID its Evidence cell links")
+        parser.add_argument("--status", choices=_STATUSES, help="new status")
+        parser.add_argument("--text", help="new finding wording")
+        parser.add_argument("--caveat", help="replace the caveat's notes; the checks' caveat run.py writes stays "
+                                             "('' clears the notes)")
+        parser.add_argument("--reason", help="why, for the history entry a status or wording change writes")
+    elif action in ("issue", "next"):
+        parser.add_argument("text", help="the bullet's text")
+    elif action == "done":
+        parser.add_argument("item", metavar="number-or-text",
+                            help="the number `awb.py state` shows, or text only one bullet contains")
+    elif action == "switch":
+        parser.add_argument("investigation", help="directory name under investigations/")
+    try:
+        args = parser.parse_args(argv[1:] if action else argv)
+    except SystemExit as stop:
+        return stop.code
+    if action == "finding" and args.status is None and args.text is None and args.caveat is None:
+        parser.print_usage(sys.stderr)
+        print("awb.py state finding: give --status, --text, or --caveat", file=sys.stderr)
+        return 2
+    name = args.investigation
+    if name is not None and not (_ID.fullmatch(name) and (root / "investigations" / name).is_dir()):
+        print(f"awb.py state: no investigation named {name!r} under investigations/", file=sys.stderr)
+        return 2
+    try:
+        name = name or _active(root)
+        if action is None:
+            print(state_view(root, name))
+        elif action == "switch":
+            changed = switch_active(root, name)
+            print(("Active investigation now " if changed else "Already active: ") + state_view(root, name))
+        elif action == "finding":
+            result = update_finding(root, name, args.result_id, status=args.status, text=args.text,
+                                    caveat=args.caveat, reason=args.reason)
+            print(result["row"] if result["changed"] else f"unchanged: {result['row']}")
+            if result["history"]:
+                print(f"history.md: {result['history']}")
+        elif action in ("issue", "next"):
+            title = "Unresolved issues" if action == "issue" else "Next steps"
+            number = add_item(root, name, title, args.text)
+            print(f"added {title} item {number}")
+        else:
+            title, text = remove_item(root, name, args.item)
+            print(f"removed from {title}: {text}")
+    except StateError as error:
+        print(f"awb.py state: {error}", file=sys.stderr)
+        return 1
+    except ValueError as error:
+        print(f"awb.py state: {error}", file=sys.stderr)
+        return 2
+    return 0
 
 
 def _short(detail, limit=3):
