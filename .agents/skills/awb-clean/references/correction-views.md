@@ -1,12 +1,12 @@
 # Correction views
 
-Read before writing a correction pattern not yet used in this project. Corrections live in the Git-managed canonical view definitions under `foundation/views/`, loaded by `session()` in filename order. A definition that reads another view must sort after it.
+Corrections live in the Git-managed canonical view definitions under `foundation/views/`, loaded by `session()` in filename order. A definition that reads another view must sort after it.
 
 ## Where the correction goes
 
-Edit the canonical view that consumers already read, so that every investigation receives the correction and `stale` sees the changed definition. Keep one definition per dataset while it stays readable. When corrections grow, split it into a source view and a corrected view under the canonical name, for example `01_orders_source.sql` reading the publication and `02_orders.sql` applying the rules. Do not rename the canonical view; findings and the catalog cite it.
+Keep one definition per dataset while it stays readable. When corrections grow, split it into a source view and a corrected view under the canonical name, for example `01_orders_source.sql` reading the publication and `02_orders.sql` applying the rules. Keep the canonical name; findings and the catalog cite it.
 
-Correct values in place and keep every row, except for rows that are invalid as a rule, such as exact duplicates or the losing rows of a decided key rule. The originals stay readable in the publication and the landed files, so do not add `_raw` copies of corrected columns unless an investigation needs both. Rules must not depend on the date they run: write fixed bounds, not `current_date`.
+The originals stay readable in the publication and the landed files, so add a `_raw` copy of a corrected column only when an investigation needs both. Write fixed date bounds rather than `current_date`, so a rule gives the same result on any day.
 
 ## Patterns
 
@@ -39,4 +39,4 @@ LEFT JOIN labels ON lower(trim(source.dept)) = labels.variant;
 
 ## When a view cannot express it
 
-Reparsing landed files is a conversion change: malformed rows, the wrong delimiter or encoding, or a column split differently. So is a correction too expensive to repeat in every session. Publish a corrected dataset from the landed acquisitions with `python3 src/awb.py publish` (its `--help` gives the arguments), then point the canonical view at the new publication. Leave the earlier publication in place while any reader needs it. The catalog row then names the new publication under `Definition or location` and `Inputs`.
+Reparsing landed files is a conversion change: malformed rows, the wrong delimiter or encoding, or a column split differently. So is a correction too expensive to repeat in every session. Publish a corrected dataset from the landed acquisitions with `python3 src/awb.py publish` (its `--help` gives the arguments), then point the canonical view at the new publication; that switch is a deliberate preparation change, so name it in the report. Leave the earlier publication in place while any reader needs it. The catalog row then names the new publication under `Definition or location` and `Inputs`, starting from the command's `catalog_row`.

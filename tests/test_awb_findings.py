@@ -15,10 +15,10 @@ from pathlib import Path
 import pytest
 
 
-ASSET = Path(__file__).resolve().parents[1] / ".agents/skills/awb-package/assets/awb_findings.py"
-spec = importlib.util.spec_from_file_location("awb_findings", ASSET)
-findings = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(findings)
+ASSET = Path(__file__).resolve().parents[1] / ".agents/skills/awb-package/assets/awb_draft.py"
+spec = importlib.util.spec_from_file_location("awb_draft_findings", ASSET)
+draft = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(draft)
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def test_clean_prose_returns_no_rows(write):
         "\n"
         "*Figure 1. Share of cases closed late, Q3 2026, _all_ regions.*\n"
     )
-    assert findings.check(path) == []
+    assert draft.check_findings(path) == []
 
 
 def test_reports_each_kind_with_exact_text(write):
@@ -52,7 +52,7 @@ def test_reports_each_kind_with_exact_text(write):
         "The source is sales.daily_orders, built at a1b2c3d.\n"
         "This is the churn-q3 package.\n"
     )
-    assert findings.check(str(path), names=["churn-q3"]) == [
+    assert draft.check_findings(str(path), names=["churn-q3"]) == [
         {"line": 1, "kind": "code", "text": "`make report`"},
         {"line": 2, "kind": "path", "text": "src/packaging"},
         {"line": 3, "kind": "path", "text": "../notes"},
@@ -66,7 +66,7 @@ def test_reports_each_kind_with_exact_text(write):
 
 def test_rows_are_ordered_by_line_then_column(write):
     path = write("ok\ncase_id beside `code` and report.csv before R-17.\n")
-    assert findings.check(path, names=["R-17"]) == [
+    assert draft.check_findings(path, names=["R-17"]) == [
         {"line": 2, "kind": "identifier", "text": "case_id"},
         {"line": 2, "kind": "code", "text": "`code`"},
         {"line": 2, "kind": "file", "text": "report.csv"},
@@ -82,7 +82,7 @@ def test_link_and_image_targets_are_excluded_but_text_and_alt_are_scanned(write)
         "See [the regional view](https://example.org/a_b/c.md) and [region_view](notes/x.md).\n"
         "![alt from late_view.sql](figures/y.png)\n"
     )
-    assert findings.check(path) == [
+    assert draft.check_findings(path) == [
         {"line": 4, "kind": "identifier", "text": "region_view"},
         {"line": 5, "kind": "file", "text": "late_view.sql"},
     ]
@@ -99,7 +99,7 @@ def test_fenced_block_reports_once_at_opening_line(write):
         "~~~\n"
         "unclosed_block runs to the end\n"
     )
-    assert findings.check(path) == [
+    assert draft.check_findings(path) == [
         {"line": 2, "kind": "code", "text": "```python"},
         {"line": 6, "kind": "identifier", "text": "region_id"},
         {"line": 7, "kind": "code", "text": "~~~"},
@@ -114,7 +114,7 @@ def test_html_comments_are_ignored(write):
         "-->\n"
         "Then case_id.\n"
     )
-    assert findings.check(path) == [
+    assert draft.check_findings(path) == [
         {"line": 5, "kind": "identifier", "text": "case_id"},
     ]
 
@@ -125,7 +125,7 @@ def test_names_match_whole_tokens_case_sensitively(write):
         "Not q3-churn-review-v2 or Q3-Churn-Review.\n"
         "Region West, not Westerly.\n"
     )
-    assert findings.check(path, names=("q3-churn-review", "West", "")) == [
+    assert draft.check_findings(path, names=("q3-churn-review", "West", "")) == [
         {"line": 1, "kind": "name", "text": "q3-churn-review"},
         {"line": 3, "kind": "name", "text": "West"},
     ]
@@ -133,13 +133,13 @@ def test_names_match_whole_tokens_case_sensitively(write):
 
 def test_name_takes_precedence_over_other_kinds(write):
     path = write("Built from daily_orders.\n")
-    assert findings.check(path, names=["daily_orders"]) == [
+    assert draft.check_findings(path, names=["daily_orders"]) == [
         {"line": 1, "kind": "name", "text": "daily_orders"},
     ]
 
 
 def test_digit_only_fractions_are_not_paths(write):
     path = write("About 3/4 of cases on 6/30/2026 were late; open/closed status differed.\n")
-    assert findings.check(path) == [
+    assert draft.check_findings(path) == [
         {"line": 1, "kind": "path", "text": "open/closed"},
     ]

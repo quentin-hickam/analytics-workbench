@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Composition entry for this investigation: produce, validate, and record each result.
+"""Run script for this investigation: produce, validate, and record each result.
 
 Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With no IDs it
 produces every result in settings.toml. For each result it runs the result's saved queries in a
 fresh session of canonical views, validates the result, saves the table and its profile under
-results/, records evidence under evidence/, and prints one compact JSON line with the paths,
-failed and unassessed checks, and the state.md findings row to paste.
+results/, records evidence under evidence/, writes its state.md findings row, and prints one
+compact JSON line with the paths, failed and unassessed checks, and what it did to the row.
 
 Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml
 and its query in queries/<id>.sql. Add a producer below only when a result needs more than its
-query, and put reusable operations in src/, not here. Requires duckdb and pandas.
+query, and put reusable operations in src/. Requires duckdb and pandas.
 """
 
 import json
@@ -31,7 +31,7 @@ sys.path.insert(0, str(ROOT))
 
 from src.exploration.validate import profile, validate  # noqa: E402
 from src.preparation.landing import session  # noqa: E402
-from src.provenance import finding_row, record_evidence, views_read  # noqa: E402
+from src.provenance import prior_result, record_evidence, record_finding, views_read  # noqa: E402
 
 
 def run(connection, sql, parameters):
@@ -74,6 +74,10 @@ def produce_result(connection, result_id, config, parameters):
     sql = [(HERE / query).read_text() for query in queries]
     frame, measured = PRODUCERS.get(result_id, produce)(connection, sql, parameters)
     checks = validate(frame, _spec(config.get("validation", {}), measured))
+    # What the rerun replaces: the evidence citation, and the table, checks and settings it compares.
+    prior = prior_result(ROOT, NAME, result_id)
+    # Evidence describes the saved table, so drop it before the table changes; a failed run leaves none.
+    (HERE / "evidence" / f"{result_id}.json").unlink(missing_ok=True)
     output = HERE / "results"
     output.mkdir(exist_ok=True)
     # The saved table holds the computed values that packaging later serializes for charts.
@@ -83,6 +87,8 @@ def produce_result(connection, result_id, config, parameters):
     # Settings `views` overrides detection when a result reads views its queries do not name.
     views = config.get("views") or views_read(ROOT, [HERE / query for query in queries])
     evidence = record_evidence(ROOT, NAME, result_id, views=views, settings_path=SETTINGS, checks=checks)
+    # Writes the row; a failed write removes this evidence and raises.
+    state = record_finding(ROOT, NAME, result_id, checks, prior=prior)
     return {
         "result_id": result_id, "rows": len(frame),
         "failed_checks": [c["name"] for c in checks if c["outcome"] == "fail"],
@@ -90,7 +96,7 @@ def produce_result(connection, result_id, config, parameters):
         "evidence": evidence.relative_to(ROOT).as_posix(),
         "table": table.relative_to(ROOT).as_posix(),
         "profile": profile_path.relative_to(ROOT).as_posix(),
-        "state_row": finding_row(ROOT, NAME, result_id, checks),
+        "state": state["action"], "status": state["status"], "history": state["history"],
     }
 
 

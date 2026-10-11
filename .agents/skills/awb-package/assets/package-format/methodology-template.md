@@ -1,6 +1,6 @@
 # Methodology
 
-This file is the internal reference for the analysis this package represents. It lets the M365 agent and analysts look up the logic behind a specific decision, so it uses the workbench's own vocabulary: view and table names, settings keys, result IDs, evidence paths, and release numbers are expected here. It is never rendered into a delivered document. It stands on its own, without earlier releases or the investigation records.
+This file is the internal reference for the analysis this package represents. It lets the M365 agent and analysts look up the logic behind a specific decision, so it uses the workbench's own vocabulary: view and table names, settings keys, result IDs, evidence paths, and release numbers are expected here. It stays internal to the package. It stands on its own, without earlier releases or the investigation records.
 
 ## Package context
 
@@ -37,11 +37,3 @@ Give one `###` section per finding in `findings.md`, its heading identical to th
 ## Methodological corrections
 
 Record each methodological mistake that changed a finding or explains why an earlier conclusion was wrong: what was wrong, how it was found, and what it changed. Routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding stay out, as in `history.md`. Otherwise state **None**.
-
-## Revalidation status
-
-List each represented finding awaiting revalidation, with its reason as recorded in `state.md`, the quality entry that raised it, and every place the draft represents an affected conclusion. Otherwise state **None**.
-
-## Changes since previous release
-
-For later releases, describe material changes to scope, inputs, method, settings, findings, caveats, or selected datasets since the latest numbered release, naming releases by number. For the first release, state that there is no previous release.

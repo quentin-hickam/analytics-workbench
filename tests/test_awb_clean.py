@@ -3,10 +3,10 @@
 # test_scan_reads_views_through_session_and_changes_no_data: a view loads through the project's session(); landed and view files keep their bytes and only the scan file is written.
 # test_text_dates_and_codes_are_typed_conservatively: a day-first text date column is typed by its one covering format, an all-ambiguous one is reported, and leading-zero codes stay text.
 # test_rescan_reports_delta_with_stable_ids_and_inherited_options: a rescan after a correction view reports before and after counts by issue, keeps ids, and reuses the baseline's options.
-# test_local_query_scan_stays_beside_the_query: a saved exploration query scanned against a view baseline writes its scan beside the query, not in the foundation.
-# test_recorded_markers_mark_issues_as_recorded: issues whose `<scan>#<key>` marker is in the quality record are reported as recorded with their quality ID.
-# test_record_writes_quality_catalog_and_flags_in_one_call: new quality IDs, issue and correction rows with scan counts and markers, a catalog row, and a revalidation flag that keeps the prior status.
-# test_record_updates_recorded_issue_and_continues_numbering: a recorded issue has its judgment cells updated; a new issue continues the existing ID prefix and width.
+# test_removed_targets_and_options_are_rejected: a saved .sql query is not a scan target; --rescan takes no scan name; --typed-threshold and --max-categories are gone.
+# test_recorded_markers_mark_issues_as_recorded: issues whose `<scan>#<key>` marker is in the quality record are reported as recorded with their quality ID and recorded count beside the current count.
+# test_record_writes_quality_catalog_and_flags_in_one_call: new quality IDs, issue and correction rows with scan counts and markers dated with no scan link, a catalog row, and a revalidation flag that keeps the prior status.
+# test_record_updates_recorded_issue_and_continues_numbering: a recorded issue has its judgment cells updated and its observation's count and scan date refreshed, in older linked rows and in current rows; a new issue continues the existing ID prefix and width.
 # test_record_checks_everything_before_writing: an unmatched flag or a correction without findings writes nothing; a dry run prints rows and writes nothing.
 
 import importlib.util
@@ -153,17 +153,16 @@ def test_rescan_reports_delta_with_stable_ids_and_inherited_options(project, cap
     assert variants["before"] == 1 and variants["after"] == 1  # case remains until mapped
 
 
-def test_local_query_scan_stays_beside_the_query(project):
+def test_removed_targets_and_options_are_rejected(project, capsys):
     pytest.importorskip("duckdb")
     with_session(project)
-    scanner.scan(project, "orders", today=TODAY)
-    query = write(project, "investigations/churn/exploration/dept_fix.sql",
-                  "SELECT * REPLACE (upper(trim(dept)) AS dept) FROM orders -- local assessment\n")
-    record, path = scanner.scan(project, str(query.relative_to(project)), rescan="orders", today=TODAY)
-    assert path == project / "investigations/churn/exploration/dept_fix.scan.json"
-    assert sorted(p.name for p in (project / "foundation/scans").iterdir()) == ["orders.json"]
-    change = {d["key"]: d["change"] for d in record["delta"]["issues"]}
-    assert change["whitespace:dept"] == "resolved" and change["variants:dept:sales"] == "resolved"
+    write(project, "investigations/churn/exploration/dept_fix.sql", "SELECT * FROM orders\n")
+    assert scanner.main([str(project), "investigations/churn/exploration/dept_fix.sql"]) == 2
+    assert "unsupported formats" in capsys.readouterr().err
+    assert not (project / "investigations/churn/exploration/dept_fix.scan.json").exists()
+    for extra in (["--rescan", "orders"], ["--typed-threshold", "0.5"], ["--max-categories", "9"]):
+        with pytest.raises(SystemExit):
+            scanner.main([str(project), "orders", *extra])
 
 
 def test_recorded_markers_mark_issues_as_recorded(project, capsys):
@@ -171,11 +170,11 @@ def test_recorded_markers_mark_issues_as_recorded(project, capsys):
     with_session(project)
     quality = (TEMPLATES / "foundation/quality.md").read_text().replace(
         "| --- | --- | --- | --- | --- | --- |\n",
-        "| --- | --- | --- | --- | --- | --- |\n| Q-003 | view `orders` | Trailing spaces; `orders#whitespace:dept` | None | Trimmed | corrected |\n", 1)
+        "| --- | --- | --- | --- | --- | --- |\n| Q-003 | view `orders` | Trailing spaces (1 of 45); `orders#whitespace:dept` | None | Trimmed | corrected |\n", 1)
     write(project, "foundation/quality.md", quality)
     assert scanner.main([str(project), "orders"]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert {"quality": "Q-003", "status": "corrected"}.items() <= out["recorded"][0].items()
+    assert {"quality": "Q-003", "status": "corrected", "count": 2, "recorded_count": 1}.items() <= out["recorded"][0].items()
     assert all(i["key"] != "whitespace:dept" for i in out["issues"])
 
 
@@ -219,7 +218,7 @@ def test_record_writes_quality_catalog_and_flags_in_one_call(tmp_path):
                                          "investigations/churn/state.md"]
     quality = (tmp_path / "foundation/quality.md").read_text()
     assert ("| Q-001 | view `orders`, column `dept` | 2 values in dept with leading or trailing whitespace "
-            "(2 of 45); e.g. \"Sales \" (2); `orders#whitespace:dept` in [scan](scans/orders.json) 2026-10-09 | "
+            "(2 of 45); e.g. \"Sales \" (2); `orders#whitespace:dept` scanned 2026-10-09 | "
             "Splits department counts | Trimmed in the view | corrected |") in quality
     assert ("| 2026-10-09 | Q-001 | Trim department labels; spaces carry no meaning | "
             "`foundation/views/01_orders.sql` trims dept; rescan 2 -> 0 | churn: r-003 |") in quality
@@ -237,7 +236,7 @@ def test_record_updates_recorded_issue_and_continues_numbering(tmp_path):
     quality = (TEMPLATES / "foundation/quality.md").read_text().replace(
         "| --- | --- | --- | --- | --- | --- |\n",
         "| --- | --- | --- | --- | --- | --- |\n"
-        "| DQ-07 | view `orders` | Spaces; `orders#whitespace:dept` | Splits counts | Open | open |\n", 1)
+        "| DQ-07 | view `orders` | Spaces (5 of 45); `orders#whitespace:dept` in [scan](scans/orders.json) 2026-01-02 | Splits counts | Open | open |\n", 1)
     write(tmp_path, "foundation/quality.md", quality)
     result = recorder.record(tmp_path, "orders", {
         "issues": {"S1": {"treatment": "Trimmed in the view", "status": "corrected"},
@@ -245,7 +244,19 @@ def test_record_updates_recorded_issue_and_continues_numbering(tmp_path):
     assert result["quality_ids"] == {"S1": "DQ-07", "S2": "DQ-08"}
     assert result["updated"] == ["DQ-07"] and result["added"] == ["DQ-08"]
     text = (tmp_path / "foundation/quality.md").read_text()
-    assert "| DQ-07 | view `orders` | Spaces; `orders#whitespace:dept` | Splits counts | Trimmed in the view | corrected |" in text
+    assert ("| DQ-07 | view `orders` | Spaces (2 of 45); `orders#whitespace:dept` in [scan](scans/orders.json) 2026-10-09 | "
+            "Splits counts | Trimmed in the view | corrected |") in text
+    assert "`orders#sentinel:age:9999` scanned 2026-10-09 |" in text
+    # A later scan reopens the current-form row: its count and the date after the marker refresh.
+    path = tmp_path / "foundation/scans/orders.json"
+    record = json.loads(path.read_text())
+    record["scanned_at"] = "2026-11-01T10:00:00+00:00"
+    record["issues"][1]["count"] = 3
+    path.write_text(json.dumps(record))
+    result = recorder.record(tmp_path, "orders", {"issues": {"S2": {"status": "open"}}}, today=TODAY)
+    assert result["updated"] == ["DQ-08"] and result["added"] == []
+    text = (tmp_path / "foundation/quality.md").read_text()
+    assert "2 values in age are 9999 (3 of 45); e.g. \"Sales \" (2); `orders#sentinel:age:9999` scanned 2026-11-01 |" in text
 
 
 def test_record_checks_everything_before_writing(tmp_path, capsys, monkeypatch):

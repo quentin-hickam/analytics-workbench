@@ -1,7 +1,7 @@
 """Land, publish, retain, and open analytical sessions for a workbench.
 
-Copy this file to src/preparation/landing.py and import it from there, never
-from the skill folder. src/awb.py runs cli_sql() as `python3 src/awb.py sql`.
+Copy this file to src/preparation/landing.py and import the project copy. src/awb.py runs
+its cli_* functions as the land, retain, publish, and sql commands.
 
 data/raw/<source>/<acquisition-id>/provenance.json:
     {source, acquisition_id, request, started_at, completed_at, status,
@@ -439,20 +439,30 @@ def _settle(root, directory, location, skipped):
 
 
 def cli_land(root: Path, argv: list[str]) -> int:
-    """land <source> <acquisition-id> <file>... [--request TEXT] [--records NAME=COUNT ...] [--notes TEXT]"""
+    """land <source> <acquisition-id> <file>... [--request TEXT] [--records NAME=COUNT]... [--notes TEXT]"""
     import argparse
     parser = argparse.ArgumentParser(
         prog="awb.py land",
         description="Copy files byte for byte into data/raw/<source>/<acquisition-id>/, retain "
-                    "the acquisition at README's Landed data location, and record its Acquisitions row.")
-    parser.add_argument("source")
-    parser.add_argument("acquisition_id", metavar="acquisition-id")
+                    "the acquisition at README's Landed data location, and record its Acquisitions row.",
+        epilog="Retention runs when README's `Landed data is kept at` line names a reachable filesystem "
+               "path. The Acquisitions row goes in foundation/sources.md and sets a candidate source to "
+               "acquired; fill its Restrictions yourself. Prints one JSON line: landed, files, bytes, "
+               "retention (the retained copy's destination, copied, conflict, and discrepancies, or "
+               "skipped with a warning to act on), and ledger (row, source_status; missing means the "
+               "source still needs its Sources row). Exit 1 means the files landed but retention or the "
+               "row failed; exit 2 means unusable arguments, with nothing landed.")
+    parser.add_argument("source", help="source directory name under data/raw/ (one name, not ending "
+                                       "in .partial)")
+    parser.add_argument("acquisition_id", metavar="acquisition-id",
+                        help="new acquisition directory name under data/raw/<source>/")
     parser.add_argument("files", nargs="+", metavar="file",
                         help="file or directory to copy under its own name; relative to the current directory")
     parser.add_argument("--request", help="source version, query, or request (default: the copied paths)")
-    parser.add_argument("--records", nargs="+", action="extend", default=[], metavar="NAME=COUNT",
-                        help="record count of a landed file, by its path inside the acquisition")
-    parser.add_argument("--notes")
+    parser.add_argument("--records", action="append", default=[], metavar="NAME=COUNT",
+                        help="record count of a landed file, by its path inside the acquisition; "
+                             "repeat the flag for each file")
+    parser.add_argument("--notes", help="note recorded in the Acquisitions row")
     args = parser.parse_args(argv)
     records = {}
     for item in args.records:
@@ -497,7 +507,14 @@ def cli_retain(root: Path, argv: list[str]) -> int:
     argparse.ArgumentParser(
         prog="awb.py retain",
         description="Retain every completed acquisition under data/raw/ whose Acquisitions row lacks "
-                    "a retained copy, and write missing Acquisitions rows.").parse_args(argv)
+                    "a retained copy, and write missing Acquisitions rows.",
+        epilog="Run it after a library land() and whenever README's `Landed data is kept at` line is "
+               "first recorded or changed; without a reachable filesystem location it only writes "
+               "missing rows. Copies never overwrite. Prints one JSON line: location (or the skip "
+               "reason), acted_on (each acquisition's retention result and row outcome), "
+               "already_retained, and still_this_checkout_only. Report every conflict and discrepancy; "
+               "an existing destination can match and still report a conflict. Exit 1 when a "
+               "retention or row failed.").parse_args(argv)
     location, skipped = _landed_location(root)
     rows = _acquisition_rows(root) or {}
     raw = Path(root) / "data/raw"
@@ -526,20 +543,32 @@ def cli_retain(root: Path, argv: list[str]) -> int:
 
 
 def cli_publish(root: Path, argv: list[str]) -> int:
-    """publish <dataset> <publication-id> --from <acquisition-dir>... --sql <select.sql> [--check <check.sql>]"""
+    """publish <dataset> <publication-id> --from <acquisition-dir> [--from ...] --sql <select.sql> [--check <check.sql>]"""
     import argparse
     import re
     parser = argparse.ArgumentParser(
         prog="awb.py publish",
         description="Write a SQL select over landed files as data/parquet/<dataset>/<publication-id>/"
-                    "<dataset>.parquet, check it, and publish it with publication.json.")
-    parser.add_argument("dataset")
-    parser.add_argument("publication_id", metavar="publication-id")
-    parser.add_argument("--from", dest="acquisitions", nargs="+", required=True, metavar="ACQUISITION_DIR",
-                        help="completed acquisition directory the select reads, project-relative")
-    parser.add_argument("--sql", required=True, help="file holding one SELECT over the landed files")
-    parser.add_argument("--check", help="file holding a query over the view `publication`; any row refuses")
-    parser.add_argument("--notes")
+                    "<dataset>.parquet, check it, and publish it with publication.json.",
+        epilog="Commit the SQL first so conversion_commit holds it; otherwise the output carries a "
+               "warning. Prints one JSON line. On success: published, rows, bytes, inputs, "
+               "conversion_commit, and catalog_row, a foundation/catalog.md row to complete with grain "
+               "and availability. On refusal (exit 1): published false, error, failing_rows with up to "
+               "20 under first, and the partial directory left behind. A select returning no rows is "
+               "refused. Needs duckdb.")
+    parser.add_argument("dataset", help="dataset directory name under data/parquet/")
+    parser.add_argument("publication_id", metavar="publication-id",
+                        help="new publication directory name under data/parquet/<dataset>/")
+    parser.add_argument("--from", dest="acquisitions", action="append", required=True,
+                        metavar="ACQUISITION_DIR",
+                        help="completed acquisition directory, project-relative; repeat the flag for each, "
+                             "naming exactly the acquisitions the select reads")
+    parser.add_argument("--sql", required=True,
+                        help="file holding one SELECT that reads landed files by project-relative path, "
+                             "such as read_csv('data/raw/<source>/<acquisition-id>/<file>.csv')")
+    parser.add_argument("--check", help="file holding a query over the view `publication` (landed files "
+                                        "are readable too); any returned row refuses publication")
+    parser.add_argument("--notes", help="comment recorded in publication.json")
     args = parser.parse_args(argv)
     root = Path(root)
     queries = {}
@@ -701,11 +730,13 @@ def _fail(command, error):
 
 
 def cli_sql(root: Path, argv: list[str]) -> int:
-    """Run a query file or SQL text in a fresh session; print the first rows and the row count."""
-    parser = argparse.ArgumentParser(prog="awb.py sql", description=cli_sql.__doc__)
+    """Run a query file or SQL text in a fresh session with the foundation views loaded; every
+    statement runs, and the last one's first rows print as a Markdown table with the row count."""
+    parser = argparse.ArgumentParser(prog="awb.py sql", description=" ".join(cli_sql.__doc__.split()),
+                                     epilog="Errors print one line on stderr and exit 1.")
     parser.add_argument("query", help="query file (absolute or project-relative) or SQL text")
     parser.add_argument("--limit", type=int, default=20, help="rows to print (default 20)")
-    parser.add_argument("--out", help="write the full result to this .csv or .parquet file")
+    parser.add_argument("--out", help="write the full result to this project-relative .csv or .parquet file")
     args = parser.parse_args(argv)
     if args.limit < 0:
         parser.error("--limit must be 0 or more")

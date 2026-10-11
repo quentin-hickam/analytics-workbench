@@ -3,10 +3,14 @@
 # test_active_investigation_reads_link_path_or_slug: README pointer forms resolve to the investigation name.
 # test_missing_session_helper_exits_with_installer_remedy: no src/preparation/landing.py exits 2 naming the installer.
 # test_scan_applies_settings_scope_and_writes_only_its_exploration_file: settings filters applied with sources; one file written; compact stdout.
-# test_shared_data_problems_route_to_clean_and_contrary_trends_stay_local: duplicates, variants, gaps, null shift route to awb-clean; contrary group flagged.
+# test_shared_data_problems_route_to_clean_and_coverage_stays_with_the_investigation: key violations and variants route to awb-clean; gaps and null shift route to the investigation; contrary group flagged; no suggested state lines.
+# test_correlations_pair_only_the_measure_and_print_the_top_five: the measure correlates with each other numeric column, not itself; at most five with |r| >= 0.5 print.
+# test_removed_options_are_rejected: --json, --settings, and --min-r are gone.
 # test_variance_explained_matches_hand_computation: eta squared and group means for a two-group measure.
 # test_options_override_settings_and_unfit_settings_are_skipped: options replace settings; unfit settings print as not applied; a bad option or empty scope exits 2.
 # test_publication_path_with_label_and_float_columns_keep_distributions: publication directory scanned to a labelled file; unique floats are not keys.
+# test_template_settings_take_the_period_from_parameters_and_name_unset_choices: [parameters] start/end scope the period; unset scope, measure, and dimensions print the options to pass.
+# test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one: --show walks keys and named list items without rescanning; a miss exits 2 listing what is there.
 
 import importlib.util
 import json
@@ -99,6 +103,12 @@ def test_settings_lookup_prefers_dataset_then_eda_then_scope_and_lists_unread_ke
     assert found["date_column"] == ("d", "scope.date_column")
     assert unused == ["population", "where", "scope.owner"]
     assert eda.resolve_settings(data, "other")[0]["measure"] == ("eda", "eda.measure")
+    template = {"parameters": {"start": "2025-01-01", "end": "2025-06-30", "region": "US"},
+                "results": {"r1": {"queries": []}}, "eda": {"period_end": "2025-03-31"}}
+    found, unused = eda.resolve_settings(template, "shifts")
+    assert found["period_start"] == ("2025-01-01", "parameters.start")
+    assert found["period_end"] == ("2025-03-31", "eda.period_end")
+    assert unused == ["parameters.end", "parameters.region"]  # end is shadowed by eda.period_end
 
 
 def test_active_investigation_reads_link_path_or_slug(tmp_path):
@@ -139,23 +149,45 @@ def test_scan_applies_settings_scope_and_writes_only_its_exploration_file(shifts
     assert len(out.splitlines()) < 80
 
 
-def test_shared_data_problems_route_to_clean_and_contrary_trends_stay_local(shifts, capsys):
-    status, out, _ = run(shifts, "shifts", "--no-scope", "--json", capsys=capsys)
+def test_shared_data_problems_route_to_clean_and_coverage_stays_with_the_investigation(shifts, capsys):
+    status, out, _ = run(shifts, "shifts", "--no-scope", capsys=capsys)
     assert status == 0
-    summary = json.loads(out)
-    routes = {(a["kind"], a["column"]): a["route"] for a in summary["anomalies"]}
+    scan = json.loads((shifts / "investigations/overtime/exploration/eda/shifts.json").read_text())
+    routes = {(a["kind"], a["column"]): a["route"] for a in scan["anomalies"]}
     assert routes[("key-violated", "shift_id")] == "awb-clean"
     assert routes[("case-or-space-variants", "site")] == "awb-clean"
-    assert routes[("period-gaps", "shift_date")] == "awb-clean"
-    assert routes[("null-shift", "note")] == "awb-clean"
+    assert routes[("period-gaps", "shift_date")] == "investigation"
+    assert routes[("null-shift", "note")] == "investigation"
     assert routes[("contrary-trend", "site")] == "investigation"
-    contrary = [a["detail"] for a in summary["anomalies"] if a["kind"] == "contrary-trend"]
+    contrary = [a["detail"] for a in scan["anomalies"] if a["kind"] == "contrary-trend"]
     assert len(contrary) == 1 and contrary[0].startswith("South:")
-    variants = next(a for a in summary["anomalies"] if a["kind"] == "case-or-space-variants")
+    variants = next(a for a in scan["anomalies"] if a["kind"] == "case-or-space-variants")
     assert 'West / "west "' in variants["detail"]
-    issues = summary["suggested_records"]["unresolved_issues"]
-    assert any("shifts.site" in line and "awb-clean" in line for line in issues)
-    assert any("site South" in line for line in summary["suggested_records"]["next_steps"])
+    assert "suggested_records" not in scan and "Suggested" not in out
+
+
+def test_correlations_pair_only_the_measure_and_print_the_top_five(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    root = project(tmp_path, settings="")
+    multiples = ", ".join(f"(i // 2) * {k} AS a{k}" for k in range(1, 7))
+    write(root, "foundation/views/01_parts.sql",
+          f"CREATE VIEW parts AS SELECT i // 2 AS x, {multiples}, i % 3 AS u FROM range(40) t(i);\n")
+    status, out, _ = run(root, "parts", "--measure", "x", "--dimension", "u", capsys=capsys)
+    assert status == 0
+    scan = json.loads((root / "investigations/overtime/exploration/eda/parts.json").read_text())
+    found = {c["column"]: c["r"] for c in scan["associations"]["correlations"]}
+    assert scan["associations"]["measure"] == "x" and set(found) == {"a1", "a2", "a3", "a4", "a5", "a6", "u"}
+    assert all(found[f"a{k}"] == pytest.approx(1.0) for k in range(1, 7)) and abs(found["u"]) < 0.5
+    assert "### Correlations with `x` (Pearson, |r| ≥ 0.5)" in out
+    section = out.split("### Correlations")[1].split("###")[0]
+    assert len([line for line in section.splitlines() if line.startswith("| a")]) == 5
+    assert "near-duplicate-columns" not in out
+
+
+def test_removed_options_are_rejected(shifts):
+    for extra in (["--json"], ["--settings", "x.toml"], ["--min-r", "0.3"]):
+        with pytest.raises(SystemExit):
+            eda.main([str(shifts), "shifts", *extra])
 
 
 def test_variance_explained_matches_hand_computation(tmp_path, capsys):
@@ -210,3 +242,54 @@ def test_publication_path_with_label_and_float_columns_keep_distributions(shifts
     near = [n["column"] for n in scan["grain"]["near_unique_columns"]]
     assert near == ["shift_id"]
     assert all("shift_id" not in pair for pair in scan["grain"]["column_pair_keys"])
+
+
+TEMPLATE = """[parameters]
+start = 2025-07-01
+end = 2025-12-31
+
+[results.overtime-by-site]
+queries = ["queries/overtime-by-site.sql"]
+"""
+
+
+def test_template_settings_take_the_period_from_parameters_and_name_unset_choices(shifts, capsys):
+    write(shifts, "investigations/overtime/settings.toml", TEMPLATE)
+    status, out, _ = run(shifts, "shifts", capsys=capsys)
+    assert status == 0
+    assert "not applied: parameters.start: no date column is set; pass --date-column" in out
+    assert "not set: measure, dimensions: no breakdown, trend, or contrary groups; pass --measure" in out
+    assert "not set: where, period" not in out and "settings keys not read" not in out
+    status, out, _ = run(shifts, "shifts", "--date-column", "shift_date", "--measure", "overtime_hours",
+                         capsys=capsys)
+    assert status == 0
+    scan = json.loads((shifts / "investigations/overtime/exploration/eda/shifts.json").read_text())
+    assert [f["source"] for f in scan["scope"]["applied"]] == ["parameters.start", "parameters.end"]
+    assert scan["rows"] == 3 * sum(1 for n in range(1, 336) if n > 151)
+    assert scan["scope"]["not_set"] == [{"keys": "dimensions",
+                                         "detail": "chose site, region automatically; pass --dimension (repeatable)"}]
+    write(shifts, "investigations/overtime/settings.toml", "")
+    status, out, _ = run(shifts, "shifts", "--measure", "overtime_hours", "--dimension", "site", capsys=capsys)
+    assert status == 0 and "not set: where, period: the scan covers every row; pass --where" in out
+    assert "not set: measure" not in out and "not set: dimensions" not in out
+
+
+def test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one(shifts, capsys):
+    status, _, err = run(shifts, "shifts", "--show", "columns", capsys=capsys)
+    assert status == 2 and "no saved scan at investigations/overtime/exploration/eda/shifts.json" in err
+    assert run(shifts, "shifts", capsys=capsys)[0] == 0
+    path = shifts / "investigations/overtime/exploration/eda/shifts.json"
+    scan = json.loads(path.read_text())
+    path.write_text(path.read_text().replace('"format"', '"saved": true, "format"', 1))
+    status, out, _ = run(shifts, "shifts", "--show", "columns.region.top", capsys=capsys)
+    assert status == 0 and len(out.splitlines()) == 1
+    region = next(c for c in scan["columns"] if c["name"] == "region")
+    assert json.loads(out) == region["top"]
+    status, out, _ = run(shifts, "shifts", "--show", "measure.by_dimension.site.values", capsys=capsys)
+    assert status == 0 and json.loads(out) == scan["measure"]["by_dimension"][0]["values"]
+    status, out, _ = run(shifts, "shifts", "--show", "saved", capsys=capsys)
+    assert status == 0 and out.strip() == "true"  # read from the file, not a fresh scan
+    status, _, err = run(shifts, "shifts", "--show", "columns.nope", capsys=capsys)
+    assert status == 2 and "no nope under columns; there:" in err and "shift_id" in err
+    status, _, err = run(shifts, "shifts", "--show", "grain.nope", capsys=capsys)
+    assert status == 2 and "duplicate_rows" in err
