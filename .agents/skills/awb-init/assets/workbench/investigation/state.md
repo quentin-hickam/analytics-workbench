@@ -9,7 +9,7 @@ Last updated: <!-- use an ISO date -->
 
 Status is provisional, supported, superseded, or, for a flagged finding, `revalidation-needed` with its prior status visible, as in `revalidation-needed (was supported)`.
 
-`run.py` writes each result's row, whose Evidence cell links its evidence file, such as `[r-003](evidence/r-003.json)`; `python3 src/awb.py state finding` changes its status or wording. Commits and checksums live in the evidence file.
+`run.py` writes one row per result, whose Evidence cell links its evidence file, such as `[r-003](evidence/r-003.json)`; `python3 src/awb.py state finding` changes its wording, status, or caveat. Commits and checksums live in the evidence file.
 
 ## Unresolved issues
 

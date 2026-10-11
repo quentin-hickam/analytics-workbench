@@ -30,8 +30,8 @@ COMMANDS = {
     "profile": ("exploration/validate.py", "cli_profile",
                 "print each column's type, null rate, and distinct count for a view, query file, or SQL text"),
     "state": ("provenance.py", "cli_state",
-              "show the active investigation; record finding status and wording changes with their history, "
-              "issues, and next steps; switch investigations"),
+              "print the active investigation's brief and state to resume; promote or reword findings with "
+              "their history, edit issues and next steps, or switch investigations"),
     "stale": ("provenance.py", "cli_stale",
               "list findings whose evidence no longer matches the current code, views, inputs, or settings"),
     "export": ("packaging/draft.py", "cli_export",
