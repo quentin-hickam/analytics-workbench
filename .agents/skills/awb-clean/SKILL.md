@@ -62,7 +62,7 @@ python3 <skill-directory>/scripts/record_cleaning.py <project-root> <scan-name> 
 EOF
 ```
 
-With no affected finding, add `"findings": "none: stale listed no finding reading <view>"`. The script fills IDs, observations, counts, markers, and flagged statuses, and turns `{S1}` into that issue's quality ID. Record shared vocabulary in the glossary yourself.
+With no affected finding, add `"findings": "none: stale listed no finding reading <view>"`. The script fills IDs, observations, counts, markers, and flagged statuses, and turns `{S1}` into that issue's quality ID. A decision on a recorded issue the scan no longer lists uses its quality ID, such as `"Q-004"`, as the key. Record shared vocabulary in the glossary yourself.
 
 Read the existing catalog row before setting any of its cells. A cell you set replaces the whole cell: give its complete new text, keeping what still holds and citing quality IDs for rationale.
 
