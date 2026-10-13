@@ -91,9 +91,14 @@ Each investigation separates a concise current state from a chronological histor
 - `state.md` captures the active question, current findings, unresolved issues, flagged findings, and next steps so work can resume quickly.
 - `history.md` captures meaningful findings, analytical decisions, caveats, superseded conclusions, and data limitations or errors that affected the investigation.
 
-The workbench updates these records automatically when a finding, decision, flag, or next step changes.
+The workbench updates these records automatically when a finding, decision, flag, or next step changes. The user can also request a checkpoint before switching investigations. Records and a package's methodology document retain limitations and errors in the data and the methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, but exclude routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding. Git remains the record for code evolution.
 
-Where a helper must read back what it wrote, the machine state lives in a JSON file beside the Markdown record, and every field has exactly one owner. `findings.json` owns the whole Current findings table in `state.md`, which helpers render from it; the rest of `state.md` and all of `history.md` remain Markdown. `foundation/quality.json` holds only the links from scan issues to quality rows; every cell of `quality.md`, including its IDs and statuses, remains Markdown. Readers outside the provenance helper keep reading the rendered Markdown. Neither JSON file holds source values: a quality link is keyed by a hash of the scan name and issue key, while the example values a quality row quotes stay under the existing confirmation before `quality.md` is committed. The user can also request a checkpoint before switching investigations. Records and a package's methodology document retain limitations and errors in the data and the methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, but exclude routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding. Git remains the record for code evolution.
+Two Markdown records keep helper-owned machine state in a JSON file beside them, and each field has exactly one owner:
+
+- An investigation's `findings.json`, written by the shipped `awb_provenance.py`, owns every cell of the Current findings table in `state.md`, which that helper renders from it. Other readers of findings, such as status and packaging, read the rendered table. The rest of `state.md` and all of `history.md` remain Markdown.
+- `foundation/quality.json`, written by `awb-clean`'s scripts, holds only the links from scan issues to quality rows. Each link is keyed by `sha256(<scan name> + "\n" + <issue key>)` and records the row's quality ID with the issue count, total, and date that row recorded. Every cell of `quality.md`, including its IDs and statuses, remains Markdown.
+
+Both files are JSON with fixed keys and hold no source values; the example values a quality row quotes stay under the existing confirmation before `quality.md` is committed.
 
 Shared business and analytical terms live in `foundation/glossary.md`. Investigations inherit those definitions. A deliberate local meaning or departure is recorded and explained in that investigation's `brief.md`; the full glossary is not copied. Population and reporting-period choices are settings rather than competing definitions.
 
@@ -316,4 +321,4 @@ The following choices remain open and must not be silently fixed by the specific
 - backend-specific raw-data retention and ignore rules, beyond the landed-data storage rule in **Question-driven data preparation**; and
 - which releases, if any, warrant preserving original inputs for exact reruns.
 
-Result evidence files, findings files (`findings.json`), acquisition provenance files (`provenance.json`), and publication files (`publication.json`) are JSON with fixed keys written by the shipped `awb-init` helpers `awb_provenance.py` and `awb_landing.py`, and the quality links file (`foundation/quality.json`) is JSON with fixed keys written by `awb-clean`; the package manifest's serialization stays open.
+Result evidence files, acquisition provenance files (`provenance.json`), and publication files (`publication.json`) are JSON with fixed keys written by the shipped `awb-init` helpers `awb_provenance.py` and `awb_landing.py`; the package manifest's serialization stays open.
