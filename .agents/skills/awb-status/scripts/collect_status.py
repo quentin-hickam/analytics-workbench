@@ -26,6 +26,7 @@ BLOCKING = {"none", "revalidate"}
 
 
 PROBE_TIMEOUT = 10
+TIMED_OUT = f"no response within {PROBE_TIMEOUT} s"
 # The fields land() records per file as upstream, each null or a nonblank string (awb_landing.py).
 UPSTREAM_FIELDS = ("url", "etag", "last_modified", "version_id")
 
@@ -355,9 +356,18 @@ def upstream(root, probe, uncertain):
             probeable.append((entry, recorded))
     report = {"probeable_files": len(probeable) if complete else None}
     if probe:
-        opener = head_opener()
-        report.update(files=[{**entry, **probe_file(recorded, opener)} for entry, recorded in probeable],
-                      not_probeable=not_probeable, superseded=superseded, without_upstream=without)
+        opener, unresponsive, results = head_opener(), set(), []
+        for entry, recorded in probeable:
+            # One timeout per host bounds the run when a host is unreachable (VPN off, firewall).
+            host = urllib.parse.urlsplit(recorded["url"]).hostname
+            if host in unresponsive:
+                result = {"result": "unknown", "reason": f"not requested: an earlier request to {host} timed out"}
+            else:
+                result = probe_file(recorded, opener)
+                if result.get("reason") == TIMED_OUT:
+                    unresponsive.add(host)
+            results.append({**entry, **result})
+        report.update(files=results, not_probeable=not_probeable, superseded=superseded, without_upstream=without)
     return report
 
 
@@ -437,6 +447,8 @@ def probe_file(recorded, opener):
     except RedirectRefused:
         return {"result": "unknown", "reason": "redirected to a URL other than http(s), not followed"}
     except (OSError, ValueError, http.client.HTTPException) as error:
+        if isinstance(error, TimeoutError) or isinstance(getattr(error, "reason", None), TimeoutError):
+            return {"result": "unknown", "reason": TIMED_OUT}
         return {"result": "unknown", "reason": f"{type(error).__name__}: {error}"}
     compared = {}
     for name, header in (("etag", "ETag"), ("last_modified", "Last-Modified")):

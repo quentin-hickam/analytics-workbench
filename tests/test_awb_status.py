@@ -30,6 +30,7 @@
 # test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes: land()'s upstream fields drive one HEAD per probeable file; ETag wins over Last-Modified unless only the ETag changed, a weak ETag and an equal date in another form match, HTTP and network errors are unknown, and nothing is written.
 # test_out_of_range_server_date_is_compared_as_text_and_the_probe_continues: a Last-Modified the date parser overflows on falls back to text comparison, and the remaining files are still probed.
 # test_a_relanded_url_is_checked_only_in_its_latest_acquisition: after a changed upstream is landed again, only the newest acquisition of that source and URL is probed and the earlier one counts as superseded, even when the newer one records no validator.
+# test_a_host_that_times_out_is_not_requested_again: after a connect or read timeout, the host's remaining files are unknown without a request, and other hosts are still probed.
 # test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
 # test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including an upstream field land() would refuse, is named under uncertainties and makes probeable_files null, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
 # test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key is valid and counts as without upstream.
@@ -607,6 +608,22 @@ def test_a_relanded_url_is_checked_only_in_its_latest_acquisition(workbench, mon
                                         "reason": "no ETag or Last-Modified recorded"}]
     assert result["superseded"] == 2
     assert sorted(url for _, url, _ in server.requests) == [url + "data", url + "data"]
+
+
+@pytest.mark.parametrize("timeout", ["connect", "read"])
+def test_a_host_that_times_out_is_not_requested_again(workbench, monkeypatch, timeout):
+    import urllib.error
+    error = urllib.error.URLError(TimeoutError("timed out")) if timeout == "connect" else TimeoutError("timed out")
+    land_with_upstream(workbench, "batch-1", {name: {"url": f"https://{host}/{name}", "etag": '"v1"'} for name, host in
+                                              (("a.csv", "slow.test"), ("b.csv", "slow.test"), ("c.csv", "fast.test"))})
+    server = FakeServer({"https://slow.test/a.csv": error, "https://fast.test/c.csv": {"ETag": '"v1"'}})
+    serve(monkeypatch, server)
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["result"], file.get("reason")) for file in files] == [
+        ("a.csv", "unknown", f"no response within {status.PROBE_TIMEOUT} s"),
+        ("b.csv", "unknown", "not requested: an earlier request to slow.test timed out"),
+        ("c.csv", "unchanged", None)]
+    assert [url for _, url, _ in server.requests] == ["https://slow.test/a.csv", "https://fast.test/c.csv"]
 
 
 def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench, monkeypatch):
