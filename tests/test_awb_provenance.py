@@ -26,6 +26,9 @@
 # test_finding_row_reuses_state_text_and_names_check_gaps: the row keeps existing finding text, escapes pipes, names failed and unassessed checks.
 # test_cli_stale_lists_changed_results_with_their_findings: stale lists failing results with state.md rows, missing linked evidence, skips non-evidence JSON, rejects an unknown investigation.
 # test_record_evidence_records_runtime: the runtime block holds this interpreter's Python and platform and the versions of duckdb, pandas, and each requirements.txt name, null when not installed.
+# test_requirement_name_reads_names_and_direct_references: names with extras, versions, markers, or @ URL; #egg= and wheel or sdist file names of direct references, -e included; options, comments, and references naming no package give none.
+# test_runtime_records_a_wheel_url_package_and_its_drift: a requirements.txt wheel URL records its package's installed version, and a changed recorded version is a runtime mismatch.
+# test_runtime_records_missing_version_metadata_as_unknown: an installed distribution whose metadata has no Version is unknown, not null (not installed).
 # test_cli_stale_reports_runtime_mismatch_as_a_warning: a changed recorded duckdb or Python version, or no runtime block, is listed under runtime_mismatches with its findings rows, never under results, and compare_evidence still passes.
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
 # test_producing_paths_follow_the_result: run.py, the result's queries, other investigation code, src/ minus awb.py, provenance.py and packaging/, plus code_paths; other results' queries and the excluded helpers never stale it.
@@ -596,6 +599,46 @@ def test_record_evidence_records_runtime(project):
     assert packages == {"awb-fixture-absent": None, "duckdb": installed("duckdb"),
                         "pandas": installed("pandas"), "pytest": installed("pytest")}
     assert packages["pytest"] is not None
+
+
+def test_requirement_name_reads_names_and_direct_references():
+    cases = {
+        "PyTest>=7  # the runner": "pytest", "pkg[extra]==1 ; python_version < '4'": "pkg",
+        "pkg --hash=sha256:ab": "pkg", "foo (>=1.0)": "foo", "Name @ https://example.invalid/y.zip": "name",
+        "git+https://example.invalid/org/realpkg.git#egg=Real_Pkg": "real-pkg",
+        "https://example.invalid/wheels/otherpkg-1.0-py3-none-any.whl": "otherpkg",
+        "https://example.invalid/scipy-1.14.1-py3-none-any.whl#sha256=ab": "scipy",
+        "numpy-1.26.0-cp312-cp312-macosx_11_0_arm64.whl": "numpy", "./dist/foo_bar-2.0.tar.gz": "foo-bar",
+        "-e git+https://example.invalid/r.git#egg=ed": "ed", "--editable=./src/x#egg=edx": "edx",
+        "src/mypkg": None, "-e .": None, "git+https://example.invalid/r.git": None, "-r other.txt": None,
+        "--index-url https://example.invalid": None, "# comment": None, "": None,
+    }
+    assert {line: provenance.requirement_name(line) for line in cases} == cases
+
+
+def test_runtime_records_a_wheel_url_package_and_its_drift(project, capsys):
+    write(project, "requirements.txt", b"https://example.invalid/pytest-0.0.1-py3-none-any.whl\n")
+    path = record(project)
+    evidence = json.loads(path.read_text())
+    assert "https" not in evidence["runtime"]["packages"]
+    assert evidence["runtime"]["packages"]["pytest"] == installed("pytest") is not None
+    evidence["runtime"]["packages"]["pytest"] = "0.0.1-fixture"
+    path.write_text(json.dumps(evidence))
+    provenance.cli_stale(project, [])
+    assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["detail"] == (
+        f"pytest 0.0.1-fixture recorded, {installed('pytest')} now.")
+
+
+@pytest.mark.filterwarnings("ignore:Implicit None:DeprecationWarning")
+def test_runtime_records_missing_version_metadata_as_unknown(project, tmp_path, monkeypatch):
+    info = tmp_path / "site/broken_package-0.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: broken-package\n")
+    monkeypatch.syspath_prepend(str(tmp_path / "site"))
+    write(project, "requirements.txt", b"broken-package\n")
+    packages = provenance.runtime(project)["packages"]
+    assert provenance._is_unknown(packages["broken-package"])
+    assert packages["broken-package"]["unknown"].startswith("broken-package: ")
 
 
 def test_cli_stale_reports_runtime_mismatch_as_a_warning(project, capsys):

@@ -10,7 +10,9 @@ conversion_commit/files), acquisitions (path/provenance_file/status/files),
 settings (path/bytes/sha256/[result]/content), runtime (python/platform/packages), checks
 (name/outcome/detail), notes (text or null). Unknowns are {"unknown": reason}.
 runtime is the recording interpreter's Python version, system-machine platform, and the installed
-version of duckdb, pandas, and each package requirements.txt names (null when not installed).
+version of duckdb, pandas, and each package requirements.txt names (null when not installed;
+unknown when its metadata records no version). requirement_name() reads each requirements.txt line; a
+direct reference that names no package, such as a local directory, is not recorded.
 Settings are scoped: the settings file must hold a [results.<id>] table for the result; settings
 carries "result", content holds only [parameters] and that table, and the settings file is left
 out of producing_paths, so other results' tables and other top-level tables never make this
@@ -239,27 +241,63 @@ def _package(name):
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+# Archive suffixes pip installs from a path or URL: a wheel is name-version-tags, an sdist name-version.
+_ARCHIVES = (".whl", ".tar.gz", ".tgz", ".tar.bz2", ".tbz", ".tar.xz", ".txz", ".tar", ".zip")
+
+
+def requirement_name(line):
+    """The normalized package name a requirements.txt line installs, or None when it names none.
+
+    A name with optional extras, versions, markers, or `@ URL` gives that name. A direct reference,
+    alone or after -e, gives its #egg= name or its wheel or sdist file name's package; one naming no
+    package, such as a local directory or a VCS URL without #egg=, and every other option line give None.
+    """
+    line = re.sub(r"(^|\s)#.*", "", line).strip()
+    editable = re.match(r"(?:-e|--editable)(?:\s+|=)(.*)", line)
+    if editable:
+        line = editable[1].strip()
+    elif line.startswith("-"):
+        return None
+    if not line:
+        return None
+    reference = line.split(";")[0].strip()
+    match = re.match(r"([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)(?=$|\s|[\[(;@<>=!~])", reference)
+    # A bare archive file name, such as pkg-1.0-py3-none-any.whl, is a path, not a name.
+    if match and not editable and not (match.end() == len(reference) and reference.lower().endswith(_ARCHIVES)):
+        return _package(match[1])
+    egg = re.search(r"[#&]egg=([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)", reference)
+    if egg:
+        return _package(egg[1])
+    archive = reference.split("#")[0].split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+    lower = archive.lower()
+    if lower.endswith(".whl"):
+        return _package(archive.split("-")[0]) if "-" in archive else None
+    for suffix in _ARCHIVES:
+        if lower.endswith(suffix) and "-" in archive:
+            return _package(archive[:-len(suffix)].rsplit("-", 1)[0])
+    return None
+
+
 def _required(root):
     """Normalized package names requirements.txt declares; none when it is absent or unreadable."""
     try:
         lines = (root / "requirements.txt").read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return []
-    names = []
-    for line in lines:
-        match = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", line.split("#")[0])
-        if match and not line.lstrip().startswith("-"):
-            names.append(_package(match[1]))
-    return names
+    return [name for name in map(requirement_name, lines) if name]
 
 
 def _version(name):
+    """The installed version; None when not installed; unknown when its metadata is broken or has none."""
     try:
-        return importlib.metadata.version(name)
+        version = importlib.metadata.version(name)
     except importlib.metadata.PackageNotFoundError:
         return None
     except Exception as error:  # Broken metadata fails in other ways.
         return {"unknown": f"{name}: {error}"}
+    if not isinstance(version, str) or not version.strip():
+        return {"unknown": f"{name}: installed metadata records no version"}
+    return version
 
 
 def _interpreter():

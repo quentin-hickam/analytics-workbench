@@ -32,6 +32,7 @@ workbench, Python too old, or an unreadable receipt, nothing written; 2 unusable
 import argparse
 import hashlib
 import importlib
+import importlib.util
 import json
 import re
 import shutil
@@ -77,6 +78,14 @@ def _distribution(requirement):
     return requirement.split(";")[0].strip()
 
 
+def _requirement_name():
+    """The provenance helper's requirements.txt line parser, so runtime records and this check agree."""
+    spec = importlib.util.spec_from_file_location("awb_asset_provenance", SKILLS / COPIED["src/provenance.py"])
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.requirement_name
+
+
 def _copies():
     """(project path, asset path) for every copy the installed skills ship."""
     return [(path, SKILLS / asset) for path, asset in COPIED.items() if (SKILLS / asset).is_file()]
@@ -88,10 +97,8 @@ def _declared(root):
     requirements = root / "requirements.txt"
     if requirements.is_file():
         files.append("requirements.txt")
-        for line in requirements.read_text(encoding="utf-8", errors="replace").splitlines():
-            match = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", line.split("#")[0])
-            if match and not line.lstrip().startswith("-"):
-                names.add(_normalize(match.group(1)))
+        names |= {name for name in map(_requirement_name(), requirements.read_text(
+            encoding="utf-8", errors="replace").splitlines()) if name}
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
         files.append("pyproject.toml")

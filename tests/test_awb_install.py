@@ -5,7 +5,7 @@
 # test_receipt_alone_decides_earlier: a file matching its receipt entry is earlier; a file whose entry differs, or without an entry such as one installed before receipts, is customized.
 # test_package_formats_install_on_request: --package-formats installs missing formats into the receipt; without it present formats go unreported.
 # test_check_writes_nothing: --check reports missing helpers and the absent requirements file without writing.
-# test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited.
+# test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited; a wheel URL declares its package, not its scheme.
 # test_missing_packages_get_an_install_command: a package that fails to import is reported with a pip command for this interpreter.
 # test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks.
 # test_refuses_non_workbench_old_python_and_unreadable_receipt: none of these writes anything.
@@ -171,10 +171,14 @@ def test_check_writes_nothing(project, imports_ok):
 
 
 def test_existing_dependency_files_are_only_reported(project, imports_ok):
-    (project / "requirements.txt").write_text("# pinned\nPandas>=2.0  # frames\ntomli>=2\n-r more.txt\n")
+    (project / "requirements.txt").write_text("# pinned\nPandas>=2.0  # frames\ntomli>=2\n-r more.txt\n"
+                                              "https://example.invalid/duckdb-1.0-py3-none-any.whl\n")
     before = snapshot(project)
     result = installer.install(project)
     assert (project / "requirements.txt").read_bytes() == before[project / "requirements.txt"]
+    assert result["requirements"] == {"path": "requirements.txt", "status": "declared"}
+    (project / "requirements.txt").write_text("Pandas>=2.0\ntomli>=2\n")
+    result = installer.install(project)
     assert result["requirements"] == {"path": "requirements.txt", "status": "incomplete", "missing": ["duckdb"]}
     (project / "requirements.txt").unlink()
     (project / "pyproject.toml").write_text(
