@@ -19,7 +19,7 @@ Quality issue rows get the next ID, the scan's counts and examples, and the mark
 `<scan>#<key>` with its scan date. foundation/quality.json holds hashed scan links and recorded
 counts and dates, backfilled from legacy rows when absent. A baseline observation supplies both
 counts and date; otherwise the current scan does. Reopening updates the link and judgment cells,
-keeping the observation. Correction rows carry the rescan's before and after counts. A flag sets
+keeping the observation. Correction rows carry the rescan's before and after counts. A flag goes through the project's provenance helper and sets
 the finding's status to `revalidation-needed (was <status>)`, adds the reason, and updates
 `Last updated`. All versions are checked before writing: A replaces links, Active rows, and
 catalog; B writes flags; C appends corrections. Failures report completed phases and replaced
@@ -27,6 +27,7 @@ files. --dry-run prints the rows that would change and writes nothing. Prints co
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -42,7 +43,6 @@ TEMPLATES = Path(__file__).resolve().parents[2] / "awb-init/assets/workbench/fou
 ACTIVE = "## Active limitations and issues"
 CORRECTIONS = "## Correction record"
 DATASETS = "## Published datasets and views"
-FINDINGS = "## Current findings"
 
 
 class RecordError(ValueError):
@@ -140,6 +140,18 @@ def _fill(text, ids, prefixes=("S",)):
             raise RecordError(f"{{{name}}} names no issue recorded in this call or earlier")
         return match.group(0)
     return re.sub(r"\{([A-Za-z]+-?\d+)\}", replace, str(text))
+
+
+def _load_provenance(root):
+    path = root / "src/provenance.py"
+    if not path.is_file():
+        raise RecordError("src/provenance.py is missing; run awb-init repair: install_helpers.py --upgrade")
+    spec = importlib.util.spec_from_file_location("awb_clean_project_provenance", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if not hasattr(module, "flag_findings"):
+        raise RecordError("src/provenance.py predates findings.json; run awb-init repair: install_helpers.py --upgrade")
+    return module
 
 
 def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
@@ -276,7 +288,8 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     if corrections:
         table = Table(quality, CORRECTIONS, "foundation/quality.md")
         for qid, cells in corrections:
-            rows.append(table.append(dict(zip(table.columns, cells))))
+            if [_cell(c) for c in cells] not in [row for _, row in table.rows()]:
+                rows.append(table.append(dict(zip(table.columns, cells))))
         changed["foundation/quality.md"] = True
     if added or updated:
         changed["foundation/quality.md"] = True
@@ -309,34 +322,25 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
             catalog_result = f"added {entry['name']}"
         changed["foundation/catalog.md"] = True
 
-    flagged = []
+    flag_statuses, batches = {}, {}
+    provenance = _load_provenance(root) if flags else None
     for flag in flags:
-        relative = f"investigations/{flag['investigation']}/state.md"
-        lines = files.setdefault(relative, _load(root, relative))
-        table = Table(lines, FINDINGS, relative)
-        result = flag["result"]
-        evidence, status_at = table.column("Evidence"), table.column("Status")
-        reason_at = table.column("Revalidation reason or caveat")
-        matches = [(i, row) for i, row in table.rows()
-                   if f"evidence/{result}.json" in row[evidence] or f"[{result}]" in row[evidence]
-                   or row[0] == result]
-        if len(matches) != 1:
-            raise RecordError(f"{relative}: {len(matches)} findings match {result}")
-        line_index, row = matches[0]
-        status = row[status_at]
-        if not status.startswith("revalidation-needed"):
-            status = f"revalidation-needed (was {status})" if status else "revalidation-needed"
-        reason = fill(flag["reason"])
-        existing = row[reason_at] if reason_at < len(row) else ""
-        if existing:
-            reason = f"{existing}; {reason}" if reason not in existing else existing
-        rows.append(table.set(line_index, {"Status": status, "Revalidation reason or caveat": reason}))
-        for i, line in enumerate(lines):
-            if line.startswith("Last updated:"):
-                lines[i] = f"Last updated: {day}"
-                break
-        changed[relative] = True
-        flagged.append({"investigation": flag["investigation"], "result": result, "status": status})
+        batches.setdefault(flag["investigation"], []).append({"result": flag["result"], "reason": fill(flag["reason"])})
+    for investigation, batch in batches.items():
+        try:
+            preview = provenance.flag_findings(root, investigation, batch, check=True, today=day)
+        except (ValueError, OSError) as error:
+            raise RecordError(str(error)) from error
+        for flag in preview["flags"]:
+            flag_statuses[investigation, flag["result"]] = flag["status"]
+        # Keep the output shape for flags already present, without rewriting the records.
+        if preview["unchanged"]:
+            state_rows = provenance.finding_rows(root / "investigations" / investigation / "state.md")
+            for result in preview["unchanged"]:
+                status = _cells(state_rows[result][0])[2]
+                flag_statuses[investigation, result] = status
+    flagged = [{"investigation": f["investigation"], "result": f["result"],
+                "status": flag_statuses[f["investigation"], f["result"]]} for f in flags]
 
     try:
         ActiveRows(quality_active)
@@ -349,7 +353,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     for text in [*versions.values(), active_text]:
         text.encode("utf-8")
 
-    written, phases = [], []
+    written, phases, flagged_investigations = [], [], []
     def prepare(relative, text):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -373,16 +377,23 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
             for relative, partial in partials.items():
                 replace(relative, partial)
             phases.append("A")
-            for relative in changed:
-                if relative.startswith("investigations/"):
-                    replace(relative, prepare(relative, versions[relative]))
+            for investigation, batch in batches.items():
+                outcome = provenance.flag_findings(root, investigation, batch, today=day)
+                flagged_investigations.append(investigation)
+                if outcome["flags"]:
+                    written += [f"investigations/{investigation}/findings.json", f"investigations/{investigation}/state.md"]
             phases.append("B")
             if corrections:
                 relative = "foundation/quality.md"
                 replace(relative, prepare(relative, versions[relative]))
             phases.append("C")
-        except OSError as error:
-            failure = RecordError(str(error))
+        except (OSError, ValueError) as error:
+            for path in getattr(error, "replaced", []):
+                relative = Path(path).relative_to(root).as_posix()
+                if relative not in written:
+                    written.append(relative)
+            failure = RecordError(f"{error}; investigations already flagged: "
+                                  + (", ".join(flagged_investigations) or "none"))
             failure.phases, failure.written = phases, written
             raise failure from error
     result = {"quality_ids": {k: ids[k] for k in issues}, "added": added, "updated": updated,

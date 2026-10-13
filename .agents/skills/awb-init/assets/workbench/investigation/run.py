@@ -87,7 +87,7 @@ def produce_result(connection, result_id, config, parameters):
     # Settings `views` overrides detection when a result reads views its queries do not name.
     views = config.get("views") or views_read(ROOT, [HERE / query for query in queries])
     evidence = record_evidence(ROOT, NAME, result_id, views=views, settings_path=SETTINGS, checks=checks)
-    # Writes the row; a failed write removes this evidence and raises.
+    # Writes findings and renders the row; failure before findings are saved removes this evidence.
     state = record_finding(ROOT, NAME, result_id, checks, prior=prior)
     return {
         "result_id": result_id, "rows": len(frame),

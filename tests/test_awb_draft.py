@@ -1,4 +1,5 @@
 # Kept cases:
+# test_check_draft_checks_findings_drift: synchronized JSON passes, drift fails with state render in both modes, absent JSON skips, and an old helper gets an upgrade hint.
 # test_names_cover_project_records: names hold created views, sources without CTEs or table functions, settings dotted paths (not bare nested keys), and result IDs from evidence and state links; plain words, including plain investigation and package names, are left out.
 # test_toml_keys_fall_back_to_tomli_then_key_lines: without tomllib, settings keys parse with tomli (no bare nested keys); without either, table headers and key lines; display.toml then names the missing package.
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten, revised_at stamped only when it changes, other manifest fields kept; nothing is written outside the draft.
@@ -678,3 +679,27 @@ def test_copy_releases_copies_compares_and_never_overwrites(project, capsys, tmp
     assert (store / "inv/pkg/released/001/findings.md").read_text() == "changed\n"
     code, report = run(project, capsys, "copy-releases", "inv", "other")
     assert code == 1 and report["errors"] == ["no package at deliveries/inv/other"]
+
+
+@pytest.mark.parametrize("verify_only", [False, True])
+def test_check_draft_checks_findings_drift(project, verify_only):
+    draft = load(project / "src/packaging/draft.py", "draft_findings_drift")
+    assert draft.check_draft(project, "inv", "pkg")["passed"]  # no JSON: legacy tables remain readable
+    write(project, "investigations/inv/state.md", "Last updated: 2026-10-01\n" + STATE.format(status="supported", reason=""))
+    content = {"schema": "awb-findings/1", "findings": [
+        {"result": "r-009", "text": "Late orders rose in the west", "status": "supported", "prior_status": None,
+         "flag_reason": "", "notes": [], "checks_caveat": ""}]}
+    write(project, "investigations/inv/findings.json", json.dumps(content, indent=2) + "\n")
+    report = draft.check_draft(project, "inv", "pkg", verify_only=verify_only)
+    assert report["passed"] and report["errors"] == []
+    state = project / "investigations/inv/state.md"
+    state.write_text(state.read_text().replace("Late orders rose in the west", "Hand edited finding"))
+    report = draft.check_draft(project, "inv", "pkg", verify_only=verify_only)
+    assert not report["passed"]
+    assert "Hand edited finding" in " ".join(report["errors"])
+    assert "state render --investigation inv" in " ".join(report["errors"])
+    write(project, "src/provenance.py", "# old provenance helper\n")
+    report = draft.check_draft(project, "inv", "pkg", verify_only=verify_only)
+    assert not report["passed"] and "install_helpers.py --upgrade" in " ".join(report["errors"])
+    (project / "investigations/inv/findings.json").unlink()
+    assert draft.check_draft(project, "inv", "pkg", verify_only=verify_only)["passed"]

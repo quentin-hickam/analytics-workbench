@@ -62,6 +62,8 @@ python3 <skill-directory>/scripts/record_cleaning.py <project-root> <scan-name> 
 EOF
 ```
 
+Flags go through the project's `src/provenance.py` state flag helper. A helper predating `findings.json` refuses before writes; run `awb-init` repair (`install_helpers.py --upgrade`).
+
 With no affected finding, add `"findings": "none: stale listed no finding reading <view>"`. The script fills new rows' IDs, observations, counts, and markers, keeps scan links and recorded counts and dates in `foundation/quality.json`, fills flagged statuses, and turns `{S1}` into that issue's quality ID. Reopening updates judgment cells and the link; the observation stays as first written. A decision on a recorded issue the scan no longer lists uses its quality ID, such as `"Q-004"`, as the key; it revises judgment cells while keeping the observation and link. `{Q-004}` placeholders also resolve. Record shared vocabulary in the glossary yourself.
 
 Read the existing catalog row before setting any of its cells. A cell you set replaces the whole cell: give its complete new text, keeping what still holds and citing quality IDs for rationale.

@@ -37,6 +37,8 @@ Every rule holds for the complete draft:
 
 ## Revalidation caveats
 
+When `findings.json` exists, `check-draft` refuses drift in the rendered table and names `state render`; a project helper without `findings_drift` needs `awb-init` repair (`install_helpers.py --upgrade`). Flags still come from the rendered `state.md` rows.
+
 The manifest's `revalidation_flags` is `none` or one entry per finding the investigation's `state.md` currently flags (`unmatched_flags` lists the ones it lacks): `{finding, reason, represented_in, disposition}`. `finding` and `reason` are exactly as that row writes them. `represented_in` lists every place the draft represents an affected conclusion, each a short description such as `findings: <slide headline>`, `methodology: <section>`, `chart 2`, or `dataset late-closures: <column>`; or it is `none` when the draft represents none. `disposition` is one of `none`, `revalidate`, `omit`, or `release_with_caveat`: required when `represented_in` lists places, optional when it is `none`. Each represented flagged finding is listed as unresolved under findings' **Limitations and open caveats**.
 
 Each represented conclusion carries a nearby caveat unless the disposition omits it: beside claims in both narratives, in a chart specification's **Caveat:** and **Alt text:** lines in findings, or in the dataset or column description under **Supporting datasets**. Findings uses the template's **Awaiting revalidation:** prefix with a plain-language reason, on every slide where the conclusion appears.
