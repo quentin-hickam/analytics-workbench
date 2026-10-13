@@ -36,7 +36,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from quality_links import ActiveRows, QualityLinks
+from quality_links import OBJECT, OBSERVATION, ActiveRows, QualityLinks, position
 
 TEMPLATES = Path(__file__).resolve().parents[2] / "awb-init/assets/workbench/foundation"
 ACTIVE = "## Active limitations and issues"
@@ -119,7 +119,8 @@ ID = r"([A-Za-z]+-?)(\d+)"
 
 def _next_ids(table):
     """Yield new IDs continuing the table's prefix and numbering, Q-001 by default."""
-    found = [re.fullmatch(ID, cells[table.column("ID")]) for _, cells in table.rows()]
+    at = position(table.columns, "ID", 0)
+    found = [re.fullmatch(ID, cells[at]) for _, cells in table.rows()]
     found = [m for m in found if m]
     prefix = Counter(m.group(1) for m in found).most_common(1)[0][0] if found else "Q-"
     width = max((len(m.group(2)) for m in found), default=3)
@@ -165,9 +166,11 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     active = Table(quality, ACTIVE, "foundation/quality.md")
     issues = decisions.get("issues") or {}
     by_qid = {}
+    id_at, object_at, observation_at = (position(active.columns, "ID", 0), position(active.columns, OBJECT, 1),
+                                        position(active.columns, OBSERVATION, 2))
     for line_index, cells in active.rows():
-        if re.fullmatch(ID, cells[active.column("ID")]):
-            by_qid.setdefault(cells[active.column("ID")], []).append(line_index)
+        if re.fullmatch(ID, cells[id_at]):
+            by_qid.setdefault(cells[id_at], []).append(line_index)
     revised = {k: by_qid[k] for k in issues if k not in by_id and k in by_qid}
     unknown = sorted(set(issues) - set(by_id) - set(revised))
     if unknown:
@@ -176,7 +179,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
         if len(lines) > 1:
             raise RecordError(f"foundation/quality.md: {len(lines)} active rows have the ID {qid}")
         revised[qid] = lines[0]
-        observation = _cells(quality[lines[0]])[active.column("Observation and evidence")]
+        observation = _cells(quality[lines[0]])[observation_at]
         markers = set(re.findall(r"`([^`\s#]+)#[^`]+`", observation))
         if markers and scan["name"] not in markers:
             raise RecordError(f"{qid} is recorded from scan {', '.join(sorted(markers))}, "
@@ -253,8 +256,8 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                            + f"; `{marker}{issue['key']}` scanned {observed_at[issue_id]}")
             column = f", column `{issue['column']}`" if issue["column"] else ""
             obj = decision.get("object") or f"{target['kind']} `{subject}`{column}"
-            rows.append(active.append({"ID": qid, "Affected source or catalog object": fill(obj),
-                                       "Observation and evidence": observation, **values}))
+            rows.append(active.append({active.columns[id_at]: qid, active.columns[object_at]: fill(obj),
+                                       active.columns[observation_at]: observation, **values}))
             added.append(qid)
         if issue is not None:
             links.set(scan["name"], issue["key"], qid, issue["count"], issue["of"], observed_at[issue_id])

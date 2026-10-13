@@ -654,7 +654,7 @@ def _recorded(root, name, keys=None):
         link = links.get(name, key)
         if link:
             cells = links.active.rows[link["id"]][1]
-            found[key] = {"id": link["id"], "status": cells[links.active.column("Status")],
+            found[key] = {"id": link["id"], "status": cells[links.active.status_at],
                           "count": link["recorded_count"]}
     return found
 

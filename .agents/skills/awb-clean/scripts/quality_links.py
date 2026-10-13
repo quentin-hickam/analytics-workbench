@@ -10,6 +10,14 @@ ACTIVE = "## Active limitations and issues"
 MARKER = re.compile(r"`([A-Za-z0-9][A-Za-z0-9._@-]*)#([^`]+)`")
 
 
+OBJECT, OBSERVATION = "Affected source or catalog object", "Observation and evidence"
+
+
+def position(columns, name, default):
+    """The column headed `name`, else the template's position for it."""
+    return columns.index(name) if name in columns else default
+
+
 def link_key(scan, key):
     return hashlib.sha256(f"{scan}\n{key}".encode("utf-8")).hexdigest()
 
@@ -19,7 +27,11 @@ def _cells(line):
 
 
 class ActiveRows:
-    """Index Active rows by Markdown ID, refusing ambiguous IDs or scan markers."""
+    """Index Active rows by ID, refusing ambiguous IDs or scan markers.
+
+    A column is found by its template header, else by the template's position, so renamed and
+    reordered tables both work.
+    """
 
     def __init__(self, lines):
         self.rows, self.markers, self.columns = {}, {}, []
@@ -34,14 +46,13 @@ class ActiveRows:
         if index + 1 >= len(lines):
             return
         self.columns = _cells(lines[index])
-        id_at = self.column("ID")
+        self.id_at, self.observation_at = position(self.columns, "ID", 0), position(self.columns, OBSERVATION, 2)
+        self.status_at = position(self.columns, "Status", len(self.columns) - 1)
         for i in range(index + 2, len(lines)):
             if not lines[i].strip().startswith("|"):
                 break
             cells = _cells(lines[i])
-            if id_at >= len(cells):
-                raise ValueError("foundation/quality.md: row lacks its ID cell")
-            qid = cells[id_at]
+            qid = cells[self.id_at] if self.id_at < len(cells) else ""
             if qid in self.rows:
                 raise ValueError(f"foundation/quality.md: duplicate ID {qid}")
             self.rows[qid] = (i, cells, lines[i].replace("\\|", "|"))
@@ -49,11 +60,6 @@ class ActiveRows:
                 if (scan, key) in self.markers:
                     raise ValueError(f"foundation/quality.md: marker `{scan}#{key}` appears on two rows")
                 self.markers[scan, key] = qid
-
-    def column(self, name):
-        if name not in self.columns:
-            raise ValueError(f"foundation/quality.md: table lacks the column '{name}'")
-        return self.columns.index(name)
 
 
 class QualityLinks:
@@ -68,7 +74,8 @@ class QualityLinks:
             self.document = {"schema": SCHEMA, "links": {}}
             for (scan, key), qid in self.active.markers.items():
                 _, cells, _ = self.active.rows[qid]
-                observation = cells[self.active.column("Observation and evidence")]
+                at = self.active.observation_at
+                observation = cells[at] if at < len(cells) else ""
                 count = re.search(r"\((\d+) of (\d+)\)", observation)
                 observed = re.search(r"`" + re.escape(f"{scan}#{key}")
                                      + r"`(?: scanned| in \[scan\]\([^)]*\)) (\d{4}-\d{2}-\d{2})",

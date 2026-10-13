@@ -21,6 +21,7 @@
 # test_quality_id_revision_keeps_link_and_placeholder_rules: a quality-ID revision keeps the link's original counts and date, works with reordered Markdown columns, and keeps known-prefix placeholder refusals.
 # test_record_ignores_unvalidated_recorded_placeholders: saved scan metadata cannot supply a placeholder ID without a validated link; the refusal writes nothing.
 # test_quality_id_duplicate_keeps_revision_error: duplicate quality-ID revisions retain their specific refusal message and write nothing.
+# test_renamed_quality_headers_keep_template_positions: with the ID, object, and observation headers renamed, a new row is written in the template's positions and scans read it as recorded.
 
 import hashlib
 import importlib.util
@@ -629,3 +630,17 @@ def test_record_failure_reports_phases_and_retries_once(tmp_path, capsys, monkey
     text = state.read_text()
     assert text.count("Q-001 merges labels") == 1 and "Prior caveat; Q-001 merges labels" in text
     assert "revalidation-needed (was supported)" in text
+
+
+def test_renamed_quality_headers_keep_template_positions(tmp_path):
+    scan_file(tmp_path, delta=False)
+    path = quality_file(tmp_path)
+    path.write_text(path.read_text().replace("| ID | Affected source or catalog object | Observation and evidence |",
+                                              "| Key | Object | Evidence |", 1))
+    result = recorder.record(tmp_path, "orders", {"issues": {"S2": judgment()}}, today=TODAY)
+    assert result["added"] == ["Q-007"]
+    row = next(line for line in path.read_text().splitlines() if line.startswith("| Q-007 |"))
+    cells = recorder._cells(row)
+    assert "`orders#sentinel:age:9999`" in cells[2] and cells[-1] == "open"
+    assert scanner._recorded(tmp_path, "orders", ["sentinel:age:9999"]) == {
+        "sentinel:age:9999": {"id": "Q-007", "status": "open", "count": 2}}
