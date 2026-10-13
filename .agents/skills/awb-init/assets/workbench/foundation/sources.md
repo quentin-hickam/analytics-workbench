@@ -13,7 +13,7 @@ Status is one of:
 - `acquired`: at least one acquisition has completed and the source has not been rejected.
 - `rejected`: assessed as irrelevant or unfit; give the reason under Relevance and fitness and stop preparing it.
 
-Begin Relevance and fitness with the assessment's basis: `from documentation` when documentation or a schema settled it, otherwise `from landed records`. In Notes, record each reference it relied on as `reference:` and its link, such as `reference: [codebook](references/<source-id>/codebook.pdf)`, or for material kept out of Git its retained location and `sha256 <checksum>`.
+Begin Relevance and fitness with the assessment's basis: `from documentation` when documentation or a schema settled it, otherwise `from landed records`. In Notes, record each reference it relied on as a clause beginning `reference:`, followed by its link, such as `reference: [codebook](references/<source-id>/codebook.pdf)`, or, for material kept out of Git, by its retained location and full SHA-256, such as `reference: /secure/<source-id>/manual.pdf, sha256 <checksum>`. `awb-status` reads these two forms.
 
 Note failed acquisition attempts in the source's Notes. Use stable source IDs in the catalog, quality record, and investigation records.
 

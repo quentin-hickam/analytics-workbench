@@ -27,7 +27,7 @@ Keep the report to one screen, in this order. Report the collector's values as g
 - **Other investigations.** Each name and `last_updated`.
 - **Packages.** For each: `revised_at`, `latest_release` with `released_at`, and `draft_vs_release`. Then what blocks its next release: `confirmed_without_disposition`, flags the manifest records whose disposition is still `none` or `revalidate`; `unmatched_flags`, flagged findings the manifest does not record with the same finding and reason, which awb-package resolves; and `rerun_since_draft`, represented results rerun after the draft was last revised, so the package still shows their earlier run.
 - **Storage.** `landed_data_storage` and `release_storage` by `availability`, and `acquisitions.without_retained_copy` as acquisitions held only in this checkout. `unrecorded` or `unreachable` is a risk once acquisitions or releases exist. `none chosen` is the user's recorded decision: report that this checkout holds the only copy. For `unknown`, check through the project's established access method or say "not verified".
-- **Sources.** `sources.documentation_without_reference`: sources assessed from documentation whose Notes link no reference.
+- **Sources.** `sources.documentation_without_reference`: sources assessed from documentation whose Notes record no reference in a form `foundation/sources.md` gives.
 - **Uncertainties** the targeted lookups left unresolved.
 
 ## You can ask for

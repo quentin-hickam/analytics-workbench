@@ -70,7 +70,7 @@ That preserves the next numbered release, frozen from then on, once you have cho
 
 Landed source data gets the same treatment. `data/raw/` is also excluded from Git, and a landed original often cannot be fetched again, so before the first acquisition is landed the agent asks where landed originals are kept outside the checkout, records it on the project README's `Landed data is kept at` line, and copies each completed landing there when the location is reachable. `awb-status` reports landed data that exists only in the checkout.
 
-The third-party documentation a source assessment relies on, such as a data dictionary or codebook, is committed under `foundation/references/<source-id>/`; material whose license or confidentiality bars committing it stays outside the checkout, recorded by location and checksum. `awb-status` reports a source assessed from documentation with no linked reference.
+The third-party documentation a source assessment relies on, such as a data dictionary or codebook, is committed under `foundation/references/<source-id>/`; material whose license or confidentiality bars committing it stays outside the checkout, recorded by location and checksum. `awb-status` reports a source assessed from documentation with no recorded reference.
 
 After installing a newer release of the skills, bring each existing workbench up to date with `awb-init`'s repair:
 
