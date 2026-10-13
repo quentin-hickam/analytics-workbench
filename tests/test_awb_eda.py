@@ -7,18 +7,21 @@
 # test_correlations_pair_only_the_measure_and_print_the_top_five: the measure correlates with each other numeric column, not itself; at most five with |r| >= 0.5 print.
 # test_removed_options_are_rejected: --json, --settings, and --min-r are gone.
 # test_variance_explained_matches_hand_computation: eta squared and group means for a two-group measure.
-# test_options_override_settings_and_unfit_settings_are_skipped: options replace settings; unfit settings print as not applied; a bad option or empty scope exits 2.
+# test_options_override_settings_and_unfit_settings_are_skipped: options replace settings; a comma-separated --key checks one composite key; unfit settings print as not applied; a bad option or empty scope exits 2.
 # test_publication_path_with_label_and_float_columns_keep_distributions: publication directory scanned to a labelled file; unique floats are not keys.
 # test_scan_file_name_follows_the_documented_rule: the examples in references/scan-file.md hold; directory names join up to the last two path parts; characters outside ASCII [A-Za-z0-9._-] become "-", edges are trimmed, "dataset" fills an empty name; colliding names share one file; --help names no <dataset>-<label> file.
 # test_label_must_be_a_simple_name_and_an_empty_one_cannot_overwrite_the_unlabelled_scan: --label "" and other names outside the rule exit 2 before anything is written; "x." is accepted.
+# test_comma_separated_key_is_one_declared_key_from_option_or_settings: --key "a, b" and settings key "a,b" or ["a,b"] give the columns of one key, as awb-clean's composite grain; a repeated --key adds columns; an empty --key exits 2; an absent option column reports key-missing; a settings key with an absent column or none is skipped. Runs without duckdb.
 # test_template_settings_take_the_period_from_parameters_and_name_unset_choices: [parameters] start/end scope the period; unset scope, measure, and dimensions print the options to pass.
 # test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one: --show walks keys and named list items without rescanning; a miss exits 2 listing what is there.
 
+from datetime import date
 import importlib.util
 import inspect
 import json
 from pathlib import Path
 import shutil
+import sqlite3
 
 import pytest
 
@@ -220,6 +223,14 @@ def test_options_override_settings_and_unfit_settings_are_skipped(shifts, capsys
     assert [(f["sql"], f["source"]) for f in scan["scope"]["applied"]][:2] == [
         ("region = 'EU'", "option"), ('CAST("shift_date" AS DATE) >= CAST(\'2025-07-01\' AS DATE)', "option")]
     assert scan["measure"]["expression"] == "overtime_hours * 60"
+    # A comma-separated --key, as awb-clean takes a composite grain, replaces the settings key.
+    status, _, _ = run(shifts, "shifts", "--no-scope", "--key", "shift_id, shift_date", "--label", "grain",
+                       capsys=capsys)
+    assert status == 0
+    scan = json.loads((shifts / "investigations/overtime/exploration/eda/shifts-grain.json").read_text())
+    assert scan["grain"]["declared_key"]["columns"] == ["shift_id", "shift_date"]
+    assert "missing_columns" not in scan["grain"]["declared_key"]
+    assert ("key-violated", "shift_id, shift_date") in [(a["kind"], a["column"]) for a in scan["anomalies"]]
     # The settings filter references columns the sites view lacks, so it stops the scan.
     status, _, err = run(shifts, "sites", capsys=capsys)
     assert status == 2 and "--no-scope" in err
@@ -294,6 +305,62 @@ def test_label_must_be_a_simple_name_and_an_empty_one_cannot_overwrite_the_unlab
     assert [p.name for p in saved.parent.iterdir()] == ["shifts.json"]
     assert eda.parse([str(root), "shifts", "--label", "x."]).label == "x."
     assert eda.parse([str(root), "shifts"]).label is None
+
+
+def test_comma_separated_key_is_one_declared_key_from_option_or_settings(tmp_path, capsys):
+    root = str(tmp_path)
+    for args in (["--key", "shift_id, shift_date"], ["--key", "shift_id", "--key", "shift_date"],
+                 ["--key", "shift_id,", "--key", " shift_date "]):
+        assert eda.parse([root, "shifts", *args]).key == ["shift_id", "shift_date"]
+    assert eda.parse([root, "shifts", "--key", "a,b", "--key", "c"]).key == ["a", "b", "c"]
+    assert eda.parse([root, "shifts"]).key is None
+    for args in (["--key="], ["--key", " , "], ["--key", "shift_id", "--key", ""]):
+        with pytest.raises(SystemExit) as exit:
+            eda.parse([root, "shifts", *args])
+        assert exit.value.code == 2 and "--key must name at least one column" in capsys.readouterr().err
+
+    names = ["shift_id", "shift_date", "site"]
+    for value in ("shift_id, shift_date", ["shift_id,shift_date"], ["shift_id", "shift_date"]):
+        chosen, unused = eda.resolve_settings({"eda": {"shifts": {"key": value}}}, "shifts")
+        skipped = []
+        assert eda.declared_key(chosen, names, skipped) == ["shift_id", "shift_date"] and skipped == []
+        assert chosen["key"][1] == "eda.shifts.key" and unused == []
+    # A settings key that does not fit this dataset is skipped, not checked.
+    for value, reason in (("shift_id,day", "key columns not in this dataset: day"), ("", "names no key column")):
+        skipped = []
+        assert eda.declared_key({"key": (value, "eda.key")}, names, skipped) == []
+        assert skipped == [{"setting": "eda.key", "reason": reason}]
+    # An option is kept, so a column absent here reports key-missing.
+    skipped = []
+    option = eda.parse([root, "shifts", "--key", "shift_id,day"]).key
+    assert eda.declared_key({"key": (option, "option")}, names, skipped) == ["shift_id", "day"] and skipped == []
+
+    # grain() on a stand-in table: the composite key checks as one key of two columns.
+    connection = sqlite3.connect(":memory:")
+    connection.execute("CREATE TABLE __eda (row_id INTEGER, shift_id INTEGER, shift_date TEXT)")
+    connection.executemany("INSERT INTO __eda VALUES (?, ?, ?)",
+                           [(1, 1, "d1"), (2, 1, "d2"), (3, 2, "d1"), (4, 2, "d1")])
+    columns = [{"name": "row_id", "type": "BIGINT", "kind": "numeric", "unique": True, "distinct": 4,
+                "nulls": 0, "null_rate": 0},
+               {"name": "shift_id", "type": "BIGINT", "kind": "numeric", "unique": False, "distinct": 2,
+                "nulls": 0, "null_rate": 0},
+               {"name": "shift_date", "type": "VARCHAR", "kind": "text", "unique": False, "distinct": 2,
+                "nulls": 0, "null_rate": 0}]
+    names = [c["name"] for c in columns]
+
+    def scan_with(key):
+        key = eda.declared_key({"key": (key, "option")}, names, [])
+        scan = {"rows": 4, "columns": columns, "null_patterns": None, "measure": None,
+                "grain": eda.grain(connection, columns, 4, key)}
+        return scan["grain"]["declared_key"], [(a["kind"], a["column"]) for a in eda.anomalies(scan, date(2026, 1, 1))]
+
+    declared, found = scan_with(eda.parse([root, "shifts", "--key", "shift_id, shift_date"]).key)
+    assert declared == {"columns": ["shift_id", "shift_date"], "duplicate_keys": 1, "rows_in_duplicate_keys": 2,
+                        "rows_with_null_key": 0}
+    assert found == [("key-violated", "shift_id, shift_date")]
+    declared, found = scan_with(eda.parse([root, "shifts", "--key", "shift_id,day"]).key)
+    assert declared == {"columns": ["shift_id", "day"], "missing_columns": ["day"]}
+    assert found == [("key-missing", "shift_id, day")]
 
 TEMPLATE = """[parameters]
 start = 2025-07-01

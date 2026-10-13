@@ -137,6 +137,28 @@ def as_list(value):
     return [str(item) for item in value] if isinstance(value, (list, tuple)) else [str(value)]
 
 
+def key_columns(value):
+    """The columns of the one declared key. Each --key value or settings item may hold several
+    comma-separated columns, so a composite grain copied from the catalog checks as one key."""
+    return [column.strip() for item in as_list(value) for column in item.split(",") if column.strip()]
+
+
+def declared_key(chosen, names, skipped):
+    """The declared key's columns. An option keeps a column absent here, so the scan reports
+    key-missing; a settings key that does not fit this dataset is skipped, since one settings file
+    serves several datasets."""
+    if "key" not in chosen:
+        return []
+    value, source = chosen["key"]
+    key = key_columns(value)
+    absent = [k for k in key if k not in names]
+    if source != "option" and (absent or not key):
+        skipped.append({"setting": source, "reason": f"key columns not in this dataset: {', '.join(absent)}"
+                        if absent else "names no key column"})
+        return []
+    return key
+
+
 def open_session(root):
     path = root / "src/preparation/landing.py"
     if not path.is_file():
@@ -659,11 +681,7 @@ def scan_dataset(root, dataset, options):
                           if c["kind"] in {"text", "boolean"} and 2 <= c["distinct"] <= 20
                           and (c["null_rate"] or 0) < 0.5][:5]
         scope["not_set"] = not_set(chosen, options, measure, dimensions)
-        key = as_list(chosen["key"][0]) if "key" in chosen else []
-        if key and chosen["key"][1] != "option" and any(k not in names for k in key):
-            scope["skipped"].append({"setting": chosen["key"][1],
-                                     "reason": f"key columns not in this dataset: {', '.join(k for k in key if k not in names)}"})
-            key = []
+        key = declared_key(chosen, names, scope["skipped"])
         scan = {
             "format": FORMAT,
             "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -877,9 +895,10 @@ SETTINGS_HELP = """settings: the scan reads the investigation's settings.toml. E
 from the first of [eda.<dataset>], [eda], [scope], and the top level; period_start and period_end
 then fall back to [parameters] start and end, the period run.py uses. Keys: where (predicate or
 list, joined with AND), date_column, period_start, period_end (inclusive dates), measure (numeric
-column or expression; a boolean gives a rate), dimensions (list), key (list), period. Options
-replace settings. A setting that does not fit the dataset prints as `not applied` with its reason;
-an unconfigured scope or measure prints as `not set` with the options to pass.
+column or expression; a boolean gives a rate), dimensions (list), key (the grain's columns, as a
+comma-separated string or a list), period. Options replace settings. A setting that does not fit
+the dataset prints as `not applied` with its reason; an unconfigured scope or measure prints as
+`not set` with the options to pass.
 
 --show PATH: dot-separated keys into the saved scan, where a list item is named by its name,
 dimension, or kind, or by index: columns.site.top, measure.by_dimension.site.values,
@@ -905,7 +924,10 @@ def parse(argv):
     parser.add_argument("--dimension", action="append", help="grouping column or SQL expression; repeatable; "
                         "default with a measure: up to five text or boolean columns with 2 to 20 values, "
                         "marked auto")
-    parser.add_argument("--key", action="append", help="declared grain column to check; repeatable")
+    parser.add_argument("--key", action="append", metavar="COLS", help="declared grain to check, from the "
+                        "dataset's catalog row (the view's row for a canonical view): one comma-separated "
+                        "value for a composite grain, as awb-clean takes it; a repeated --key adds columns "
+                        "to the same key")
     parser.add_argument("--period", choices=PERIODS, help="period for coverage and trends; default by date span: "
                         "day up to 92 days, month up to 10 years, year beyond")
     parser.add_argument("--top", type=int, default=10, help="top values kept per column, and groups compared "
@@ -919,6 +941,10 @@ def parse(argv):
     options = parser.parse_args(argv)
     if options.label is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", options.label):
         parser.error("--label must be a simple name: an ASCII letter or digit, then any of [A-Za-z0-9._-]")
+    if options.key is not None:
+        if not all(key_columns(value) for value in options.key):
+            parser.error("--key must name at least one column")
+        options.key = key_columns(options.key)
     if options.top < 1 or options.min_group < 1:
         parser.error("--top and --min-group must be positive")
     return options

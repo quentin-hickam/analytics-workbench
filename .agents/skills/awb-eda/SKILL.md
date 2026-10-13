@@ -28,7 +28,7 @@ One scan per dataset and scope is final, and its printed summary is the result. 
 Check in order:
 
 - **Scope.** Are the rows before and after the filters plausible? Does a `not set` or `not applied` line, or an unread settings key, mean the population differs from the brief's? If so, scan again with the missing options and say so.
-- **Grain.** Do the candidate keys match the catalog's grain? Check duplicates and any declared-key violation.
+- **Grain.** Do the candidate keys match the grain on the dataset's catalog row (the view's row for a canonical view)? To check that grain, pass it as `--key`, as one comma-separated value for a composite grain. Check duplicates and any declared-key violation.
 - **Anomalies.** Give every printed anomaly one disposition: a shared data problem, confirmed by a follow-up query or the source register before the step 5 hand-off; a local analytical matter; or dismissed with a reason. The `route` column is the scan's guess, not the disposition.
 - **Relationships.** Read variance explained, the trend, the measure's correlations, and **contrary** groups. Variance explained rises with group count, and a trend where a high-variance dimension's shares shift may be mix rather than change. Name candidate explanations and keep every contrary pattern.
 
