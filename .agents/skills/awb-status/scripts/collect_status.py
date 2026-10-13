@@ -178,6 +178,10 @@ def collect(root):
     sources = read(sources_path)
     acquisitions = table(section(sources, "Acquisitions", sources_path), ["Acquisition ID", "Source ID", "Acquired at", "Source version, query, or request", "Landed directory", "Retained copy", "Integrity or completeness check", "Restrictions", "Notes"], sources_path)
     result["acquisitions"] = None if acquisitions is None else {"count": len(acquisitions), "without_retained_copy": sum(not row["Retained copy"] or row["Retained copy"].strip("`").strip().lower() == "this checkout only" for row in acquisitions)}
+    registered = table(section(sources, "Sources", sources_path), ["Source ID", "System or provider", "Contents and grain", "Owner or contact", "Acquisition method", "Relevance and fitness", "Status", "Notes"], sources_path)
+    # The register names an assessment's basis in Relevance and fitness and each reference it relied on as `reference:` in Notes.
+    result["sources"] = None if registered is None else {"count": len(registered), "documentation_without_reference": [
+        row["Source ID"] for row in registered if re.search(r"\bfrom documentation\b", row["Relevance and fitness"], re.I) and not re.search(r"\breference:", row["Notes"], re.I)]}
     result["landed_data_storage"] = storage(field(readme, "Landed data is kept at", readme_path, optional=True))
     result["release_storage"] = storage(field(readme, "Released packages are kept at", readme_path, optional=True))
 

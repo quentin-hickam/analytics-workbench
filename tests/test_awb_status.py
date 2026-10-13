@@ -17,6 +17,7 @@
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
+# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness says from documentation and whose Notes hold no reference: is listed; a committed or retained reference, or a landed-records basis, is not; an unsupported Sources table is null with an uncertainty.
 # test_absent_project_and_unsafe_active_pointer: a missing project is not a workbench; an unsafe pointer is an uncertainty.
 # test_standard_active_state_pointer: link, path, and backticked pointer forms resolve to the investigation.
 # test_other_state_reader_stops_before_conclusions: another investigation's state is read only up to its first section.
@@ -72,6 +73,7 @@ def test_collect_standard_records_without_writes_or_other_conclusions(workbench)
     assert result["other_investigations"] == [{"name": "pricing", "last_updated": "2026-08-01"}]
     assert "PRIVATE CONCLUSION" not in json.dumps(result)
     assert result["acquisitions"] == {"count": 0, "without_retained_copy": 0}
+    assert result["sources"] == {"count": 0, "documentation_without_reference": []}
     assert result["packages"] == []
     assert result["uncertainties"] == []
     assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in workbench.rglob("*") if p.is_file()}
@@ -82,7 +84,7 @@ def test_missing_and_custom_tables_are_unknown_not_zero(workbench):
     (workbench / "foundation/sources.md").unlink()
     result = status.collect(workbench)
     assert result["active"]["counts"] is None
-    assert result["acquisitions"] is None
+    assert result["acquisitions"] is None and result["sources"] is None
     assert {u["path"] for u in result["uncertainties"]} == {"investigations/churn/state.md", "foundation/sources.md"}
 
 
@@ -289,6 +291,24 @@ def test_acquisitions_and_storage_risks(workbench):
     assert result["acquisitions"] == {"count": 2, "without_retained_copy": 2}
     assert result["landed_data_storage"] == {"location": "none chosen", "availability": "none chosen"}
     assert result["release_storage"]["availability"] == "unrecorded"
+
+
+def test_sources_assessed_from_documentation_need_a_reference(workbench):
+    path = workbench / "foundation/sources.md"
+    rows = "\n".join([
+        "| hr | HRIS | employees, one row each | HR ops | export | From documentation: has tenure | candidate | owner confirmed |",
+        "| pay | Payroll | pay lines | Finance | API | from documentation; fit | acquired | reference: [dictionary](references/pay/dictionary.pdf) |",
+        "| vendor | Vendor feed | events | Vendor | SFTP | from documentation | candidate | Reference: /secure/vendor/manual.pdf, sha256 ab12 |",
+        "| crm | CRM | accounts | Sales | export | from landed records: sparse | rejected | |"])
+    path.write_text(path.read_text().replace("| --- | --- | --- | --- | --- | --- | --- | --- |\n", "| --- | --- | --- | --- | --- | --- | --- | --- |\n" + rows + "\n", 1))
+    result = status.collect(workbench)
+    assert result["sources"] == {"count": 4, "documentation_without_reference": ["hr"]}
+    assert result["acquisitions"] == {"count": 0, "without_retained_copy": 0}
+    assert result["uncertainties"] == []
+    path.write_text(path.read_text().replace("| Relevance and fitness |", "| Fitness |", 1))
+    result = status.collect(workbench)
+    assert result["sources"] is None
+    assert [u["path"] for u in result["uncertainties"]] == ["foundation/sources.md"]
 
 
 def test_absent_project_and_unsafe_active_pointer(tmp_path, workbench):
