@@ -28,7 +28,7 @@
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
 # test_producing_paths_follow_the_result: run.py, the result's queries, other investigation code, src/ minus awb.py, provenance.py and packaging/, plus code_paths; other results' queries and the excluded helpers never stale it.
 # test_settings_fall_back_to_tomli: without tomllib, settings parse through tomli, and without either the content is unknown.
-# test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: the run.py template records a result and writes its state.md row, keeps it on an identical rerun, and fails without evidence when state.md is missing; a run failing after the table is rewritten leaves no evidence.
+# test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: prior_result checks the state before unlink; the run.py template records a result and writes its state.md row, keeps it on an identical rerun, and refuses before touching evidence when state.md is missing or drifts; a run failing after the table is rewritten leaves no evidence.
 
 import hashlib
 import importlib.util
@@ -550,10 +550,18 @@ def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(p
     again = subprocess.run(run, capture_output=True, text=True)
     assert json.loads(again.stdout)["state"] == "kept"
     assert (project / "investigations/inv/state.md").read_bytes() == state
+    saved_table = (project / "investigations/inv/results/r1.csv").read_bytes()
+    saved_evidence = (project / "investigations/inv/evidence/r1.json").read_bytes()
+    write(project, "investigations/inv/state.md", state.replace(b"<state the finding from r1>", b"Hand edit"))
+    drifted = subprocess.run(run, capture_output=True, text=True)
+    assert drifted.returncode == 1 and "state render --investigation inv" in drifted.stdout
+    assert (project / "investigations/inv/results/r1.csv").read_bytes() == saved_table
+    assert (project / "investigations/inv/evidence/r1.json").read_bytes() == saved_evidence
     (project / "investigations/inv/state.md").unlink()
     unwritten = subprocess.run(run, capture_output=True, text=True)
     assert unwritten.returncode == 1 and "state.md does not exist" in json.loads(unwritten.stdout)["error"]
-    assert not (project / "investigations/inv/evidence/r1.json").exists()
+    assert (project / "investigations/inv/evidence/r1.json").exists()  # prior_result refuses before unlink
+    write(project, "investigations/inv/state.md", state)
     write(project, "investigations/inv/settings.toml", SETTINGS.replace(
         b"[results.r1]\n", b'[results.r1]\nviews = ["../outside.sql"]\n'))
     failed = subprocess.run(run, capture_output=True, text=True)

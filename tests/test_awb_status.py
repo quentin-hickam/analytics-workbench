@@ -1,4 +1,5 @@
 # Kept cases:
+# test_status_reads_rendered_table_with_json_present: status keeps reading the rendered Markdown even if JSON disagrees, and writes nothing.
 # test_collect_standard_records_without_writes_or_other_conclusions: counts normalize flagged statuses; nothing is written; other investigations give only name and date.
 # test_missing_and_custom_tables_are_unknown_not_zero: an unsupported state table or absent sources record is null with an uncertainty, never zero.
 # test_malformed_table_does_not_count_partial_rows: one malformed findings row makes the counts unknown.
@@ -440,3 +441,13 @@ def test_absent_storage_remains_actionable_when_acquisitions_and_releases_exist(
     assert result["landed_data_storage"]["availability"] == "unrecorded"
     assert result["release_storage"]["availability"] == "unrecorded"
     assert result["uncertainties"] == []
+
+
+def test_status_reads_rendered_table_with_json_present(workbench):
+    write(workbench, "investigations/churn/findings.json", json.dumps({"schema": "awb-findings/1", "findings": []}))
+    before = {p: p.read_bytes() for p in workbench.rglob("*") if p.is_file()}
+    result = status.collect(workbench)
+    assert result["active"]["counts"] == {"revalidation-needed": 1, "supported": 1}
+    assert {"finding": "Renewal lag", "status": "revalidation-needed",
+            "reason": "Q-004 correction"} in result["active"]["findings"]
+    assert before == {p: p.read_bytes() for p in workbench.rglob("*") if p.is_file()}

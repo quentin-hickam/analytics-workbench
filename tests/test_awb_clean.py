@@ -22,6 +22,9 @@
 # test_quality_id_revision_keeps_link_and_placeholder_rules: a quality-ID revision keeps the link's original counts and date, works with reordered Markdown columns, and keeps known-prefix placeholder refusals.
 # test_record_ignores_unvalidated_recorded_placeholders: saved scan metadata cannot supply a placeholder ID when no row carries the issue's marker; the refusal writes nothing.
 # test_quality_id_duplicate_keeps_revision_error: duplicate quality-ID revisions retain their specific refusal message and write nothing.
+# test_old_provenance_refuses_before_writes: a project helper without flag_findings refuses with an awb-init repair hint, including dry runs.
+# test_flag_retry_keeps_original_quality_id: a phase B failure followed by another issue allocation keeps the original Q-ID on retry and records its correction exactly once.
+# test_dry_run_prints_flag_rows_and_writes_nothing: a dry run lists the rendered flagged rows beside the quality rows and writes nothing.
 # test_renamed_quality_headers_keep_template_positions: with every Active header renamed, a new row is written in the template's positions, scans read it as recorded, and a reopen sets its status.
 # test_quality_json_is_written_only_when_links_change: a call that changes no link leaves quality.json absent or byte-identical.
 # test_unlinked_marker_row_is_relinked_and_short_rows_read: with quality.json present, a row carrying the marker but no link is relinked from its prose; a short row reads as blank status.
@@ -231,6 +234,8 @@ def scan_file(root, *, delta=True):
 
 
 def state_file(root):
+    shutil.copyfile(ROOT / ".agents/skills/awb-init/assets/awb_provenance.py",
+                    write(root, "src/provenance.py", ""))
     text = (TEMPLATES / "investigation/state.md").read_text().replace("<!-- use an ISO date -->", "2026-09-01")
     text = text.replace("| --- | --- | --- | --- |\n",
                         "| --- | --- | --- | --- |\n| Sales leads growth | [r-003](evidence/r-003.json) | supported | |\n"
@@ -287,9 +292,9 @@ def test_record_writes_quality_catalog_and_flags_in_one_call(tmp_path, monkeypat
     }, today=TODAY)
     assert result["quality_ids"] == {"S1": "Q-001", "S2": "Q-002"} and result["corrections"] == ["Q-001"]
     assert sorted(result["written"]) == ["foundation/catalog.md", "foundation/quality.json", "foundation/quality.md",
-                                         "investigations/churn/state.md"]
+                                         "investigations/churn/findings.json", "investigations/churn/state.md"]
     assert replaced == ["foundation/quality.json", "foundation/quality.md", "foundation/catalog.md",
-                        "investigations/churn/state.md", "foundation/quality.md"]
+                        "investigations/churn/findings.json", "investigations/churn/state.md", "foundation/quality.md"]
     links = json.loads((tmp_path / "foundation/quality.json").read_text())
     assert links["schema"] == "awb-quality-links/1" and len(links["links"]) == 2
     assert {link["id"] for link in links["links"].values()} == {"Q-001", "Q-002"}
@@ -348,7 +353,7 @@ def test_record_checks_everything_before_writing(tmp_path, capsys, monkeypatch):
     decision = {"issues": {"S1": {"impact": "x", "treatment": "y", "status": "corrected",
                                   "correction": "Trim", "change": "view"}},
                 "flags": [{"investigation": "churn", "result": "r-999", "reason": "{S1}"}]}
-    with pytest.raises(recorder.RecordError, match="0 findings match r-999"):
+    with pytest.raises(recorder.RecordError, match="no findings row links r-999"):
         recorder.record(tmp_path, "orders", decision, today=TODAY)
     del decision["flags"]
     with pytest.raises(recorder.RecordError, match="findings text"):
@@ -623,7 +628,7 @@ def test_record_failure_reports_phases_and_retries_once(tmp_path, capsys, monkey
         nonlocal quality_replaces
         if Path(target).name == "quality.md":
             quality_replaces += 1
-        if ((failed_phase == "B" and Path(target) == state)
+        if ((failed_phase == "B" and Path(target).name == "findings.json")
                 or (failed_phase == "C" and Path(target).name == "quality.md" and quality_replaces == 2)):
             raise PermissionError("injected write failure")
         original(source, target)
@@ -634,7 +639,7 @@ def test_record_failure_reports_phases_and_retries_once(tmp_path, capsys, monkey
     assert out["phases"] == (["A"] if failed_phase == "B" else ["A", "B"])
     expected = ["foundation/quality.json", "foundation/quality.md"]
     if failed_phase == "C":
-        expected.append("investigations/churn/state.md")
+        expected += ["investigations/churn/findings.json", "investigations/churn/state.md"]
     assert out["written"] == expected
     quality = (tmp_path / "foundation/quality.md").read_text()
     assert "| Q-001 |" in quality and "| Q-001 | Trim |" not in quality
@@ -665,6 +670,43 @@ def test_renamed_quality_headers_keep_template_positions(tmp_path):
     assert recorder.record(tmp_path, "orders", {"issues": {"S2": {"status": "corrected"}}})["updated"] == ["Q-007"]
     assert recorder._cells(next(line for line in path.read_text().splitlines()
                                 if line.startswith("| Q-007 |")))[-1] == "corrected"
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_old_provenance_refuses_before_writes(tmp_path, dry_run):
+    scan_file(tmp_path)
+    state_file(tmp_path)
+    write(tmp_path, "src/provenance.py", "# old helper\n")
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    with pytest.raises(recorder.RecordError, match="awb-init repair: install_helpers.py --upgrade"):
+        recorder.record(tmp_path, "orders", {"issues": {"S1": judgment()},
+                        "flags": [{"investigation": "churn", "result": "r-003", "reason": "{S1}"}]}, dry_run=dry_run)
+    assert before == {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+
+
+def test_flag_retry_keeps_original_quality_id(tmp_path, monkeypatch):
+    scan_file(tmp_path)
+    state = state_file(tmp_path)
+    helper = recorder._load_provenance(tmp_path)
+    real_flag = helper.flag_findings
+    def fail(root, investigation, flags, **kwargs):
+        if kwargs.get("check"):
+            return real_flag(root, investigation, flags, **kwargs)
+        raise ValueError("injected flag failure")
+    monkeypatch.setattr(helper, "flag_findings", fail)
+    monkeypatch.setattr(recorder, "_load_provenance", lambda root: helper)
+    decisions = {"issues": {"S1": {**judgment(), "correction": "Trim", "change": "view"}},
+                 "flags": [{"investigation": "churn", "result": "r-003", "reason": "{S1} merges labels"}]}
+    with pytest.raises(recorder.RecordError, match="investigations already flagged: none") as failure:
+        recorder.record(tmp_path, "orders", decisions, today=TODAY)
+    assert failure.value.phases == ["A"]
+    assert recorder.record(tmp_path, "orders", {"issues": {"S2": judgment()}}, today=TODAY)["added"] == ["Q-002"]
+    monkeypatch.setattr(helper, "flag_findings", real_flag)
+    result = recorder.record(tmp_path, "orders", decisions, today=TODAY)
+    assert result["quality_ids"] == {"S1": "Q-001"} and result["added"] == []
+    assert "Q-001 merges labels" in state.read_text() and "Q-002 merges labels" not in state.read_text()
+    recorder.record(tmp_path, "orders", decisions, today=TODAY)
+    assert (tmp_path / "foundation/quality.md").read_text().count("| Q-001 | Trim |") == 1
+
 
 
 def test_quality_json_is_written_only_when_links_change(tmp_path):
@@ -701,3 +743,15 @@ def test_failed_phase_a_leaves_no_partial_files(tmp_path, monkeypatch):
         recorder.record(tmp_path, "orders", {"issues": {"S1": judgment()}}, today=TODAY)
     assert failure.value.phases == [] and failure.value.written == []
     assert not list(tmp_path.rglob("*.tmp"))
+
+
+def test_dry_run_prints_flag_rows_and_writes_nothing(tmp_path):
+    scan_file(tmp_path)
+    state_file(tmp_path)
+    write(tmp_path, "src/provenance.py", (ROOT / ".agents/skills/awb-init/assets/awb_provenance.py").read_text())
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    result = recorder.record(tmp_path, "orders", {"issues": {"S1": judgment()},
+                             "flags": [{"investigation": "churn", "result": "r-003", "reason": "{S1} merges labels"}]},
+                             dry_run=True, today=TODAY)
+    assert "| Sales leads growth | [r-003](evidence/r-003.json) | revalidation-needed (was supported) | Q-001 merges labels |" in result["rows"]
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before

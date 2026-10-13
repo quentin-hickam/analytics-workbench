@@ -2,13 +2,23 @@
 # test_show_prints_brief_and_state_verbatim: resume prints brief.md and state.md verbatim with a warning per row whose evidence is missing, writes nothing, honours --investigation, lists investigations when none is active, and exits 2 for an unknown one.
 # test_run_rows_are_added_kept_and_refreshed: a new result gets a placeholder row; an exact-match rerun leaves state.md and history.md untouched; a changed rerun keeps wording and notes, demotes supported with a history entry, keeps superseded, and demotes provisional silently.
 # test_flagged_rerun_always_writes_history: a flagged row returns to provisional, or superseded when it was, with a reset caveat and a history entry naming the flag reason and the exact match.
-# test_failed_state_write_removes_new_evidence: a malformed state.md or a failed state replacement removes the new evidence; a failed history replacement raises with the prior row after state.md was replaced.
+# test_failed_state_write_removes_new_evidence: evidence is removed only before findings.json is replaced; a failed state replacement names render, and failed history names missing prior rows.
 # test_signals_wait_for_the_replacements: SIGINT during the replacements reaches the previous handler only after it is restored.
 # test_evidence_commit_cites_verified_commits: HEAD's full SHA for committed unchanged evidence; otherwise the last commit holding a version, verified, or uncommitted.
 # test_finding_guards_and_history: missing rows or evidence, stale or unexplained promotion, flagged promotion or caveat, and reserved caveat prefixes are refused; --reason is required exactly when history is due; one entry per call; provisional rewording is silent; no-ops write nothing.
 # test_issues_and_next_edit_lists_in_one_call: adds and drops resolve against the original list, ambiguous or missing drops exit 2 listing candidates, only list lines change, numbering continues.
 # test_switch_keeps_the_pointer_form: switch rewrites only the pointer in its link, path, backticked or slug form, which collect_status accepts, and prints the view; a missing state.md exits 1 and a customized pointer is refused.
 # test_malformed_records_write_nothing: a missing or repeated Last updated or section, a wrong header, a short row, two rows for one result, or a missing history file exit 1 and leave every file byte for byte.
+# test_legacy_findings_migrate: migration keeps row order, unescapes pipes, separates checks, preserves flagged reasons and unknown prior status, and reports padding normalization, including unpadded escaped trailing pipes.
+# test_rows_valid_before_findings_json_migrate_with_normalizations: ./ links, titled links, trailing text, status case, empty segments, and segment order migrate and are reported as normalizations.
+# test_unmigratable_legacy_row_refuses_before_a_rerun_removes_evidence: prior_result migrates in memory, so an unknown status refuses before evidence or results change; list edits still work.
+# test_migration_refuses_lossy_rows: an unknown status, multiple evidence links, or no link refuse before writing and name the row.
+# test_writers_refuse_drift: every findings writer lists each differing row and the render/finding/flag remedies, the flag one conditional; prior_result protects existing evidence and results.
+# test_render_restores_rows: render discards hand edits, preserves the rest of state, and refuses without JSON.
+# test_compound_flag_reasons_are_idempotent: a reason containing '; ' is recognized as present and writes nothing.
+# test_lists_above_the_table_leave_it_intact: issues and next steps placed before Current findings are edited without touching the table, and later findings writes keep it whole.
+# test_render_recovers_malformed_and_stray_rows: render replaces an unescaped pipe, a duplicate row, and a row cut off below the table, which writers refuse as drift.
+# test_flags_validate_and_are_idempotent: batches validate before writes, check migrates only in memory, duplicate reasons keep all records byte-identical, and rerun drops notes and flag reasons with legacy history wording.
 # test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helpers write.
 
 from datetime import date
@@ -101,7 +111,7 @@ def produce(project, result_id, table="n\n1\n", checks=OK):
 
 
 def set_row(project, result_id, finding=None, row_status=None, caveat=None):
-    """Edit a row as an agent or record_cleaning would."""
+    """Set up a synchronized row, bypassing guards only in the fixture."""
     lines = text(project, STATE).splitlines(keepends=True)
     for i, line in enumerate(lines):
         if f"[{result_id}](evidence/{result_id}.json)" in line:
@@ -109,6 +119,13 @@ def set_row(project, result_id, finding=None, row_status=None, caveat=None):
             cells = [finding or cells[0], cells[1], row_status or cells[2], cells[3] if caveat is None else caveat]
             lines[i] = "| " + " | ".join(cells) + " |\n"
     (project / STATE).write_text("".join(lines))
+    path = project / INV / "findings.json"
+    if path.exists():
+        content = json.loads(path.read_text())
+        row = next(line for line in lines if f"[{result_id}](evidence/{result_id}.json)" in line)
+        entry = provenance._migrate_row(provenance._cells(row), STATE)
+        content["findings"] = [entry if e["result"] == result_id else e for e in content["findings"]]
+        path.write_text(json.dumps(content, indent=2) + "\n")
 
 
 def run(project, capsys, *argv):
@@ -197,17 +214,6 @@ def test_failed_state_write_removes_new_evidence(project, monkeypatch):
     produce(project, "r1")
     set_row(project, "r1", "Churn rose", "supported")
     evidence = project / f"{INV}/evidence/r1.json"
-    (project / STATE).write_text(text(project, STATE).replace("| Finding | Evidence |", "| Result | Evidence |"))
-    before = snapshot(project)
-    with pytest.raises(provenance.StateError, match="Current findings needs a table"):
-        produce(project, "r1", table="n\n2\n")
-    assert not evidence.exists()
-    assert {k: v for k, v in snapshot(project).items() if "/results/" not in k} == \
-        {k: v for k, v in before.items() if "/results/" not in k and k != f"{INV}/evidence/r1.json"}
-
-    (project / STATE).write_text(text(project, STATE).replace("| Result | Evidence |", "| Finding | Evidence |"))
-    produce(project, "r1", table="n\n5\n")
-    set_row(project, "r1", row_status="supported")
     real, calls = os.replace, []
 
     def failing(source, target):
@@ -217,16 +223,25 @@ def test_failed_state_write_removes_new_evidence(project, monkeypatch):
         return real(source, target)
 
     monkeypatch.setattr(provenance.os, "replace", failing)
-    fail_on, before = "state.md", snapshot(project)
-    with pytest.raises(provenance.StateError, match="state.md not written"):
-        produce(project, "r1", table="n\n6\n")
+    fail_on, before = "findings.json", snapshot(project)
+    with pytest.raises(provenance.StateError, match="findings.json not written"):
+        produce(project, "r1", table="n\n2\n")
     assert not evidence.exists() and text(project, STATE).encode() == before[STATE]
+    assert text(project, f"{INV}/findings.json").encode() == before[f"{INV}/findings.json"]
+    fail_on = "state.md"
+    with pytest.raises(provenance.StateError, match="table is behind.*state render --investigation churn"):
+        produce(project, "r1", table="n\n3\n")
+    assert evidence.exists() and text(project, STATE).encode() == before[STATE]
+    assert calls[-3:] == ["r1.json", "findings.json", "state.md"]
     assert not [p for p in (project / INV).iterdir() if p.name.endswith(".tmp")]
+    fail_on = None
+    provenance.render_findings(project, "churn")
+    set_row(project, "r1", row_status="supported")
     fail_on = "history.md"
     with pytest.raises(provenance.StateError, match=r"history.md not written .*prior rows it lacks: \| Churn"):
-        produce(project, "r1", table="n\n7\n")
+        produce(project, "r1", table="n\n4\n")
     assert evidence.exists() and "| provisional |" in text(project, STATE)
-    assert calls[-2:] == ["state.md", "history.md"]
+    assert calls[-3:] == ["findings.json", "state.md", "history.md"]
 
 
 def test_signals_wait_for_the_replacements():
@@ -425,3 +440,188 @@ def test_parsers_read_written_files(project, capsys):
     assert sorted(found) == ["r1", "r2", "r3"] and all(len(rows) == 1 for rows in found.values())
     assert found["r2"] == ["| <state the finding from r2> | [r2](evidence/r2.json) | provisional | "
                            "failed checks: columns; not assessed: joins |"]
+
+
+def legacy_rows(project, rows):
+    state = project / STATE
+    state.write_text(text(project, STATE).replace("| --- | --- | --- | --- |\n",
+                                                "| --- | --- | --- | --- |\n" + "\n".join(rows) + "\n", 1))
+
+
+def test_legacy_findings_migrate(project):
+    rows = [r"| Legacy \| finding | [r1](evidence/r1.json) | supported | failed checks: columns; note one; note two |",
+            "| Flagged | [r2](evidence/r2.json) | revalidation-needed (was supported) | not assessed: joins; old note; Q-004 correction |",
+            "| Bare | [r3](evidence/r3.json) | revalidation-needed | Q-005 correction |",
+            r"| Compact | [r4](evidence/r4.json) | provisional | note \| |"]
+    legacy_rows(project, [rows[0].replace("| Legacy", "|   Legacy"), *rows[1:3],
+                          r"|Compact|[r4](evidence/r4.json)|provisional|note \||"])
+    before = snapshot(project)
+    assert provenance.findings_drift(project, "churn") == []
+    provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-006"}], check=True)
+    assert snapshot(project) == before
+    result = provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-006"}])
+    assert len(result["normalizations"]) == 2
+    content = json.loads(text(project, f"{INV}/findings.json"))
+    assert content["schema"] == "awb-findings/1"
+    first, flagged, bare, compact = content["findings"]
+    assert first == {"result": "r1", "text": "Legacy | finding", "status": "revalidation-needed",
+                     "prior_status": "supported", "flag_reason": "Q-006", "notes": ["note one", "note two"],
+                     "checks_caveat": "failed checks: columns"}
+    assert flagged["prior_status"] == "supported" and flagged["notes"] == []
+    assert flagged["flag_reason"] == "old note; Q-004 correction"
+    assert bare["prior_status"] is None and bare["flag_reason"] == "Q-005 correction"
+    assert compact["notes"] == ["note |"]
+    assert all(row in text(project, STATE) for row in rows[1:])
+    assert (r"| Legacy \| finding | [r1](evidence/r1.json) | revalidation-needed (was supported) | "
+            "failed checks: columns; note one; note two; Q-006 |") in text(project, STATE)
+    assert provenance.findings_drift(project, "churn") == []
+
+
+def test_rows_valid_before_findings_json_migrate_with_normalizations(project):
+    legacy_rows(project, ["| Dotted | [r1](./evidence/r1.json) | Supported | note; failed checks: x |",
+                          "| Titled | [Result 2](evidence/r2.json) see notes | provisional | a; ; b |"])
+    result = provenance.flag_findings(project, "churn", [{"result": "r2", "reason": "Q-004"}])
+    assert [n["disk"] for n in result["normalizations"]] == [
+        "| Dotted | [r1](./evidence/r1.json) | Supported | note; failed checks: x |",
+        "| Titled | [Result 2](evidence/r2.json) see notes | provisional | a; ; b |"]
+    first, second = json.loads(text(project, f"{INV}/findings.json"))["findings"]
+    assert (first["status"], first["checks_caveat"], first["notes"]) == ("supported", "failed checks: x", ["note"])
+    assert (second["notes"], second["flag_reason"]) == (["a", "b"], "Q-004")
+    assert "| Dotted | [r1](evidence/r1.json) | supported | failed checks: x; note |" in text(project, STATE)
+    assert provenance.findings_drift(project, "churn") == []
+
+
+def test_unmigratable_legacy_row_refuses_before_a_rerun_removes_evidence(project):
+    produce(project, "r1")
+    (project / INV / "findings.json").unlink()
+    set_row(project, "r1", row_status="maybe")
+    before = snapshot(project)
+    with pytest.raises(provenance.StateError, match="unknown status"):
+        produce(project, "r1", table="n\n2\n")
+    assert snapshot(project) == before
+    assert provenance.edit_list(project, "churn", "next", add=["Fix r1's status"])["added"] == ["Fix r1's status"]
+
+
+@pytest.mark.parametrize("row, message", [
+    ("| Odd | [r1](evidence/r1.json) | maybe | |", "unknown status"),
+    ("| Multiple | [r1](evidence/r1.json) [r2](evidence/r2.json) | supported | |", "exactly one evidence"),
+    ("| Unlinked | none | provisional | |", "exactly one evidence"),
+])
+def test_migration_refuses_lossy_rows(project, row, message):
+    legacy_rows(project, [row])
+    before = snapshot(project)
+    with pytest.raises(provenance.StateError, match=message) as failure:
+        provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-004"}], check=True)
+    assert row in str(failure.value) and snapshot(project) == before
+
+
+@pytest.mark.parametrize("writer", ["record", "update", "flag", "prior"])
+def test_writers_refuse_drift(project, writer):
+    produce(project, "r1")
+    produce(project, "r2")
+    state = project / STATE
+    state.write_text(state.read_text().replace("| provisional | |", "| revalidation-needed (was provisional) | Q-004 |", 1)
+                     .replace("<state the finding from r2>", "Hand edited finding"))
+    before = snapshot(project)
+    with pytest.raises(provenance.StateError, match="findings drift") as failure:
+        if writer == "record":
+            provenance.record_finding(project, "churn", "r1", OK)
+        elif writer == "update":
+            provenance.update_findings(project, "churn", ["r1"], text="New finding")
+        elif writer == "flag":
+            provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-005"}])
+        else:
+            produce(project, "r1", table="n\n99\n")
+    message = str(failure.value)
+    assert "Q-004" in message and "Hand edited finding" in message
+    assert "state render --investigation churn" in message and "state finding" in message
+    assert 'state flag --investigation churn, stdin: [{"result": "r1", "reason": "Q-004"}]' in message
+    assert "if this flag was added by hand" in message
+    if writer == "record":  # This call represents a newly recorded evidence file.
+        before.pop(f"{INV}/evidence/r1.json")
+    assert snapshot(project) == before
+
+
+def test_render_restores_rows(project, capsys):
+    before = snapshot(project)
+    code, _, err = run(project, capsys, "render")
+    assert code == 1 and "nothing to render; the next state write migrates the table" in err
+    assert snapshot(project) == before
+    produce(project, "r1")
+    original = text(project, STATE)
+    (project / STATE).write_text(original.replace("<state the finding from r1>", "Hand edit")
+                                .replace("## Next steps", "A handwritten note.\n\n## Next steps"))
+    drift = provenance.findings_drift(project, "churn")
+    assert drift == [{"result": "r1", "disk": "| Hand edit | [r1](evidence/r1.json) | provisional | |",
+                      "rendered": "| <state the finding from r1> | [r1](evidence/r1.json) | provisional | |"}]
+    json_before = text(project, f"{INV}/findings.json")
+    code, out, _ = run(project, capsys, "render")
+    assert code == 0 and out == "discarded: " + drift[0]["disk"] + "\n"
+    assert text(project, STATE) == original.replace("## Next steps", "A handwritten note.\n\n## Next steps")
+    assert text(project, f"{INV}/findings.json") == json_before
+    assert provenance.findings_drift(project, "churn") == []
+
+
+def test_flags_validate_and_are_idempotent(project, capsys, monkeypatch):
+    produce(project, "r1", checks=GAPS)
+    provenance.update_findings(project, "churn", ["r1"], caveat="old note | detail")
+    flags = [{"result": "r1", "reason": "Q-004 correction"}]
+    before = snapshot(project)
+    with pytest.raises(provenance.StateError, match="r9"):
+        provenance.flag_findings(project, "churn", flags + [{"result": "r9", "reason": "Q-005"}])
+    assert snapshot(project) == before
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(json.dumps(flags)))
+    code, out, _ = run(project, capsys, "flag", "--check")
+    assert code == 0 and json.loads(out)["flags"] == [{"result": "r1", "status": "revalidation-needed (was provisional)"}]
+    assert snapshot(project) == before
+    provenance.flag_findings(project, "churn", flags)
+    before = snapshot(project)
+    assert provenance.flag_findings(project, "churn", flags, today="2099-01-01") == {
+        "flags": [], "unchanged": ["r1"], "rows": []}
+    assert snapshot(project) == before
+    provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-005"}])
+    entry = json.loads(text(project, f"{INV}/findings.json"))["findings"][0]
+    assert entry["flag_reason"] == "Q-004 correction; Q-005" and entry["prior_status"] == "provisional"
+    produce(project, "r1", checks=GAPS)
+    entry = json.loads(text(project, f"{INV}/findings.json"))["findings"][0]
+    assert entry["notes"] == [] and entry["flag_reason"] == "" and entry["prior_status"] is None
+    assert "flag reason: old note | detail; Q-004 correction; Q-005" in text(project, HISTORY)
+
+
+def test_compound_flag_reasons_are_idempotent(project):
+    produce(project, "r1")
+    flags = [{"result": "r1", "reason": "Q-004 merges labels; affects counts"}]
+    provenance.flag_findings(project, "churn", flags)
+    before = snapshot(project)
+    assert provenance.flag_findings(project, "churn", flags)["unchanged"] == ["r1"]
+    assert snapshot(project) == before
+
+
+def test_lists_above_the_table_leave_it_intact(project):
+    produce(project, "r1")
+    state = text(project, STATE)
+    lists = state[state.index("## Unresolved issues"):]
+    (project / STATE).write_text(state.replace(lists, "").replace("## Current findings", lists + "\n## Current findings"))
+    assert provenance.edit_list(project, "churn", "issues", add=["Gap in Q3"])["added"] == ["Gap in Q3"]
+    assert provenance.edit_list(project, "churn", "next", add=["Check Q3"])["added"] == ["Check Q3"]
+    produce(project, "r2")
+    assert sorted(provenance.finding_rows(project / STATE)) == ["r1", "r2"]
+    assert text(project, STATE).count("| --- | --- | --- | --- |") == 1
+    assert provenance.findings_drift(project, "churn") == []
+
+
+def test_render_recovers_malformed_and_stray_rows(project, capsys):
+    produce(project, "r1")
+    produce(project, "r2")
+    original = text(project, STATE)
+    row2 = "| <state the finding from r2> | [r2](evidence/r2.json) | provisional | |"
+    damaged = original.replace("<state the finding from r1>", "a | b").replace(row2, row2 + "\n" + row2)
+    damaged = damaged.replace("## Unresolved issues", "\n" + row2 + "\n\n## Unresolved issues")
+    (project / STATE).write_text(damaged)
+    with pytest.raises(provenance.StateError):
+        provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-004"}])
+    code, out, _ = run(project, capsys, "render")
+    assert code == 0 and "a | b" in out
+    assert text(project, STATE) == original.replace("## Unresolved issues", "\n\n## Unresolved issues")
+    assert all(len(rows) == 1 for rows in provenance.finding_rows(project / STATE).values())
+    assert provenance.findings_drift(project, "churn") == []
