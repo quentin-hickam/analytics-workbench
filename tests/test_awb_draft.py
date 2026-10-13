@@ -23,7 +23,7 @@
 # test_export_display_stub_names_each_gap_once: missing display names on chart and dataset paths give one quoted [columns] line each, deduplicated, a dotted column kept as one key; a blank name gets its own error and no stub line, so the stub pastes as valid TOML.
 # test_release_refuses_failed_check_or_pending_disposition: a failing verify, an unmatched flag, or a none/revalidate disposition creates no release; a missing or unknown disposition or malformed places fail the check's flag_entries; represented_in none needs no disposition.
 # test_release_reports_fields_for_the_report: datasets, dispositions marked new against the prior release's manifest (unknown when it is unreadable), provenance gaps, checkout-only acquisitions, and a clean local verify.
-# test_release_manifest_lists_runtime_per_result: export copies each represented result's runtime block into its results entry, unknown when the evidence has none, and the release manifest keeps them.
+# test_release_manifest_lists_runtime_per_result: export copies each represented result's runtime block into its results entry, unknown when the evidence has none or a null one, as stale reads it, and the release manifest keeps them.
 # test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy compared.
 # test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
@@ -658,6 +658,10 @@ def test_release_manifest_lists_runtime_per_result(project, capsys):
     assert code == 0 and report["provenance_gaps"] == [
         {"field": "results[1].runtime", "reason": "evidence lacks runtime"}]
     assert manifest(project, "released/002")["results"][1]["runtime"] == {"unknown": "evidence lacks runtime"}
+    second["runtime"] = None
+    (evidence / "r-002.json").write_text(json.dumps(second))
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    assert manifest(project, "draft")["results"][1]["runtime"] == {"unknown": "evidence lacks runtime"}
 
 
 def test_release_numbers_stamps_and_copies_to_storage(project, capsys, tmp_path_factory):

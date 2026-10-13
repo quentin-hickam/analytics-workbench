@@ -1046,8 +1046,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     record["export_checks"] = [e for e in entries if e] or "none"
     # Every represented result with its evidence, serialized or not, so status can see a later rerun,
     # and the runtime that evidence recorded.
-    record["results"] = [{"result_id": r, "evidence": evidence_paths[r],
-                          "runtime": evidence[r].get("runtime", {"unknown": "evidence lacks runtime"})}
+    record["results"] = [{"result_id": r, "evidence": evidence_paths[r], "runtime": _runtime(evidence[r])}
                          for r in represented]
     fields = producing_state(evidence)
     fields["packaging_commit"], fields["packaging_uncommitted_changes"] = packaging_state(root)
@@ -1171,6 +1170,14 @@ def release_dispositions(record: dict, prior) -> list[dict]:
                      "represented_in": flag["represented_in"], "disposition": flag.get("disposition"),
                      "new": None if prior is False else key(flag) not in before})
     return rows
+
+
+def _runtime(evidence):
+    """The evidence's runtime block, or unknown when it records none; stale tests the same shape."""
+    runtime = evidence.get("runtime")
+    if isinstance(runtime, dict) and isinstance(runtime.get("packages"), dict):
+        return runtime
+    return {"unknown": "evidence lacks runtime"}
 
 
 def provenance_gaps(record: dict) -> list[dict]:
