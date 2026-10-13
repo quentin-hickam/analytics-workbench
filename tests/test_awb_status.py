@@ -29,6 +29,7 @@
 # test_absent_storage_remains_actionable_when_acquisitions_and_releases_exist: absent lines read unrecorded alongside acquisitions and releases.
 # test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes: land()'s upstream fields drive one HEAD per probeable file; ETag wins over Last-Modified unless only the ETag changed, a weak ETag and an equal date in another form match, HTTP and network errors are unknown, and nothing is written.
 # test_out_of_range_server_date_is_compared_as_text_and_the_probe_continues: a Last-Modified the date parser overflows on falls back to text comparison, and the remaining files are still probed.
+# test_a_relanded_url_is_checked_only_in_its_latest_acquisition: after a changed upstream is landed again, only the newest acquisition of that source and URL is probed and the earlier one counts as superseded, even when the newer one records no validator.
 # test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
 # test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including an upstream field land() would refuse, is named under uncertainties and makes probeable_files null, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
 # test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key is valid and counts as without upstream.
@@ -567,6 +568,7 @@ def test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_w
         {**file, "path": "bare.csv", "reason": "no ETag or Last-Modified recorded"},
         {**file, "path": "s3.csv", "reason": "no HTTP URL recorded"},
     ]
+    assert result["superseded"] == 0
     assert result["without_upstream"] == 1
 
 
@@ -581,6 +583,32 @@ def test_out_of_range_server_date_is_compared_as_text_and_the_probe_continues(wo
         ("a.csv", "changed", "Tue, 13 Oct 9999999999 08:00:00 GMT"), ("b.csv", "unchanged", None)]
 
 
+def test_a_relanded_url_is_checked_only_in_its_latest_acquisition(workbench, monkeypatch):
+    times = iter(f"2026-10-13T08:00:0{second}+02:00" for second in range(10))
+    monkeypatch.setattr(landing, "_timestamp", lambda: next(times))
+    url = "https://example.test/"
+    land_with_upstream(workbench, "batch-1", {"data.csv": {"url": url + "data", "etag": '"v1"'},
+                                              "page.csv": {"url": url + "page", "etag": '"p1"'}})
+    land_with_upstream(workbench, "batch-1", {"data.csv": {"url": url + "data", "etag": '"v1"'}}, source="mirror")
+    server = FakeServer({url + "data": {"ETag": '"v2"'}, url + "page": {"ETag": '"p2"'}})
+    serve(monkeypatch, server)
+    changed = status.collect(workbench, probe_upstream=True)["upstream"]
+    assert [(f["source"], f["path"], f["result"]) for f in changed["files"]] == [
+        ("api", "data.csv", "changed"), ("api", "page.csv", "changed"), ("mirror", "data.csv", "changed")]
+    # Land again as the re-land request row says; page.csv is now recorded without a validator.
+    land_with_upstream(workbench, "batch-2", {"data.csv": {"url": url + "data", "etag": '"v2"'},
+                                              "page.csv": {"url": url + "page"}})
+    server.requests.clear()
+    result = status.collect(workbench, probe_upstream=True)["upstream"]
+    assert result["probeable_files"] == 2
+    assert [(f["source"], f["acquisition_id"], f["path"], f["result"]) for f in result["files"]] == [
+        ("api", "batch-2", "data.csv", "unchanged"), ("mirror", "batch-1", "data.csv", "changed")]
+    assert result["not_probeable"] == [{"source": "api", "acquisition_id": "batch-2", "path": "page.csv",
+                                        "reason": "no ETag or Last-Modified recorded"}]
+    assert result["superseded"] == 2
+    assert sorted(url for _, url, _ in server.requests) == [url + "data", url + "data"]
+
+
 def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench, monkeypatch):
     monkeypatch.setattr(status, "head_opener", refuse_network)
     assert status.collect(workbench)["upstream"] == {"probeable_files": 0}
@@ -593,17 +621,21 @@ def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench
     ("[1, 2]", "Malformed acquisition provenance: not a JSON object"),
     ("{", "Cannot read acquisition provenance: JSONDecodeError"),
     ("{}", "Malformed acquisition provenance: status is not complete"),
-    ('{"status": "complete", "files": {}}', "Malformed acquisition provenance: files is not a list"),
-    ('{"status": "complete", "files": [{"path": 7, "upstream": null}]}',
+    ('{"status": "complete", "files": []}',
+     "Malformed acquisition provenance: completed_at is not an ISO timestamp with a UTC offset"),
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00", "files": []}',
+     "Malformed acquisition provenance: completed_at is not an ISO timestamp with a UTC offset"),
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": {}}', "Malformed acquisition provenance: files is not a list"),
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [{"path": 7, "upstream": null}]}',
      "Malformed acquisition provenance: a file entry has no path"),
-    ('{"status": "complete", "files": ["a.csv"]}', "Malformed acquisition provenance: a file entry has no path"),
-    ('{"status": "complete", "files": [{"path": "a.csv", "upstream": "https://example.test/a"}]}',
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": ["a.csv"]}', "Malformed acquisition provenance: a file entry has no path"),
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [{"path": "a.csv", "upstream": "https://example.test/a"}]}',
      "Malformed acquisition provenance: a file's upstream is not an object or null"),
-    ('{"status": "complete", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "lastModified": "x"}}]}',
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "lastModified": "x"}}]}',
      "Malformed acquisition provenance: a file's upstream has a field other than url, etag, last_modified, version_id"),
-    ('{"status": "complete", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "etag": 7}}]}',
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "etag": 7}}]}',
      "Malformed acquisition provenance: a file's upstream field is not null or a nonblank string"),
-    ('{"status": "complete", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "etag": " "}}]}',
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "etag": " "}}]}',
      "Malformed acquisition provenance: a file's upstream field is not null or a nonblank string"),
     (None, "Missing acquisition provenance"),
 ])
@@ -621,13 +653,14 @@ def test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown(wo
     assert result["upstream"] == {
         "probeable_files": None,
         "files": [{"source": "api", "acquisition_id": "batch-1", "path": "a.csv", "result": "unchanged", "compared": "etag"}],
-        "not_probeable": [], "without_upstream": 0}
+        "not_probeable": [], "superseded": 0, "without_upstream": 0}
 
 
 def test_provenance_without_upstream_keys_counts_as_without_upstream(workbench, monkeypatch):
     monkeypatch.setattr(status, "head_opener", refuse_network)
     write(workbench, "data/raw/api/old/provenance.json", json.dumps(
-        {"status": "complete", "files": [{"path": "a.csv", "bytes": 1, "sha256": "0", "records": None}]}))
+        {"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00",
+         "files": [{"path": "a.csv", "bytes": 1, "sha256": "0", "records": None}]}))
     result = status.collect(workbench)
     assert result["uncertainties"] == [] and result["upstream"] == {"probeable_files": 0}
 

@@ -2,9 +2,9 @@
 
 Run with Python 3.10+: collect_status.py [PROJECT_ROOT] [--probe-upstream]. Emits compact JSON;
 uncertainties identify records requiring targeted agent interpretation. Only --probe-upstream
-touches the network: one HEAD request per landed file whose provenance.json records an HTTP URL
-and an ETag or Last-Modified, comparing those validators, and a redirect is followed only to an
-http(s) URL and only as another HEAD request. It writes nothing.
+touches the network: HEAD requests for the landed files upstream() selects, comparing their recorded
+validators, and a redirect is followed only to an http(s) URL and only as another HEAD request.
+It writes nothing.
 """
 
 import argparse
@@ -304,10 +304,13 @@ def collect(root, *, probe_upstream=False):
 def upstream(root, probe, uncertain):
     """Count landed files a HEAD request can check; with probe, check each and report the rest.
 
-    probeable_files is null when an acquisition directory or provenance.json could not be read;
-    an uncertainty names each one, and the files that were read are still counted and probed.
+    Only the latest acquisition of a source to record a URL is checked, by completed_at: a file of
+    an earlier acquisition of the same source and URL counts as superseded, since landing again is
+    how a changed upstream is taken up. probeable_files is null when an acquisition directory or
+    provenance.json could not be read; an uncertainty names each one, and the files that were read
+    are still counted and probed.
     """
-    probeable, not_probeable, without, complete = [], [], 0, True
+    recorded_files, latest, without, complete = [], {}, 0, True
 
     def directories(path):
         nonlocal complete
@@ -324,34 +327,43 @@ def upstream(root, probe, uncertain):
         for directory in directories(source):
             if directory.name.endswith(".partial"):
                 continue
-            path = directory / "provenance.json"
-            files = acquisition_files(path, uncertain)
-            if files is None:
+            acquisition = acquisition_files(directory / "provenance.json", uncertain)
+            if acquisition is None:
                 complete = False
                 continue
+            completed_at, files = acquisition
             for file in files:
-                entry = {"source": source.name, "acquisition_id": directory.name, "path": file["path"]}
                 recorded = file.get("upstream")
                 if recorded is None:
                     without += 1
                     continue
-                url = recorded.get("url")
-                if not (isinstance(url, str) and url.split(":", 1)[0].lower() in {"http", "https"}):
-                    not_probeable.append({**entry, "reason": "no HTTP URL recorded"})
-                elif not any(isinstance(recorded.get(name), str) for name in ("etag", "last_modified")):
-                    not_probeable.append({**entry, "reason": "no ETag or Last-Modified recorded"})
-                else:
-                    probeable.append((entry, recorded))
+                entry = {"source": source.name, "acquisition_id": directory.name, "path": file["path"]}
+                recorded_files.append((entry, recorded, completed_at))
+                if recorded.get("url") is not None:
+                    key = (source.name, recorded["url"])
+                    latest[key] = max(latest.get(key, completed_at), completed_at)
+    probeable, not_probeable, superseded = [], [], 0
+    for entry, recorded, completed_at in recorded_files:
+        url = recorded.get("url")
+        if url is not None and completed_at < latest[(entry["source"], url)]:
+            superseded += 1
+        elif not (isinstance(url, str) and url.split(":", 1)[0].lower() in {"http", "https"}):
+            not_probeable.append({**entry, "reason": "no HTTP URL recorded"})
+        elif not any(isinstance(recorded.get(name), str) for name in ("etag", "last_modified")):
+            not_probeable.append({**entry, "reason": "no ETag or Last-Modified recorded"})
+        else:
+            probeable.append((entry, recorded))
     report = {"probeable_files": len(probeable) if complete else None}
     if probe:
         opener = head_opener()
         report.update(files=[{**entry, **probe_file(recorded, opener)} for entry, recorded in probeable],
-                      not_probeable=not_probeable, without_upstream=without)
+                      not_probeable=not_probeable, superseded=superseded, without_upstream=without)
     return report
 
 
 def acquisition_files(path, uncertain):
-    """Return a completed acquisition's file entries sorted by path, else record an uncertainty and return None."""
+    """Return a completed acquisition's completed_at and its file entries sorted by path,
+    else record an uncertainty and return None."""
     try:
         provenance = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -361,10 +373,13 @@ def acquisition_files(path, uncertain):
         uncertain(path, f"Cannot read acquisition provenance: {type(error).__name__}")
         return None
     files = provenance.get("files") if isinstance(provenance, dict) else None
+    completed_at = timestamp(provenance.get("completed_at")) if isinstance(provenance, dict) else None
     if not isinstance(provenance, dict):
         defect = "not a JSON object"
     elif provenance.get("status") != "complete":
         defect = "status is not complete"
+    elif completed_at is None:
+        defect = "completed_at is not an ISO timestamp with a UTC offset"
     elif not isinstance(files, list):
         defect = "files is not a list"
     elif not all(isinstance(f, dict) and isinstance(f.get("path"), str) and f["path"] for f in files):
@@ -377,9 +392,18 @@ def acquisition_files(path, uncertain):
                  for f in files for value in (f.get("upstream") or {}).values()):
         defect = "a file's upstream field is not null or a nonblank string"
     else:
-        return sorted(files, key=lambda f: f["path"])
+        return completed_at, sorted(files, key=lambda f: f["path"])
     uncertain(path, f"Malformed acquisition provenance: {defect}")
     return None
+
+
+def timestamp(value):
+    """Parse land()'s completed_at, an ISO timestamp with a UTC offset, else return None."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else None
 
 
 class RedirectRefused(urllib.error.URLError):
@@ -525,7 +549,7 @@ def git_status(root, slug, state_date, uncertain):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", nargs="?", default=".", help="Workbench root (default: current directory)")
-    parser.add_argument("--probe-upstream", action="store_true", help="HEAD each landed file with recorded HTTP validators and report it changed, unchanged, or unknown")
+    parser.add_argument("--probe-upstream", action="store_true", help="HEAD the latest landed file of each recorded HTTP URL with recorded validators and report it changed, unchanged, or unknown")
     args = parser.parse_args()
     print(json.dumps(collect(args.root, probe_upstream=args.probe_upstream), ensure_ascii=False, separators=(",", ":")))
 
