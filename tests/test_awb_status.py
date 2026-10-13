@@ -12,7 +12,7 @@
 # test_malformed_flag_shape_leaves_counts_unknown: a missing or unknown disposition, empty or non-string places, or the per-place shape is malformed; counts are null.
 # test_malformed_manifest_requests_targeted_fallback: invalid manifests or timestamps name the manifest under uncertainties, with no mtime estimate.
 # test_draft_without_manifest_json_is_an_uncertainty: a draft manifest in another format is not read; the draft is named under uncertainties.
-# test_frozen_release_manifest_is_tolerated: an absent, non-JSON, undated, or unreadable release manifest leaves released_at null without uncertainties.
+# test_unusable_release_manifest_is_uncertain: an absent, non-JSON, undated, or unreadable release manifest leaves released_at null and records one uncertainty.
 # test_unreadable_draft_manifest_is_unknown: an unreadable draft manifest leaves dates and counts null with an uncertainty.
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
@@ -211,7 +211,7 @@ def test_draft_without_manifest_json_is_an_uncertainty(workbench):
 
 
 @pytest.mark.parametrize("change", ["remove", "yaml", "not json", "no date", "unreadable"])
-def test_frozen_release_manifest_is_tolerated(workbench, monkeypatch, change):
+def test_unusable_release_manifest_is_uncertain(workbench, monkeypatch, change):
     package(workbench, "none")
     release = workbench / "deliveries/churn/review/released/002/manifest.json"
     if change in {"remove", "yaml"}:
@@ -227,7 +227,9 @@ def test_frozen_release_manifest_is_tolerated(workbench, monkeypatch, change):
     assert result["packages"][0]["latest_release"] == "002"
     assert result["packages"][0]["released_at"] is None
     assert result["packages"][0]["draft_vs_release"] is None
-    assert result["uncertainties"] == []
+    assert [u["path"] for u in result["uncertainties"]] == [
+        "deliveries/churn/review/released/002" if change in {"remove", "yaml"}
+        else "deliveries/churn/review/released/002/manifest.json"]
 
 
 def test_unreadable_draft_manifest_is_unknown(workbench, monkeypatch):

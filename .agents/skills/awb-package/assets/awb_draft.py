@@ -694,18 +694,18 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         report["headings"] = heading_problems(draft)
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"headings check: {error}")
-    if (root / "investigations" / investigation / "findings.json").exists():
-        try:
-            provenance = _load_provenance(root)
-            if not hasattr(provenance, "findings_drift"):
-                raise ValueError("src/provenance.py predates findings.json; run awb-init repair: "
-                                 "install_helpers.py --upgrade")
-            drift = provenance.findings_drift(root, investigation)
-            if drift:
-                report["errors"].append(f"findings drift: {drift}; restore with python3 src/awb.py state render "
-                                        f"--investigation {investigation}")
-        except (OSError, ValueError) as error:
-            report["errors"].append(f"findings drift: {error}")
+    # Without findings.json the table renders empty, so any row is drift.
+    try:
+        provenance = _load_provenance(root)
+        if not hasattr(provenance, "findings_drift"):
+            raise ValueError("src/provenance.py predates findings.json; run awb-init repair: "
+                             "install_helpers.py --upgrade")
+        drift = provenance.findings_drift(root, investigation)
+        if drift:
+            report["errors"].append(f"findings drift: {drift}; restore with python3 src/awb.py state render "
+                                    f"--investigation {investigation}")
+    except (OSError, ValueError) as error:
+        report["errors"].append(f"findings drift: {error}")
     try:
         flags = state_flags(root, investigation)
     except ValueError as error:

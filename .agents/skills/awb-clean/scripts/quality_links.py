@@ -85,9 +85,6 @@ class QualityLinks:
                 raise ValueError(f"foundation/quality.json: expected {SCHEMA}")
         else:
             self.document = {"schema": SCHEMA, "links": {}}
-            for scan, key in self.active.markers:
-                if self.marked(scan, key) is not None:
-                    self._from_row(scan, key)
 
     def marked(self, scan, key):
         """The one row carrying this marker, when its ID is also unique, else None."""
@@ -101,8 +98,7 @@ class QualityLinks:
         line = self.marked(scan, key)
         observation = self.active.observation(line)
         count = re.search(r"\((\d+) of (\d+)\)", observation)
-        observed = re.search(r"`" + re.escape(f"{scan}#{key}")
-                             + r"`(?: scanned| in \[scan\]\([^)]*\)) (\d{4}-\d{2}-\d{2})", observation)
+        observed = re.search(r"`" + re.escape(f"{scan}#{key}") + r"` scanned (\d{4}-\d{2}-\d{2})", observation)
         self.set(scan, key, self.active.qid(line), int(count[1]) if count else None,
                  int(count[2]) if count else None, observed[1] if observed else None)
         return self.document["links"][link_key(scan, key)]

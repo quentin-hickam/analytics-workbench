@@ -181,8 +181,8 @@ def collect(root):
     result["landed_data_storage"] = storage(field(readme, "Landed data is kept at", readme_path, optional=True))
     result["release_storage"] = storage(field(readme, "Released packages are kept at", readme_path, optional=True))
 
-    def manifest(directory, *, frozen=False):
-        """Read manifest.json; a frozen release's is tolerated when absent, unreadable, or not JSON."""
+    def manifest(directory, *, release=False):
+        """Read manifest.json, recording an uncertainty when it is absent, unreadable, or not a JSON object."""
         path = directory / "manifest.json"
         try:
             obj = json.loads(path.read_text(encoding="utf-8"))
@@ -190,11 +190,10 @@ def collect(root):
                 return obj
             raise ValueError
         except FileNotFoundError:
-            if not frozen:
-                uncertain(directory, "Draft lacks manifest.json; awb-package rewrites it on the next revision")
+            uncertain(directory, "Release lacks manifest.json" if release else
+                      "Draft lacks manifest.json; awb-package rewrites it on the next revision")
         except (OSError, UnicodeError, ValueError) as error:
-            if not frozen:
-                uncertain(path, f"Cannot read JSON manifest object: {type(error).__name__}")
+            uncertain(path, f"Cannot read JSON manifest object: {type(error).__name__}")
         return None
 
     def timestamp(obj, key, path=None):
@@ -255,8 +254,8 @@ def collect(root):
             release_dirs = entries(directory / "released", directories=True)
             releases = [p for p in release_dirs or [] if p.name.isascii() and p.name.isdigit()]
             latest = max(releases, key=lambda p: int(p.name)) if releases else None
-            # Frozen releases are read only for released_at; an earlier format leaves it unknown.
-            released = timestamp(manifest(latest, frozen=True), "released_at") if latest else None
+            # A frozen release is read only for released_at.
+            released = timestamp(manifest(latest, release=True), "released_at", latest / "manifest.json") if latest else None
             entry = {"name": directory.name, "draft_exists": draft.is_dir(), "revised_at": revised.isoformat() if revised else None,
                      "release_inventory_known": release_dirs is not None, "latest_release": latest.name if latest else None, "released_at": released.isoformat() if released else None,
                      "draft_vs_release": ("ahead" if revised > released else "same_or_older") if revised and released else None}

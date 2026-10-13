@@ -55,15 +55,9 @@ COPIED = {
     "package-format/m365-assembly.md": "awb-package/assets/package-format/m365-assembly.md",
     "package-format/manifest-template.md": "awb-package/assets/package-format/manifest-template.md",
 }
-# Project paths the skills once copied and no longer ship.
-RETIRED = [
-    "package-format/journal-template.md",
-    "package-format/executive-summary-template.md",
-    "src/presentation/style.py",
-    "src/packaging/findings.py",
-    "src/packaging/manifest.py",
-    "src/packaging/charts.py",
-]
+# Project paths the skills once copied and no longer ship; --upgrade reports them and removes unmodified
+# ones on request. Add a path here when a shipped file is retired.
+RETIRED = []
 # Import name -> requirement for the third-party packages the helpers and the run.py template import;
 # a test keeps it equal to their imports.
 REQUIREMENTS = {"duckdb": "duckdb", "pandas": "pandas", "tomli": 'tomli; python_version < "3.11"'}

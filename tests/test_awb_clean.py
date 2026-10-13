@@ -14,7 +14,6 @@
 # test_orphan_links_do_not_claim_reused_ids: deleted rows or missing markers invalidate links, including when Markdown reuses their ID.
 # test_ambiguous_quality_rows_block_only_their_links: a marker on two rows or on a row with a repeated ID is unrecorded for scans and refused for recording before any write; an unrelated repeated ID blocks nothing.
 # test_markers_outside_the_observation_are_not_links: backticked `x#y` text in other cells, such as a column named PO#line, is not a marker.
-# test_legacy_links_backfill_without_scan_writes: both historical date formats and escaped keys migrate, and scanning stays read-only.
 # test_recorded_status_follows_header_and_count_follows_json: Markdown status is read by header; JSON alone owns the recorded count.
 # test_record_failure_reports_phases_and_retries_once: B or C failure reports completed phases and replaced files; retry appends one correction and keeps flags idempotent.
 # test_record_revises_a_row_by_quality_id: a Q- or DQ- key revises its row's judgment cells and keeps the observation, appends a correction row without a rescan suffix, accepts an unmarked row, and resolves {Q-004}; a dry run writes nothing.
@@ -28,6 +27,7 @@
 # test_renamed_quality_headers_keep_template_positions: with every Active header renamed, a new row is written in the template's positions, scans read it as recorded, and a reopen sets its status.
 # test_quality_json_is_written_only_when_links_change: a call that changes no link leaves quality.json absent or byte-identical.
 # test_unlinked_marker_row_is_relinked_and_short_rows_read: with quality.json present, a row carrying the marker but no link is relinked from its prose; a short row reads as blank status.
+# test_marked_row_is_linked_when_quality_json_is_absent: a scan reads a marked row as recorded without writing; the first record writes its link with the row's count, total, and date.
 # test_failed_phase_a_leaves_no_partial_files: a failed replace in phase A removes every prepared temporary file.
 
 import hashlib
@@ -233,12 +233,19 @@ def scan_file(root, *, delta=True):
     write(root, "foundation/scans/orders.json", json.dumps(record))
 
 
-def state_file(root):
+def state_file(root, caveat=""):
+    """An investigation with two recorded findings, its state.md table rendered from findings.json."""
     shutil.copyfile(ROOT / ".agents/skills/awb-init/assets/awb_provenance.py",
                     write(root, "src/provenance.py", ""))
+    findings = [{"result": "r-003", "text": "Sales leads growth", "status": "supported", "prior_status": None,
+                 "flag_reason": "", "notes": [caveat] if caveat else [], "checks_caveat": "", "notes_checks": ""},
+                {"result": "r-004", "text": "Age is stable", "status": "provisional", "prior_status": None,
+                 "flag_reason": "", "notes": [], "checks_caveat": "", "notes_checks": ""}]
+    write(root, "investigations/churn/findings.json", json.dumps({"schema": "awb-findings/1", "findings": findings}))
     text = (TEMPLATES / "investigation/state.md").read_text().replace("<!-- use an ISO date -->", "2026-09-01")
     text = text.replace("| --- | --- | --- | --- |\n",
-                        "| --- | --- | --- | --- |\n| Sales leads growth | [r-003](evidence/r-003.json) | supported | |\n"
+                        f"| --- | --- | --- | --- |\n| Sales leads growth | [r-003](evidence/r-003.json) | supported | "
+                        f"{caveat + ' ' if caveat else ''}|\n"
                         "| Age is stable | [r-004](evidence/r-004.json) | provisional | |\n", 1)
     return write(root, "investigations/churn/state.md", text)
 
@@ -424,7 +431,7 @@ def test_record_rejects_bad_quality_id_keys(tmp_path):
 def test_quality_id_revision_keeps_link_and_placeholder_rules(tmp_path, prefix):
     scan_file(tmp_path)
     quality_file(tmp_path, prefix)
-    recorder.record(tmp_path, "orders", {})  # persist the legacy links before revision
+    recorder.record(tmp_path, "orders", {})  # link the marked rows before revision
     links = tmp_path / "foundation/quality.json"
     before_links = links.read_bytes()
     quality = tmp_path / "foundation/quality.md"
@@ -570,35 +577,6 @@ def test_markers_outside_the_observation_are_not_links(tmp_path):
         "whitespace:dept", "sentinel:age:9999"}
 
 
-def test_legacy_links_backfill_without_scan_writes(tmp_path):
-    scan_file(tmp_path, delta=False)
-    path = tmp_path / "foundation/scans/orders.json"
-    scan = json.loads(path.read_text())
-    scan["issues"][1]["key"] = "near-variants:dept:a|b"
-    path.write_text(json.dumps(scan))
-    quality_rows(tmp_path, [
-        "| Q-003 | view | Spaces (5 of 45); `orders#whitespace:dept` scanned 2026-01-02 | x | y | corrected |",
-        "| Q-004 | view | Variants (7 of 50); `orders#near-variants:dept:a\\|b` in [scan](scans/orders.json) 2026-02-03 | x | y | open |"])
-    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
-    expected = {"whitespace:dept": {"id": "Q-003", "status": "corrected", "count": 5},
-                "near-variants:dept:a|b": {"id": "Q-004", "status": "open", "count": 7}}
-    assert scanner._recorded(tmp_path, "orders") == expected
-    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
-    decisions = {"issues": {"S1": {"status": "open"}, "S2": {"status": "corrected"}}}
-    result = recorder.record(tmp_path, "orders", decisions, dry_run=True)
-    assert result["quality_ids"] == {"S1": "Q-003", "S2": "Q-004"}
-    assert not (tmp_path / "foundation/quality.json").exists()
-    # A first write without reopening preserves both legacy observations in the backfill.
-    recorder.record(tmp_path, "orders", {})
-    assert quality_link(tmp_path, "orders", "whitespace:dept")["observed_at"] == "2026-01-02"
-    assert quality_link(tmp_path, "orders", "near-variants:dept:a|b") == {
-        "id": "Q-004", "scan": "orders", "recorded_count": 7, "recorded_of": 50,
-        "observed_at": "2026-02-03"}
-    assert scanner._recorded(tmp_path, "orders") == expected
-    result = recorder.record(tmp_path, "orders", decisions)
-    assert result["updated"] == ["Q-003", "Q-004"]
-
-
 def test_recorded_status_follows_header_and_count_follows_json(tmp_path):
     scan_file(tmp_path, delta=False)
     recorder.record(tmp_path, "orders", {"issues": {"S1": judgment()}}, today=TODAY)
@@ -617,8 +595,7 @@ def test_recorded_status_follows_header_and_count_follows_json(tmp_path):
 @pytest.mark.parametrize("failed_phase", ["B", "C"])
 def test_record_failure_reports_phases_and_retries_once(tmp_path, capsys, monkeypatch, failed_phase):
     scan_file(tmp_path)
-    state = state_file(tmp_path)
-    state.write_text(state.read_text().replace("| supported | |", "| supported | Prior caveat |"))
+    state = state_file(tmp_path, caveat="Prior caveat")
     decisions = {"issues": {"S1": {**judgment(), "status": "corrected", "correction": "Trim",
                                    "change": "view"}},
                  "flags": [{"investigation": "churn", "result": "r-003", "reason": "{S1} merges labels | codes"}]}
@@ -711,7 +688,6 @@ def test_flag_retry_keeps_original_quality_id(tmp_path, monkeypatch):
     assert quality.decode().count("| Q-001 | Trim |") == 1
 
 
-
 def test_quality_json_is_written_only_when_links_change(tmp_path):
     scan_file(tmp_path, delta=False)
     assert recorder.record(tmp_path, "orders", {})["written"] == []
@@ -731,7 +707,19 @@ def test_unlinked_marker_row_is_relinked_and_short_rows_read(tmp_path):
         "whitespace:dept": {"id": "Q-004", "status": "", "count": 2}}
     result = recorder.record(tmp_path, "orders", {"issues": {"S1": {"status": "corrected"}}}, today=TODAY)
     assert result["updated"] == ["Q-004"] and result["added"] == []
-    assert "Q-004" in (tmp_path / "foundation/quality.json").read_text()
+    assert list(json.loads((tmp_path / "foundation/quality.json").read_text())["links"].values()) == [
+        {"id": "Q-004", "scan": "orders", "recorded_count": 2, "recorded_of": 45, "observed_at": "2026-10-09"}]
+
+
+def test_marked_row_is_linked_when_quality_json_is_absent(tmp_path):
+    scan_file(tmp_path, delta=False)
+    quality_rows(tmp_path, ["| Q-004 | view | Spaces (2 of 45); `orders#whitespace:dept` scanned 2026-10-01 | x | y | open |"])
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert scanner._recorded(tmp_path, "orders", ["whitespace:dept"])["whitespace:dept"]["id"] == "Q-004"
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before  # a scan writes nothing
+    assert recorder.record(tmp_path, "orders", {}, today=TODAY)["written"] == ["foundation/quality.json"]
+    assert list(json.loads((tmp_path / "foundation/quality.json").read_text())["links"].values()) == [
+        {"id": "Q-004", "scan": "orders", "recorded_count": 2, "recorded_of": 45, "observed_at": "2026-10-01"}]
 
 
 def test_failed_phase_a_leaves_no_partial_files(tmp_path, monkeypatch):
