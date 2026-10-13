@@ -12,6 +12,7 @@ are CSV. Standard library only; `export` also needs the project's `src/provenanc
 """
 
 import argparse
+import bisect
 import csv
 import hashlib
 import importlib.util
@@ -226,18 +227,10 @@ def _scan_line(number, line, roots, pattern):
     return [{"line": number, "kind": kind, "text": text} for _, kind, text in sorted(found)]
 
 
-def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]:
-    """List code, paths, file names, identifiers, SHAs, and given names, by line then column.
-
-    A slash token with any of `names` or `roots` as a segment is a path; `roots` may be plain words,
-    which never match alone.
-    """
+def _unfenced(path):
+    """Yield (line number, line, opens a fence) for each line outside fenced code and HTML comments."""
     text = Path(path).read_text(encoding="utf-8")
     text = _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
-    pattern = _name_pattern(names)
-    roots = set(names) | set(roots)
-
-    rows = []
     fence = None
     for number, line in enumerate(text.splitlines(), start=1):
         if fence is not None:
@@ -249,9 +242,25 @@ def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]
         opening = _FENCE.match(line)
         if opening and not (opening.group(1)[0] == "`" and "`" in line[opening.end():]):
             fence = opening.group(1)
-            rows.append({"line": number, "kind": "code", "text": line.strip()})
+            yield number, line, True
             continue
-        rows.extend(_scan_line(number, line, roots, pattern))
+        yield number, line, False
+
+
+def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]:
+    """List code, paths, file names, identifiers, SHAs, and given names, by line then column.
+
+    A slash token with any of `names` or `roots` as a segment is a path; `roots` may be plain words,
+    which never match alone.
+    """
+    pattern = _name_pattern(names)
+    roots = set(names) | set(roots)
+    rows = []
+    for number, line, opens in _unfenced(path):
+        if opens:
+            rows.append({"line": number, "kind": "code", "text": line.strip()})
+        else:
+            rows.extend(_scan_line(number, line, roots, pattern))
     return rows
 
 
@@ -492,6 +501,165 @@ def heading_problems(draft) -> list[dict]:
             for heading in _headings(Path(draft) / "findings.md") if heading not in methodology]
 
 
+# ---------------------------------------------------------------- numbers in the narratives
+
+NARRATIVES = ("findings.md", "methodology.md")
+_MONTHS = ("Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
+           "|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?")
+_DAY = r"[0-9]{1,2}(?:st|nd|rd|th)?"
+# Dates, times, chart numbers, list markers, and footnote marks are blanked before numbers are read.
+_NOT_QUANTITY = re.compile(
+    r"(?<![\w.])(?:[0-9]{4}-[0-9]{1,2}(?:-[0-9]{1,2})?(?:T[0-9:.]+(?:Z|[+-][0-9:]+)?)?"
+    r"|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?"
+    rf"|(?:{_MONTHS})\.?\s+{_DAY}|{_DAY}\s+(?:{_MONTHS})"
+    r"|[Cc]harts?\s+[0-9]+)(?![\w%]|[.,][0-9])"
+    r"|^\s*[0-9]+[.)]\s|\[\^[^\]]*\]", re.MULTILINE)
+# A number not glued to a word, path, version, or hyphenated name (Q-3, chart-1), with its unit.
+_NUMBER = re.compile(
+    r"(?<![\w.,/\\])(?<![A-Za-z_]-)"
+    r"([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?|\.[0-9]+)"
+    r"(\s?%|\s?(?:per\s?cent|percentage\s+points?|pp)(?!\w)|(?:mn|bn|tn|[kKmMbB])(?!\w)"
+    r"|\s(?:thousand|million|billion|trillion)(?!\w)|[x×](?!\w))?"
+    r"(?!\w|[.,/][0-9])")
+_RANGE = re.compile(r"\s?(?:[-–—]|to|and)\s?")
+_SCALES = {"k": 3, "thousand": 3, "m": 6, "mn": 6, "million": 6, "b": 9, "bn": 9, "billion": 9,
+           "tn": 12, "trillion": 12}
+# Recorded text is read liberally: every digit run, so a value inside a label or detail still counts.
+_RECORDED_NUMBER = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]*\.?[0-9]+")
+
+
+def _magnitudes(value, into, *, text=True):
+    """Add the absolute value of every finite number in a JSON or CSV value; text only when `text`."""
+    if isinstance(value, bool):
+        return
+    if isinstance(value, (int, float)):
+        value = str(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _magnitudes(item, into, text=text)
+        return
+    elif isinstance(value, list):
+        for item in value:
+            _magnitudes(item, into, text=text)
+        return
+    elif not (isinstance(value, str) and text):
+        return
+    try:
+        number = Decimal(value.strip())
+        found = [number] if number.is_finite() else []
+    except InvalidOperation:
+        found = [Decimal(match.replace(",", "")) for match in _RECORDED_NUMBER.findall(value)]
+    into.update(abs(number) for number in found)
+
+
+def _evidence_numbers(record):
+    """The parts of an evidence record that hold result values: check details and settings content."""
+    checks, settings = record.get("checks"), record.get("settings")
+    return [[check.get("detail") for check in checks if isinstance(check, dict)] if isinstance(checks, list) else [],
+            settings.get("content") if isinstance(settings, dict) else None]
+
+
+def recorded_values(root, investigation, results) -> tuple[list, list[str]]:
+    """Return the sorted magnitudes the manifest's represented results record, and the problems.
+
+    Each result contributes every cell of results/<id>.csv, the numbers in results/<id>.profile.json,
+    and the numbers in its evidence's check details and settings.
+    """
+    if not isinstance(results, list) or not all(
+            isinstance(entry, dict) and isinstance(entry.get("result_id"), str)
+            and _SIMPLE.fullmatch(entry["result_id"]) for entry in results):
+        return [], [f"{MANIFEST} results is not a list of result_id entries; rerun export"]
+    base = Path(root) / "investigations" / investigation
+    values, problems = set(), []
+    for result_id in dict.fromkeys(entry["result_id"] for entry in results):
+        table = base / "results" / f"{result_id}.csv"
+        try:
+            with table.open(newline="", encoding="utf-8") as stream:
+                for row in csv.reader(stream):
+                    for cell in row:
+                        _magnitudes(cell, values)
+        except FileNotFoundError:
+            problems.append(f"{_rel(root, table)} is missing; numbers from {result_id} cannot be traced")
+        except (OSError, UnicodeError, csv.Error) as error:
+            problems.append(f"{_rel(root, table)}: unreadable ({error})")
+        # The table holds the result; a profile or evidence, when present, adds its counts and settings.
+        for path in (base / "results" / f"{result_id}.profile.json", base / "evidence" / f"{result_id}.json"):
+            try:
+                record = _read_json(path)
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError) as error:
+                problems.append(f"{_rel(root, path)}: unreadable ({error})")
+                continue
+            if path.parent.name == "results":
+                _magnitudes(record, values, text=False)  # dtype names such as float64 are not values
+            else:
+                _magnitudes(_evidence_numbers(record), values)
+    return sorted(values), problems
+
+
+def allowed_numbers(record: dict) -> tuple[set, list[str]]:
+    """Return the texts the manifest's allowed_numbers accepts untraced, and its malformed entries."""
+    entries = record.get("allowed_numbers", "none")
+    if entries == "none":
+        return set(), []
+    if not isinstance(entries, list):
+        return set(), ["allowed_numbers is not none or a list of {text, reason}"]
+    texts, problems = set(), []
+    for index, entry in enumerate(entries, start=1):
+        if isinstance(entry, dict) and all(isinstance(entry.get(key), str) and entry[key].strip()
+                                           for key in ("text", "reason")):
+            texts.add(entry["text"].strip())
+        else:
+            problems.append(f"allowed_numbers entry {index} is not {{text, reason}} with both filled in")
+    return texts, problems
+
+
+def _within(values, low, high):
+    index = bisect.bisect_left(values, low)
+    return index < len(values) and values[index] <= high
+
+
+def _traces(body, unit, values):
+    number = Decimal(body.replace(",", ""))
+    # Written to d places, the number stands for any value within half a unit of its last place.
+    half = Decimal(5).scaleb(-len(body.partition(".")[2]) - 1)
+    windows = [(number - half, number + half)]
+    unit = " ".join(unit.lower().split())
+    if unit.startswith(("%", "per", "pp")):
+        windows.append(((number - half) / 100, (number + half) / 100))
+    elif unit in _SCALES:
+        windows.append(((number - half).scaleb(_SCALES[unit]), (number + half).scaleb(_SCALES[unit])))
+    return any(_within(values, low, high) for low, high in windows)
+
+
+def check_numbers(path: str | os.PathLike, values, *, allowed=()) -> list[dict]:
+    """List each number in a narrative file that no recorded value rounds to and `allowed` lacks.
+
+    `values` are sorted magnitudes from recorded_values(). Code, comments, link targets, dates, times,
+    years, chart numbers, list markers, slash-joined numbers, and zero-padded codes are not read.
+    """
+    rows = []
+    for number, line, opens in _unfenced(path):
+        if opens:
+            continue
+        for pattern in (_CODE_SPAN, _NOT_QUANTITY):
+            line = pattern.sub(lambda match: " " * len(match.group(0)), line)
+        line = _LINK_TARGET.sub(lambda match: "]" + " " * (len(match.group(0)) - 1), line)
+        matches = list(_NUMBER.finditer(line))
+        for index, match in enumerate(matches):
+            body, unit = match.group(1), match.group(2) or ""
+            if not unit and index + 1 < len(matches) and _RANGE.fullmatch(line[match.end():matches[index + 1].start()]):
+                unit = matches[index + 1].group(2) or ""  # 10-15%: the lower bound takes the upper's unit
+            if (body[0] == "0" and len(body) > 1 and "." not in body
+                    or not unit and len(body) == 4 and body.isdigit() and 1900 <= int(body) <= 2099):
+                continue  # a zero-padded code (release 002) or a year
+            text = match.group(0).strip()
+            if text not in allowed and not _traces(body, unit, values):
+                rows.append({"file": Path(path).name, "line": number, "text": text})
+    return rows
+
+
 # ---------------------------------------------------------------- inventory and tree comparison
 
 _CHUNK_BYTES = 1024 * 1024  # 1 MiB reads keep memory flat on large datasets
@@ -664,7 +832,7 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
             and report["charts"] == [] and report["headings"] == [] and report["verify"] == []
-            and report["flag_entries"] == [])
+            and report["flag_entries"] == [] and report["numbers"] == [] and not report["numbers_problems"])
 
 
 def check_draft(root, investigation, package, *, verify_only=False) -> dict:
@@ -672,8 +840,8 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
-              "charts": None, "headings": None, "inventory": None, "verify": None,
-              "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
+              "charts": None, "headings": None, "numbers": None, "numbers_problems": [], "inventory": None,
+              "verify": None, "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
         return report
@@ -712,6 +880,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         flags = None
         report["errors"].append(f"flags: {error}")
 
+    record = None
     try:
         path = draft / MANIFEST
         if not path.is_file():
@@ -733,6 +902,17 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     except (OSError, ValueError) as error:
         report["errors"].append(f"manifest: {error}")
 
+    # Every number in either narrative traces to a represented result or is allowed with a reason.
+    if record is not None:
+        allowed, problems = allowed_numbers(record)
+        values, more = recorded_values(root, investigation, record.get("results"))
+        report["numbers_problems"], report["numbers"] = problems + more, []
+        for name in NARRATIVES:
+            try:
+                report["numbers"] += check_numbers(draft / name, values, allowed=allowed)
+            except (OSError, UnicodeError) as error:
+                report["errors"].append(f"numbers check: {error}")
+
     report["passed"] = _structure_passed(report) and report["unmatched_flags"] == []
     return report
 
@@ -747,14 +927,18 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py check-draft", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Run every mechanical draft check (internal names in findings.md, chart files, "
-                    "matching finding headings, the manifest inventory, and state.md's current flags) "
-                    "and rewrite the manifest inventory, stamping revised_at when it changes; "
-                    "--verify-only checks a release candidate and writes nothing.",
-        epilog="Prints one JSON line.\nunmatched_flags lists each finding state.md flags whose exact finding "
-               "and reason the manifest's revalidation_flags does not record.\nflag_entries lists a missing or "
-               "malformed revalidation_flags, an entry without text finding and reason, represented_in that is "
-               "neither none nor a list of places, and an unknown disposition.\nExit 0 only when names_problems, "
-               "findings, charts, headings, verify, flag_entries, unmatched_flags, and errors are all empty.")
+                    "matching finding headings, numbers in both narratives, the manifest inventory, and "
+                    "state.md's current flags) and rewrite the manifest inventory, stamping revised_at when it "
+                    "changes; --verify-only checks a release candidate and writes nothing.",
+        epilog="Prints one JSON line.\nnumbers lists, as file, line, and text, each number in findings.md or "
+               "methodology.md that no represented result's table, profile, check details, or settings round to "
+               "and the manifest's allowed_numbers does not list; numbers_problems names a missing table or a "
+               "malformed results or allowed_numbers.\nunmatched_flags lists each finding state.md flags whose "
+               "exact finding and reason the manifest's revalidation_flags does not record.\nflag_entries lists a "
+               "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
+               "that is neither none nor a list of places, and an unknown disposition.\nExit 0 only when "
+               "names_problems, findings, charts, headings, numbers, numbers_problems, verify, flag_entries, "
+               "unmatched_flags, and errors are all empty.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
                         help="verify against the recorded inventory without rewriting it (the release gate)")
@@ -1187,7 +1371,7 @@ def provenance_gaps(record: dict) -> list[dict]:
                 walk(item, f"{path}[{index}]")
 
     for key, value in record.items():
-        if key not in {"inventory", "export_checks", "revalidation_flags"}:
+        if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers"}:
             walk(value, key)
     return gaps
 

@@ -8,6 +8,9 @@
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
 # test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
+# test_check_draft_traces_narrative_numbers: numbers in both narratives trace to a represented result's table cells within rounding, check details, settings, and profile rates as percents; an untraced number fails with its file, line, and text in both modes and refuses release; allowed_numbers accepts it and export keeps that field; dropping a result from the represented set untraces its numbers.
+# test_check_draft_reports_number_problems: a malformed allowed_numbers value or entry, a malformed results value or result_id, a missing result table, and an unreadable profile are numbers_problems that fail the check.
+# test_check_numbers_reads_formats: thousands separators, percents of fractions, scales, multipliers, ranges, and rounding trace; dates, years, times, codes, glued names, chart numbers, list markers, footnotes, code, comments, and link targets are skipped; allowed texts pass.
 # test_verify_only_never_writes: a changed file is reported against the recorded inventory; the manifest stays byte-identical.
 # test_missing_manifest_runs_other_checks: without manifest.json the findings and chart checks still run; verify is not run and the check fails.
 # test_export_results_records_provenance_only: --result alone writes shared commit, inputs, settings, and packaging state, creates the manifest with its identity fields, leaves chart files untouched, and is not gated by a changed setting.
@@ -35,6 +38,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -55,6 +59,7 @@ SELECT r.*, EXTRACT(year FROM r.ordered_at) AS y FROM recent r JOIN main.regions
 """
 SETTINGS = b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n[results.r-001]\n\n[results.r-002]\n"
 STALE_SETTINGS = SETTINGS.replace(b"minimum_count = 5", b"minimum_count = 6")
+RESULT = "region,late_rate,n\nW,21.349,10\nE,2.675,8\n"
 FINDINGS = "# Order quality\n\n### Late orders rose in the west\n\n**Chart 1.** Bar: late share by region\n"
 METHODOLOGY = "# Methodology\n\n## Findings\n\n### Late orders rose in the west\n"
 STATE = """# Current investigation state
@@ -145,9 +150,10 @@ def project(tmp_path):
     write(draft, "findings.md", FINDINGS)
     write(draft, "methodology.md", METHODOLOGY)
     write(draft, "charts/chart-1.csv", "Region,Late (%)\nWest,21\n")
+    write(tmp_path, "investigations/inv/results/r-001.csv", RESULT)
     write(draft, "manifest.json", json.dumps({
-        "investigation": "inv", "package": "pkg", "status": "draft",
-        "revalidation_flags": "none", "inventory": []}))
+        "investigation": "inv", "package": "pkg", "status": "draft", "revalidation_flags": "none",
+        "results": [{"result_id": "r-001", "evidence": "investigations/inv/evidence/r-001.json"}], "inventory": []}))
     return tmp_path
 
 
@@ -287,6 +293,106 @@ def test_check_draft_and_release_refuse_malformed_flag_entries(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["flag_entries"] == []
     assert not (project / "deliveries/inv/pkg/released").exists()
+
+
+def set_manifest(project, **fields):
+    path = project / "deliveries/inv/pkg/draft/manifest.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), **fields}))
+
+
+TRACED = """# Order quality, January to June 2026
+
+### Late orders rose in the west
+
+- West closed 21.3% of orders late, against 2.7% in the east.
+- Ten checks covered 3 rows; regions needed at least 5 orders.
+- Missing regions were 0.0% of rows, and 1,240 orders were reviewed.
+
+**Chart 1.** Bar: late share by region
+"""
+
+
+def test_check_draft_traces_narrative_numbers(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    write(project, "investigations/inv/results/r-001.profile.json", json.dumps(
+        {"row_count": 2, "columns": {"region": {"dtype": "object", "null_rate": 0.0, "distinct_count": 2}}}))
+    write(project, "investigations/inv/results/r-002.csv", "orders\n1240\n")
+    set_manifest(project, results=[{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json"}
+                                   for r in ("r-001", "r-002")])
+    # Table cells rounded, a check detail, a setting, a profile rate as a percent, a thousands separator.
+    write(draft, "findings.md", TRACED)
+    write(draft, "methodology.md", METHODOLOGY + "\nSettings `minimum_count = 7` (r-001), release 002, as of "
+          "2026-06-30.\n\n- West closed 21.3% late.\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["numbers"] == [] and report["numbers_problems"] == []
+    # A number no represented result produced fails with its file and line, in both modes and at release.
+    write(draft, "findings.md", TRACED.replace("21.3%", "23.1%"))
+    write(draft, "methodology.md", METHODOLOGY + "\nAbout 40 stores.\n")
+    rows = [{"file": "findings.md", "line": 5, "text": "23.1%"},
+            {"file": "methodology.md", "line": 7, "text": "40"}]
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and not report["passed"] and report["numbers"] == rows
+    code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert code == 1 and report["numbers"] == rows and report["verify"] == []
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
+    assert report["check"]["numbers"] == rows and not (project / "deliveries/inv/pkg/released").exists()
+    # An allowed number passes with its reason; a represented result's table is what makes a number trace.
+    set_manifest(project, allowed_numbers=[{"text": "23.1%", "reason": "the prior release's figure"},
+                                           {"text": "40", "reason": "store count from the owner"}])
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["numbers"] == []
+    allowed = manifest(project)["allowed_numbers"]
+    code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-002")
+    assert code == 0 and manifest(project)["allowed_numbers"] == allowed  # export keeps the hand-recorded field
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and {"file": "findings.md", "line": 5, "text": "2.7%"} in report["numbers"]
+
+
+def test_check_draft_reports_number_problems(project, capsys):
+    for fields, problems in [
+            ({"allowed_numbers": [{"text": "40", "reason": " "}, "40"]},
+             ["allowed_numbers entry 1 is not {text, reason} with both filled in",
+              "allowed_numbers entry 2 is not {text, reason} with both filled in"]),
+            ({"allowed_numbers": {"text": "40"}}, ["allowed_numbers is not none or a list of {text, reason}"]),
+            ({"results": [{"result_id": "../r-001"}]}, ["manifest.json results is not a list of result_id entries; "
+                                                         "rerun export"]),
+            ({"results": "none"}, ["manifest.json results is not a list of result_id entries; rerun export"]),
+            ({"results": [{"result_id": "r-002"}]},
+             ["investigations/inv/results/r-002.csv is missing; numbers from r-002 cannot be traced"])]:
+        set_manifest(project, allowed_numbers="none",
+                     results=[{"result_id": "r-001", "evidence": "investigations/inv/evidence/r-001.json"}])
+        set_manifest(project, **fields)
+        code, report = run(project, capsys, "check-draft", "inv", "pkg")
+        assert code == 1 and report["numbers"] == [] and report["numbers_problems"] == problems
+    write(project, "investigations/inv/results/r-002.profile.json", "{not json")
+    write(project, "investigations/inv/results/r-002.csv", "n\n1\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["numbers_problems"][0].startswith(
+        "investigations/inv/results/r-002.profile.json: unreadable")
+
+
+def test_check_numbers_reads_formats(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_numbers")
+    values = sorted({Decimal(v) for v in ("21.349", "0.105", "0.15", "3", "4213000", "12480", "1240", "0.5")})
+    path = tmp_path / "findings.md"
+    path.write_text("""# Orders, January to June 2026
+
+- n = 1,240 as of June 30, 2026, 30 June 2026, 2026-06-30T14:05:00-04:00, 6/30/2026, and 14:05.
+- West 21% and 21.35; between 10-15% or 10 and 15%; 3x the east; $4.2M and 12.5 thousand; 0.5 percentage points.
+- Release 002, Q-3, chart-1, v1.2.3, COVID-19, FY2026, 1st, 3/4 of stores, and Charts 1.
+1. A list marker[^2], `code 77`, and [the 7 guide](notes/88.md).
+<!-- 66 -->
+```
+44
+```
+- Untraced: 21.4%, 1,250, 4.3M, 16%, 2.
+""")
+    assert draft.check_numbers(path, values) == [
+        {"file": "findings.md", "line": 6, "text": "7"},
+        *({"file": "findings.md", "line": 11, "text": t} for t in ("21.4%", "1,250", "4.3M", "16%", "2"))]
+    assert draft.check_numbers(path, values, allowed={"7", "2", "16%", "1,250", "4.3M", "21.4%"}) == []
 
 
 def test_verify_only_never_writes(project, capsys):
@@ -477,7 +583,6 @@ late_rate = 1
 
 
 def with_results(project):
-    write(project, "investigations/inv/results/r-001.csv", "region,late_rate,n\nW,21.349,10\nE,2.675,8\n")
     write(project, "foundation/display.toml", DISPLAY)
 
 
