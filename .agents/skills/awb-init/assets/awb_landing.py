@@ -7,7 +7,8 @@ data/raw/<source>/<acquisition-id>/provenance.json:
     {source, acquisition_id, request, started_at, completed_at, status,
      files: [{path, bytes, sha256, records, upstream}], notes}
     status is "complete"; records is an integer or null; upstream is null or
-    {url, etag, last_modified, version_id}, each a string or null, as the fetch received them.
+    {url, etag, last_modified, version_id}, each a string or null, as the fetch received them;
+    url carries no credentials.
 data/parquet/<dataset>/<publication-id>/publication.json:
     {dataset, publication_id,
      inputs: [{source, acquisition_id, files: [{path, sha256}]}],
@@ -20,9 +21,11 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -80,6 +83,27 @@ def _complete_provenance(directory):
 
 
 UPSTREAM_FIELDS = ("url", "etag", "last_modified", "version_id")
+# Matched against a query or fragment parameter name, lowercased with non-alphanumerics removed:
+# api_key, access_token, client_secret, X-Amz-Signature, X-Amz-Credential, sig (Azure SAS), ...
+CREDENTIAL_PARAMETER = re.compile(r"(key|token|secret|signature|password|passwd|credentials?)$"
+                                  r"|^(sig|pwd|auth|authorization)$")
+
+
+def _check_url(path, url):
+    """Refuse a URL carrying credentials, since provenance files are copied into committed evidence."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        raise ValueError(f"upstream url of {path} is not a valid URL") from None
+    if "@" in parts.netloc:
+        raise ValueError(f"upstream url of {path} carries a user name or password; "
+                         "record it without credentials")
+    names = sorted({name for part in (parts.query, parts.fragment)
+                    for name, _ in urllib.parse.parse_qsl(part, keep_blank_values=True)
+                    if CREDENTIAL_PARAMETER.search(re.sub(r"[^a-z0-9]", "", name.lower()))})
+    if names:
+        raise ValueError(f"upstream url of {path} carries credential parameters ({', '.join(names)}); "
+                         "record it without credentials")
 
 
 def _upstream(upstream, paths):
@@ -97,6 +121,8 @@ def _upstream(upstream, paths):
         if any(value is not None and (not isinstance(value, str) or not value.strip())
                for value in fields.values()):
             raise ValueError(f"upstream fields of {path} must be nonblank strings or None")
+        if fields.get("url") is not None:
+            _check_url(path, fields["url"])
         if any(value is not None for value in fields.values()):
             entries[path] = {name: fields.get(name) for name in UPSTREAM_FIELDS}
     return entries
