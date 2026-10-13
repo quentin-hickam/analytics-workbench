@@ -2,14 +2,16 @@
 
 Copy this file to `src/provenance.py` and import the project copy.
 
-Schema awb-evidence/3, in order: schema, investigation, result_id, recorded_at
+Schema awb-evidence/3, in order: schema, investigation, result_id, question (the result's
+settings question, verbatim), inputs (its settings inputs, or []), recorded_at
 (local ISO time), producing_commit (SHA/uncommitted/unknown), producing_paths
 (sorted), producing_uncommitted_changes (path/status/bytes/sha256), views
 (path/bytes/sha256/publications), publications (path/publication_file/inputs/
 conversion_commit/files), acquisitions (path/provenance_file/status/files),
 settings (path/bytes/sha256/[result]/content), checks (name/outcome/detail), notes (text or null).
 Unknowns are {"unknown": reason}.
-Settings are scoped: the settings file must hold a [results.<id>] table for the result; settings
+Settings are scoped: the settings file must hold a [results.<id>] table for the result, with a
+one-line question and optionally inputs, a list of dataset or view names; settings
 carries "result", content holds only [parameters] and that table, and the settings file is left
 out of producing_paths, so other results' tables and other top-level tables never make this
 result stale. Producing paths are the investigation's code (run.py and other files outside its
@@ -225,6 +227,27 @@ def _settings_keys(content, result_id):
             f"results.{result_id}": content.get("results", {}).get(result_id)}
 
 
+def result_problems(result_id: str, table) -> list[str]:
+    """What a [results.<id>] table lacks: a one-line question, and inputs, when given, as a list of names.
+
+    record_evidence refuses a table with problems; run.py checks every wanted result before running any.
+    """
+    where = f"[results.{result_id}]"
+    if not isinstance(table, dict):
+        return [f"{where} is not a table"]
+    problems = []
+    question = table.get("question")
+    if not isinstance(question, str) or not question.strip():
+        problems.append(f'{where} has no question; add question = "<the question this result answers, '
+                        'in the user\'s words>"')
+    elif "\n" in question or "\r" in question:
+        problems.append(f"{where} question spans several lines; write it on one line")
+    inputs = table.get("inputs", [])
+    if not isinstance(inputs, list) or not all(isinstance(name, str) and name.strip() for name in inputs):
+        problems.append(f"{where} inputs must be a list of dataset or view names")
+    return problems
+
+
 # Investigation entries that are records or outputs, or that other results own, not producing code.
 _NOT_CODE = {"brief.md", "state.md", "findings.json", "history.md", "evidence", "exploration", "results", "queries"}
 # Helpers that dispatch, record evidence, or package; replacing them changes no result.
@@ -237,10 +260,11 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
                     code_paths: list[str] | None = None) -> Path:
     """Write one result's complete producing state atomically, replacing the same id.
 
-    The settings file must hold the result's [results.<id>] table; its `queries` (default
-    queries/<id>.sql, relative to the investigation) are producing code. code_paths adds further
-    producing files or directories. Omitted publications are those the views read; omitted
-    acquisitions are the inputs recorded in those publications' publication.json.
+    The settings file must hold the result's [results.<id>] table, whose question and inputs the
+    evidence copies; its `queries` (default queries/<id>.sql, relative to the investigation) are
+    producing code. code_paths adds further producing files or directories. Omitted publications
+    are those the views read; omitted acquisitions are the inputs recorded in those publications'
+    publication.json.
     """
     root = Path(project_root).resolve()
     if not all(isinstance(v, str) and _ID.fullmatch(v) for v in (investigation, result_id)):
@@ -255,7 +279,10 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
         reason = settings["content"]["unknown"] if _is_unknown(settings["content"]) else "no such table"
         raise ValueError(f"{settings_path} must hold [results.{result_id}]: {reason}")
     table = settings["content"]["results"][result_id]
-    queries = table.get("queries", [f"queries/{result_id}.sql"]) if isinstance(table, dict) else []
+    problems = result_problems(result_id, table)
+    if problems:
+        raise ValueError(f"{settings_path}: " + "; ".join(problems))
+    queries = table.get("queries", [f"queries/{result_id}.sql"])
     prefix = f"investigations/{investigation}/"
     code = [p for p in _expand(root, [p for p in ("src", prefix) if (root / p).is_dir()])
             if not p.startswith(_NOT_PRODUCING)
@@ -298,6 +325,7 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
                    for e in file_checksums(paths, root=root)]
     evidence = {
         "schema": _SCHEMA, "investigation": investigation, "result_id": result_id,
+        "question": table["question"], "inputs": table.get("inputs", []),
         "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "producing_commit": commit, "producing_paths": paths, "producing_uncommitted_changes": changes,
         "views": view_entries,
@@ -1196,7 +1224,8 @@ def _readme_pointer(root):
 
 
 def state_view(project_root, investigation: str) -> str:
-    """The resume view: brief.md and state.md verbatim, then a warning per row with missing evidence."""
+    """The resume view: brief.md and state.md verbatim, the question each row's evidence records, then
+    a warning per row with missing evidence."""
     root = Path(project_root).resolve()
     base = root / "investigations" / investigation
     out = []
@@ -1211,8 +1240,20 @@ def state_view(project_root, investigation: str) -> str:
         except (OSError, UnicodeError) as error:
             raise StateError(f"{label} is unreadable: {error}") from None
         out.append(f"==> {label} <==\n{text.rstrip()}\n")
+    rows = finding_rows(base / "state.md")
+    questions = []
+    for result_id in rows:
+        path = base / "evidence" / f"{result_id}.json"
+        try:
+            question = json.loads(path.read_text(encoding="utf-8"))["question"]
+        except (OSError, UnicodeError, ValueError, KeyError, TypeError):
+            continue  # Missing evidence gets its warning below; malformed evidence shows no question.
+        if isinstance(question, str):
+            questions.append(f"{result_id}: {question}")
+    if questions:
+        out.append("==> questions the findings answer, by result <==\n" + "\n".join(questions) + "\n")
     out += [f"warning: {result_id} links evidence/{result_id}.json, which does not exist"
-            for result_id in finding_rows(base / "state.md") if not (base / "evidence" / f"{result_id}.json").is_file()]
+            for result_id in rows if not (base / "evidence" / f"{result_id}.json").is_file()]
     return "\n".join(out)
 
 
@@ -1272,8 +1313,8 @@ def cli_state(root: Path, argv: list[str]) -> int:
         prog="awb.py state" + (f" {action}" if action else ""),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=actions[action] if action else
-        "Show an investigation for resuming: brief.md and state.md verbatim, and a warning for each finding "
-        "whose evidence file is missing. Changes nothing. Uses README's Active investigation line unless "
+        "Show an investigation for resuming: brief.md and state.md verbatim, the question each finding's "
+        "evidence records, and a warning for each finding whose evidence file is missing. Changes nothing. Uses README's Active investigation line unless "
         "--investigation is given; with no active investigation it lists the investigations.",
         epilog=epilog[action] + _STATE_EXIT)
     if action != "switch":

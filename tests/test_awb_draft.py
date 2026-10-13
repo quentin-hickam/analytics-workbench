@@ -53,7 +53,9 @@ CREATE OR REPLACE VIEW orders_view AS
 WITH recent AS (SELECT * FROM read_parquet('data/parquet/orders/p1/*.parquet'))
 SELECT r.*, EXTRACT(year FROM r.ordered_at) AS y FROM recent r JOIN main.regions_table g USING (region);
 """
-SETTINGS = b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n[results.r-001]\n\n[results.r-002]\n"
+SETTINGS = (b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n"
+            b'[results.r-001]\nquestion = "How many claims closed late?"\n\n'
+            b'[results.r-002]\nquestion = "Which regions close claims late?"\n')
 STALE_SETTINGS = SETTINGS.replace(b"minimum_count = 5", b"minimum_count = 6")
 FINDINGS = "# Order quality\n\n### Late orders rose in the west\n\n**Chart 1.** Bar: late share by region\n"
 METHODOLOGY = "# Methodology\n\n## Findings\n\n### Late orders rose in the west\n"
@@ -180,7 +182,8 @@ def test_toml_keys_fall_back_to_tomli_then_key_lines(project, monkeypatch):
     monkeypatch.setitem(sys.modules, "tomllib", None)
     monkeypatch.setitem(sys.modules, "tomli", tomllib)
     assert draft._toml_keys(text) == {"parameters", "parameters.minimum_count", "parameters.start",
-                                      "results", "results.r-001", "results.r-002"}
+                                      "results", "results.r-001", "results.r-001.question",
+                                      "results.r-002", "results.r-002.question"}
     monkeypatch.setitem(sys.modules, "tomli", None)
     assert {"parameters", "results.r-001", "minimum_count"} <= draft._toml_keys(text)
     write(project, "foundation/display.toml", "[columns]\n")
