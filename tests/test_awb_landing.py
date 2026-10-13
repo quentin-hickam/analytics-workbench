@@ -29,6 +29,12 @@
 # test_cli_publish_keeps_a_failed_check_or_empty_result_unpublished: check rows or an empty select keep the partial directory unpublished and print the failures.
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
+# test_publish_records_validate_detail_and_no_checks_by_default: without declared checks publication.json records no declared check; a string validate returns is its check's detail; another dataset's declaration does not apply.
+# test_declared_checks_refuse_a_malformed_declaration_before_conversion: unknown and malformed keys, a non-checks key, and invalid TOML refuse before any partial directory exists.
+# test_publish_runs_declared_checks_and_records_them: every declared check kind runs in DuckDB over the partial Parquet and is recorded by name, in the documented key order whatever the declaration order, before validate's check.
+# test_publish_keeps_a_failing_declared_check_unpublished: a failing declared check raises ChecksFailed listing every check, skips validate, and leaves the partial unpublished.
+# test_declared_check_failures_report_counts_not_values: each failing kind reports counts; a check that cannot compare its declared values fails without quoting DuckDB's message.
+# test_cli_publish_records_declared_checks: the publish command records declared checks with its --check outcome, counts them in its output and catalog_row, and prints failed_checks on refusal.
 
 import hashlib
 import importlib.util
@@ -126,7 +132,7 @@ def test_publish_records_inputs_and_uncommitted_conversion(tmp_path):
     raw = (final / "publication.json").read_text(encoding="utf-8")
     publication = json.loads(raw)
     assert list(publication) == ["dataset", "publication_id", "inputs", "conversion_commit",
-                                "converted_at", "files", "notes"]
+                                "converted_at", "files", "checks", "notes"]
     assert publication["dataset"] == "events"
     assert publication["publication_id"] == "v1"
     assert publication["conversion_commit"] == "uncommitted"
@@ -136,6 +142,8 @@ def test_publish_records_inputs_and_uncommitted_conversion(tmp_path):
     }]
     assert publication["files"] == [{"path": "nested/part.parquet", "bytes": 3,
                                      "sha256": hashlib.sha256(b"abc").hexdigest()}]
+    assert publication["checks"] == [
+        {"name": "validate", "outcome": "pass", "detail": "The validate callable passed."}]
     assert publication["notes"] == "converted"
     converted_at = datetime.fromisoformat(publication["converted_at"])
     assert converted_at.utcoffset() is not None
@@ -647,3 +655,166 @@ def test_cli_publish_view_sql_loads_through_session(tmp_path, capsys, dataset):
     (root / "foundation/views/01_view.sql").write_text(out["view_sql"] + "\n", encoding="utf-8")
     with landing.session(root) as connection:
         assert connection.execute(f"SELECT * FROM {name} ORDER BY id").fetchall() == [(1, 20), (2, 40)]
+
+
+def declare(root, text):
+    (root / "foundation").mkdir(parents=True, exist_ok=True)
+    (root / "foundation/datasets.toml").write_text(text)
+
+
+def test_publish_records_validate_detail_and_no_checks_by_default(tmp_path):
+    pytest.importorskip("tomllib")
+    declare(tmp_path, '[datasets.other.checks]\nnot_null = ["id"]\n')
+
+    def convert(directory):
+        (directory / "part.parquet").write_bytes(b"abc")
+
+    original = acquisition(tmp_path)
+    final = landing.publish(tmp_path, "events", "v1", convert, acquisitions=[original],
+                            validate=lambda directory: "  Three rows,\n all dated.  ")
+    assert json.loads((final / "publication.json").read_text())["checks"] == [
+        {"name": "validate", "outcome": "pass", "detail": "Three rows, all dated."}]
+    final = landing.publish(tmp_path, "events", "v2", convert, acquisitions=[original])
+    assert json.loads((final / "publication.json").read_text())["checks"] == []
+
+
+@pytest.mark.parametrize("text, message", [
+    ('[datasets.events.checks]\nnulls = ["id"]\n', "unknown check nulls"),
+    ('[datasets.events.checks]\nnot_null = "id"\n', "checks.not_null is malformed"),
+    ('[datasets.events.checks]\nkey = []\n', "checks.key is malformed"),
+    ('[datasets.events.checks]\nrange = { amount = { low = 0 } }\n', "checks.range is malformed"),
+    ('[datasets.events.checks]\nrow_count = { min = -1 }\n', "checks.row_count is malformed"),
+    ('[datasets.events.checks]\ntypes = { id = "INT; DROP" }\n', "checks.types is malformed"),
+    ('[datasets.events]\ncheck = { key = ["id"] }\n', "holds only a checks table"),
+    ('[datasets.events.checks\n', "foundation/datasets.toml"),
+])
+def test_declared_checks_refuse_a_malformed_declaration_before_conversion(tmp_path, text, message):
+    pytest.importorskip("tomllib")
+    original = acquisition(tmp_path)
+    declare(tmp_path, text)
+    called = []
+    with pytest.raises(ValueError, match=message):
+        landing.publish(tmp_path, "events", "v1", lambda path: called.append(path), acquisitions=[original])
+    assert called == []
+    assert not (tmp_path / "data/parquet").exists()
+
+
+def parquet_convert(duckdb, select):
+    def convert(directory):
+        (directory / "part").mkdir()
+        duckdb.execute(f"COPY ({select}) TO '{directory / 'part/data.parquet'}' (FORMAT parquet)")
+        (directory / "README.txt").write_text("not data")
+    return convert
+
+
+ROWS = ("SELECT * FROM (VALUES (1, 'open', 5.0, DATE '2024-01-02', 'a'), (2, 'shipped', 0.0, DATE '2024-06-30', NULL), "
+        "(3, 'open', NULL, DATE '2024-03-01', NULL)) AS t(id, status, amount, day, email)")
+ALL_KINDS = """
+[datasets.events.checks]
+row_count = { min = 1, max = 3 }
+columns = ["id", "status", "amount"]
+types = { id = "INT", status = "TEXT", day = "DATE" }
+not_null = ["id", "day"]
+key = ["id", "status"]
+unique = ["email", ["status", "day"]]
+accepted_values = { status = ["open", "shipped"] }
+range = { amount = { min = 0 }, day = { min = 2024-01-01, max = 2024-06-30 } }
+"""
+
+
+def test_publish_runs_declared_checks_and_records_them(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    declare(tmp_path, ALL_KINDS)
+    final = landing.publish(tmp_path, "events", "v1", parquet_convert(duckdb, ROWS),
+                            acquisitions=[acquisition(tmp_path)], validate=lambda directory: None)
+    checks = json.loads((final / "publication.json").read_text())["checks"]
+    assert [check["name"] for check in checks] == [
+        "columns", "types:id", "types:status", "types:day", "not_null:id", "not_null:day", "key:id,status",
+        "unique:email", "unique:status,day", "accepted_values:status", "range:amount", "range:day",
+        "row_count", "validate"]
+    assert {check["outcome"] for check in checks} == {"pass"}
+    details = {check["name"]: check["detail"] for check in checks}
+    assert details["types:id"] == "id is INTEGER."
+    assert details["types:status"] == "status is VARCHAR."
+    assert details["key:id,status"] == "3 rows, each key complete and unique."
+    assert details["unique:email"] == "No repeated values in 3 rows; nulls are not compared."
+    assert details["range:day"] == "No value outside [2024-01-01, 2024-06-30] in 3 rows."
+    assert details["row_count"] == "3 rows, within [1, 3]."
+
+
+def test_publish_keeps_a_failing_declared_check_unpublished(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    declare(tmp_path, '[datasets.events.checks]\nnot_null = ["id", "amount"]\nrow_count = { min = 1 }\n')
+    validated = []
+    with pytest.raises(landing.ChecksFailed) as error:
+        landing.publish(tmp_path, "events", "v1", parquet_convert(duckdb, ROWS),
+                        acquisitions=[acquisition(tmp_path)], validate=validated.append)
+    assert str(error.value) == "Declared checks failed: not_null:amount (1 of 3 rows are null)"
+    assert isinstance(error.value, ValueError)
+    assert [(check["name"], check["outcome"]) for check in error.value.checks] == [
+        ("not_null:id", "pass"), ("not_null:amount", "fail"), ("row_count", "pass")]
+    assert validated == []
+    partial = tmp_path / "data/parquet/events/v1.partial"
+    assert (partial / "part/data.parquet").is_file()
+    assert not (partial / "publication.json").exists()
+    assert not (tmp_path / "data/parquet/events/v1").exists()
+
+
+def test_declared_check_failures_report_counts_not_values(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    declare(tmp_path, """
+[datasets.events.checks]
+columns = ["id", "missing_a", "missing_b"]
+types = { id = "VARCHAR", day = "NOT_A_TYPE", gone = "INT" }
+key = ["status"]
+unique = [["status"]]
+accepted_values = { status = ["open"], id = ["secret-value"] }
+range = { amount = { max = 1 }, status = { min = 5 } }
+row_count = { max = 2 }
+""")
+    with pytest.raises(landing.ChecksFailed) as error:
+        landing.publish(tmp_path, "events", "v1", parquet_convert(duckdb, ROWS),
+                        acquisitions=[acquisition(tmp_path)])
+    details = {check["name"]: (check["outcome"], check["detail"]) for check in error.value.checks}
+    assert details == {
+        "columns": ("fail", "Missing columns: missing_a, missing_b."),
+        "types:id": ("fail", "id is INTEGER, declared VARCHAR."),
+        "types:day": ("fail", "Declared type NOT_A_TYPE is not a DuckDB type."),
+        "types:gone": ("fail", "Missing column: gone."),
+        "key:status": ("fail", "1 of 3 rows repeat a key."),
+        "unique:status": ("fail", "1 of 3 rows repeat a value."),
+        "accepted_values:status": ("fail", "1 of 3 rows hold a value outside the 1 accepted."),
+        "accepted_values:id": ("fail", "The check could not run (BinderException); compare its declared "
+                                       "values with the column's type."),
+        "range:amount": ("fail", "1 of 3 rows fall outside [-inf, 1]."),
+        "range:status": details["range:status"],
+        "row_count": ("fail", "3 rows, outside [-inf, 2]."),
+    }
+    assert details["range:status"][0] == "fail" and "shipped" not in details["range:status"][1]
+    assert "secret-value" not in str(error.value) and "shipped" not in str(error.value)
+
+
+def test_cli_publish_records_declared_checks(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    root = published_project(tmp_path, capsys)
+    (root / "prep/check.sql").write_text("SELECT * FROM publication WHERE doubled IS NULL")
+    declare(root, '[datasets.orders.checks]\nkey = ["id"]\nrange = { doubled = { min = 0 } }\n')
+    status, out = run(capsys, landing.cli_publish, root, "orders", "v1", "--from", "data/raw/orders/r1",
+                      "--sql", "prep/orders.sql", "--check", "prep/check.sql")
+    assert status == 0
+    assert out["checks"] == 3
+    assert ("| 2 declared checks in `foundation/datasets.toml` pass; `prep/check.sql` returns no rows |"
+            in out["catalog_row"])
+    checks = json.loads((root / "data/parquet/orders/v1/publication.json").read_text())["checks"]
+    assert [(check["name"], check["outcome"]) for check in checks] == [
+        ("key:id", "pass"), ("range:doubled", "pass"), ("validate", "pass")]
+    assert checks[-1]["detail"] == "The select returned 2 rows; prep/check.sql returned none."
+    declare(root, '[datasets.orders.checks]\nrange = { doubled = { max = 30 } }\n')
+    status, out = run(capsys, landing.cli_publish, root, "orders", "v2", "--from", "data/raw/orders/r1",
+                      "--sql", "prep/orders.sql")
+    assert status == 1
+    assert out["published"] is False
+    assert out["error"] == "ChecksFailed: Declared checks failed: range:doubled (1 of 2 rows fall outside [-inf, 30])"
+    assert out["failed_checks"] == [{"name": "range:doubled", "detail": "1 of 2 rows fall outside [-inf, 30]."}]
+    assert out["partial"] == "data/parquet/orders/v2.partial"
+    assert not (root / "data/parquet/orders/v2").exists()

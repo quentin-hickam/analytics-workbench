@@ -10,8 +10,11 @@ data/raw/<source>/<acquisition-id>/provenance.json:
 data/parquet/<dataset>/<publication-id>/publication.json:
     {dataset, publication_id,
      inputs: [{source, acquisition_id, files: [{path, sha256}]}],
-     conversion_commit, converted_at, files: [{path, bytes, sha256}], notes}
-    conversion_commit is git HEAD or "uncommitted".
+     conversion_commit, converted_at, files: [{path, bytes, sha256}],
+     checks: [{name, outcome, detail}], notes}
+    conversion_commit is git HEAD or "uncommitted". checks lists the dataset's declared checks
+    from foundation/datasets.toml, then `validate` when a validate callable ran; every outcome
+    is "pass", because a failure refuses publication.
 Paths are sorted POSIX paths relative to their acquisition or publication.
 """
 
@@ -94,6 +97,229 @@ def _finish(partial, final, name, value):
     return final
 
 
+# Declared dataset checks: [datasets.<name>.checks] in foundation/datasets.toml, run by publish()
+# against every publication of that dataset. The shipped foundation/datasets.toml documents the keys.
+
+DATASETS = "foundation/datasets.toml"
+CHECK_KEYS = ("columns", "types", "not_null", "key", "unique", "accepted_values", "range", "row_count")
+
+
+class ChecksFailed(ValueError):
+    """A declared check failed; checks holds every declared check's {name, outcome, detail}."""
+
+    def __init__(self, checks):
+        self.checks = checks
+        failed = [f"{check['name']} ({check['detail'].rstrip('.')})"
+                  for check in checks if check["outcome"] == "fail"]
+        super().__init__("Declared checks failed: " + "; ".join(failed))
+
+
+def _toml():
+    try:
+        import tomllib
+    except ImportError:  # Python 3.10
+        import tomli as tomllib
+    return tomllib
+
+
+def _names(value):
+    return isinstance(value, list) and all(isinstance(name, str) and name for name in value)
+
+
+def _bounds(value, kind):
+    return (isinstance(value, dict) and value and set(value) <= {"min", "max"}
+            and all(isinstance(bound, kind) and not isinstance(bound, bool) for bound in value.values()))
+
+
+def declared_checks(project_root: str | Path, dataset: str) -> dict:
+    """Return [datasets.<dataset>.checks] from foundation/datasets.toml, {} when none are declared.
+
+    Raises ValueError for a malformed declaration, naming the key at fault.
+    """
+    path = Path(project_root) / DATASETS
+    if not path.is_file():
+        return {}
+    try:
+        tomllib = _toml()
+    except ImportError as error:
+        raise ImportError(f"reading {DATASETS} needs Python 3.11 or the tomli package") from error
+    try:
+        datasets = tomllib.loads(path.read_text(encoding="utf-8")).get("datasets", {})
+    except ValueError as error:
+        raise ValueError(f"{DATASETS}: {error}") from error
+    if not isinstance(datasets, dict):
+        raise ValueError(f"{DATASETS}: datasets must be a table of [datasets.<name>] tables")
+    where = f"{DATASETS} [datasets.{dataset}]"
+    entry = datasets.get(dataset, {})
+    if not isinstance(entry, dict) or set(entry) - {"checks"} or not isinstance(entry.get("checks", {}), dict):
+        raise ValueError(f"{where} holds only a checks table")
+    spec = entry.get("checks", {})
+    shapes = {
+        "columns": _names,
+        "types": lambda v: isinstance(v, dict) and all(isinstance(t, str) and t.strip() and ";" not in t
+                                                       for t in v.values()),
+        "not_null": _names,
+        "key": lambda v: _names(v) and v,
+        "unique": lambda v: isinstance(v, list) and all(
+            (isinstance(item, str) and item) or (_names(item) and item) for item in v),
+        "accepted_values": lambda v: isinstance(v, dict) and all(
+            isinstance(values, list) and values for values in v.values()),
+        "range": lambda v: isinstance(v, dict) and all(_bounds(bounds, object) for bounds in v.values()),
+        "row_count": lambda v: _bounds(v, int) and all(bound >= 0 for bound in v.values()),
+    }
+    for key, value in spec.items():
+        if key not in shapes:
+            raise ValueError(f"{where}: unknown check {key}; use {', '.join(CHECK_KEYS)}")
+        if not shapes[key](value):
+            raise ValueError(f"{where}: checks.{key} is malformed; see the comments in the shipped {DATASETS}")
+    return spec
+
+
+def _quote(name):
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _literal(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _span(bounds):
+    return f"[{bounds.get('min', '-inf')}, {bounds.get('max', 'inf')}]"
+
+
+def _run_checks(directory, spec):
+    """Run spec's checks over the Parquet files under directory; return [{name, outcome, detail}]."""
+    try:
+        import duckdb
+    except ImportError as error:
+        raise ImportError("declared checks need the duckdb package") from error
+    files = [directory / path for path in _files(directory) if path.endswith(".parquet")]
+    if not files:
+        raise ValueError("Declared checks need the publication's Parquet files; none were written")
+    connection = duckdb.connect()
+    try:
+        connection.execute("CREATE VIEW awb_publication AS SELECT * FROM read_parquet(["
+                           + ", ".join(_literal(path) for path in files) + "])")
+        types = dict(connection.execute("SELECT column_name, column_type FROM "
+                                        "(DESCRIBE awb_publication)").fetchall())
+        rows = connection.execute("SELECT count(*) FROM awb_publication").fetchone()[0]
+
+        def count(condition, parameters=()):
+            return connection.execute(f"SELECT count(*) FROM awb_publication WHERE {condition}",
+                                      list(parameters)).fetchone()[0]
+
+        def repeats(columns, where="true"):
+            listed = ", ".join(map(_quote, columns))
+            return connection.execute(f"SELECT coalesce(sum(n - 1), 0) FROM (SELECT count(*) AS n "
+                                      f"FROM awb_publication WHERE {where} GROUP BY {listed})").fetchone()[0]
+
+        def columns_present(columns):
+            missing = [column for column in columns if column not in types]
+            return f"Missing column{'s' * (len(missing) > 1)}: {', '.join(missing)}." if missing else None
+
+        # Each measure returns (failure or None, pass detail); every detail is counts, never values.
+        def measure_columns(columns):
+            return columns_present(columns), f"All {len(columns)} declared columns present."
+
+        def measure_type(column, declared):
+            missing = columns_present([column])
+            if missing:
+                return missing, ""
+            try:
+                expected = connection.execute(f"SELECT typeof(CAST(NULL AS {declared}))").fetchone()[0]
+            except duckdb.Error:
+                return f"Declared type {declared} is not a DuckDB type.", ""
+            actual = types[column]
+            failure = None if actual == expected else f"{column} is {actual}, declared {expected}."
+            return failure, f"{column} is {actual}."
+
+        def measure_not_null(column):
+            missing = columns_present([column])
+            if missing:
+                return missing, ""
+            nulls = count(f"{_quote(column)} IS NULL")
+            return (f"{nulls} of {rows} rows are null." if nulls else None), f"No nulls in {rows} rows."
+
+        def measure_key(columns):
+            missing = columns_present(columns)
+            if missing:
+                return missing, ""
+            nulls = count(" OR ".join(f"{_quote(column)} IS NULL" for column in columns))
+            repeated = repeats(columns)
+            failures = ([f"{nulls} of {rows} rows have a null key column"] if nulls else []) + (
+                [f"{repeated} of {rows} rows repeat a key"] if repeated else [])
+            return ("; ".join(failures) + "." if failures else None), f"{rows} rows, each key complete and unique."
+
+        def measure_unique(columns):
+            missing = columns_present(columns)
+            if missing:
+                return missing, ""
+            repeated = repeats(columns, " AND ".join(f"{_quote(column)} IS NOT NULL" for column in columns))
+            return (f"{repeated} of {rows} rows repeat a value." if repeated else None), (
+                f"No repeated values in {rows} rows; nulls are not compared.")
+
+        def measure_accepted(column, accepted):
+            missing = columns_present([column])
+            if missing:
+                return missing, ""
+            outside = count(f"{_quote(column)} IS NOT NULL AND NOT list_contains(?, {_quote(column)})",
+                            [accepted])
+            return (f"{outside} of {rows} rows hold a value outside the {len(accepted)} accepted."
+                    if outside else None), f"Every non-null value is one of the {len(accepted)} accepted."
+
+        def measure_range(column, bounds):
+            missing = columns_present([column])
+            if missing:
+                return missing, ""
+            tests = [(f"{_quote(column)} < ?", bounds["min"])] if "min" in bounds else []
+            tests += [(f"{_quote(column)} > ?", bounds["max"])] if "max" in bounds else []
+            outside = count(" OR ".join(test for test, _ in tests), [bound for _, bound in tests])
+            return (f"{outside} of {rows} rows fall outside {_span(bounds)}." if outside else None), (
+                f"No value outside {_span(bounds)} in {rows} rows.")
+
+        def measure_rows(bounds):
+            inside = bounds.get("min", 0) <= rows <= bounds.get("max", rows)
+            return (None if inside else f"{rows} rows, outside {_span(bounds)}."), f"{rows} rows, within {_span(bounds)}."
+
+        planned = []
+        for key in CHECK_KEYS:
+            value = spec.get(key)
+            if value is None:
+                continue
+            if key == "columns":
+                planned.append(("columns", measure_columns, (value,)))
+            elif key == "types":
+                planned += [(f"types:{column}", measure_type, (column, declared)) for column, declared in value.items()]
+            elif key == "not_null":
+                planned += [(f"not_null:{column}", measure_not_null, (column,)) for column in value]
+            elif key == "key":
+                planned.append((f"key:{','.join(value)}", measure_key, (value,)))
+            elif key == "unique":
+                for item in value:
+                    columns = [item] if isinstance(item, str) else item
+                    planned.append((f"unique:{','.join(columns)}", measure_unique, (columns,)))
+            elif key == "accepted_values":
+                planned += [(f"accepted_values:{column}", measure_accepted, (column, accepted))
+                            for column, accepted in value.items()]
+            elif key == "range":
+                planned += [(f"range:{column}", measure_range, (column, bounds)) for column, bounds in value.items()]
+            else:
+                planned.append(("row_count", measure_rows, (value,)))
+        checks = []
+        for name, measure, arguments in planned:
+            try:
+                failure, detail = measure(*arguments)
+            except duckdb.Error as error:  # a declared value the column cannot be compared with
+                # DuckDB's message can quote a source value; name only the error's kind.
+                failure = (f"The check could not run ({type(error).__name__}); compare its declared "
+                           "values with the column's type.")
+            checks.append({"name": name, "outcome": "fail" if failure else "pass",
+                           "detail": failure or detail})
+        return checks
+    finally:
+        connection.close()
+
+
 def land(project_root: str | Path, source: str, acquisition_id: str,
          fetch: Callable[[Path], object], *, request: Any,
          records: dict[str, int] | None = None, notes: Any = None) -> Path:
@@ -133,10 +359,12 @@ def land(project_root: str | Path, source: str, acquisition_id: str,
 def publish(project_root: str | Path, dataset: str, publication_id: str,
             convert: Callable[[Path], object], *, acquisitions: Sequence[str | Path],
             validate: Callable[[Path], object] | None = None, notes: Any = None) -> Path:
-    """Convert completed acquisitions, validate the output, then write publication.json and rename it."""
+    """Convert completed acquisitions, check and validate the output, then write publication.json
+    and rename it. The dataset's declared checks run first; any failure raises ChecksFailed."""
     _check_name(dataset)
     _check_name(publication_id)
     root = Path(project_root)
+    spec = declared_checks(root, dataset)  # a malformed declaration refuses before any output
     if not acquisitions:
         raise ValueError("At least one completed acquisition is required")
     inputs = []
@@ -153,8 +381,16 @@ def publish(project_root: str | Path, dataset: str, publication_id: str,
     _refuse_existing(final, partial)
     partial.mkdir(parents=True)
     convert(partial)
-    if validate is not None and validate(partial) is False:
-        raise ValueError("Publication validation returned False")
+    checks = _run_checks(partial, spec) if spec else []
+    if any(check["outcome"] == "fail" for check in checks):
+        raise ChecksFailed(checks)
+    if validate is not None:
+        outcome = validate(partial)
+        if outcome is False:
+            raise ValueError("Publication validation returned False")
+        detail = " ".join(outcome.split()) if isinstance(outcome, str) else ""
+        checks.append({"name": "validate", "outcome": "pass",
+                       "detail": detail or "The validate callable passed."})
     try:
         result = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
                                 check=False, capture_output=True, text=True)
@@ -173,6 +409,7 @@ def publish(project_root: str | Path, dataset: str, publication_id: str,
         "conversion_commit": conversion_commit,
         "converted_at": _timestamp(),
         "files": _file_entries(partial, paths),
+        "checks": checks,
         "notes": notes,
     })
 
@@ -586,12 +823,15 @@ def cli_publish(root: Path, argv: list[str]) -> int:
         prog="awb.py publish",
         description="Write a SQL select over landed files as data/parquet/<dataset>/<publication-id>/"
                     "<dataset>.parquet, check it, and publish it with publication.json.",
-        epilog="Commit the SQL first so conversion_commit holds it; otherwise the output carries a "
-               "warning. Prints one JSON line. On success: published, rows, bytes, inputs, "
-               "conversion_commit, view_sql, a canonical view definition for foundation/views/, and "
+        epilog="The dataset's checks declared in foundation/datasets.toml run first, then --check; "
+               "publication.json records each outcome under checks. Commit the SQL first so "
+               "conversion_commit holds it; otherwise the output carries a warning. Prints one JSON line. "
+               "On success: published, rows, bytes, inputs, conversion_commit, checks (the number "
+               "recorded, all passed), view_sql, a canonical view definition for foundation/views/, and "
                "catalog_row, a foundation/catalog.md row to complete with grain and availability. On "
-               "refusal (exit 1): published false, error, failing_rows with up to 20 under first, and "
-               "the partial directory left behind. A select returning no rows is refused. Needs duckdb.")
+               "refusal (exit 1): published false, error, failed_checks with each failing declared "
+               "check's name and detail, or failing_rows with up to 20 under first, and the partial "
+               "directory left behind. A select returning no rows is refused. Needs duckdb.")
     parser.add_argument("dataset", help="dataset directory name under data/parquet/")
     parser.add_argument("publication_id", metavar="publication-id",
                         help="new publication directory name under data/parquet/<dataset>/")
@@ -654,7 +894,7 @@ def cli_publish(root: Path, argv: list[str]) -> int:
         if not notes["rows"]:
             raise ValueError("The select returned no rows")
         if "check" not in queries:
-            return
+            return f"The select returned {notes['rows']} rows."
         connection.execute("CREATE VIEW publication AS SELECT * FROM read_parquet("
                            f"{literal(directory / f'{args.dataset}.parquet')})")
         result = connection.execute(queries["check"][1])
@@ -665,12 +905,16 @@ def cli_publish(root: Path, argv: list[str]) -> int:
         if rows:
             failures.update(failing_rows=len(rows), first=[dict(zip(columns, row)) for row in rows[:20]])
             raise ValueError(f"The check returned {len(rows)} failing rows")
+        return f"The select returned {notes['rows']} rows; {notes['check']} returned none."
 
     try:
         connection.execute("SET file_search_path = ?", [str(root.resolve())])
         final = publish(root, args.dataset, args.publication_id, convert,
                         acquisitions=args.acquisitions, validate=validate, notes=notes)
-    except (duckdb.Error, OSError, ValueError) as error:
+    except (duckdb.Error, OSError, ValueError, ImportError) as error:
+        if isinstance(error, ChecksFailed):
+            failures["failed_checks"] = [{"name": check["name"], "detail": check["detail"]}
+                                         for check in error.checks if check["outcome"] == "fail"]
         partial = root / "data/parquet" / args.dataset / f"{args.publication_id}.partial"
         _print({"published": False, "error": f"{type(error).__name__}: {error}", **failures,
                 "partial": _relative(root, partial) if partial.is_dir() else None})
@@ -681,10 +925,14 @@ def cli_publish(root: Path, argv: list[str]) -> int:
     location = _relative(root, final) + "/"
     view_name = '"' + args.dataset.replace('"', '""') + '"'
     quality = f"`{notes['check']}` returns no rows" if notes["check"] else "nonzero row count"
+    declared = len(publication["checks"]) - 1  # the last check is the validate callable's
+    if declared:
+        quality = f"{declared} declared check{'s' * (declared > 1)} in `{DATASETS}` pass; {quality}"
     result = {
         "published": location, "rows": notes["rows"],
         "bytes": sum(file["bytes"] for file in publication["files"]),
         "inputs": sorted(named), "conversion_commit": publication["conversion_commit"],
+        "checks": len(publication["checks"]),
         "view_sql": (f"CREATE VIEW {view_name} AS SELECT * FROM "
                      f"read_parquet({literal(location + args.dataset + '.parquet')});"),
         # Grain and availability need judgment; the agent completes and places the row.

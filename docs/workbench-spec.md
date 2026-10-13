@@ -149,6 +149,7 @@ project-root/
 │   ├── catalog.md                # Canonical datasets, views, and deliberate caches
 │   ├── quality.md                # Limitations, errors, and correction rationale
 │   ├── quality.json              # Links from cleaning-scan issues to quality rows (written by awb-clean)
+│   ├── datasets.toml             # Declared checks each dataset's publications must pass
 │   ├── scans/                    # Cleaning scans; Git-ignored because they quote source values
 │   ├── glossary.md               # Shared business and analytical vocabulary
 │   └── views/                    # Version-controlled canonical definitions, if used
