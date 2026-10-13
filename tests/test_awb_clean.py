@@ -6,13 +6,25 @@
 # test_removed_targets_and_options_are_rejected: a saved .sql query is not a scan target; --rescan takes no scan name; --typed-threshold and --max-categories are gone.
 # test_recorded_markers_mark_issues_as_recorded: issues whose `<scan>#<key>` marker is in the quality record are reported as recorded with their quality ID and recorded count beside the current count.
 # test_record_sets_the_view_row_when_a_publication_shares_its_name: a publication row named like its canonical view leaves the view row the one record sets; two non-view rows with one name still refuse.
-# test_record_writes_quality_catalog_and_flags_in_one_call: new quality IDs, issue and correction rows with scan counts and markers dated with no scan link, a catalog row, and a revalidation flag that keeps the prior status.
-# test_record_updates_recorded_issue_and_continues_numbering: a recorded issue has its judgment cells updated and its observation's count and scan date refreshed, in older linked rows and in current rows; a new issue continues the existing ID prefix and width.
+# test_record_writes_quality_catalog_and_flags_in_one_call: linked quality rows and catalog cells exist before flags, corrections are last, and a flag keeps the prior status.
+# test_record_updates_recorded_issue_and_continues_numbering: a recorded issue updates its link and judgment cells, keeps its observation, and continues the Markdown ID prefix and width.
 # test_record_checks_everything_before_writing: an unmatched flag or a correction without findings writes nothing; a dry run prints rows and writes nothing.
+# test_record_uses_one_observation_for_link: baseline count/of/date win together; a new rescan issue uses the current observation.
+# test_record_keeps_unexamined_links: recording one scan preserves another scan's links without its scan file.
+# test_orphan_links_do_not_claim_reused_ids: deleted rows or missing markers invalidate links, including when Markdown reuses their ID.
+# test_duplicate_quality_rows_are_refused: duplicate IDs or markers are refused by both helpers before any write.
+# test_legacy_links_backfill_without_scan_writes: both historical date formats and escaped keys migrate, and scanning stays read-only.
+# test_recorded_status_follows_header_and_count_follows_json: Markdown status is read by header; JSON alone owns the recorded count.
+# test_record_failure_reports_phases_and_retries_once: B or C failure reports completed phases and replaced files; retry appends one correction and keeps flags idempotent.
 # test_record_revises_a_row_by_quality_id: a Q- or DQ- key revises its row's judgment cells and keeps the observation, appends a correction row without a rescan suffix, accepts an unmarked row, and resolves {Q-004}; a dry run writes nothing.
 # test_record_rejects_bad_quality_id_keys: a foreign scan's marker, two keys naming one row, and an unknown key are rejected and write nothing.
+# test_quality_id_revision_keeps_link_and_placeholder_rules: a quality-ID revision keeps the link's original counts and date, works with reordered Markdown columns, and keeps known-prefix placeholder refusals.
+# test_record_ignores_unvalidated_recorded_placeholders: saved scan metadata cannot supply a placeholder ID without a validated link; the refusal writes nothing.
+# test_quality_id_duplicate_keeps_revision_error: duplicate quality-ID revisions retain their specific refusal message and write nothing.
 
+import hashlib
 import importlib.util
+import io
 import json
 import shutil
 from datetime import date
@@ -42,6 +54,22 @@ def write(root, path, text):
     file.parent.mkdir(parents=True, exist_ok=True)
     file.write_text(text)
     return file
+
+
+def quality_link(root, scan, key):
+    digest = hashlib.sha256(f"{scan}\n{key}".encode()).hexdigest()
+    return json.loads((root / "foundation/quality.json").read_text())["links"][digest]
+
+
+def quality_rows(root, rows):
+    text = (TEMPLATES / "foundation/quality.md").read_text().replace(
+        "| --- | --- | --- | --- | --- | --- |\n",
+        "| --- | --- | --- | --- | --- | --- |\n" + "\n".join(rows) + "\n", 1)
+    return write(root, "foundation/quality.md", text)
+
+
+def judgment():
+    return {"impact": "Splits counts", "treatment": "Open", "status": "open"}
 
 
 def orders_csv():
@@ -190,7 +218,7 @@ def scan_file(root, *, delta=True):
     record = {"schema": "awb-scan/1", "name": "orders",
               "target": {"kind": "view", "label": "view orders", "path": None},
               "scanned_at": "2026-10-09T10:00:00+00:00", "issues": [issues[1]] if delta else issues,
-              "baseline": {"issues": issues} if delta else None,
+              "baseline": {"scanned_at": "2026-10-09T10:00:00+00:00", "issues": issues} if delta else None,
               "delta": {"issues": [{"id": "S1", "key": "whitespace:dept", "before": 2, "after": 0, "change": "resolved"},
                                    {"id": "S2", "key": "sentinel:age:9999", "before": 2, "after": 2, "change": "unchanged"}]}
               if delta else None}
@@ -228,9 +256,22 @@ def test_record_sets_the_view_row_when_a_publication_shares_its_name(tmp_path):
         recorder.record(tmp_path, "orders", decisions, today=TODAY)
 
 
-def test_record_writes_quality_catalog_and_flags_in_one_call(tmp_path):
+def test_record_writes_quality_catalog_and_flags_in_one_call(tmp_path, monkeypatch):
     scan_file(tmp_path)
     state = state_file(tmp_path)
+    replaced = []
+    original = recorder.os.replace
+    def replace(source, target):
+        if not replaced:
+            assert all((tmp_path / relative).is_file() for relative in (
+                "foundation/quality.json.tmp", "foundation/quality.md.tmp", "foundation/catalog.md.tmp"))
+        if Path(target) == state:
+            quality = (tmp_path / "foundation/quality.md").read_text()
+            assert "| Q-001 |" in quality and "| Q-002 |" in quality
+            assert "| 2026-10-09 | Q-001 |" not in quality
+        replaced.append(Path(target).relative_to(tmp_path).as_posix())
+        original(source, target)
+    monkeypatch.setattr(recorder.os, "replace", replace)
     result = recorder.record(tmp_path, "orders", {
         "issues": {"S1": {"impact": "Splits department counts", "treatment": "Trimmed in the view",
                           "status": "corrected", "correction": "Trim department labels; spaces carry no meaning",
@@ -240,8 +281,13 @@ def test_record_writes_quality_catalog_and_flags_in_one_call(tmp_path):
         "catalog": {"name": "orders", "cells": {"Kind": "view", "Preparation rules": "Trims dept ({S1})"}},
     }, today=TODAY)
     assert result["quality_ids"] == {"S1": "Q-001", "S2": "Q-002"} and result["corrections"] == ["Q-001"]
-    assert sorted(result["written"]) == ["foundation/catalog.md", "foundation/quality.md",
+    assert sorted(result["written"]) == ["foundation/catalog.md", "foundation/quality.json", "foundation/quality.md",
                                          "investigations/churn/state.md"]
+    assert replaced == ["foundation/quality.json", "foundation/quality.md", "foundation/catalog.md",
+                        "investigations/churn/state.md", "foundation/quality.md"]
+    links = json.loads((tmp_path / "foundation/quality.json").read_text())
+    assert links["schema"] == "awb-quality-links/1" and len(links["links"]) == 2
+    assert {link["id"] for link in links["links"].values()} == {"Q-001", "Q-002"}
     quality = (tmp_path / "foundation/quality.md").read_text()
     assert ("| Q-001 | view `orders`, column `dept` | 2 values in dept with leading or trailing whitespace "
             "(2 of 45); e.g. \"Sales \" (2); `orders#whitespace:dept` scanned 2026-10-09 | "
@@ -270,10 +316,13 @@ def test_record_updates_recorded_issue_and_continues_numbering(tmp_path):
     assert result["quality_ids"] == {"S1": "DQ-07", "S2": "DQ-08"}
     assert result["updated"] == ["DQ-07"] and result["added"] == ["DQ-08"]
     text = (tmp_path / "foundation/quality.md").read_text()
-    assert ("| DQ-07 | view `orders` | Spaces (2 of 45); `orders#whitespace:dept` in [scan](scans/orders.json) 2026-10-09 | "
+    assert ("| DQ-07 | view `orders` | Spaces (5 of 45); `orders#whitespace:dept` in [scan](scans/orders.json) 2026-01-02 | "
             "Splits counts | Trimmed in the view | corrected |") in text
     assert "`orders#sentinel:age:9999` scanned 2026-10-09 |" in text
-    # A later scan reopens the current-form row: its count and the date after the marker refresh.
+    assert quality_link(tmp_path, "orders", "whitespace:dept") == {
+        "id": "DQ-07", "scan": "orders", "recorded_count": 2, "recorded_of": 45,
+        "observed_at": "2026-10-09"}
+    # A plain scan updates the link's count and date, keeping the first observation.
     path = tmp_path / "foundation/scans/orders.json"
     record = json.loads(path.read_text())
     record["scanned_at"] = "2026-11-01T10:00:00+00:00"
@@ -282,7 +331,9 @@ def test_record_updates_recorded_issue_and_continues_numbering(tmp_path):
     result = recorder.record(tmp_path, "orders", {"issues": {"S2": {"status": "open"}}}, today=TODAY)
     assert result["updated"] == ["DQ-08"] and result["added"] == []
     text = (tmp_path / "foundation/quality.md").read_text()
-    assert "2 values in age are 9999 (3 of 45); e.g. \"Sales \" (2); `orders#sentinel:age:9999` scanned 2026-11-01 |" in text
+    assert "2 values in age are 9999 (2 of 45); e.g. \"Sales \" (2); `orders#sentinel:age:9999` scanned 2026-10-09 |" in text
+    link = quality_link(tmp_path, "orders", "sentinel:age:9999")
+    assert link["recorded_count"] == 3 and link["observed_at"] == "2026-11-01"
 
 
 def test_record_checks_everything_before_writing(tmp_path, capsys, monkeypatch):
@@ -304,6 +355,7 @@ def test_record_checks_everything_before_writing(tmp_path, capsys, monkeypatch):
     out = json.loads(capsys.readouterr().out)
     assert out["written"] == [] and any("none: stale listed" in row for row in out["rows"])
     assert not (tmp_path / "foundation/quality.md").exists()
+    assert not (tmp_path / "foundation/quality.json").exists()
 
 
 def quality_file(root, prefix="Q-"):
@@ -356,3 +408,224 @@ def test_record_rejects_bad_quality_id_keys(tmp_path):
         with pytest.raises(recorder.RecordError, match=message):
             recorder.record(tmp_path, "orders", {"issues": issues}, today=TODAY)
     assert path.read_text() == before
+
+
+@pytest.mark.parametrize("prefix", ["Q-", "DQ-"])
+def test_quality_id_revision_keeps_link_and_placeholder_rules(tmp_path, prefix):
+    scan_file(tmp_path)
+    quality_file(tmp_path, prefix)
+    recorder.record(tmp_path, "orders", {})  # persist the legacy links before revision
+    links = tmp_path / "foundation/quality.json"
+    before_links = links.read_bytes()
+    quality = tmp_path / "foundation/quality.md"
+    lines = quality.read_text().splitlines()
+    table = recorder.Table(lines, recorder.ACTIVE, "foundation/quality.md")
+    for index in [table.header, *[i for i, _ in table.rows()]]:
+        cells = recorder._cells(lines[index])
+        cells[0], cells[2] = cells[2], cells[0]
+        lines[index] = recorder._row(cells)
+    quality.write_text("\n".join(lines) + "\n")
+    qid = prefix + "003"  # this row's issue is still listed by the scan
+    decisions = {"issues": {qid: {"status": "open", "treatment": "See {" + prefix + "004} and {r-003}",
+                                 "correction": "Revise {" + qid + "}", "change": "view"}},
+                 "findings": "none"}
+    result = recorder.record(tmp_path, "orders", decisions, today=TODAY)
+    assert result["quality_ids"] == {qid: qid} and result["updated"] == [qid]
+    assert links.read_bytes() == before_links
+    text = quality.read_text()
+    assert "Spaces (2 of 45); `orders#whitespace:dept` scanned 2026-10-01" in text
+    assert f"See {prefix}004 and {{r-003}} | open |" in text
+    assert f"| 2026-10-09 | {qid} | Revise {qid} | view | none |" in text
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    for missing in ("S99", "Q-099", prefix + "099"):
+        decisions["issues"][qid]["treatment"] = "See {" + missing + "}"
+        with pytest.raises(recorder.RecordError, match="names no issue recorded in this call or earlier"):
+            recorder.record(tmp_path, "orders", decisions, today=TODAY)
+        assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_record_ignores_unvalidated_recorded_placeholders(tmp_path):
+    scan_file(tmp_path)
+    quality_file(tmp_path)
+    write(tmp_path, "foundation/quality.json", json.dumps({"schema": "awb-quality-links/1", "links": {}}))
+    scan_path = tmp_path / "foundation/scans/orders.json"
+    scan = json.loads(scan_path.read_text())
+    scan["issues"][0]["recorded"] = {"id": "Q-003", "count": 2, "status": "corrected"}
+    scan_path.write_text(json.dumps(scan))
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    with pytest.raises(recorder.RecordError, match="names no issue recorded in this call or earlier"):
+        recorder.record(tmp_path, "orders", {"issues": {"Q-005": {"treatment": "See {S1}"}}})
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_quality_id_duplicate_keeps_revision_error(tmp_path):
+    scan_file(tmp_path)
+    quality_rows(tmp_path, ["| Q-003 | view | First | x | y | open |",
+                            "| Q-003 | view | Second | x | y | open |"])
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    with pytest.raises(recorder.RecordError, match="foundation/quality.md: 2 active rows have the ID Q-003"):
+        recorder.record(tmp_path, "orders", {"issues": {"Q-003": {"status": "corrected"}}})
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_record_uses_one_observation_for_link(tmp_path):
+    scan_file(tmp_path)
+    path = tmp_path / "foundation/scans/orders.json"
+    scan = json.loads(path.read_text())
+    scan["scanned_at"] = "2026-11-02T10:00:00+00:00"
+    scan["issues"][0].update(count=1, of=40)
+    new = {**scan["issues"][0], "id": "S3", "key": "sentinel:dept:n/a", "count": 3, "of": 40}
+    scan["issues"].append(new)
+    path.write_text(json.dumps(scan))
+    recorder.record(tmp_path, "orders", {"issues": {"S2": judgment(), "S3": judgment()}}, today=TODAY)
+    assert quality_link(tmp_path, "orders", "sentinel:age:9999") == {
+        "id": "Q-001", "scan": "orders", "recorded_count": 2, "recorded_of": 45,
+        "observed_at": "2026-10-09"}
+    assert quality_link(tmp_path, "orders", "sentinel:dept:n/a") == {
+        "id": "Q-002", "scan": "orders", "recorded_count": 3, "recorded_of": 40,
+        "observed_at": "2026-11-02"}
+    quality = (tmp_path / "foundation/quality.md").read_text()
+    assert "`orders#sentinel:age:9999` scanned 2026-10-09" in quality
+    assert "`orders#sentinel:dept:n/a` scanned 2026-11-02" in quality
+    raw = (tmp_path / "foundation/quality.json").read_text()
+    assert "sentinel" not in raw and "Sales" not in raw and "n/a" not in raw
+    assert raw == json.dumps(json.loads(raw), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
+def test_record_keeps_unexamined_links(tmp_path):
+    scan_file(tmp_path, delta=False)
+    recorder.record(tmp_path, "orders", {"issues": {"S1": judgment(), "S2": judgment()}}, today=TODAY)
+    path = tmp_path / "foundation/quality.json"
+    document = json.loads(path.read_text())
+    bkey = hashlib.sha256(b"other\nwhitespace:dept").hexdigest()
+    document["links"][bkey] = {"id": "Q-999", "scan": "other", "recorded_count": 17,
+                               "recorded_of": 99, "observed_at": "2025-01-01"}
+    unseen = hashlib.sha256(b"orders\nrange:amount:0:100").hexdigest()
+    document["links"][unseen] = {**document["links"][bkey], "scan": "orders"}
+    path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
+    def entry_bytes(key):
+        return path.read_bytes().split(f'"{key}": '.encode(), 1)[1].split(b"\n    }", 1)[0]
+    before = {key: entry_bytes(key) for key in (bkey, unseen)}
+    # Even an invalid link is left alone until its scan and key are examined.
+    assert not (tmp_path / "foundation/scans/other.json").exists()
+    recorder.record(tmp_path, "orders", {"issues": {"S1": {"status": "corrected"}}}, today=TODAY)
+    assert {key: entry_bytes(key) for key in (bkey, unseen)} == before
+
+
+@pytest.mark.parametrize("deleted", [True, False])
+def test_orphan_links_do_not_claim_reused_ids(tmp_path, deleted):
+    scan_file(tmp_path, delta=False)
+    recorder.record(tmp_path, "orders", {"issues": {"S1": judgment()}}, today=TODAY)
+    quality = tmp_path / "foundation/quality.md"
+    if deleted:
+        quality.write_text("\n".join(line for line in quality.read_text().splitlines()
+                                     if not line.startswith("| Q-001 |")) + "\n")
+    else:
+        quality.write_text(quality.read_text().replace("`orders#whitespace:dept`", "Manual observation"))
+    assert scanner._recorded(tmp_path, "orders", ["whitespace:dept"]) == {}
+    # This unrelated issue can receive the deleted ID, but cannot inherit its link.
+    result = recorder.record(tmp_path, "orders", {"issues": {"S2": judgment()}}, today=TODAY)
+    assert result["quality_ids"] == {"S2": "Q-001" if deleted else "Q-002"}
+    stale = hashlib.sha256(b"orders\nwhitespace:dept").hexdigest()
+    assert stale not in json.loads((tmp_path / "foundation/quality.json").read_text())["links"]
+    found = scanner._recorded(tmp_path, "orders", ["whitespace:dept", "sentinel:age:9999"])
+    assert "whitespace:dept" not in found and found["sentinel:age:9999"]["id"] == result["quality_ids"]["S2"]
+
+
+@pytest.mark.parametrize("duplicate", ["id", "marker"])
+def test_duplicate_quality_rows_are_refused(tmp_path, duplicate):
+    scan_file(tmp_path, delta=False)
+    marker = "`orders#whitespace:dept`"
+    quality_rows(tmp_path, [f"| Q-001 | view | Spaces (2 of 45); {marker} | x | y | open |",
+                            f"| {'Q-001' if duplicate == 'id' else 'Q-002'} | view | {marker if duplicate == 'marker' else 'Other'} | x | y | open |"])
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    message = "duplicate ID" if duplicate == "id" else "appears on two rows"
+    for dry_run in [False, True]:
+        with pytest.raises(recorder.RecordError, match=message):
+            recorder.record(tmp_path, "orders", {"issues": {"S1": judgment()}}, dry_run=dry_run)
+    with pytest.raises(ValueError, match=message):
+        scanner._recorded(tmp_path, "orders", ["whitespace:dept"])
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_legacy_links_backfill_without_scan_writes(tmp_path):
+    scan_file(tmp_path, delta=False)
+    path = tmp_path / "foundation/scans/orders.json"
+    scan = json.loads(path.read_text())
+    scan["issues"][1]["key"] = "near-variants:dept:a|b"
+    path.write_text(json.dumps(scan))
+    quality_rows(tmp_path, [
+        "| Q-003 | view | Spaces (5 of 45); `orders#whitespace:dept` scanned 2026-01-02 | x | y | corrected |",
+        "| Q-004 | view | Variants (7 of 50); `orders#near-variants:dept:a\\|b` in [scan](scans/orders.json) 2026-02-03 | x | y | open |"])
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    expected = {"whitespace:dept": {"id": "Q-003", "status": "corrected", "count": 5},
+                "near-variants:dept:a|b": {"id": "Q-004", "status": "open", "count": 7}}
+    assert scanner._recorded(tmp_path, "orders") == expected
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+    decisions = {"issues": {"S1": {"status": "open"}, "S2": {"status": "corrected"}}}
+    result = recorder.record(tmp_path, "orders", decisions, dry_run=True)
+    assert result["quality_ids"] == {"S1": "Q-003", "S2": "Q-004"}
+    assert not (tmp_path / "foundation/quality.json").exists()
+    # A first write without reopening preserves both legacy observations in the backfill.
+    recorder.record(tmp_path, "orders", {})
+    assert quality_link(tmp_path, "orders", "whitespace:dept")["observed_at"] == "2026-01-02"
+    assert quality_link(tmp_path, "orders", "near-variants:dept:a|b") == {
+        "id": "Q-004", "scan": "orders", "recorded_count": 7, "recorded_of": 50,
+        "observed_at": "2026-02-03"}
+    assert scanner._recorded(tmp_path, "orders") == expected
+    result = recorder.record(tmp_path, "orders", decisions)
+    assert result["updated"] == ["Q-003", "Q-004"]
+
+
+def test_recorded_status_follows_header_and_count_follows_json(tmp_path):
+    scan_file(tmp_path, delta=False)
+    recorder.record(tmp_path, "orders", {"issues": {"S1": judgment()}}, today=TODAY)
+    quality = tmp_path / "foundation/quality.md"
+    lines = quality.read_text().splitlines()
+    table = recorder.Table(lines, recorder.ACTIVE, "foundation/quality.md")
+    for index in [table.header, *[i for i, _ in table.rows()]]:
+        cells = recorder._cells(lines[index])
+        cells[3], cells[5] = cells[5], cells[3]
+        lines[index] = recorder._row(cells)
+    quality.write_text("\n".join(lines).replace("(2 of 45)", "(999 of 999)") + "\n")
+    assert scanner._recorded(tmp_path, "orders") == {
+        "whitespace:dept": {"id": "Q-001", "status": "open", "count": 2}}
+
+
+@pytest.mark.parametrize("failed_phase", ["B", "C"])
+def test_record_failure_reports_phases_and_retries_once(tmp_path, capsys, monkeypatch, failed_phase):
+    scan_file(tmp_path)
+    state = state_file(tmp_path)
+    state.write_text(state.read_text().replace("| supported | |", "| supported | Prior caveat |"))
+    decisions = {"issues": {"S1": {**judgment(), "status": "corrected", "correction": "Trim",
+                                   "change": "view"}},
+                 "flags": [{"investigation": "churn", "result": "r-003", "reason": "{S1} merges labels"}]}
+    original = recorder.os.replace
+    quality_replaces = 0
+    def replace(source, target):
+        nonlocal quality_replaces
+        if Path(target).name == "quality.md":
+            quality_replaces += 1
+        if ((failed_phase == "B" and Path(target) == state)
+                or (failed_phase == "C" and Path(target).name == "quality.md" and quality_replaces == 2)):
+            raise PermissionError("injected write failure")
+        original(source, target)
+    monkeypatch.setattr(recorder.os, "replace", replace)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(decisions)))
+    assert recorder.main([str(tmp_path), "orders"]) == 2
+    out = json.loads(capsys.readouterr().err)
+    assert out["phases"] == (["A"] if failed_phase == "B" else ["A", "B"])
+    expected = ["foundation/quality.json", "foundation/quality.md"]
+    if failed_phase == "C":
+        expected.append("investigations/churn/state.md")
+    assert out["written"] == expected
+    quality = (tmp_path / "foundation/quality.md").read_text()
+    assert "| Q-001 |" in quality and "| Q-001 | Trim |" not in quality
+    monkeypatch.setattr(recorder.os, "replace", original)
+    result = recorder.record(tmp_path, "orders", decisions, today=TODAY)
+    assert result["updated"] == ["Q-001"] and result["added"] == []
+    quality = (tmp_path / "foundation/quality.md").read_text()
+    assert quality.count("| Q-001 | Trim |") == 1
+    text = state.read_text()
+    assert text.count("Q-001 merges labels") == 1 and "Prior caveat; Q-001 merges labels" in text
+    assert "revalidation-needed (was supported)" in text

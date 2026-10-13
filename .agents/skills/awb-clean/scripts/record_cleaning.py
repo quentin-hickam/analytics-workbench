@@ -11,15 +11,19 @@ SCAN_NAME names foundation/scans/<SCAN_NAME>.json written by scan_dataset.py. De
      "findings": "...",                                           correction rows' findings when no flags
      "flags": [{"investigation", "result", "reason"}],            findings to flag
      "catalog": {"name", "cells": {column: text}}}                catalog cells to set
-Text may name an issue as {S1}; it becomes the issue's quality ID. A recorded quality ID, such as Q-004, also works as a key.
+Text may name an issue as {S1} or {Q-004}; it becomes the issue's quality ID.
+A recorded quality ID, such as Q-004, also works as a key: it revises only judgment cells,
+keeps the observation and link, and its correction carries no rescan suffix.
 
 Quality issue rows get the next ID, the scan's counts and examples, and the marker
-`<scan>#<key>` with its scan date; later scans use the marker to report the issue as recorded. An
-issue already recorded has its judgment cells updated instead, and its observation takes this
-scan's count and date, so later scans compare with the reopened state. Correction rows carry the rescan's before and after
-counts. A flag sets the finding's status to `revalidation-needed (was <status>)`, adds the reason,
-and updates `Last updated`. Everything is checked before any file is written; --dry-run prints the
-rows that would change and writes nothing. Prints compact JSON.
+`<scan>#<key>` with its scan date. foundation/quality.json holds hashed scan links and recorded
+counts and dates, backfilled from legacy rows when absent. A baseline observation supplies both
+counts and date; otherwise the current scan does. Reopening updates the link and judgment cells,
+keeping the observation. Correction rows carry the rescan's before and after counts. A flag sets
+the finding's status to `revalidation-needed (was <status>)`, adds the reason, and updates
+`Last updated`. All versions are checked before writing: A replaces links, Active rows, and
+catalog; B writes flags; C appends corrections. Failures report completed phases and replaced
+files. --dry-run prints the rows that would change and writes nothing. Prints compact JSON.
 """
 
 import argparse
@@ -30,6 +34,9 @@ import sys
 from collections import Counter
 from datetime import date
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from quality_links import ActiveRows, QualityLinks
 
 TEMPLATES = Path(__file__).resolve().parents[2] / "awb-init/assets/workbench/foundation"
 ACTIVE = "## Active limitations and issues"
@@ -112,7 +119,7 @@ ID = r"([A-Za-z]+-?)(\d+)"
 
 def _next_ids(table):
     """Yield new IDs continuing the table's prefix and numbering, Q-001 by default."""
-    found = [re.fullmatch(ID, cells[0]) for _, cells in table.rows()]
+    found = [re.fullmatch(ID, cells[table.column("ID")]) for _, cells in table.rows()]
     found = [m for m in found if m]
     prefix = Counter(m.group(1) for m in found).most_common(1)[0][0] if found else "Q-"
     width = max((len(m.group(2)) for m in found), default=3)
@@ -135,7 +142,7 @@ def _fill(text, ids, prefixes=("S",)):
 
 
 def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
-    """Apply DECISIONS for scan SCAN_NAME; return the compact result. Writes nothing on error."""
+    """Validate DECISIONS, then write A (records), B (flags), C (corrections)."""
     root = Path(project_root).resolve()
     scan_path = root / "foundation/scans" / f"{scan_name}.json"
     try:
@@ -147,6 +154,8 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     baseline = (scan.get("baseline") or {}).get("issues") or []
     by_id = {issue["id"]: issue for issue in scan["issues"]}
     by_id.update({issue["id"]: issue for issue in baseline})  # the original observation wins
+    observed_at = {issue["id"]: scan["scanned_at"][:10] for issue in scan["issues"]}
+    observed_at.update({issue["id"]: scan["baseline"]["scanned_at"][:10] for issue in baseline})
     delta = {d["id"]: d for d in (scan.get("delta") or {}).get("issues", [])}
     target = scan["target"]
     subject = target["path"] or scan["name"]
@@ -154,15 +163,11 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     files, changed = {}, {}
     quality = files["foundation/quality.md"] = _load(root, "foundation/quality.md", "quality.md")
     active = Table(quality, ACTIVE, "foundation/quality.md")
-    recorded = {}
-    for line_index, cells in active.rows():
-        for key in re.findall(r"`" + re.escape(marker) + r"([^`]+)`", quality[line_index]):
-            recorded[key.replace("\\|", "|")] = (line_index, cells[0])
     issues = decisions.get("issues") or {}
     by_qid = {}
     for line_index, cells in active.rows():
-        if re.fullmatch(ID, cells[0]):
-            by_qid.setdefault(cells[0], []).append(line_index)
+        if re.fullmatch(ID, cells[active.column("ID")]):
+            by_qid.setdefault(cells[active.column("ID")], []).append(line_index)
     revised = {k: by_qid[k] for k in issues if k not in by_id and k in by_qid}
     unknown = sorted(set(issues) - set(by_id) - set(revised))
     if unknown:
@@ -171,10 +176,24 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
         if len(lines) > 1:
             raise RecordError(f"foundation/quality.md: {len(lines)} active rows have the ID {qid}")
         revised[qid] = lines[0]
-        markers = set(re.findall(r"`([^`\s#]+)#[^`]+`", _cells(quality[lines[0]])[2]))
+        observation = _cells(quality[lines[0]])[active.column("Observation and evidence")]
+        markers = set(re.findall(r"`([^`\s#]+)#[^`]+`", observation))
         if markers and scan["name"] not in markers:
             raise RecordError(f"{qid} is recorded from scan {', '.join(sorted(markers))}, "
                               f"not {scan['name']}; pass that scan to revise it")
+
+    try:
+        links = QualityLinks(root, quality)
+    except ValueError as error:
+        raise RecordError(str(error)) from error
+    recorded = {}
+    for issue in scan["issues"] + baseline:
+        key = issue["key"]
+        link = links.get(scan["name"], key)
+        if link:
+            recorded[key] = (links.active.rows[link["id"]][0], link["id"])
+        else:
+            links.discard(scan["name"], key)
 
     # Allocate IDs first so {S1} and {Q-004} placeholders resolve anywhere in the decisions.
     ids, new_ids, named = {}, _next_ids(active), {}
@@ -192,8 +211,8 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                               "give one decision per issue")
         named[line_index] = issue_id
     for issue in scan["issues"] + baseline:
-        if issue.get("recorded") and issue["id"] not in ids:
-            ids[issue["id"]] = issue["recorded"]["id"]
+        if issue["key"] in recorded and issue["id"] not in ids:
+            ids[issue["id"]] = recorded[issue["key"]][1]
     for qid in [*by_qid, *ids.values()]:
         ids.setdefault(qid, qid)
     prefixes = {"S", "Q-"} | {re.fullmatch(ID, qid).group(1) for qid in by_qid}
@@ -221,13 +240,6 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
         elif issue["key"] in recorded:
             if values:
                 line_index = recorded[issue["key"]][0]
-                observation = _cells(quality[line_index])[2]
-                if f"`{marker}" in observation:  # a reopened issue records this scan's count and date
-                    observation = re.sub(r"\(\d+ of \d+\)", f"({issue['count']} of {issue['of']})", observation, count=1)
-                    # The date follows the marker: "scanned <date>", or "in [scan](scans/...) <date>" in older rows.
-                    observation = re.sub(r"(`" + re.escape(marker) + r"[^`]+`(?: scanned| in \[scan\]\([^)]*\))) \d{4}-\d{2}-\d{2}",
-                                         rf"\g<1> {scan['scanned_at'][:10]}", observation, count=1)
-                    values[active.columns[2]] = observation.replace("\\|", "|")
                 rows.append(active.set(line_index, values))
                 updated.append(qid)
         else:
@@ -238,12 +250,14 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                                  for e in issue["examples"][:3])
             observation = (f"{issue['summary']} ({issue['count']} of {issue['of']})"
                            + (f"; e.g. {examples}" if examples else "")
-                           + f"; `{marker}{issue['key']}` scanned {scan['scanned_at'][:10]}")
+                           + f"; `{marker}{issue['key']}` scanned {observed_at[issue_id]}")
             column = f", column `{issue['column']}`" if issue["column"] else ""
             obj = decision.get("object") or f"{target['kind']} `{subject}`{column}"
-            rows.append(active.append({active.columns[0]: qid, active.columns[1]: fill(obj),
-                                       active.columns[2]: observation, **values}))
+            rows.append(active.append({"ID": qid, "Affected source or catalog object": fill(obj),
+                                       "Observation and evidence": observation, **values}))
             added.append(qid)
+        if issue is not None:
+            links.set(scan["name"], issue["key"], qid, issue["count"], issue["of"], observed_at[issue_id])
         if bool(decision.get("correction")) != bool(decision.get("change")):
             raise RecordError(f"{issue_id}: give both correction and change, or neither")
         if decision.get("correction"):
@@ -255,6 +269,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                 d = delta[issue_id]
                 change += f"; rescan {d['before']} -> {d['after']}"
             corrections.append((qid, [day, qid, fill(decision["correction"]), change, fill(findings)]))
+    quality_active = quality.copy()
     if corrections:
         table = Table(quality, CORRECTIONS, "foundation/quality.md")
         for qid, cells in corrections:
@@ -310,8 +325,8 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
             status = f"revalidation-needed (was {status})" if status else "revalidation-needed"
         reason = fill(flag["reason"])
         existing = row[reason_at] if reason_at < len(row) else ""
-        if existing and reason not in existing:
-            reason = f"{existing}; {reason}"
+        if existing:
+            reason = f"{existing}; {reason}" if reason not in existing else existing
         rows.append(table.set(line_index, {"Status": status, "Revalidation reason or caveat": reason}))
         for i, line in enumerate(lines):
             if line.startswith("Last updated:"):
@@ -320,15 +335,53 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
         changed[relative] = True
         flagged.append({"investigation": flag["investigation"], "result": result, "status": status})
 
-    written = []
-    if not dry_run:
-        for relative in changed:
-            path = root / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            partial = path.with_name(path.name + ".tmp")
-            partial.write_text("\n".join(files[relative]) + "\n", encoding="utf-8")
-            os.replace(partial, path)
+    try:
+        ActiveRows(quality_active)
+        ActiveRows(quality)
+    except ValueError as error:
+        raise RecordError(str(error)) from error
+    versions = {relative: "\n".join(files[relative]) + "\n" for relative in changed}
+    versions["foundation/quality.json"] = links.text()
+    active_text = "\n".join(quality_active) + "\n"
+    for text in [*versions.values(), active_text]:
+        text.encode("utf-8")
+
+    written, phases = [], []
+    def prepare(relative, text):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        partial = path.with_name(path.name + ".tmp")
+        partial.write_text(text, encoding="utf-8")
+        return partial
+
+    def replace(relative, partial):
+        os.replace(partial, root / relative)
+        if relative not in written:
             written.append(relative)
+
+    if not dry_run:
+        try:
+            phase_a = {"foundation/quality.json": versions["foundation/quality.json"]}
+            if "foundation/quality.md" in changed:
+                phase_a["foundation/quality.md"] = active_text
+            if "foundation/catalog.md" in changed:
+                phase_a["foundation/catalog.md"] = versions["foundation/catalog.md"]
+            partials = {relative: prepare(relative, text) for relative, text in phase_a.items()}
+            for relative, partial in partials.items():
+                replace(relative, partial)
+            phases.append("A")
+            for relative in changed:
+                if relative.startswith("investigations/"):
+                    replace(relative, prepare(relative, versions[relative]))
+            phases.append("B")
+            if corrections:
+                relative = "foundation/quality.md"
+                replace(relative, prepare(relative, versions[relative]))
+            phases.append("C")
+        except OSError as error:
+            failure = RecordError(str(error))
+            failure.phases, failure.written = phases, written
+            raise failure from error
     result = {"quality_ids": {k: ids[k] for k in issues}, "added": added, "updated": updated,
               "corrections": [qid for qid, _ in corrections], "catalog": catalog_result,
               "flags": flagged, "written": written}
@@ -349,7 +402,9 @@ def main(argv=None):
             raise RecordError("decisions must be a JSON object")
         result = record(args.root, args.scan, decisions, dry_run=args.dry_run)
     except (RecordError, ValueError, KeyError, OSError) as error:
-        print(json.dumps({"error": f"{type(error).__name__}: {error}", "written": []}), file=sys.stderr)
+        print(json.dumps({"error": f"{type(error).__name__}: {error}",
+                          "phases": getattr(error, "phases", []),
+                          "written": getattr(error, "written", [])}), file=sys.stderr)
         return 2
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
     return 0

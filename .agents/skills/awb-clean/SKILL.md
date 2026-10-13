@@ -62,10 +62,10 @@ python3 <skill-directory>/scripts/record_cleaning.py <project-root> <scan-name> 
 EOF
 ```
 
-With no affected finding, add `"findings": "none: stale listed no finding reading <view>"`. The script fills IDs, observations, counts, markers, and flagged statuses, and turns `{S1}` into that issue's quality ID. A decision on a recorded issue the scan no longer lists uses its quality ID, such as `"Q-004"`, as the key. Record shared vocabulary in the glossary yourself.
+With no affected finding, add `"findings": "none: stale listed no finding reading <view>"`. The script fills new rows' IDs, observations, counts, and markers, keeps scan links and recorded counts and dates in `foundation/quality.json`, fills flagged statuses, and turns `{S1}` into that issue's quality ID. Reopening updates judgment cells and the link; the observation stays as first written. A decision on a recorded issue the scan no longer lists uses its quality ID, such as `"Q-004"`, as the key; it revises judgment cells while keeping the observation and link. `{Q-004}` placeholders also resolve. Record shared vocabulary in the glossary yourself.
 
 Read the existing catalog row before setting any of its cells. A cell you set replaces the whole cell: give its complete new text, keeping what still holds and citing quality IDs for rationale.
 
 ## Report
 
-Report the dataset, the decided issues by class, the corrections and changed views, the rescan's delta lines verbatim, the quality IDs, each flagged finding with its reason, the in-scope issues still `open`, and any exclusion named for an investigation's settings. Say that no analysis was rerun. When `foundation/sources.md` restricts copying the source's values, confirm before committing `foundation/quality.md`: its rows quote up to three example values.
+Report the dataset, the decided issues by class, the corrections and changed views, the rescan's delta lines verbatim, the quality IDs, each flagged finding with its reason, the in-scope issues still `open`, and any exclusion named for an investigation's settings. Say that no analysis was rerun. Commit `foundation/quality.json` with `foundation/quality.md`; the JSON holds no source values. When `foundation/sources.md` restricts copying the source's values, confirm before committing `foundation/quality.md`: its rows quote up to three example values.
