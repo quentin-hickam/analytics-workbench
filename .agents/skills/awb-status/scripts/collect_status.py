@@ -212,9 +212,8 @@ def collect(root):
 
     def rerun_since(obj, revised):
         """Represented results whose evidence was recorded after the draft's last revision, or None if unknown."""
-        checks = obj.get("export_checks") if obj is not None else None
-        if checks == "none":
-            return []
+        # `results` lists every represented result; a manifest from before it was recorded is unknown.
+        checks = obj.get("results") if obj is not None else None
         if revised is None or not isinstance(checks, list):
             return None
         rerun = []

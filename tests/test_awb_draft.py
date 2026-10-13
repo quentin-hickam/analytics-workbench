@@ -4,6 +4,7 @@
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten, revised_at stamped only when it changes, other manifest fields kept; nothing is written outside the draft.
 # test_check_draft_reports_each_helper_problem: an internal name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
+# test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
 # test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
 # test_verify_only_never_writes: a changed file is reported against the recorded inventory; the manifest stays byte-identical.
 # test_missing_manifest_runs_other_checks: without manifest.json the findings and chart checks still run; verify is not run and the check fails.
@@ -244,6 +245,10 @@ def test_check_draft_and_release_refuse_malformed_flag_entries(project, capsys):
              [{"finding": None, "problem": entry_problem}, {"finding": "F2", "problem": entry_problem}]),
             ([{**FLAG, "represented_in": [], "disposition": "none"}],
              [{"finding": FLAG["finding"], "problem": PLACES_PROBLEM}]),
+            # A non-text reason or finding is reported, never hashed into a crash.
+            ([{"finding": FLAG["finding"], "reason": [], "represented_in": "none"},
+              {"finding": {"a": 1}, "reason": FLAG["reason"], "represented_in": "none"}],
+             [{"finding": FLAG["finding"], "problem": entry_problem}, {"finding": None, "problem": entry_problem}]),
             ([{**FLAG, "represented_in": [" "], "disposition": "omit"}],
              [{"finding": FLAG["finding"], "problem": PLACES_PROBLEM}])]:
         set_flags(project, flags)
@@ -298,6 +303,9 @@ def test_export_results_records_provenance_only(project, capsys):
         (["r-002"], {"minimum_count": 5, "start": "2026-01-01"})]
     assert record["packaging_commit"] == head and record["packaging_uncommitted_changes"] == "none"
     assert record["export_checks"] == "none" and "charts" not in record and "dataset_selection" not in record
+    # A result represented without serialization is still listed with its evidence, for status.
+    assert record["results"] == [{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json"}
+                                 for r in ("r-001", "r-002")]
     assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes() == chart
 
 
@@ -331,6 +339,17 @@ def test_export_creates_revalidation_flags_from_state(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and report["unmatched_flags"] == [] and report["flag_entries"] == [
         {"finding": FLAG["finding"], "problem": PLACES_PROBLEM}]
+
+
+def test_export_replaces_malformed_flag_entries_before_writing(project, capsys):
+    with_results(project)
+    write(project, "investigations/inv/state.md", FLAGGED)
+    set_flags(project, [{"finding": FLAG["finding"], "reason": [], "represented_in": ["chart 1"], "disposition": "omit"}])
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,late_rate", "--no-datasets")
+    assert code == 0 and out["written"]
+    record = manifest(project)
+    assert record["charts"] == [{"path": "charts/chart-1.csv", "result_id": "r-001"}]
+    assert record["revalidation_flags"] == [{**FLAG, "represented_in": [], "disposition": "none"}]
 
 
 def test_export_syncs_revalidation_flags_with_state(project, capsys):

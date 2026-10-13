@@ -377,15 +377,21 @@ def state_flags(root, investigation) -> list[dict]:
 def unmatched_flags(record: dict, flags: list[dict]) -> list[dict]:
     """List each current flag whose exact finding and reason no revalidation_flags entry records."""
     recorded = record.get("revalidation_flags")
-    recorded = ({(f.get("finding"), f.get("reason")) for f in recorded if isinstance(f, dict)}
-                if isinstance(recorded, list) else set())
+    recorded = {_flag_key(f) for f in recorded} if isinstance(recorded, list) else set()
     return [flag for flag in flags if (flag["finding"], flag["reason"]) not in recorded]
+
+
+def _flag_key(entry):
+    """An entry's (finding, reason), or None when either is not text, so a malformed entry matches nothing."""
+    if isinstance(entry, dict) and isinstance(entry.get("finding"), str) and isinstance(entry.get("reason"), str):
+        return entry["finding"], entry["reason"]
+    return None
 
 
 def sync_flags(recorded, flags: list[dict]):
     """Return revalidation_flags for the current flags: an exact-match entry kept, others fresh, none when empty."""
     prior = recorded if isinstance(recorded, list) else []
-    kept = {(e.get("finding"), e.get("reason")): e for e in prior if isinstance(e, dict)}
+    kept = {_flag_key(e): e for e in prior if _flag_key(e)}
     # A fresh entry copies state.md verbatim; the agent fills represented_in and the user's disposition.
     entries = [kept.get((flag["finding"], flag["reason"]))
                or {"finding": flag["finding"], "reason": flag["reason"], "represented_in": [], "disposition": "none"}
@@ -953,6 +959,12 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
         report["exports_blocked"] = _BLOCKED
         return report
 
+    # Settled before any file changes, so the manifest written below always matches the exports.
+    try:
+        flags = sync_flags(record.get("revalidation_flags"), state_flags(root, investigation))
+    except ValueError as error:
+        flags, report["flags_error"] = None, str(error)
+
     if full:
         frames = [(r, headers, rows) for kind, _, r, headers, rows in shaped if kind == "chart"]
         try:
@@ -988,14 +1000,14 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     kept = {c.get("result_id"): c for c in previous if isinstance(c, dict)}
     entries = [checks.get(r) or kept.get(r) for r in represented]
     record["export_checks"] = [e for e in entries if e] or "none"
+    # Every represented result with its evidence, serialized or not, so status can see a later rerun.
+    record["results"] = [{"result_id": r, "evidence": evidence_paths[r]} for r in represented]
     fields = producing_state(evidence)
     fields["packaging_commit"], fields["packaging_uncommitted_changes"] = packaging_state(root)
     record.update(fields)
     # revalidation_flags follows state.md on every write; an unreadable state.md leaves it as it was.
-    try:
-        record["revalidation_flags"] = sync_flags(record.get("revalidation_flags"), state_flags(root, investigation))
-    except ValueError as error:
-        report["flags_error"] = str(error)
+    if flags is not None:
+        record["revalidation_flags"] = flags
     _write_json(path, record)
     report["written"] = True
     commits, changes = fields["producing_commit"], fields["producing_uncommitted_changes"]
