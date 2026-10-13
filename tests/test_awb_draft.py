@@ -2,7 +2,7 @@
 # test_names_cover_project_records: names hold created views, sources without CTEs or table functions, settings dotted paths (not bare nested keys), and result IDs from evidence and state links; plain words, including plain investigation and package names, are left out.
 # test_toml_keys_fall_back_to_tomli_then_key_lines: without tomllib, settings keys parse with tomli (no bare nested keys); without either, table headers and key lines; display.toml then names the missing package.
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten, revised_at stamped only when it changes, other manifest fields kept; nothing is written outside the draft.
-# test_check_draft_reports_each_helper_problem: an internal name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
+# test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
 # test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
@@ -184,14 +184,15 @@ def test_check_draft_rewrites_inventory_and_passes(project, capsys):
 
 def test_check_draft_reports_each_helper_problem(project, capsys):
     draft = project / "deliveries/inv/pkg/draft"
-    write(draft, "findings.md", FINDINGS + "\nCounts come from orders_view.\n\n**Chart 2.** Line: cases\n"
+    write(draft, "findings.md", FINDINGS + "\nCounts come from orders_view, as inv/notes says.\n\n**Chart 2.** Line: cases\n"
           "\n### East held steady\n")
     (project / "investigations/inv/settings.toml").unlink()
     for path in (project / "investigations/inv/evidence").glob("r-00?.json"):
         path.unlink()
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"]
-    assert report["findings"] == [{"line": 7, "kind": "name", "text": "orders_view"}]
+    assert report["findings"] == [{"line": 7, "kind": "name", "text": "orders_view"},
+                                  {"line": 7, "kind": "path", "text": "inv/notes"}]
     assert report["charts"] == [{"chart": "Chart 2", "problem": "no chart file for this specification"}]
     assert report["headings"] == [
         {"heading": "East held steady", "problem": "methodology.md has no ### section with this exact heading"}]
