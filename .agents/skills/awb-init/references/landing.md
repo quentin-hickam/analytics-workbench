@@ -6,7 +6,7 @@ Call the project copy at `src/preparation/landing.py`. The `land`, `retain`, `pu
 
 For an API or other fetched source, call `land()` from a script with a `fetch` callable, then run `python3 src/awb.py retain` to retain the acquisition and write its Acquisitions row.
 
-`land(root, source, acquisition_id, fetch, *, request, records=None, notes=None) -> Path` calls `fetch(partial_directory)`. The callback writes every original file and raises on incomplete acquisition; its return value is ignored. `request` and `notes` must be JSON serializable. `records` maps relative filenames to integer counts; omitted counts become null. `provenance.json` is reserved. Completed files are hashed, provenance is written, and the directory is renamed from `.partial` only on success.
+`land(root, source, acquisition_id, fetch, *, request, records=None, notes=None) -> Path` calls `fetch(partial_directory)`. The callback writes every original file and raises on incomplete acquisition; its return value is ignored. `request` and `notes` must be JSON serializable. `records` maps relative filenames to integer counts; omitted counts become null. `provenance.json` is reserved. After `fetch` returns, completed files are hashed, provenance is written, and the directory is renamed from `.partial`. If `fetch` or any of these steps fails, the directory keeps its `.partial` name and holds no `provenance.json`.
 
 ## Convert with `publish()`
 

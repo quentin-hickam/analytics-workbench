@@ -38,4 +38,4 @@ Preparation owns reusable parsing, normalization, checks, and corrections; their
 
 ## Storage
 
-Materialize only publications and cataloged caches of expensive, rebuildable results in `data/cache/`; normalization and corrections stay in views. A justified alternate backend preserves independent source landing and the preparation/EDA boundary. Add versioning, invalidation, or pipeline machinery only for a concrete need.
+Materialize only publications, under `data/parquet/`, and cataloged caches of expensive, rebuildable results, in `data/cache/`; normalization and corrections stay in views. A justified alternate backend preserves independent source landing and the preparation/EDA boundary. Add versioning, invalidation, or pipeline machinery only for a concrete need.
