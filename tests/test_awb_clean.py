@@ -24,6 +24,7 @@
 # test_quality_id_duplicate_keeps_revision_error: duplicate quality-ID revisions retain their specific refusal message and write nothing.
 # test_old_provenance_refuses_before_writes: a project helper without flag_findings refuses with an awb-init repair hint, including dry runs.
 # test_flag_retry_keeps_original_quality_id: a phase B failure followed by another issue allocation keeps the original Q-ID on retry and records its correction exactly once.
+# test_dry_run_prints_flag_rows_and_writes_nothing: a dry run lists the rendered flagged rows beside the quality rows and writes nothing.
 # test_renamed_quality_headers_keep_template_positions: with every Active header renamed, a new row is written in the template's positions, scans read it as recorded, and a reopen sets its status.
 # test_quality_json_is_written_only_when_links_change: a call that changes no link leaves quality.json absent or byte-identical.
 # test_unlinked_marker_row_is_relinked_and_short_rows_read: with quality.json present, a row carrying the marker but no link is relinked from its prose; a short row reads as blank status.
@@ -742,3 +743,15 @@ def test_failed_phase_a_leaves_no_partial_files(tmp_path, monkeypatch):
         recorder.record(tmp_path, "orders", {"issues": {"S1": judgment()}}, today=TODAY)
     assert failure.value.phases == [] and failure.value.written == []
     assert not list(tmp_path.rglob("*.tmp"))
+
+
+def test_dry_run_prints_flag_rows_and_writes_nothing(tmp_path):
+    scan_file(tmp_path)
+    state_file(tmp_path)
+    write(tmp_path, "src/provenance.py", (ROOT / ".agents/skills/awb-init/assets/awb_provenance.py").read_text())
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    result = recorder.record(tmp_path, "orders", {"issues": {"S1": judgment()},
+                             "flags": [{"investigation": "churn", "result": "r-003", "reason": "{S1} merges labels"}]},
+                             dry_run=True, today=TODAY)
+    assert "| Sales leads growth | [r-003](evidence/r-003.json) | revalidation-needed (was supported) | Q-001 merges labels |" in result["rows"]
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before

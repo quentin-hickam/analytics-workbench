@@ -30,9 +30,9 @@ omitted acquisitions from those publications' publication.json inputs. cli_stale
 
 prior_result and record_finding write a recorded result's state.md findings row for run.py, and
 cli_state backs `python3 src/awb.py state`, which shows and updates investigation state.
-findings.json (awb-findings/1) owns the Current findings table; hand edits are refused as drift.
-Both keep the Markdown records' shipped format, change only the lines they touch, and write the history.md
-entries for reruns and status changes that matter.
+findings.json (awb-findings/1) owns the Current findings table, which every findings write
+re-renders whole; hand edits to it are refused as drift. Other lines keep their bytes, and the
+writers add the history.md entries for reruns and status changes that matter.
 """
 
 import argparse
@@ -582,15 +582,22 @@ class _Record:
 
 
 class _State(_Record):
-    """state.md with one Last updated line and a valid findings table, each result on one row."""
+    """state.md with one Last updated line and a valid findings table, each result on one row.
 
-    def __init__(self, root, investigation):
+    `strict=False` only locates the table, for `state render` to replace whatever rows it holds.
+    """
+
+    def __init__(self, root, investigation, *, strict=True):
         super().__init__(root / "investigations" / investigation / "state.md",
                          f"investigations/{investigation}/state.md")
         updated = [i for i, line in enumerate(self.lines) if line.startswith("Last updated:")]
         if len(updated) != 1:
             raise StateError(f"{self.label}: {'no' if not updated else 'repeated'} 'Last updated:' line")
         self.updated = updated[0]
+        self.locate(strict)
+
+    def locate(self, strict=True):
+        """Find the findings table: its contiguous rows, and stray rows below a break that link evidence."""
         start, end = self.section("Current findings")
         header = next((i for i in range(start + 1, end) if self.lines[i].lstrip().startswith("|")), None)
         if header is None or header + 1 >= end or _cells(self.lines[header]) != _COLUMNS \
@@ -601,6 +608,9 @@ class _State(_Record):
         linked = {}
         while self.rows_end < end and self.lines[self.rows_end].lstrip().startswith("|"):
             cells = _cells(self.lines[self.rows_end])
+            if not strict:
+                self.rows_end += 1
+                continue
             if len(cells) != len(_COLUMNS):
                 raise StateError(f"{self.label}: findings row {self.rows_end + 1} does not have four cells")
             for result_id in set(_EVIDENCE_LINK.findall(cells[1])):
@@ -610,18 +620,13 @@ class _State(_Record):
                 linked[result_id] = self.rows_end
             self.rows_end += 1
         self.linked = linked
+        self.strays = [i for i in range(self.rows_end, end)
+                       if self.lines[i].lstrip().startswith("|") and _EVIDENCE_LINK.search(self.lines[i])]
 
     def row_for(self, result_id):
         """(line index, cells) of the row linking this result's evidence, or None."""
         index = self.linked.get(result_id)
         return None if index is None else (index, _cells(self.lines[index]))
-
-    def set_row(self, index, cells):
-        self.lines[index] = _row(cells) + (self.lines[index][len(_bare(self.lines[index])):] or self.newline)
-
-    def add_row(self, cells):
-        self.insert(self.rows_end, [_row(cells)])
-        self.rows_end += 1
 
     def touch(self, today):
         line = self.lines[self.updated]
@@ -677,20 +682,22 @@ def _signals_deferred():
 def _commit(records, *, replaced=None, prior_rows=()):
     """Prepare all temporary files, then replace records in order with signals deferred."""
     replaced = [] if replaced is None else replaced
-    temporaries = []
+    temporaries, current = [], records[0]
     try:
         for record in records:
+            current = record
             temporary = record.path.with_name(f".{record.path.name}.{os.getpid()}.tmp")
             temporaries.append(temporary)
             with open(temporary, "w", encoding="utf-8", newline="") as stream:
                 stream.write("".join(record.lines))
         with _signals_deferred():
             for record, temporary in zip(records, temporaries):
+                current = record
                 os.replace(temporary, record.path)
                 replaced.append(record.path)
     except OSError as error:
         if not replaced:
-            message = f"{records[0].label} not written: {error}"
+            message = f"{current.label} not written: {error}; nothing was replaced"
         else:
             missing = next(r for r in records if r.path not in replaced)
             if missing.path.name == "state.md" and records[0].path.name == "findings.json":
@@ -716,30 +723,43 @@ def _finding_cells(entry):
             _cell(status), _cell(caveat)]
 
 
+def _segment_set(caveat):
+    return sorted(" ".join(part.split()) for part in caveat.replace(r"\|", "|").split(";") if part.strip())
+
+
 def _migrate_row(cells, label):
-    links = _EVIDENCE_LINK.findall(cells[1])
-    if len(links) != 1:
-        raise StateError(f"{label}: row {_row(cells)} must link exactly one evidence file")
+    """Build a findings.json entry from a legacy row, keeping its meaning.
+
+    The Evidence cell is rewritten to its one link, status case and caveat segment order and spacing
+    are normalized; a row without exactly one evidence link or with an unknown status is refused.
+    """
+    links = list(dict.fromkeys(_EVIDENCE_LINK.findall(cells[1]) if len(cells) > 1 else []))
+    if len(cells) != len(_COLUMNS) or len(links) != 1:
+        raise StateError(f"{label}: row {_row(cells)} must have four cells and link exactly one evidence "
+                         "file; fix the row, then rerun the command")
     text, _, status, caveat = [c.replace(r"\|", "|") for c in cells]
-    status = " ".join(status.split())
+    status = " ".join(status.split()).lower()
     prior = None
     match = re.fullmatch(r"revalidation-needed \(was (.+)\)", status)
     if match:
         status, prior = _FLAGGED, match[1]
     if status not in (*_STATUSES, _FLAGGED):
-        raise StateError(f"{label}: row {_row(cells)} has an unknown status")
-    checks, notes = _segments(caveat)
+        raise StateError(f"{label}: row {_row(cells)} has an unknown status; use one of "
+                         f"{', '.join((*_STATUSES, _FLAGGED))}, then rerun the command")
+    checks, notes = _segments("; ".join(" ".join(part.split()) for part in caveat.split(";") if part.strip()))
     entry = {"result": links[0], "text": text, "status": status, "prior_status": prior,
              "flag_reason": "; ".join(notes) if status == _FLAGGED else "",
              "notes": [] if status == _FLAGGED else notes, "checks_caveat": "; ".join(checks)}
-    if _finding_cells(entry) != [_cell(c.replace(r"\|", "|")) for c in cells]:
-        raise StateError(f"{label}: row {_row(cells)} does not round-trip through findings.json")
+    rendered = _finding_cells(entry)
+    if " ".join(text.split()) != rendered[0].replace(r"\|", "|") or _segment_set(caveat) != _segment_set(rendered[3]):
+        raise StateError(f"{label}: row {_row(cells)} would render as {_row(rendered)}; fix the row, then "
+                         "rerun the command")
     return entry
 
 
 class _Findings:
-    def __init__(self, root, investigation):
-        self.state = _State(root, investigation)
+    def __init__(self, root, investigation, *, render=False):
+        self.state = _State(root, investigation, strict=not render)
         self.path = self.state.path.with_name("findings.json")
         self.label = f"investigations/{investigation}/findings.json"
         self.history, self.prior_rows, self.changed = None, [], False
@@ -785,6 +805,10 @@ class _Findings:
                 continue
             links = _EVIDENCE_LINK.findall(old or new or "")
             differences.append({"result": links[0] if len(links) == 1 else None, "disk": old, "rendered": new})
+        for i in self.state.strays:  # a row cut off from the table by a blank or other line
+            links = _EVIDENCE_LINK.findall(self.state.lines[i])
+            differences.append({"result": links[0] if len(links) == 1 else None,
+                                "disk": _bare(self.state.lines[i]), "rendered": None})
         return differences
 
     def refuse_drift(self, investigation):
@@ -806,8 +830,9 @@ class _Findings:
                     parts = parts[len(notes):]
                 reason = "; ".join(parts)
                 flags = json.dumps([{"result": row["result"], "reason": reason}])
-                details.append(f"re-apply the Markdown-only flag with python3 src/awb.py state flag "
-                               f"--investigation {investigation}, stdin: {flags}")
+                details.append(f"if this flag was added by hand, re-apply it after rendering with python3 "
+                               f"src/awb.py state flag --investigation {investigation}, stdin: {flags}; if a write "
+                               "failed after findings.json was saved, rendering alone restores the table")
         raise StateError("findings drift: " + " | ".join(details) +
                          f"; python3 src/awb.py state render --investigation {investigation} discards the hand edit; "
                          "then re-apply the intended change with state finding")
@@ -821,18 +846,21 @@ def findings_drift(project_root, investigation) -> list[dict]:
     return _Findings(root, investigation).drift()
 
 
-def _write_findings(root, investigation, mutate, *, check=False, render=False, replaced=None):
+def _write_findings(root, investigation, mutate, *, check=False, render=False, replaced=None, report=True):
     if render and not (root / "investigations" / investigation / "findings.json").exists():
         raise StateError("nothing to render; the next state write migrates the table")
-    findings = _Findings(root, investigation)
+    findings = _Findings(root, investigation, render=render)
     if not render:
         findings.refuse_drift(investigation)
     result = mutate(findings)
-    if findings.normalizations:
+    if findings.normalizations and report:
         result["normalizations"] = findings.normalizations
     if check or not findings.changed:
         return result
     state = findings.state
+    state.locate(strict=False)  # a mutation may have moved lines above the table
+    for i in reversed(state.strays):
+        del state.lines[i]
     state.lines[state.rows_start:state.rows_end] = [
         _row(_finding_cells(e)) + state.newline for e in findings.entries]
     findings.lines = [json.dumps({"schema": "awb-findings/1", "findings": findings.entries}, indent=2, ensure_ascii=False) + "\n"]
@@ -850,6 +878,11 @@ def render_findings(project_root, investigation) -> dict:
     return _write_findings(Path(project_root).resolve(), investigation, mutate, render=True)
 
 
+def _has_reason(flag_reason, reason):
+    """Whether `reason` is already a whole run of "; "-separated parts of `flag_reason`."""
+    return f"; {reason}; " in f"; {flag_reason}; "
+
+
 def flag_findings(project_root, investigation, flags, *, check=False, today=None) -> dict:
     """Validate a whole batch, then flag findings without a history entry."""
     if not isinstance(flags, list) or any(not isinstance(f, dict) or set(f) != {"result", "reason"}
@@ -861,22 +894,23 @@ def flag_findings(project_root, investigation, flags, *, check=False, today=None
         for flag in flags:
             if flag["result"] not in by_id:
                 raise StateError(f"{findings.state.label}: no findings row links {flag['result']}")
-        changed, unchanged = [], []
+        changed, unchanged, rows = [], [], []
         for flag in flags:
             entry = by_id[flag["result"]]
             reason = flag["reason"]
-            if entry["status"] == _FLAGGED and reason in entry["flag_reason"].split("; "):
+            if entry["status"] == _FLAGGED and _has_reason(entry["flag_reason"], reason):
                 unchanged.append(entry["result"])
                 continue
             if entry["status"] != _FLAGGED:
                 entry["prior_status"], entry["status"] = entry["status"], _FLAGGED
-            if reason not in entry["flag_reason"].split("; "):
+            if not _has_reason(entry["flag_reason"], reason):
                 entry["flag_reason"] = "; ".join(p for p in (entry["flag_reason"], reason) if p)
             changed.append({"result": entry["result"], "status": _finding_cells(entry)[2]})
+            rows.append(_row(_finding_cells(entry)))
         if changed:
             findings.changed = True
             findings.state.touch(today or _today())
-        return {"flags": changed, "unchanged": unchanged}
+        return {"flags": changed, "unchanged": unchanged, "rows": rows}
     return _write_findings(Path(project_root).resolve(), investigation, mutate, check=check)
 
 
@@ -929,8 +963,8 @@ def prior_result(project_root, investigation: str, result_id: str) -> dict:
     """
     root = Path(project_root).resolve()
     base = root / "investigations" / investigation
-    if (base / "findings.json").exists():
-        _Findings(root, investigation).refuse_drift(investigation)
+    # Load or migrate findings and check drift before run.py removes evidence; a missing state.md refuses here.
+    _Findings(root, investigation).refuse_drift(investigation)
     baseline = None
     try:
         evidence = json.loads((base / "evidence" / f"{result_id}.json").read_text())
@@ -1008,7 +1042,7 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
         return {"action": action, "status": entry["status"], "history": history is not None}
 
     try:
-        return _write_findings(root, investigation, mutate, replaced=replaced)
+        return _write_findings(root, investigation, mutate, replaced=replaced, report=False)
     except BaseException:
         if base / "findings.json" not in replaced:
             evidence_path.unlink(missing_ok=True)
@@ -1133,45 +1167,43 @@ def edit_list(project_root, investigation: str, which: str, *, add: list[str] = 
     if not added and not drop or not all(added):
         raise ValueError("give --add or --drop with nonempty text")
 
-    def mutate(findings):
-        state = findings.state
-        start, end = state.section(title)
-        items = state.items(title)
-        chosen = []
-        for target in drop:
-            if target.strip().isdigit() and 1 <= int(target) <= len(items):
-                matches = [items[int(target) - 1]]
-            else:
-                matches = [item for item in items if target and target in item[2]]
-            if len(matches) != 1:
-                listing = "; ".join(f"{items.index(m) + 1}. {m[2]}" for m in matches or items) or "the list is empty"
-                raise ValueError(f"--drop {target!r} matches {len(matches)} {title} items: {listing}")
-            if matches[0] not in chosen:
-                chosen.append(matches[0])
-        # Plan on the original line numbers, then apply from the bottom up, deletions before an
-        # insertion at the same line.
-        operations = [(first, 1, stop) for first, stop, _ in chosen]
-        if added:
-            remaining = [item for item in items if item not in chosen]
-            if remaining:
-                match = _ITEM.fullmatch(_bare(state.lines[remaining[-1][0]]))
-                number = int(match[2]) + 1 if match[2] else None
-                position = remaining[-1][1]
-                lines = [f"{number + n}{match[3]} {t}" if number else f"{match[1]} {t}" for n, t in enumerate(added)]
-            else:
-                dropped = {i for first, stop, _ in chosen for i in range(first, stop)}
-                body = [i for i in range(start + 1, end) if state.lines[i].strip() and i not in dropped]
-                position, lines = (body[-1] if body else start) + 1, [f"- {t}" for t in added]
-            operations.append((position, 0, lines))
-        for position, kind, value in sorted(operations, key=lambda op: (op[0], op[1]), reverse=True):
-            if kind:
-                del state.lines[position:value]
-            else:
-                state.insert(position, value)
-        state.touch(today or _today())
-        findings.changed = True
-        return {"added": added, "dropped": [item[2] for item in chosen]}
-    return _write_findings(root, investigation, mutate)
+    state = _State(root, investigation)
+    start, end = state.section(title)
+    items = state.items(title)
+    chosen = []
+    for target in drop:
+        if target.strip().isdigit() and 1 <= int(target) <= len(items):
+            matches = [items[int(target) - 1]]
+        else:
+            matches = [item for item in items if target and target in item[2]]
+        if len(matches) != 1:
+            listing = "; ".join(f"{items.index(m) + 1}. {m[2]}" for m in matches or items) or "the list is empty"
+            raise ValueError(f"--drop {target!r} matches {len(matches)} {title} items: {listing}")
+        if matches[0] not in chosen:
+            chosen.append(matches[0])
+    # Plan on the original line numbers, then apply from the bottom up, deletions before an
+    # insertion at the same line.
+    operations = [(first, 1, stop) for first, stop, _ in chosen]
+    if added:
+        remaining = [item for item in items if item not in chosen]
+        if remaining:
+            match = _ITEM.fullmatch(_bare(state.lines[remaining[-1][0]]))
+            number = int(match[2]) + 1 if match[2] else None
+            position = remaining[-1][1]
+            lines = [f"{number + n}{match[3]} {t}" if number else f"{match[1]} {t}" for n, t in enumerate(added)]
+        else:
+            dropped = {i for first, stop, _ in chosen for i in range(first, stop)}
+            body = [i for i in range(start + 1, end) if state.lines[i].strip() and i not in dropped]
+            position, lines = (body[-1] if body else start) + 1, [f"- {t}" for t in added]
+        operations.append((position, 0, lines))
+    for position, kind, value in sorted(operations, key=lambda op: (op[0], op[1]), reverse=True):
+        if kind:
+            del state.lines[position:value]
+        else:
+            state.insert(position, value)
+    state.touch(today or _today())
+    _commit([state])
+    return {"added": added, "dropped": [item[2] for item in chosen]}
 
 
 def _pointer(value):

@@ -340,6 +340,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
             preview = provenance.flag_findings(root, investigation, batch, check=True, today=day)
         except (ValueError, OSError) as error:
             raise RecordError(str(error)) from error
+        rows.extend(preview.get("rows", []))
         for flag in preview["flags"]:
             flag_statuses[investigation, flag["result"]] = flag["status"]
         # Keep the output shape for flags already present, without rewriting the records.
