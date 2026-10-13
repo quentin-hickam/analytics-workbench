@@ -96,9 +96,6 @@ class QualityLinks:
             return lines[0]
         return None
 
-    def ambiguous(self, scan, key):
-        return len(self.active.markers.get((scan, key), [])) > 1
-
     def _from_row(self, scan, key):
         """Build a link from the row's observation prose: its count, total, and marker date."""
         line = self.marked(scan, key)

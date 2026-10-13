@@ -997,8 +997,8 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
     row. An unflagged row whose table, checks, and scoped settings all equal the prior baseline is
     kept untouched; otherwise its reserved caveat segments are replaced, its status becomes
     provisional unless superseded, and history.md records a rerun of a supported row. A flagged row
-    returns to superseded if it was superseded, else provisional, with a reset caveat and a history
-    entry. When findings.json is not replaced, the evidence just recorded is removed before raising.
+    returns to superseded if it was superseded, else provisional, with its notes kept, its flag reason
+    dropped, and a history entry naming that reason. When findings.json is not replaced, the evidence just recorded is removed before raising.
     Returns {action: added|kept|refreshed|flag cleared, status, history (bool)}.
     """
     root = Path(project_root).resolve()
@@ -1026,12 +1026,12 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
             flagged = entry["status"] == _FLAGGED
             if not flagged and exact:
                 return {"action": "kept", "status": entry["status"], "history": False}
-            flag_reason = "; ".join(p for p in [*entry["notes"], entry["flag_reason"]] if p) if flagged else ""
+            flag_reason = entry["flag_reason"] if flagged else ""
             entry["status"] = "superseded" if (entry["prior_status"] if flagged else entry["status"]) == \
                 "superseded" else "provisional"
             entry["checks_caveat"] = _check_caveat(checks)
             if flagged:
-                entry.update(prior_status=None, notes=[], flag_reason="")
+                entry.update(prior_status=None, flag_reason="")  # notes, such as a known limitation, stay
             action = "flag cleared" if flagged else "refreshed"
             if flagged or old[2] == "supported":
                 history = _history(root, investigation, _rerun_entry(

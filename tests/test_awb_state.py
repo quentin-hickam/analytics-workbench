@@ -18,7 +18,7 @@
 # test_compound_flag_reasons_are_idempotent: a reason containing '; ' is recognized as present and writes nothing.
 # test_lists_above_the_table_leave_it_intact: issues and next steps placed before Current findings are edited without touching the table, and later findings writes keep it whole.
 # test_render_recovers_malformed_and_stray_rows: render replaces an unescaped pipe, a duplicate row, and a row cut off below the table, which writers refuse as drift.
-# test_flags_validate_and_are_idempotent: batches validate before writes, check migrates only in memory, duplicate reasons keep all records byte-identical, and rerun drops notes and flag reasons with legacy history wording.
+# test_flags_validate_and_are_idempotent: batches validate before writes, check migrates only in memory, duplicate reasons keep all records byte-identical, and a rerun keeps notes, drops the flag reason, and names only the reason in history.
 # test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helpers write.
 
 from datetime import date
@@ -584,8 +584,9 @@ def test_flags_validate_and_are_idempotent(project, capsys, monkeypatch):
     assert entry["flag_reason"] == "Q-004 correction; Q-005" and entry["prior_status"] == "provisional"
     produce(project, "r1", checks=GAPS)
     entry = json.loads(text(project, f"{INV}/findings.json"))["findings"][0]
-    assert entry["notes"] == [] and entry["flag_reason"] == "" and entry["prior_status"] is None
-    assert "flag reason: old note | detail; Q-004 correction; Q-005" in text(project, HISTORY)
+    assert entry["notes"] == ["old note | detail"] and entry["flag_reason"] == "" and entry["prior_status"] is None
+    assert r"| provisional | failed checks: columns; not assessed: joins; old note \| detail |" in text(project, STATE)
+    assert "flag reason: Q-004 correction; Q-005\n" in text(project, HISTORY)
 
 
 def test_compound_flag_reasons_are_idempotent(project):

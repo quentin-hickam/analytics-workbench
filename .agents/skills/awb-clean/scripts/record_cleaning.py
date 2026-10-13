@@ -20,8 +20,9 @@ Quality issue rows get the next ID, the scan's counts and examples, and the mark
 counts and dates, built from a row's prose when a link is missing; a marker on several rows, or on a
 row whose ID repeats, refuses a decision on that issue. A baseline observation supplies both
 counts and date; otherwise the current scan does. Reopening updates the link and judgment cells,
-keeping the observation. Correction rows carry the rescan's before and after counts. A flag goes through the project's provenance helper and sets
-the finding's status to `revalidation-needed (was <status>)`, adds the reason, and updates
+keeping the observation. Correction rows carry the rescan's before and after counts; a row
+identical to one already recorded is not appended again but listed as corrections_unchanged. A
+flag goes through the project's provenance helper and sets the finding's status to `revalidation-needed (was <status>)`, adds the reason, and updates
 `Last updated`. All versions are checked before writing: A replaces links, Active rows, and
 catalog; B writes flags; C appends corrections. Failures report completed phases and replaced
 files. --dry-run prints the rows that would change and writes nothing. Prints compact JSON.
@@ -294,12 +295,17 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                 change += f"; rescan {d['before']} -> {d['after']}"
             corrections.append((qid, [day, qid, fill(decision["correction"]), change, fill(findings)]))
     quality_active = quality.copy()
+    appended, repeated = [], []
     if corrections:
         table = Table(quality, CORRECTIONS, "foundation/quality.md")
         for qid, cells in corrections:
-            if [_cell(c) for c in cells] not in [row for _, row in table.rows()]:
-                rows.append(table.append(dict(zip(table.columns, cells))))
-        changed["foundation/quality.md"] = True
+            if [_cell(c) for c in cells] in [row for _, row in table.rows()]:
+                repeated.append(qid)  # already recorded, as when a finished call is run again
+                continue
+            rows.append(table.append(dict(zip(table.columns, cells))))
+            appended.append(qid)
+        if appended:
+            changed["foundation/quality.md"] = True
     if added or updated:
         changed["foundation/quality.md"] = True
 
@@ -391,7 +397,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                 if outcome["flags"]:
                     written += [f"investigations/{investigation}/findings.json", f"investigations/{investigation}/state.md"]
             phases.append("B")
-            if corrections:
+            if appended:
                 relative = "foundation/quality.md"
                 replace(relative, prepare(relative, versions[relative]))
             phases.append("C")
@@ -407,8 +413,10 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
             failure.phases, failure.written = phases, written
             raise failure from error
     result = {"quality_ids": {k: ids[k] for k in issues}, "added": added, "updated": updated,
-              "corrections": [qid for qid, _ in corrections], "catalog": catalog_result,
+              "corrections": appended, "catalog": catalog_result,
               "flags": flagged, "written": written}
+    if repeated:
+        result["corrections_unchanged"] = repeated
     if dry_run:
         result["rows"] = rows
     return result
