@@ -25,15 +25,19 @@
 # test_views_read_follows_view_references: views read by FROM/JOIN/comma, transitively; a column alias is not a read.
 # test_finding_row_reuses_state_text_and_names_check_gaps: the row keeps existing finding text, escapes pipes, names failed and unassessed checks.
 # test_cli_stale_lists_changed_results_with_their_findings: stale lists failing results with state.md rows, missing linked evidence, skips non-evidence JSON, rejects an unknown investigation.
+# test_record_evidence_records_runtime: the runtime block holds this interpreter's Python and platform and the versions of duckdb, pandas, and each requirements.txt name, null when not installed.
+# test_cli_stale_reports_runtime_mismatch_as_a_warning: a changed recorded duckdb or Python version, or no runtime block, is listed under runtime_mismatches with its findings rows, never under results, and compare_evidence still passes.
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
 # test_producing_paths_follow_the_result: run.py, the result's queries, other investigation code, src/ minus awb.py, provenance.py and packaging/, plus code_paths; other results' queries and the excluded helpers never stale it.
 # test_settings_fall_back_to_tomli: without tomllib, settings parse through tomli, and without either the content is unknown.
 # test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: prior_result checks the state before unlink; the run.py template records a result and writes its state.md row, keeps it on an identical rerun, and refuses before touching evidence when state.md is missing or drifts; a run failing after the table is rewritten leaves no evidence.
 
 import hashlib
+import importlib.metadata
 import importlib.util
 import json
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
@@ -115,7 +119,7 @@ def test_record_evidence_records_clean_producing_state(project):
     assert list(evidence) == [
         "schema", "investigation", "result_id", "recorded_at", "producing_commit",
         "producing_paths", "producing_uncommitted_changes", "views", "publications",
-        "acquisitions", "settings", "checks", "notes",
+        "acquisitions", "settings", "runtime", "checks", "notes",
     ]
     assert raw.endswith("\n") and raw.startswith('{\n  "schema": "awb-evidence/3",')
     assert evidence["producing_commit"] == git(project, "rev-parse", "HEAD")
@@ -572,3 +576,53 @@ def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(p
     assert failed.returncode == 1 and "outside the project root" in failed.stdout
     assert (project / "investigations/inv/results/r1.csv").exists()
     assert not (project / "investigations/inv/evidence/r1.json").exists()
+
+
+def installed(name):
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def test_record_evidence_records_runtime(project):
+    evidence = json.loads(record(project).read_text())
+    interpreter = {"python": platform.python_version(), "platform": f"{platform.system()}-{platform.machine()}"}
+    assert evidence["runtime"] == {**interpreter, "packages": {"duckdb": installed("duckdb"),
+                                                               "pandas": installed("pandas")}}
+    write(project, "requirements.txt", b"# comment\nPyTest>=7  # the runner\n-r other.txt\n"
+                                       b"awb_fixture.absent; python_version < '4'\nduckdb\n")
+    packages = json.loads(record(project).read_text())["runtime"]["packages"]
+    assert packages == {"awb-fixture-absent": None, "duckdb": installed("duckdb"),
+                        "pandas": installed("pandas"), "pytest": installed("pytest")}
+    assert packages["pytest"] is not None
+
+
+def test_cli_stale_reports_runtime_mismatch_as_a_warning(project, capsys):
+    path = record(project)
+    row = "| Orders are flat | [r1](evidence/r1.json) | supported | |"
+    write(project, "investigations/inv/state.md",
+          f"| Finding | Evidence | Status | Caveat |\n| --- | --- | --- | --- |\n{row}\n".encode())
+    assert provenance.cli_stale(project, []) == 0
+    assert json.loads(capsys.readouterr().out)["runtime_mismatches"] == []
+    evidence = json.loads(path.read_text())
+    current = evidence["runtime"]["packages"]["duckdb"]
+    evidence["runtime"]["packages"]["duckdb"] = "0.0.1-fixture"
+    path.write_text(json.dumps(evidence))
+    assert provenance.cli_stale(project, []) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["stale"] == 0 and out["results"] == []
+    assert out["runtime_mismatches"] == [{
+        "investigation": "inv", "result_id": "r1", "evidence": "investigations/inv/evidence/r1.json",
+        "detail": f"duckdb 0.0.1-fixture recorded, {current or 'not installed'} now.", "findings": [row]}]
+    assert [c["outcome"] for c in provenance.compare_evidence(project, path)] == ["pass"] * 5
+    evidence["runtime"]["python"] = "2.7.18"
+    path.write_text(json.dumps(evidence))
+    provenance.cli_stale(project, [])
+    detail = json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["detail"]
+    assert detail.startswith(f"python 2.7.18 recorded, {platform.python_version()} now; duckdb 0.0.1-fixture")
+    del evidence["runtime"]
+    path.write_text(json.dumps(evidence))
+    provenance.cli_stale(project, [])
+    out = json.loads(capsys.readouterr().out)
+    assert out["stale"] == 0 and out["runtime_mismatches"][0]["detail"] == "evidence records no runtime."

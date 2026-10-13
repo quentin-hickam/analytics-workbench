@@ -7,8 +7,10 @@ Schema awb-evidence/3, in order: schema, investigation, result_id, recorded_at
 (sorted), producing_uncommitted_changes (path/status/bytes/sha256), views
 (path/bytes/sha256/publications), publications (path/publication_file/inputs/
 conversion_commit/files), acquisitions (path/provenance_file/status/files),
-settings (path/bytes/sha256/[result]/content), checks (name/outcome/detail), notes (text or null).
-Unknowns are {"unknown": reason}.
+settings (path/bytes/sha256/[result]/content), runtime (python/platform/packages), checks
+(name/outcome/detail), notes (text or null). Unknowns are {"unknown": reason}.
+runtime is the recording interpreter's Python version, system-machine platform, and the installed
+version of duckdb, pandas, and each package requirements.txt names (null when not installed).
 Settings are scoped: the settings file must hold a [results.<id>] table for the result; settings
 carries "result", content holds only [parameters] and that table, and the settings file is left
 out of producing_paths, so other results' tables and other top-level tables never make this
@@ -25,7 +27,9 @@ values use ISO strings in JSON, consistently during comparison.
 
 record_evidence derives omitted publications from the views' data/parquet references and
 omitted acquisitions from those publications' publication.json inputs. cli_stale backs
-`python3 src/awb.py stale`, which compares every recorded result with the current state.
+`python3 src/awb.py stale`, which compares every recorded result with the current state and lists
+each result whose recorded runtime differs from the interpreter running it under
+runtime_mismatches: a warning that prompts a rerun decision, never a stale result.
 
 prior_result and record_finding write a recorded result's state.md findings row for run.py, and
 cli_state backs `python3 src/awb.py state`, which shows and updates investigation state.
@@ -36,8 +40,10 @@ writers add the history.md entries for reruns and status changes that matter.
 
 import argparse
 import hashlib
+import importlib.metadata
 import json
 import os
+import platform
 import re
 import signal
 import subprocess
@@ -225,6 +231,66 @@ def _settings_keys(content, result_id):
             f"results.{result_id}": content.get("results", {}).get(result_id)}
 
 
+# Packages every runtime block records; the project's requirements.txt adds its own.
+_RUNTIME_PACKAGES = ("duckdb", "pandas")
+
+
+def _package(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _required(root):
+    """Normalized package names requirements.txt declares; none when it is absent or unreadable."""
+    try:
+        lines = (root / "requirements.txt").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    names = []
+    for line in lines:
+        match = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", line.split("#")[0])
+        if match and not line.lstrip().startswith("-"):
+            names.append(_package(match[1]))
+    return names
+
+
+def _version(name):
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    except Exception as error:  # Broken metadata fails in other ways.
+        return {"unknown": f"{name}: {error}"}
+
+
+def _interpreter():
+    return {"python": platform.python_version(), "platform": f"{platform.system()}-{platform.machine()}"}
+
+
+def runtime(project_root) -> dict:
+    """This interpreter's runtime block: Python version, platform, and package versions."""
+    names = sorted({_package(n) for n in _RUNTIME_PACKAGES} | set(_required(Path(project_root).resolve())))
+    return {**_interpreter(), "packages": {name: _version(name) for name in names}}
+
+
+def _shown(version):
+    if version is None:
+        return "not installed"
+    return f"unknown ({version['unknown']})" if _is_unknown(version) else str(version)
+
+
+def _runtime_mismatches(recorded) -> list[str]:
+    """How this interpreter differs from a recorded runtime block, compared on the recorded packages."""
+    if not isinstance(recorded, dict) or not isinstance(recorded.get("packages"), dict):
+        return ["evidence records no runtime"]
+    found = [f"{key} {recorded.get(key)} recorded, {value} now"
+             for key, value in _interpreter().items() if recorded.get(key) != value]
+    for name, version in sorted(recorded["packages"].items()):
+        now = _version(name)
+        if now != version:
+            found.append(f"{name} {_shown(version)} recorded, {_shown(now)} now")
+    return found
+
+
 # Investigation entries that are records or outputs, or that other results own, not producing code.
 _NOT_CODE = {"brief.md", "state.md", "findings.json", "history.md", "evidence", "exploration", "results", "queries"}
 # Helpers that dispatch, record evidence, or package; replacing them changes no result.
@@ -304,7 +370,7 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
         "publications": [_input_record(root, p, "publication.json", ["inputs", "conversion_commit", "files"])
                          for p in publications],
         "acquisitions": [_input_record(root, p, "provenance.json", ["status", "files"]) for p in acquisitions],
-        "settings": settings,
+        "settings": settings, "runtime": runtime(root),
         "checks": checks, "notes": notes,
     }
     path = root / _relative(root, f"investigations/{investigation}/evidence/{result_id}.json")
@@ -1355,13 +1421,16 @@ def cli_stale(root: Path, argv: list[str]) -> int:
     """Print, as compact JSON, each recorded result whose evidence no longer matches the project."""
     parser = argparse.ArgumentParser(
         prog="awb.py stale",
-        description="Compare investigations' evidence files with the current code, views, inputs, and "
-                    "settings; changes nothing.",
+        description="Compare investigations' evidence files with the current code, views, inputs, "
+                    "settings, and runtime; changes nothing.",
         epilog="Prints one JSON line: checked, stale, skipped (JSON in an evidence directory that is not "
-               "evidence), and results, one entry per result with a failing comparison: investigation, "
+               "evidence), results, one entry per result with a failing comparison: investigation, "
                "result_id, evidence, failed [{name, detail}], and findings, the exact state.md rows to "
-               "flag. A finding whose linked evidence file is missing is listed too. Exit 0 whether or "
-               "not anything is stale; 2 for an unknown investigation.")
+               "flag; and runtime_mismatches, one entry per result whose recorded Python, platform, or "
+               "package versions differ from the interpreter running stale: investigation, result_id, "
+               "evidence, detail, and findings. A runtime mismatch is a warning to decide on a rerun, not "
+               "stale, and flags nothing. A finding whose linked evidence file is missing is listed under "
+               "results. Exit 0 whether or not anything is stale; 2 for an unknown investigation.")
     parser.add_argument("--investigation", metavar="NAME",
                         help="check only this investigation, by its directory name under investigations/")
     args = parser.parse_args(argv)
@@ -1374,13 +1443,14 @@ def cli_stale(root: Path, argv: list[str]) -> int:
         directories = [base / args.investigation]
     else:
         directories = sorted(p for p in base.iterdir() if p.is_dir()) if base.is_dir() else []
-    results, checked, skipped = [], 0, []
+    results, runtimes, checked, skipped = [], [], 0, []
     for directory in directories:
         rows = finding_rows(directory / "state.md")
         # Evidence files on disk, plus any a finding links that is missing.
         ids = {p.stem for p in (directory / "evidence").glob("*.json") if _ID.fullmatch(p.stem)}
         for result_id in sorted(ids | set(rows)):
             evidence = f"investigations/{directory.name}/evidence/{result_id}.json"
+            content = None
             try:
                 content = json.loads((root / evidence).read_text())
                 if not (isinstance(content, dict) and str(content.get("schema", "")).startswith("awb-evidence/")):
@@ -1389,10 +1459,15 @@ def cli_stale(root: Path, argv: list[str]) -> int:
             except (OSError, ValueError):
                 pass  # compare_evidence reports missing or unreadable evidence.
             checked += 1
+            entry = {"investigation": directory.name, "result_id": result_id, "evidence": evidence}
             failed = [{"name": c["name"], "detail": _short(c["detail"])}
                       for c in compare_evidence(root, evidence) if c["outcome"] == "fail"]
             if failed:
-                results.append({"investigation": directory.name, "result_id": result_id, "evidence": evidence,
-                                "failed": failed, "findings": rows.get(result_id, [])})
-    print(json.dumps({"checked": checked, "stale": len(results), "skipped": skipped, "results": results}))
+                results.append({**entry, "failed": failed, "findings": rows.get(result_id, [])})
+            # A runtime difference is a warning beside the comparisons, never a stale result.
+            mismatches = _runtime_mismatches(content.get("runtime")) if content is not None else []
+            if mismatches:
+                runtimes.append({**entry, "detail": "; ".join(mismatches) + ".", "findings": rows.get(result_id, [])})
+    print(json.dumps({"checked": checked, "stale": len(results), "skipped": skipped, "results": results,
+                      "runtime_mismatches": runtimes}))
     return 0

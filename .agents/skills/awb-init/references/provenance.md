@@ -17,3 +17,5 @@ Settings are recorded per result: `record_evidence()` refuses a settings file wi
 ## Evidence comparison
 
 `awb-package`'s `export` command and `python3 src/awb.py stale`, run `compare_evidence(root, evidence_path)`: five comparisons in order (`committed-code`, `uncommitted-code`, `views`, `inputs`, `settings`), each `{name, paths, outcome, detail}`. It compares state; it does not revalidate. It reads only `awb-evidence/3` files whose settings name their result; any other evidence fails all five comparisons, so rerun its result.
+
+Evidence also records the `runtime`: Python version, platform, and the installed versions of `duckdb`, `pandas`, and each package `requirements.txt` names. `stale` compares it with the interpreter running `stale` and lists differences under `runtime_mismatches`, apart from `results`: a warning that asks for a rerun decision, never a stale result, so run `stale` with the interpreter that runs `run.py`. Pin versions in `requirements.txt` to keep reruns on the recorded runtime.
