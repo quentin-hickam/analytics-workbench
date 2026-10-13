@@ -7,7 +7,7 @@ description: "Clean one analytics workbench dataset: find its data errors and co
 
 Work on one dataset at a time: a canonical view, a publication, or a landed acquisition. This skill and its references hold the data and analysis guides' cleaning rules, so a cleaning pass reads neither guide. Corrections go into view definitions or a new publication; landed originals and existing publications are never modified.
 
-Run the bundled scripts as black boxes, by path, with the project's Python environment (the scan needs `duckdb`). A typical pass is six tool calls: scan, read the view definition and the dataset's catalog row in one call, edit the view, rescan, `stale`, record.
+Run the bundled scripts as black boxes, by path, with the project's Python environment (the scan needs `duckdb`). A typical pass is six tool calls: scan, read the view definition and the view's catalog row in one call, edit the view, rescan, `stale`, record.
 
 ## 1. Scan
 
@@ -66,7 +66,7 @@ Flags go through the project's `src/provenance.py` state flag helper. A helper p
 
 With no affected finding, add `"findings": "none: stale listed no finding reading <view>"`. The script fills new rows' IDs, observations, counts, and markers, keeps scan links and recorded counts and dates in `foundation/quality.json`, fills flagged statuses, and turns `{S1}` into that issue's quality ID. Reopening updates judgment cells and the link; the observation stays as first written. A decision on a recorded issue the scan no longer lists uses its quality ID, such as `"Q-004"`, as the key; it revises judgment cells while keeping the observation and link. `{Q-004}` placeholders also resolve. Record shared vocabulary in the glossary yourself.
 
-Read the existing catalog row before setting any of its cells. A cell you set replaces the whole cell: give its complete new text, keeping what still holds and citing quality IDs for rationale.
+Read the existing catalog row before setting any of its cells; when a publication row shares the dataset's name, `record_cleaning.py` sets the view's row (Kind `canonical view`), so read that one. A cell you set replaces the whole cell: give its complete new text, keeping what still holds and citing quality IDs for rationale.
 
 ## Report
 

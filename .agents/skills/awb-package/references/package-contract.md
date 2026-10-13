@@ -21,7 +21,7 @@ Shared formats live in root `package-format/`: `findings-template.md`, `methodol
 
 When releases exist, findings adds **What changed since the last version** against the latest release, identifying its delivery date from manifest `released_at`.
 
-The **Answer** slide in `findings.md` is the executive summary; M365 writes none. In the Microsoft 365 Copilot app, the PowerPoint agent builds the deck from `findings.md` and draws each chart natively from its file under `m365-assembly.md`; datasets travel beside the deck. M365 consults methodology for reasoning only. Findings, methodology, chart files, and datasets stay authoritative upstream: substantive revisions return through the draft, and deck edits stay in the deck.
+The **Answer** slide in `findings.md` is the executive summary; M365 writes none. In the Microsoft 365 Copilot app, the PowerPoint agent builds the deck from `findings.md` and draws each chart natively from its file under `m365-assembly.md`; datasets travel beside the deck. M365 consults methodology for reasoning only. Findings, methodology, chart files, and datasets stay authoritative upstream: substantive revisions return through the draft, and layout and polish made in the deck are not carried back to the workbench.
 
 ## Structural consistency
 
