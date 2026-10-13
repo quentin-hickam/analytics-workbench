@@ -1,0 +1,9 @@
+1: What population, period, decision, usefulness criteria, audience, material unknowns, definition of return rate, and slug should this investigation use?
+1: Interpret the rest as other regions pooled and use Wilson 95% intervals? (assumed)
+2: Where should landed originals be retained outside the project checkout?
+4: Issue | observation | proposed treatment | alternative: duplicates S1/S2 12 copies | drop duplicate landings | preserve repeated records; S4 -999 amount 35 | null as missing | zero/real; S10 large amounts 9 | retain real orders | exclude; S11 orphan customers 24 | keep partial-extract orders | drop; S3 slash dates 83 e.g. 02/16/2026 | month/day/year | day/month/year.
+8: Which audience-facing datasets should accompany the package? None is an explicit option.
+9: Where should released packages be retained outside the project checkout?
+11: The flagged region-rates conclusion appears in Answer, Findings, Implications, How we know, Limitations, What changed, methodology and chart 1. Revalidate, omit, or release with the caveat?
+16: Confirm same population/period, audit decision, channel-rate usefulness threshold, channel-returns slug, and inherited method/settings?
+16: Retain operations leadership as audience and compare each channel with the other channels pooled plus pairwise checks? (assumed)

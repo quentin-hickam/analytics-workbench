@@ -11,6 +11,8 @@ A release is a *frozen* copy of the existing draft. Changes to the draft go thro
 
 Identify the investigation and package being delivered; when the request could refer to more than one, ask which. The draft lives at `deliveries/<investigation>/<package>/draft/`. When it is absent, say so and direct the user to awb-package to create it.
 
+When README's `Released packages are kept at` line is missing, blank, or `not yet recorded`, ask where releases are kept and record it as in step 4 before releasing, so `release` copies it.
+
 ## 2. Release
 
 Run `python3 src/awb.py release <investigation> <package>`. Its gate is `check-draft --verify-only`: a pass reruns every mechanical check and verifies every file but the manifest against the recorded inventory, so the narratives and the contract need no rereading. It refuses, creating nothing, in two ways:

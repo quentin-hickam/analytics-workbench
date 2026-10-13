@@ -27,6 +27,7 @@ The operation that assembled this package, recorded separately from the producin
 - `packaging_commit`: the packaging checkout commit;
 - `packaging_uncommitted_changes`: `none`, or the relevant uncommitted package-source paths; and
 - `export_checks`: each serialized result's `compare_evidence` output; `none` without exports.
+- `results`: every represented result, serialized or not, as `result_id` and `evidence` path.
 
 `export` writes `packaging_commit` and `packaging_uncommitted_changes` (paths under `src/` and `package-format/`), and `export_checks` as one entry per result, each with `result_id`, `evidence`, and the unchanged `comparisons`: a serialized result's entry is replaced, a represented result not serialized keeps its entry, and an entry outside the represented set is dropped.
 
@@ -35,6 +36,6 @@ The operation that assembled this package, recorded separately from the producin
 - `dataset_selection`: the exported dataset paths, or an explicit `none`; and
 - `charts`: each chart file's path with the result ID it serializes, or `none`.
 
-`export` writes both. `revalidation_flags`, the one field recorded by hand, holds one entry per flagged finding, with `disposition` required when `represented_in` lists places; the package contract's **Revalidation caveats** defines it.
+`export` writes both, and each `revalidation_flags` entry's finding and reason, one per flagged finding; you fill `represented_in` and the user's `disposition`, required when `represented_in` lists places. The package contract's **Revalidation caveats** defines the field.
 
 Say the provenance locates the producing state; never call a package reproducible. Record an undeterminable field as `unknown` with the reason.

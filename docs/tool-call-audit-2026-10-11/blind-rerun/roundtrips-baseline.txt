@@ -1,0 +1,11 @@
+1: What population, decision, usefulness threshold, audience, and material unknowns define the investigation?
+1: What slug should name the investigation?
+1: Compare West with pooled other regions, using Wilson 95% intervals and a difference interval? (assumed)
+2: Where should independently landed originals be retained?
+4: For duplicate rows/keys (12), sentinel -999 (35), extreme amounts (9), orphan customers (24), and slash dates (83), confirm meanings and treatments: drop duplicate landings; null -999; keep real large orders and orphan orders; parse month/day/year.
+8: Which audience-facing datasets should the package include, including the option none?
+9: Where are released packages kept?
+11: For flagged finding West leads H1 2026 returns: 105/590 = 17.80% (95% Wilson 14.92–21.09%); South 10.05%, East 7.39%, North 6.48%. West accounts for 42.34% of 248 returns from 24.58% of 2,400 orders; overall rate 10.33%., represented in ['findings: title, Answer, both finding slides, Implications, How we know, Limitations and open caveats, What changed since the last version', 'methodology: Scope and definitions, Sources and data quality, both Findings, Current correction and accepted release caveats', 'chart 1'], choose revalidate, omit, or release with caveat.
+11: For flagged finding West exceeds pooled East/North/South by 9.90 percentage points (17.80% versus 7.90%; 95% Newcombe interval 6.73–13.38 points), above the 3-point actionable threshold. It also exceeds each individual region by 7.74–11.31 points; descriptive difference interval lower bounds exceed 3 points., represented in ['findings: title, Answer, both finding slides, Implications, How we know, Limitations and open caveats, What changed since the last version', 'methodology: Scope and definitions, Sources and data quality, both Findings, Current correction and accepted release caveats', 'chart 2'], choose revalidate, omit, or release with caveat.
+16: What population, purpose, useful channel departure, slug, and inheritance define the related investigation?
+16: Compare each channel against pooled other channels, assess region mix, and inherit operations leadership as the audit audience? (assumed)

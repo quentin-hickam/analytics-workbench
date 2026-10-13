@@ -5,9 +5,12 @@
 # test_rescan_reports_delta_with_stable_ids_and_inherited_options: a rescan after a correction view reports before and after counts by issue, keeps ids, and reuses the baseline's options.
 # test_removed_targets_and_options_are_rejected: a saved .sql query is not a scan target; --rescan takes no scan name; --typed-threshold and --max-categories are gone.
 # test_recorded_markers_mark_issues_as_recorded: issues whose `<scan>#<key>` marker is in the quality record are reported as recorded with their quality ID and recorded count beside the current count.
+# test_record_sets_the_view_row_when_a_publication_shares_its_name: a publication row named like its canonical view leaves the view row the one record sets; two non-view rows with one name still refuse.
 # test_record_writes_quality_catalog_and_flags_in_one_call: new quality IDs, issue and correction rows with scan counts and markers dated with no scan link, a catalog row, and a revalidation flag that keeps the prior status.
 # test_record_updates_recorded_issue_and_continues_numbering: a recorded issue has its judgment cells updated and its observation's count and scan date refreshed, in older linked rows and in current rows; a new issue continues the existing ID prefix and width.
 # test_record_checks_everything_before_writing: an unmatched flag or a correction without findings writes nothing; a dry run prints rows and writes nothing.
+# test_record_revises_a_row_by_quality_id: a Q- or DQ- key revises its row's judgment cells and keeps the observation, appends a correction row without a rescan suffix, accepts an unmarked row, and resolves {Q-004}; a dry run writes nothing.
+# test_record_rejects_bad_quality_id_keys: a foreign scan's marker, two keys naming one row, and an unknown key are rejected and write nothing.
 
 import importlib.util
 import json
@@ -202,6 +205,29 @@ def state_file(root):
     return write(root, "investigations/churn/state.md", text)
 
 
+def test_record_sets_the_view_row_when_a_publication_shares_its_name(tmp_path):
+    scan_file(tmp_path)
+    catalog = (TEMPLATES / "foundation/catalog.md").read_text().replace(
+        "| --- | --- | --- | --- | --- | --- | --- | --- |\n",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        "| orders | Parquet publication |  | `data/raw/erp/a1/` | `data/parquet/orders/p1/` | `src/preparation/orders.sql` |  |  |\n"
+        "| orders | canonical view | one row per order |  | `foundation/views/01_orders.sql` |  |  |  |\n", 1)
+    write(tmp_path, "foundation/catalog.md", catalog)
+    decisions = {"issues": {"S1": {"impact": "Splits counts", "treatment": "Trim", "status": "corrected",
+                                   "correction": "Trim dept", "change": "`foundation/views/01_orders.sql` trims dept"}},
+                 "findings": "none: stale listed no finding reading orders",
+                 "catalog": {"name": "orders", "cells": {"Preparation rules": "Trims dept ({S1})"}}}
+    assert recorder.record(tmp_path, "orders", decisions, today=TODAY)["catalog"] == "updated orders"
+    text = (tmp_path / "foundation/catalog.md").read_text()
+    assert "| orders | canonical view | one row per order |  | `foundation/views/01_orders.sql` | Trims dept (Q-001) |  |  |" in text
+    assert "| orders | Parquet publication |  | `data/raw/erp/a1/` | `data/parquet/orders/p1/` | `src/preparation/orders.sql` |  |  |" in text
+    # Two rows that are not views stay ambiguous and refuse, writing nothing.
+    write(tmp_path, "foundation/catalog.md", catalog.replace("canonical view", "Parquet publication"))
+    scan_file(tmp_path)
+    with pytest.raises(recorder.RecordError, match="several rows are named orders"):
+        recorder.record(tmp_path, "orders", decisions, today=TODAY)
+
+
 def test_record_writes_quality_catalog_and_flags_in_one_call(tmp_path):
     scan_file(tmp_path)
     state = state_file(tmp_path)
@@ -278,3 +304,55 @@ def test_record_checks_everything_before_writing(tmp_path, capsys, monkeypatch):
     out = json.loads(capsys.readouterr().out)
     assert out["written"] == [] and any("none: stale listed" in row for row in out["rows"])
     assert not (tmp_path / "foundation/quality.md").exists()
+
+
+def quality_file(root, prefix="Q-"):
+    rows = (f"| {prefix}003 | view `orders` | Spaces (2 of 45); `orders#whitespace:dept` scanned 2026-10-01 | Splits counts | Trimmed | corrected |\n"
+            f"| {prefix}004 | view `orders`, column `amount` | -999 in amount (3 of 45); `orders#sentinel:amount:-999` scanned 2026-10-01 | Skews totals | Nulled in the view | corrected |\n"
+            f"| {prefix}005 | view `orders` | Test orders, noted by hand | Inflates counts | Open | open |\n"
+            f"| {prefix}006 | view `payments` | Bad codes (4 of 9); `payments#sentinel:code:0` scanned 2026-10-01 | None | Open | open |\n")
+    quality = (TEMPLATES / "foundation/quality.md").read_text().replace(
+        "| --- | --- | --- | --- | --- | --- |\n", "| --- | --- | --- | --- | --- | --- |\n" + rows, 1)
+    return write(root, "foundation/quality.md", quality)
+
+
+def test_record_revises_a_row_by_quality_id(tmp_path, capsys, monkeypatch):
+    scan_file(tmp_path)
+    path = quality_file(tmp_path)
+    decision = {"issues": {"Q-004": {"treatment": "Test-order rows dropped in the view", "status": "corrected",
+                                     "correction": "Drop test orders instead of nulling -999; see {Q-005}",
+                                     "change": "`foundation/views/01_orders.sql` drops test orders"},
+                           "Q-005": {"status": "corrected", "treatment": "Dropped with {Q-004}"}},
+                "findings": "none: stale listed no finding reading orders"}
+    monkeypatch.setattr("sys.stdin", __import__("io").StringIO(json.dumps(decision)))
+    before = path.read_text()
+    assert recorder.main([str(tmp_path), "orders", "--dry-run"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["written"] == [] and path.read_text() == before and len(out["rows"]) == 3
+    result = recorder.record(tmp_path, "orders", decision, today=TODAY)
+    assert result["quality_ids"] == {"Q-004": "Q-004", "Q-005": "Q-005"} and result["added"] == []
+    assert result["updated"] == ["Q-004", "Q-005"] and result["corrections"] == ["Q-004"]
+    text = path.read_text()
+    assert ("| Q-004 | view `orders`, column `amount` | -999 in amount (3 of 45); `orders#sentinel:amount:-999` scanned 2026-10-01 | "
+            "Skews totals | Test-order rows dropped in the view | corrected |") in text
+    assert "| Q-005 | view `orders` | Test orders, noted by hand | Inflates counts | Dropped with Q-004 | corrected |" in text
+    assert ("| 2026-10-09 | Q-004 | Drop test orders instead of nulling -999; see Q-005 | "
+            "`foundation/views/01_orders.sql` drops test orders | none: stale listed no finding reading orders |") in text
+    # Another ID prefix works the same way.
+    path = quality_file(tmp_path, "DQ-")
+    result = recorder.record(tmp_path, "orders", {"issues": {"DQ-004": {"status": "open"}}}, today=TODAY)
+    assert result["updated"] == ["DQ-004"]
+    assert "-999 in amount (3 of 45); `orders#sentinel:amount:-999` scanned 2026-10-01 | Skews totals | Nulled in the view | open |" in path.read_text()
+
+
+def test_record_rejects_bad_quality_id_keys(tmp_path):
+    scan_file(tmp_path)
+    path = quality_file(tmp_path)
+    before = path.read_text()
+    cases = [({"Q-006": {"status": "corrected"}}, "Q-006 is recorded from scan payments, not orders"),
+             ({"S1": {"status": "corrected"}, "Q-003": {"status": "open"}}, "S1 and Q-003 both name Q-003"),
+             ({"Q-099": {"status": "open"}, "S7": {"status": "open"}}, "issues not in the scan or the quality record: Q-099, S7")]
+    for issues, message in cases:
+        with pytest.raises(recorder.RecordError, match=message):
+            recorder.record(tmp_path, "orders", {"issues": issues}, today=TODAY)
+    assert path.read_text() == before

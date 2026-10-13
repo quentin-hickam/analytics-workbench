@@ -3,6 +3,7 @@
 # test_missing_and_custom_tables_are_unknown_not_zero: an unsupported state table or absent sources record is null with an uncertainty, never zero.
 # test_malformed_table_does_not_count_partial_rows: one malformed findings row makes the counts unknown.
 # test_unmatched_flags_are_counted_for_awb_package: a flag absent from the manifest is counted in unmatched_flags; no methodology review or mtime estimate keys remain.
+# test_rerun_since_draft_lists_results_recorded_after_the_draft: a represented result whose evidence is newer than the draft is listed, including one a narrative-only package never serialized; an empty list lists none; a manifest without results, or escaping or unreadable evidence, is unknown, an unreadable one an uncertainty.
 # test_release_only_package_counts_every_flag_unmatched: with no draft, every flagged finding is unmatched and nothing is uncertain.
 # test_dispositions_require_current_reason: a disposition applies only while finding and reason match the state row exactly.
 # test_revalidate_and_none_dispositions_block_release: a confirmed flag whose disposition is `none` or `revalidate` lacks a disposition; `omit` and `release_with_caveat` do not.
@@ -111,6 +112,36 @@ def test_unmatched_flags_are_counted_for_awb_package(workbench):
     assert result["unmatched_flags"] == 1
     assert result["confirmed_without_disposition"] == 0
     assert not {"representation_review", "review_methodology", "flags_since_draft", "comparison_is_estimate"} & result.keys()
+
+
+def test_rerun_since_draft_lists_results_recorded_after_the_draft(workbench):
+    draft = package(workbench, "none")
+    evidence = {"r-001": "2026-10-01T09:00:00-04:00", "r-002": "2026-10-02T09:00:00-04:00"}
+    for result_id, recorded_at in evidence.items():
+        write(workbench, f"investigations/churn/evidence/{result_id}.json", json.dumps({"recorded_at": recorded_at}))
+    manifest = json.loads((draft / "manifest.json").read_text())
+    # A narrative-only package serializes nothing (export_checks none) yet still represents its results.
+    manifest["export_checks"] = "none"
+    manifest["results"] = [{"result_id": r, "evidence": f"investigations/churn/evidence/{r}.json"} for r in evidence]
+    (draft / "manifest.json").write_text(json.dumps(manifest))
+    result = status.collect(workbench)
+    assert result["packages"][0]["rerun_since_draft"] == ["r-002"] and result["uncertainties"] == []
+    manifest["results"] = []
+    (draft / "manifest.json").write_text(json.dumps(manifest))
+    assert status.collect(workbench)["packages"][0]["rerun_since_draft"] == []
+    # Unknown, never empty: a manifest from before `results`, or an escaping or unreadable evidence path.
+    del manifest["results"]
+    (draft / "manifest.json").write_text(json.dumps(manifest))
+    assert status.collect(workbench)["packages"][0]["rerun_since_draft"] is None
+    manifest["results"] = [{"result_id": "r-003", "evidence": "../outside.json"}]
+    (draft / "manifest.json").write_text(json.dumps(manifest))
+    result = status.collect(workbench)
+    assert result["packages"][0]["rerun_since_draft"] is None and result["uncertainties"] == []
+    manifest["results"] = [{"result_id": "r-003", "evidence": "investigations/churn/evidence/missing.json"}]
+    (draft / "manifest.json").write_text(json.dumps(manifest))
+    result = status.collect(workbench)
+    assert result["packages"][0]["rerun_since_draft"] is None
+    assert [u["path"] for u in result["uncertainties"]] == ["investigations/churn/evidence/missing.json"]
 
 
 def test_release_only_package_counts_every_flag_unmatched(workbench):

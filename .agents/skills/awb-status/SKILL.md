@@ -25,7 +25,7 @@ Keep the report to one screen, in this order. Report the collector's values as g
 - **Findings.** `active.counts`, then every flagged finding in `active.findings` with its `reason`. Read a `foundation/quality.md` correction row only when a reason cites one that needs explaining.
 - **Open work.** `unresolved_issues` and `next_steps`. Report an open decision only when the brief or state records it as one; list `material_unknowns` as unknowns.
 - **Other investigations.** Each name and `last_updated`.
-- **Packages.** For each: `revised_at`, `latest_release` with `released_at` (null for a release older than `manifest.json`: report it undated), and `draft_vs_release`. Then what blocks its next release: `confirmed_without_disposition`, flags the manifest records whose disposition is still `none` or `revalidate`; and `unmatched_flags`, flagged findings the manifest does not record with the same finding and reason, which awb-package resolves.
+- **Packages.** For each: `revised_at`, `latest_release` with `released_at` (null for a release older than `manifest.json`: report it undated), and `draft_vs_release`. Then what blocks its next release: `confirmed_without_disposition`, flags the manifest records whose disposition is still `none` or `revalidate`; `unmatched_flags`, flagged findings the manifest does not record with the same finding and reason, which awb-package resolves; and `rerun_since_draft`, represented results rerun after the draft was last revised, so the package still shows their earlier run.
 - **Storage.** `landed_data_storage` and `release_storage` by `availability`, and `acquisitions.without_retained_copy` as acquisitions held only in this checkout. `unrecorded` or `unreachable` is a risk once acquisitions or releases exist. `none chosen` is the user's recorded decision: report that this checkout holds the only copy. For `unknown`, check through the project's established access method or say "not verified".
 - **Uncertainties** the targeted lookups left unresolved.
 
@@ -37,6 +37,7 @@ Finish with up to five requests whose state applies, risk rows first, then progr
 | --- | --- | --- | --- |
 | `active.counts` has `revalidation-needed` | "Rerun the flagged findings" | `python3 investigations/<name>/run.py` | risk |
 | A package's `unmatched_flags` is above zero | "Revise the <package> draft to carry the new caveats" | `awb-package` | risk |
+| A package's `rerun_since_draft` lists results | "Revise the <package> draft to the rerun results" | `awb-package` | risk |
 | A release exists and `release_storage` is `unrecorded` or `unreachable` | "Record where releases are kept" | `awb-release` | risk |
 | Acquisitions exist and `landed_data_storage` is `unrecorded` or `unreachable`, or `reachable` with acquisitions held only in this checkout | "Record where landed data is kept" | AGENTS.md record maintenance | risk |
 | `git.state_status` is `out of date` | "Update the investigation state" | `python3 src/awb.py state` | risk |

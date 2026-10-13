@@ -11,7 +11,7 @@ SCAN_NAME names foundation/scans/<SCAN_NAME>.json written by scan_dataset.py. De
      "findings": "...",                                           correction rows' findings when no flags
      "flags": [{"investigation", "result", "reason"}],            findings to flag
      "catalog": {"name", "cells": {column: text}}}                catalog cells to set
-Text may name an issue as {S1}; it becomes the issue's quality ID.
+Text may name an issue as {S1}; it becomes the issue's quality ID. A recorded quality ID, such as Q-004, also works as a key.
 
 Quality issue rows get the next ID, the scan's counts and examples, and the marker
 `<scan>#<key>` with its scan date; later scans use the marker to report the issue as recorded. An
@@ -107,9 +107,12 @@ def _load(root, relative, template=None):
     return (TEMPLATES / template).read_text(encoding="utf-8").splitlines()
 
 
+ID = r"([A-Za-z]+-?)(\d+)"
+
+
 def _next_ids(table):
     """Yield new IDs continuing the table's prefix and numbering, Q-001 by default."""
-    found = [re.fullmatch(r"([A-Za-z]+-?)(\d+)", cells[0]) for _, cells in table.rows()]
+    found = [re.fullmatch(ID, cells[0]) for _, cells in table.rows()]
     found = [m for m in found if m]
     prefix = Counter(m.group(1) for m in found).most_common(1)[0][0] if found else "Q-"
     width = max((len(m.group(2)) for m in found), default=3)
@@ -119,12 +122,16 @@ def _next_ids(table):
         yield f"{prefix}{number:0{width}d}"
 
 
-def _fill(text, ids):
+def _fill(text, ids, prefixes=("S",)):
+    """Replace {S1} or {Q-004} with its quality ID; an unknown name with a known prefix is an error."""
     def replace(match):
-        if match.group(1) not in ids:
-            raise RecordError(f"{{{match.group(1)}}} names no issue recorded in this call or earlier")
-        return ids[match.group(1)]
-    return re.sub(r"\{(S\d+)\}", replace, str(text))
+        name = match.group(1)
+        if name in ids:
+            return ids[name]
+        if re.fullmatch(ID, name).group(1) in prefixes:
+            raise RecordError(f"{{{name}}} names no issue recorded in this call or earlier")
+        return match.group(0)
+    return re.sub(r"\{([A-Za-z]+-?\d+)\}", replace, str(text))
 
 
 def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
@@ -152,18 +159,45 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
         for key in re.findall(r"`" + re.escape(marker) + r"([^`]+)`", quality[line_index]):
             recorded[key.replace("\\|", "|")] = (line_index, cells[0])
     issues = decisions.get("issues") or {}
-    unknown = sorted(set(issues) - set(by_id))
+    by_qid = {}
+    for line_index, cells in active.rows():
+        if re.fullmatch(ID, cells[0]):
+            by_qid.setdefault(cells[0], []).append(line_index)
+    revised = {k: by_qid[k] for k in issues if k not in by_id and k in by_qid}
+    unknown = sorted(set(issues) - set(by_id) - set(revised))
     if unknown:
-        raise RecordError(f"issues not in the scan: {', '.join(unknown)}")
+        raise RecordError(f"issues not in the scan or the quality record: {', '.join(unknown)}")
+    for qid, lines in revised.items():
+        if len(lines) > 1:
+            raise RecordError(f"foundation/quality.md: {len(lines)} active rows have the ID {qid}")
+        revised[qid] = lines[0]
+        markers = set(re.findall(r"`([^`\s#]+)#[^`]+`", _cells(quality[lines[0]])[2]))
+        if markers and scan["name"] not in markers:
+            raise RecordError(f"{qid} is recorded from scan {', '.join(sorted(markers))}, "
+                              f"not {scan['name']}; pass that scan to revise it")
 
-    # Allocate IDs first so {S1} placeholders resolve anywhere in the decisions.
-    ids, new_ids = {}, _next_ids(active)
+    # Allocate IDs first so {S1} and {Q-004} placeholders resolve anywhere in the decisions.
+    ids, new_ids, named = {}, _next_ids(active), {}
     for issue_id in issues:
-        key = by_id[issue_id]["key"]
-        ids[issue_id] = recorded[key][1] if key in recorded else next(new_ids)
+        if issue_id in revised:
+            ids[issue_id], line_index = issue_id, revised[issue_id]
+        else:
+            key = by_id[issue_id]["key"]
+            ids[issue_id] = recorded[key][1] if key in recorded else next(new_ids)
+            line_index = recorded[key][0] if key in recorded else None
+        if line_index is None:
+            continue
+        if line_index in named:
+            raise RecordError(f"{named[line_index]} and {issue_id} both name {ids[issue_id]}; "
+                              "give one decision per issue")
+        named[line_index] = issue_id
     for issue in scan["issues"] + baseline:
         if issue.get("recorded") and issue["id"] not in ids:
             ids[issue["id"]] = issue["recorded"]["id"]
+    for qid in [*by_qid, *ids.values()]:
+        ids.setdefault(qid, qid)
+    prefixes = {"S", "Q-"} | {re.fullmatch(ID, qid).group(1) for qid in by_qid}
+    fill = lambda text: _fill(text, ids, prefixes)
 
     flags = decisions.get("flags") or []
     by_investigation = {}
@@ -177,10 +211,14 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     added, updated, corrections, rows = [], [], [], []
     judged = {"impact": "Analytical impact", "treatment": "Current treatment", "status": "Status"}
     for issue_id, decision in issues.items():
-        issue = by_id[issue_id]
+        issue = by_id.get(issue_id)
         qid = ids[issue_id]
-        values = {judged[k]: _fill(decision[k], ids) for k in judged if decision.get(k)}
-        if issue["key"] in recorded:
+        values = {judged[k]: fill(decision[k]) for k in judged if decision.get(k)}
+        if issue is None:  # a quality-ID key: judgment cells only; the observation stays
+            if values:
+                rows.append(active.set(revised[issue_id], values))
+                updated.append(qid)
+        elif issue["key"] in recorded:
             if values:
                 line_index = recorded[issue["key"]][0]
                 observation = _cells(quality[line_index])[2]
@@ -203,7 +241,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                            + f"; `{marker}{issue['key']}` scanned {scan['scanned_at'][:10]}")
             column = f", column `{issue['column']}`" if issue["column"] else ""
             obj = decision.get("object") or f"{target['kind']} `{subject}`{column}"
-            rows.append(active.append({active.columns[0]: qid, active.columns[1]: _fill(obj, ids),
+            rows.append(active.append({active.columns[0]: qid, active.columns[1]: fill(obj),
                                        active.columns[2]: observation, **values}))
             added.append(qid)
         if bool(decision.get("correction")) != bool(decision.get("change")):
@@ -212,11 +250,11 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
             findings = decision.get("findings") or default_findings
             if not findings:
                 raise RecordError("a correction needs flags, or findings text saying what stale reported (e.g. 'none')")
-            change = _fill(decision["change"], ids)
+            change = fill(decision["change"])
             if issue_id in delta:
                 d = delta[issue_id]
                 change += f"; rescan {d['before']} -> {d['after']}"
-            corrections.append((qid, [day, qid, _fill(decision["correction"], ids), change, _fill(findings, ids)]))
+            corrections.append((qid, [day, qid, fill(decision["correction"]), change, fill(findings)]))
     if corrections:
         table = Table(quality, CORRECTIONS, "foundation/quality.md")
         for qid, cells in corrections:
@@ -232,12 +270,19 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
             raise RecordError("catalog needs name and cells")
         catalog = files["foundation/catalog.md"] = _load(root, "foundation/catalog.md", "catalog.md")
         table = Table(catalog, DATASETS, "foundation/catalog.md")
-        cells = {name: _fill(value, ids) for name, value in entry["cells"].items()}
+        cells = {name: fill(value) for name, value in entry["cells"].items()}
         for name in cells:
             table.column(name)
-        matches = [i for i, row in table.rows() if row[0].strip("`") == entry["name"]]
+        named = [(i, row) for i, row in table.rows() if row[0].strip("`") == entry["name"]]
+        matches = [i for i, _ in named]
         if len(matches) > 1:
-            raise RecordError(f"foundation/catalog.md: several rows are named {entry['name']}")
+            # A publication's printed catalog_row shares its dataset's name with the canonical view,
+            # and cleaning corrects the view, so a single view row among them is the one to set.
+            kind = table.column("Kind") if "Kind" in table.columns else None
+            views = [i for i, row in named if kind is not None and "view" in row[kind].lower()]
+            if len(views) != 1:
+                raise RecordError(f"foundation/catalog.md: several rows are named {entry['name']}")
+            matches = views
         if matches:
             rows.append(table.set(matches[0], cells))
             catalog_result = f"updated {entry['name']}"
@@ -263,7 +308,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
         status = row[status_at]
         if not status.startswith("revalidation-needed"):
             status = f"revalidation-needed (was {status})" if status else "revalidation-needed"
-        reason = _fill(flag["reason"], ids)
+        reason = fill(flag["reason"])
         existing = row[reason_at] if reason_at < len(row) else ""
         if existing and reason not in existing:
             reason = f"{existing}; {reason}"

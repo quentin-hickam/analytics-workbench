@@ -12,7 +12,7 @@ Packaging **serializes** recorded results: it reuses recorded evidence, exports,
 1. **Establish** the investigation, package name, dataset selection, and Audience.
 2. **Gather** the record on the read path the change needs.
 3. **Write** `findings.md`, with every **Chart N.** specification, and `methodology.md` from the project's templates, and copy `m365-assembly.md`. This creates the draft.
-4. **Export the files and provenance** with `export` on every revision, then record the flags.
+4. **Export the files and provenance** with `export` on every revision, then review the flags.
 5. **Check** last with `check-draft`, until done.
 6. **Report.**
 
@@ -37,6 +37,7 @@ Recover the business question, intended decision or exploratory purpose, audienc
 
 Create the draft at the contract's paths, or revise the same files. A draft in an earlier format is rewritten whole in the current format on its next revision; releases stay frozen.
 
+- Before writing, give each column a chart or dataset will export a display name from the glossary in `foundation/display.toml`, e.g. `[columns]` then `return_rate = "Return rate"`; **Data:** lines and dataset headers use these names.
 - `findings.md` is the deck outline under the slide rules and translation rule in `package-format/findings-template.md`; its **Answer** slide is the executive summary.
 - `methodology.md` follows `package-format/methodology-template.md` in the workbench's own vocabulary.
 - Copy `package-format/m365-assembly.md` into the draft unchanged.
@@ -44,9 +45,9 @@ Create the draft at the contract's paths, or revise the same files. A draft in a
 
 ## 4. Export the files and provenance
 
-Run `python3 src/awb.py export <investigation> <package> --chart <result>[:<columns>] ... --dataset <name>=<result>[:<columns>] ... (or --no-datasets) --result <id> ...`, passing every represented result with evidence: one `--chart` per **Chart N.** specification, in order, exactly the user-selected datasets, and each other represented result as `--result`. With only `--result` it refreshes provenance and leaves exported files untouched; a `--result` is recorded without the export check, so a flagged finding can be represented with its caveat. Choose columns so each file holds exactly what its chart plots, with interval bounds as their own columns. Display choices such as the highlight or the baseline go in the specification. When it lists display-name gaps, add them to `foundation/display.toml` from the glossary and rerun. Paste its `methodology_lines` into `methodology.md`. When `export` reports `exports_blocked`, stop and report it. When it reports missing evidence it writes nothing: rerun it without those results, and record their producing state by hand from investigation records or an earlier manifest, never from the current checkout. Commit nothing on the user's behalf to make provenance look clean.
+Run `python3 src/awb.py export <investigation> <package> --chart <result>[:<columns>] ... --dataset <name>=<result>[:<columns>] ... (or --no-datasets) --result <id> ...`, passing every represented result with evidence: one `--chart` per **Chart N.** specification, in order, exactly the user-selected datasets, and each other represented result as `--result`; a `--result` is recorded without the export check, so a flagged finding can be represented with its caveat. Choose columns so each file holds exactly what its chart plots, with interval bounds as their own columns. Display choices such as the highlight or the baseline go in the specification. When it lists display-name gaps, fill its `display_stub` under `[columns]`, fix any blank name it reports in place, and rerun. Paste its `methodology_lines` into `methodology.md`. For a revision that only adds caveats and keeps the exported files, pass every represented result with `--result` only; omit `--chart`, `--dataset`, and `--no-datasets`. When `export` reports `exports_blocked`, stop and report it. When it reports missing evidence it writes nothing: rerun it without those results, and record their producing state by hand from investigation records or an earlier manifest, never from the current checkout. Commit nothing on the user's behalf to make provenance look clean.
 
-Record every finding `state.md` flags under `revalidation_flags` as the contract's **Revalidation caveats** describes, each represented one with disposition `none` until the user chooses.
+`export` records each flag's finding and reason and lists `flags_pending`. Review every flag's `represented_in` against the revised draft and fill pending places per the contract; then for any represented flag whose disposition is still `none`, ask the user to revalidate, omit, or release with the caveat, and record the answer; without one it stays `none`.
 
 ## 5. Check
 

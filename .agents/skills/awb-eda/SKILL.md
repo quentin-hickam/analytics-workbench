@@ -42,7 +42,7 @@ Write each follow-up as `investigations/<name>/exploration/<topic>.sql` and run 
 
 ## 5. Record what was learned
 
-- **State.** Under Unresolved issues, add each confirmed shared data problem or coverage limitation, naming the scan path; under Next steps, add each consequential pattern or candidate explanation not yet tested through `run.py`, as a question for it — a pattern becomes a finding only there. Replace items they supersede.
+- **State.** Under Unresolved issues, add each confirmed shared data problem or coverage limitation, naming the scan path; under Next steps, add each consequential pattern or candidate explanation not yet tested through `run.py`, as a question for it — a pattern becomes a finding only there. Replace items they supersede, each list in one call: `python3 src/awb.py state issues --add "<text>"` and `state next --add "<text>" --drop <number>`.
 - **History.** An entry only for a limitation or decision that affects the question; a routine scan gets none.
 - **Vocabulary.** A term the data settled goes where AGENTS.md records meanings; a term still open is an unresolved issue.
 - **Shared data problems.** Except for coverage limitations recorded below, hand confirmed shared data problems to awb-clean: "Use awb-clean on <dataset> for <problem>". Leave canonical views to awb-clean. When exploration must exclude affected rows, or a question-specific exclusion stays local, do it in a saved query whose comment gives the reason, and say so; an exclusion `run.py` needs goes into settings.

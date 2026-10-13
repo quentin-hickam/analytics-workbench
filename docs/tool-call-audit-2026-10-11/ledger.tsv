@@ -1,0 +1,138 @@
+init	skill	load awb-init SKILL.md
+init	inspect	inspect target: ls, README/AGENTS/.gitignore, ancestor CLAUDE.md, git status
+init	lookup	look up facts in supplied files before asking: headers and row counts
+init	git	git init (no commit)
+init	read	read root templates README/.gitignore/AGENTS.md
+init	write	copy .gitignore and AGENTS.md unchanged (cp)
+init	write	write README adapted (Active investigation line)
+init	install	run install_helpers.py
+init	read	read brief/state/history templates
+init	write	copy run.py + settings.toml (cp)
+init	write	write brief.md
+init	write	write state.md
+init	write	write history.md
+commit	git	commit init (user asked)
+land	read	read workbench-guides/data.md (once per session)
+land	edit	record Landed data is kept at line in README
+land	run	awb.py land erp extract-2026-07-01 orders.csv customers.csv
+land	retry	land exit 1: ledger row not written (foundation/sources.md missing); recovery follows
+land	read	read sources.md template
+land	write	write foundation/sources.md with erp row
+land	run	awb.py retain
+land	verify	investigate retain conflict:true (diff landed vs retained)
+land	edit	fill Restrictions cell of Acquisitions row
+publish	write	write orders.sql, orders-check.sql, customers.sql, customers-check.sql [files=4]
+commit	git	commit conversion SQL (suggested; user agreed)
+publish	run	awb.py publish orders
+publish	run	awb.py publish customers
+publish	lookup	find how a view reads a publication (ls publication dir; grep view convention)
+publish	write	write foundation/views/01_orders.sql, 02_customers.sql [files=2]
+publish	read	read catalog.md template
+publish	write	write foundation/catalog.md (2 view rows from catalog_row)
+publish	run	awb.py sql smoke query over views
+commit	git	commit views+catalog
+clean	skill	load awb-clean SKILL.md
+clean	run	scan_dataset.py orders --key order_id --ref customer_id=customers.customer_id --range order_date=2026-01-01:2026-06-30
+clean	read	read view definition + catalog row (one call)
+clean	read	read references/correction-views.md (first correction pattern in project)
+clean	edit	rewrite foundation/views/01_orders.sql with decided rules
+clean	run	scan_dataset.py orders --rescan
+clean	run	awb.py stale
+clean	run	record_cleaning.py orders (issues, findings none, catalog cells)
+commit	git	commit cleaning
+eda	skill	load awb-eda SKILL.md
+eda	read	brief+state already loaded this session? no: awb.py state (one call)
+eda	run	eda_scan.py orders --date-column order_date --start --end --measure returned --dimension region --dimension channel
+eda	write	write exploration/region-by-channel.sql
+eda	run	awb.py sql exploration/region-by-channel.sql
+eda	run	awb.py state next --help (argument form unknown)
+eda	run	awb.py state next --help
+eda	run	awb.py state next --drop 1 --drop 2 --add ...
+eda	run	awb.py state issues --add orphan limitation
+commit	git	commit eda
+analyze	read	read workbench-guides/analysis.md (once per session)
+analyze	read	read settings.toml before editing
+analyze	edit	append [parameters] + [results.region-return-rates] + validation to settings.toml
+analyze	write	write queries/region-return-rates.sql
+analyze	run	python3 run.py
+analyze	run	awb.py state finding --help
+analyze	read	read result table to word the finding
+commit	git	commit result code
+analyze	run	awb.py state finding --status supported --text --caveat --reason
+analyze	run	awb.py state next --drop 1 --add package
+commit	git	commit finding
+status	skill	load awb-status SKILL.md
+status	run	collect_status.py
+package	skill	load awb-package SKILL.md
+package	read	read references/package-contract.md
+package	run	install_helpers.py --package-formats
+package	read	gather: brief, state, history, settings, run.py, foundation records (one call)
+package	read	read findings-template.md + methodology-template.md
+package	write	write findings.md
+package	write	write methodology.md
+package	write	copy m365-assembly.md (cp)
+package	run	awb.py export --chart region-return-rates:cols --no-datasets
+package	retry	export exit 1: display names missing in foundation/display.toml
+package	lookup	find display.toml format (export --help / helpers.md)
+package	write	write foundation/display.toml [columns]
+package	run	awb.py export (rerun)
+package	edit	paste methodology_lines into methodology.md
+package	run	awb.py check-draft
+package	retry	check-draft passed:false: internal column names in Chart 1 Data line
+package	edit	fix Chart 1 Data line to display headers
+package	run	awb.py check-draft (rerun)
+commit	git	commit package formats + display.toml
+release	skill	load awb-release SKILL.md
+release	run	awb.py release
+release	retry	release refused: revalidation_flags missing although state has no flags and check-draft passed
+release	read	read draft manifest.json
+release	edit	set revalidation_flags: none in manifest.json
+release	run	awb.py release (rerun)
+release	edit	record Released packages are kept at line in README
+release	run	awb.py copy-releases
+reclean	skill	load awb-clean SKILL.md
+reclean	run	scan_dataset.py orders (new baseline)
+reclean	lookup	record_cleaning.py --help: how to record a user-reported (non-scan) correction
+reclean	read	read view definition + catalog row + Q-004 quality row
+reclean	edit	edit 01_orders.sql: drop -999 test orders as rows
+reclean	run	scan_dataset.py orders --rescan
+reclean	run	awb.py stale
+reclean	run	record_cleaning.py (flag only, no S-issue for the user-reported change)
+reclean	edit	hand-edit Q-004 rows in quality.md (record_cleaning has no path for a resolved issue the scan no longer surfaces)
+commit	git	commit correction
+release2	skill	load awb-release SKILL.md
+release2	run	awb.py release
+revise	skill	load awb-package SKILL.md
+revise	read	read references/package-contract.md
+revise	read	gather bounded revision: draft findings+methodology+manifest, state.md flags, Q-004 row (one call)
+revise	edit	edit findings.md: Awaiting revalidation on Answer, finding slide, chart Caveat/Alt text, Limitations [edits=4]
+revise	edit	edit methodology.md: caveat beside finding + validation
+revise	run	awb.py export (every revision)
+revise	retry	export exports_blocked with --chart; skill says stop, but --result-only path is the intended route for a flagged finding
+revise	run	awb.py export --result region-return-rates (provenance only)
+revise	edit	write manifest revalidation_flags entry (finding/reason verbatim, represented_in, disposition none)
+revise	run	awb.py check-draft
+release2	run	awb.py release (after revision)
+release2	edit	set disposition release_with_caveat in manifest
+release2	run	awb.py release (rerun)
+rerun	read	read workbench-guides/analysis.md (new session)
+rerun	run	python3 run.py region-return-rates
+rerun	read	read new result table + history entry for prior caveats
+rerun	run	awb.py state finding --status supported --text --caveat --reason
+commit	git	commit revalidation
+resume	run	awb.py state (resume in a new session)
+status2	skill	load awb-status SKILL.md
+status2	run	collect_status.py
+repair	skill	load awb-init SKILL.md
+repair	inspect	inspect target: root files, ignore rules, ancestor CLAUDE.md
+repair	read	read references/repair.md
+repair	install	install_helpers.py --upgrade
+repair	diff	git diff --no-index AGENTS.md, README.md, run.py vs templates (one call)
+newinv	skill	load awb-init SKILL.md
+newinv	inspect	inspect target: root files, ancestor CLAUDE.md, investigations/
+newinv	read	awb.py state: active brief to decide extend vs new
+newinv	write	copy run.py + settings.toml (inherit parameters) (cp)
+newinv	write	write brief.md
+newinv	write	write state.md
+newinv	write	write history.md
+newinv	run	awb.py state switch channel-returns
