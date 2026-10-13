@@ -37,6 +37,9 @@ COMMANDS = {
     "export": ("packaging/draft.py", "cli_export",
                "write the draft's chart and dataset files and the manifest's producing and packaging state; "
                "--result alone refreshes provenance"),
+    "review-rules": ("packaging/draft.py", "cli_review_rules",
+                     "check: list each review rule with the draft lines its pattern matches, writing nothing; "
+                     "add: append the next numbered rule from a user's correction"),
     "check-draft": ("packaging/draft.py", "cli_check_draft",
                     "run every mechanical draft check, including state.md's current flags, and rewrite the "
                     "manifest inventory; --verify-only checks a release candidate"),

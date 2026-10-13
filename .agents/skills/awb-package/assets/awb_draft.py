@@ -1,14 +1,16 @@
-"""Export, check, and release an analytics workbench package draft.
+"""Export, review, check, and release an analytics workbench package draft.
 
 awb-init's installer places this file at `src/packaging/draft.py`. `src/awb.py` runs its commands:
 
     python3 src/awb.py export <investigation> <package> [--chart RESULT[:COLUMNS]]... [--dataset NAME=RESULT[:COLUMNS]]... [--no-datasets] [--result RESULT]...
+    python3 src/awb.py review-rules check <investigation> <package>
+    python3 src/awb.py review-rules add --area AREA --severity error|warning --rule TEXT --fix TEXT [--pattern REGEX]
     python3 src/awb.py check-draft <investigation> <package> [--verify-only]
     python3 src/awb.py release <investigation> <package>
     python3 src/awb.py copy-releases <investigation> [<package>]
 
 Each prints one line of JSON. The manifest is the draft's `manifest.json`; chart and dataset files
-are CSV. Standard library only; `export` also needs the project's `src/provenance.py`.
+are CSV; review rules live in `foundation/review-rules.md`. Standard library only; `export` also needs the project's `src/provenance.py`.
 """
 
 import argparse
@@ -74,15 +76,19 @@ def _read_json(path):
     return record
 
 
-def _write_json(path, record):
-    # Atomic, so an interrupted write never leaves a half manifest in the draft.
+def _write_text(path, text):
+    # Atomic, so an interrupted write never leaves a half manifest or rule file.
     path = Path(path)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
-        temporary.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        temporary.write_text(text, encoding="utf-8")
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _write_json(path, record):
+    _write_text(path, json.dumps(record, indent=2) + "\n")
 
 
 def _now():
@@ -1120,6 +1126,213 @@ def cli_export(root: Path, argv: list[str]) -> int:
                     rounding=rounding)
     _print(report)
     return 0 if report["written"] and not report.get("check_charts") else 1
+
+
+# ---------------------------------------------------------------- review rules
+
+REVIEW_RULES = "foundation/review-rules.md"
+_SEVERITIES = ("error", "warning")
+_AREA = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+_RULE_HEADING = re.compile(r"## (R-([a-z0-9]+(?:-[a-z0-9]+)*)-(\d{3,}))\s*")
+_RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Fix|Added): ?(.*)")
+_REQUIRED_FIELDS = ("Severity", "Rule", "Pattern", "Fix")
+_REVIEWED = ("findings.md", "methodology.md")
+_MATCH_CAP = 20
+_RULES_HEADER = """# Review rules
+
+Rules from the user's corrections to package drafts. The read-only package review checks every rule on \
+every draft; `python3 src/awb.py review-rules check <investigation> <package>` lists each rule with the \
+narrative lines its pattern matches.
+
+Add a rule only with `python3 src/awb.py review-rules add`. A rule ID, `R-<area>-NNN`, is never \
+renumbered, reused, or deleted: edit a rule's other fields in place, and retire a rule by setting its \
+severity to `retired`. A pattern is a Python regular expression in backticks, matched against each line \
+of the draft's `findings.md` and `methodology.md`, or `none` when no pattern can find the problem.
+"""
+
+
+def _parse_pattern(value):
+    """(pattern text or None, problem or None) from a Pattern field: `regex` in backticks, or none."""
+    if value == "none":
+        return None, None
+    if len(value) < 3 or not (value.startswith("`") and value.endswith("`")):
+        return None, "Pattern is neither none nor a regular expression in backticks"
+    try:
+        re.compile(value[1:-1])
+    except re.error as error:
+        return None, f"Pattern does not compile: {error}"
+    return value[1:-1], None
+
+
+def parse_review_rules(text: str) -> tuple:
+    """(rules, problems) from review-rules.md: each `## R-<area>-NNN` section and its `- Field:` lines."""
+    rules, problems, current = [], [], None
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.startswith("## "):
+            heading = _RULE_HEADING.fullmatch(line)
+            current = None
+            if heading:
+                current = {"id": heading[1], "area": heading[2], "number": int(heading[3]), "line": number,
+                           "fields": {}}
+                rules.append(current)
+            elif line[3:].lstrip().startswith("R-"):
+                problems.append({"line": number, "problem": "rule heading is not ## R-<area>-NNN with a "
+                                                            "lowercase area and a three-digit number"})
+            continue
+        field = _RULE_FIELD.fullmatch(line.rstrip()) if current else None
+        if field:
+            if field[1] in current["fields"]:
+                problems.append({"rule": current["id"], "problem": f"repeated {field[1]} line"})
+            current["fields"][field[1]] = field[2].strip()
+    seen = set()
+    for rule in rules:
+        fields = rule.pop("fields")
+        if rule["id"] in seen:
+            problems.append({"rule": rule["id"], "problem": "rule ID appears more than once"})
+        seen.add(rule["id"])
+        missing = [name for name in _REQUIRED_FIELDS if not fields.get(name)]
+        if missing:
+            problems.append({"rule": rule["id"], "problem": f"missing {', '.join(missing)}"})
+        severity = fields.get("Severity", "")
+        if severity and severity not in (*_SEVERITIES, "retired"):
+            problems.append({"rule": rule["id"], "problem": f"unknown severity {severity!r}; use error, "
+                                                            "warning, or retired"})
+        rule.update(severity=severity, rule=fields.get("Rule", ""), fix=fields.get("Fix", ""),
+                    pattern=None, usable=True)
+        if fields.get("Pattern"):
+            rule["pattern"], problem = _parse_pattern(fields["Pattern"])
+            if problem:
+                rule["usable"] = False
+                problems.append({"rule": rule["id"], "problem": problem})
+    return rules, problems
+
+
+def _read_rules(root):
+    path = Path(root) / REVIEW_RULES
+    return parse_review_rules(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+
+def check_review_rules(root, investigation, package) -> dict:
+    """List every review rule with the draft narrative lines its pattern matches; writes nothing."""
+    root = Path(root)
+    draft = _package_dir(root, investigation, package) / "draft"
+    report = {"rules_file": REVIEW_RULES, "draft": _rel(root, draft), "rules": [], "problems": [], "errors": []}
+    texts = {}
+    for name in _REVIEWED:
+        try:
+            texts[name] = (draft / name).read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError) as error:
+            report["errors"].append(f"{_rel(root, draft / name)}: {error}")
+    try:
+        parsed = _read_rules(root)
+    except (OSError, UnicodeError) as error:
+        report["errors"].append(f"{REVIEW_RULES}: {error}")
+        return report
+    if parsed is None:
+        report["rules_file"] = "none recorded"
+        return report
+    rules, report["problems"] = parsed
+    for rule in rules:
+        row = {"id": rule["id"], "severity": rule["severity"]}
+        if rule["severity"] == "retired":
+            row["status"] = "retired"
+        elif not rule["usable"]:
+            row["status"] = "unchecked"
+        elif rule["pattern"] is None:
+            row["status"] = "no pattern"
+        else:
+            pattern = re.compile(rule["pattern"])
+            matches = [{"file": name, "line": number, "text": line.strip()[:160]}
+                       for name, lines in texts.items()
+                       for number, line in enumerate(lines, 1) if pattern.search(line)]
+            row["status"] = "matched" if matches else "no match"
+            if matches:
+                row["matches"] = matches[:_MATCH_CAP]
+                if len(matches) > _MATCH_CAP:
+                    row["more_matches"] = len(matches) - _MATCH_CAP
+        report["rules"].append(row)
+    return report
+
+
+def add_review_rule(root, area, severity, rule, fix, pattern=None, *, today=None) -> dict:
+    """Append rule R-<area>-NNN, numbered after every ID the area has used, creating the file if absent."""
+    root = Path(root)
+    path = root / REVIEW_RULES
+    try:
+        parsed = _read_rules(root)
+    except (OSError, UnicodeError) as error:
+        return {"added": None, "refused": f"{REVIEW_RULES}: {error}"}
+    rules, problems = parsed if parsed is not None else ([], [])
+    if problems:
+        return {"added": None, "refused": f"repair {REVIEW_RULES} first; numbering needs a sound file",
+                "problems": problems}
+    number = max((r["number"] for r in rules if r["area"] == area), default=0) + 1
+    rule_id = f"R-{area}-{number:03d}"
+    day = today or datetime.now().astimezone().date().isoformat()
+    entry = (f"## {rule_id}\n\n- Severity: {severity}\n- Rule: {rule}\n"
+             f"- Pattern: {f'`{pattern}`' if pattern else 'none'}\n- Fix: {fix}\n- Added: {day}\n")
+    existing = path.read_text(encoding="utf-8") if parsed is not None else _RULES_HEADER
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_text(path, existing.rstrip("\n") + "\n\n" + entry)
+    return {"added": rule_id, "rules_file": REVIEW_RULES, "created": parsed is None,
+            "rules": len(rules) + 1}
+
+
+def cli_review_rules(root: Path, argv: list[str]) -> int:
+    raw = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(
+        prog="awb.py review-rules", formatter_class=raw,
+        description=f"Check a draft against the review rules in {REVIEW_RULES}, or append a rule from a "
+                    "user's correction.",
+        epilog="Run `awb.py review-rules <subcommand> --help` for its arguments, output, and exit status.")
+    actions = parser.add_subparsers(dest="action", required=True, metavar="{check,add}")
+    check = actions.add_parser(
+        "check", formatter_class=raw, help="list every rule with the draft lines its pattern matches",
+        description="List every review rule with the lines of the draft's findings.md and methodology.md "
+                    "its pattern matches. Writes nothing.",
+        epilog="Prints one JSON line.\nEach rules row has id, severity, and status: matched (with matches, "
+               "each file, line, and text, at most 20, and more_matches beyond), no match, no pattern (judge "
+               "the rule by reading), retired, or unchecked (its problem is listed).\nA match is a candidate "
+               "for the reviewer to judge, and no match does not prove the rule holds.\nrules_file is none "
+               "recorded when the project has no rules.\nExit 0 when problems and errors are empty, matches "
+               "or not; 1 otherwise.")
+    _package_arguments(check)
+    add = actions.add_parser(
+        "add", formatter_class=raw, help="append the next numbered rule",
+        description=f"Append a rule to {REVIEW_RULES}, creating the file when absent, as R-<area>-NNN: the "
+                    "number after every one the area has used, retired rules included.",
+        epilog="Prints one JSON line: added (the new ID), rules_file, created, and rules (the count).\nRefuses, "
+               "writing nothing, when the rule file has problems that `review-rules check` lists.\nExit 0 "
+               "added; 1 refused; 2 unusable arguments.")
+    add.add_argument("--area", required=True, help="what the rule governs, lowercase words joined by '-', "
+                                                   "such as periods or metric-definitions")
+    add.add_argument("--severity", required=True, choices=_SEVERITIES,
+                     help="error: a violation must be repaired; warning: repaired or accepted by the user")
+    add.add_argument("--rule", required=True, help="what every draft must do, in one line")
+    add.add_argument("--fix", required=True, help="how to repair a violation, in one line")
+    add.add_argument("--pattern", help="a Python regular expression matching a likely violation on one line "
+                                       "(default: none, judged by reading)")
+    args = parser.parse_args(argv)
+    if args.action == "check":
+        report = check_review_rules(Path(root), _simple(args.investigation, "investigation"),
+                                    _simple(args.package, "package"))
+        _print(report)
+        return 1 if report["problems"] or report["errors"] else 0
+    if not _AREA.fullmatch(args.area):
+        add.error(f"--area must be lowercase letters and digits joined by '-': {args.area!r}")
+    for name in ("rule", "fix", "pattern"):
+        value = getattr(args, name)
+        if value is not None and (not value.strip() or "\n" in value or "\r" in value):
+            add.error(f"--{name} must be one non-blank line")
+    if args.pattern is not None:
+        try:
+            re.compile(args.pattern)
+        except re.error as error:
+            add.error(f"--pattern does not compile: {error}")
+    report = add_review_rule(Path(root), args.area, args.severity, args.rule.strip(), args.fix.strip(),
+                             args.pattern)
+    _print(report)
+    return 0 if report["added"] else 1
 
 
 # ---------------------------------------------------------------- release

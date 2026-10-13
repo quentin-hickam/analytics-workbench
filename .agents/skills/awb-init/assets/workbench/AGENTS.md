@@ -35,4 +35,4 @@ Settle ambiguous terms with concrete examples and the data. Record shared meanin
 
 Commit when the user asks; suggest one when analytical code is uncommitted, so evidence carries a SHA.
 
-Answer in chat. Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen.
+Answer in chat. Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen. When the user corrects a package draft while reviewing it, take the correction through `awb-package`, which first appends it to `foundation/review-rules.md` as a numbered rule that every later review checks.

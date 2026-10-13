@@ -13,12 +13,13 @@ Packaging **serializes** recorded results: it reuses recorded evidence, exports,
 2. **Gather** the record on the read path the change needs.
 3. **Write** `findings.md`, with every **Chart N.** specification, and `methodology.md` from the project's templates, and copy `m365-assembly.md`. This creates the draft.
 4. **Export the files and provenance** with `export` on every revision, then review the flags.
-5. **Check** last with `check-draft`, until done.
-6. **Report.**
+5. **Review** the narratives with a read-only reviewer against every review rule.
+6. **Check** last with `check-draft`, until done.
+7. **Report.**
 
 ## 1. Establish
 
-Identify the investigation and package. When the request could refer to more than one investigation, ask which before changing package files. Use the package name the user gives; otherwise reuse the existing package's name, or derive a short, stable one from the investigation and a purpose word and report it. Keep one package per investigation unless another has an independent scope or delivery schedule.
+Identify the investigation and package. When the request corrects a draft the user is reviewing, record the correction as a review rule first, as [references/review.md](references/review.md) says under **After the review**. When the request could refer to more than one investigation, ask which before changing package files. Use the package name the user gives; otherwise reuse the existing package's name, or derive a short, stable one from the investigation and a purpose word and report it. Keep one package per investigation unless another has an independent scope or delivery schedule.
 
 From the project root, install the missing shared formats with `python3 <awb-init skill directory>/scripts/install_helpers.py . --package-formats`, which preserves existing files and records what it installs in `.awb-receipt.json`.
 
@@ -49,15 +50,19 @@ Run `python3 src/awb.py export <investigation> <package> --chart <result>[:<colu
 
 `export` records each flag's finding and reason and lists `flags_pending`. Review every flag's `represented_in` against the revised draft and fill pending places per the contract; then for any represented flag whose disposition is still `none`, ask the user to revalidate, omit, or release with the caveat, and record the answer; without one it stays `none`.
 
-## 5. Check
+## 5. Review
+
+Once the narratives and flags are complete, run the review in [references/review.md](references/review.md): a subagent that cannot edit checks the draft against every rule in `foundation/review-rules.md` and what `check-draft` cannot check, and reports without fixing. Act on its report as that file's **After the review** says.
+
+## 6. Check
 
 Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it.
 
-**Done** when `check-draft` prints `passed: true` on the final files and you have confirmed what it cannot check: both narratives carry the same numbers, qualifications, and caveats; every `revalidation_flags` place carries its caveat or omission; every claim in `findings.md` traces to `methodology.md`. Any edit after `check-draft` reruns it. Report its rows verbatim.
+**Done** when `check-draft` prints `passed: true` on the final files and the last review reports no violation or narrative problem left unrepaired, apart from `warning` violations the user accepted. A narrative edit after the review reruns the review; any edit after `check-draft` reruns it. Report its rows verbatim.
 
-## 6. Report
+## 7. Report
 
-Report the draft path, the audience `findings.md` is written for, the included datasets, each chart with the result it serializes, provenance gaps, and unresolved caveats. Say it is a working copy the next revision overwrites; marking it delivered freezes it as a numbered release. When a represented flagged finding lacks an applicable disposition, say `awb-release` will ask for one before releasing.
+Report the review's last line and any accepted `warning` violations, the draft path, the audience `findings.md` is written for, the included datasets, each chart with the result it serializes, provenance gaps, and unresolved caveats. Say it is a working copy the next revision overwrites; marking it delivered freezes it as a numbered release. When a represented flagged finding lacks an applicable disposition, say `awb-release` will ask for one before releasing.
 
 Tell the user how to build the deck: in a Microsoft 365 Copilot app chat, add the PowerPoint agent, attach `findings.md`, every file in `charts/`, `methodology.md`, and `m365-assembly.md`, and ask for a deck built under those instructions. Datasets travel beside the deck and are not attached.
 
