@@ -1,5 +1,5 @@
 # Kept cases:
-# test_check_draft_checks_findings_drift: synchronized JSON passes, drift fails with state render in both modes, absent JSON skips, and an old helper gets an upgrade hint.
+# test_check_draft_checks_findings_drift: synchronized JSON passes, drift fails with state render in both modes, an old helper gets an upgrade hint, and rows with no findings.json are drift.
 # test_names_cover_project_records: names hold created views, sources without CTEs or table functions, settings dotted paths (not bare nested keys), and result IDs from evidence and state links; plain words, including plain investigation and package names, are left out.
 # test_toml_keys_fall_back_to_tomli_then_key_lines: without tomllib, settings keys parse with tomli (no bare nested keys); without either, table headers and key lines; display.toml then names the missing package.
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten, revised_at stamped only when it changes, other manifest fields kept; nothing is written outside the draft.
@@ -30,6 +30,7 @@
 import hashlib
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -58,6 +59,8 @@ FINDINGS = "# Order quality\n\n### Late orders rose in the west\n\n**Chart 1.** 
 METHODOLOGY = "# Methodology\n\n## Findings\n\n### Late orders rose in the west\n"
 STATE = """# Current investigation state
 
+Last updated: 2026-10-01
+
 ## Current findings
 
 | Finding | Evidence | Status | Revalidation reason or caveat |
@@ -80,6 +83,27 @@ def write(root, path, content):
     target = root / path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(content if isinstance(content, bytes) else content.encode())
+    if path.endswith("/state.md") and isinstance(content, str):
+        findings_for(target, content)
+
+
+def findings_for(state, text):
+    """Write the findings.json a state.md's rows render from, as run.py and `state` would have."""
+    entries = []
+    for line in text.splitlines():
+        match = re.fullmatch(r"\| (.*) \| \[(.+)\]\(evidence/\2\.json\) \| (.*) \| ?(.*?) ?\|", line)
+        if match:
+            finding, result, status, reason = (part.strip() for part in match.groups())
+            flagged = re.fullmatch(r"revalidation-needed(?: \(was (.+)\))?", status)
+            entries.append({"result": result, "text": finding, "status": "revalidation-needed" if flagged else status,
+                            "prior_status": flagged[1] if flagged else None,
+                            "flag_reason": reason if flagged else "", "notes": [] if flagged or not reason else [reason],
+                            "checks_caveat": "", "notes_checks": ""})
+    path = state.with_name("findings.json")
+    if entries:
+        path.write_text(json.dumps({"schema": "awb-findings/1", "findings": entries}, indent=2) + "\n")
+    else:
+        path.unlink(missing_ok=True)
 
 
 def load(path, name):
@@ -225,7 +249,7 @@ def test_check_draft_reports_unmatched_flags(project, capsys):
     write(project, "investigations/inv/state.md", "# Current investigation state\n")
     code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
     assert code == 1 and report["unmatched_flags"] is None
-    assert "no Current findings table" in report["errors"][0]
+    assert any("no Current findings table" in error for error in report["errors"])
 
 
 def test_check_draft_and_release_refuse_malformed_flag_entries(project, capsys):
@@ -685,8 +709,8 @@ def test_copy_releases_copies_compares_and_never_overwrites(project, capsys, tmp
 @pytest.mark.parametrize("verify_only", [False, True])
 def test_check_draft_checks_findings_drift(project, verify_only):
     draft = load(project / "src/packaging/draft.py", "draft_findings_drift")
-    assert draft.check_draft(project, "inv", "pkg")["passed"]  # no findings.json: nothing to compare
-    write(project, "investigations/inv/state.md", "Last updated: 2026-10-01\n" + STATE.format(status="supported", reason=""))
+    assert draft.check_draft(project, "inv", "pkg")["passed"]
+    write(project, "investigations/inv/state.md", STATE.format(status="supported", reason=""))
     content = {"schema": "awb-findings/1", "findings": [
         {"result": "r-009", "text": "Late orders rose in the west", "status": "supported", "prior_status": None,
          "flag_reason": "", "notes": [], "checks_caveat": "", "notes_checks": ""}]}
@@ -702,8 +726,10 @@ def test_check_draft_checks_findings_drift(project, verify_only):
     write(project, "src/provenance.py", "# old provenance helper\n")
     report = draft.check_draft(project, "inv", "pkg", verify_only=verify_only)
     assert not report["passed"] and "install_helpers.py --upgrade" in " ".join(report["errors"])
-    (project / "investigations/inv/findings.json").unlink()
-    assert draft.check_draft(project, "inv", "pkg", verify_only=verify_only)["passed"]
+    write(project, "src/provenance.py", ASSETS["src/provenance.py"].read_bytes())
+    (project / "investigations/inv/findings.json").unlink()  # with no findings.json, any row is drift
+    report = draft.check_draft(project, "inv", "pkg", verify_only=verify_only)
+    assert not report["passed"] and "state render --investigation inv" in " ".join(report["errors"])
 
 
 @pytest.mark.parametrize("unusable", ["schema", "unscoped"])

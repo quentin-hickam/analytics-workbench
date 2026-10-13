@@ -11,7 +11,7 @@
 # test_malformed_records_write_nothing: a missing or repeated Last updated or section, a wrong header, a short row, two rows for one result, or a missing history file exit 1 and leave every file byte for byte.
 # test_writers_refuse_drift: every findings writer lists each differing row and the render/finding/flag remedies, the flag one conditional; prior_result protects existing evidence and results.
 # test_render_restores_rows: render discards hand edits and preserves the rest of state; without findings.json a hand-written row is drift and render empties the table.
-# test_kept_notes_explain_only_the_checks_they_were_written_for: after a flagged rerun, kept notes satisfy the promotion guard only if the checks are unchanged; changed checks need --caveat.
+# test_kept_notes_explain_only_the_checks_they_were_written_for: after a flagged rerun, kept notes satisfy the promotion guard only if the checks are unchanged; changed checks need --caveat; an entry without notes_checks is refused before a rerun changes anything.
 # test_compound_flag_reasons_are_idempotent: a reason containing '; ' is recognized as present and writes nothing.
 # test_lists_above_the_table_leave_it_intact: issues and next steps placed before Current findings are edited without touching the table, and later findings writes keep it whole.
 # test_render_recovers_malformed_and_stray_rows: render replaces an unescaped pipe, a duplicate row, and a row cut off below the table, which writers refuse as drift.
@@ -577,3 +577,11 @@ def test_kept_notes_explain_only_the_checks_they_were_written_for(project):
     assert provenance.update_findings(project, "churn", ["r2"], status="supported", reason="rechecked")["rows"]
     provenance.update_findings(project, "churn", ["r1"], caveat="Agency workers excluded; totals checked by hand")
     assert provenance.update_findings(project, "churn", ["r1"], status="supported", reason="rechecked")["rows"]
+    path = project / INV / "findings.json"
+    content = json.loads(path.read_text())
+    del content["findings"][0]["notes_checks"]  # required: a missing field is refused, never defaulted
+    path.write_text(json.dumps(content))
+    before = snapshot(project)
+    with pytest.raises(provenance.StateError, match="invalid finding"):
+        produce(project, "r1", table="n\n5\n")
+    assert snapshot(project) == before

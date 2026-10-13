@@ -27,6 +27,7 @@
 # test_renamed_quality_headers_keep_template_positions: with every Active header renamed, a new row is written in the template's positions, scans read it as recorded, and a reopen sets its status.
 # test_quality_json_is_written_only_when_links_change: a call that changes no link leaves quality.json absent or byte-identical.
 # test_unlinked_marker_row_is_relinked_and_short_rows_read: with quality.json present, a row carrying the marker but no link is relinked from its prose; a short row reads as blank status.
+# test_marked_row_is_linked_when_quality_json_is_absent: a scan reads a marked row as recorded without writing; the first record writes its link with the row's count, total, and date.
 # test_failed_phase_a_leaves_no_partial_files: a failed replace in phase A removes every prepared temporary file.
 
 import hashlib
@@ -706,7 +707,19 @@ def test_unlinked_marker_row_is_relinked_and_short_rows_read(tmp_path):
         "whitespace:dept": {"id": "Q-004", "status": "", "count": 2}}
     result = recorder.record(tmp_path, "orders", {"issues": {"S1": {"status": "corrected"}}}, today=TODAY)
     assert result["updated"] == ["Q-004"] and result["added"] == []
-    assert "Q-004" in (tmp_path / "foundation/quality.json").read_text()
+    assert list(json.loads((tmp_path / "foundation/quality.json").read_text())["links"].values()) == [
+        {"id": "Q-004", "scan": "orders", "recorded_count": 2, "recorded_of": 45, "observed_at": "2026-10-09"}]
+
+
+def test_marked_row_is_linked_when_quality_json_is_absent(tmp_path):
+    scan_file(tmp_path, delta=False)
+    quality_rows(tmp_path, ["| Q-004 | view | Spaces (2 of 45); `orders#whitespace:dept` scanned 2026-10-01 | x | y | open |"])
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert scanner._recorded(tmp_path, "orders", ["whitespace:dept"])["whitespace:dept"]["id"] == "Q-004"
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before  # a scan writes nothing
+    assert recorder.record(tmp_path, "orders", {}, today=TODAY)["written"] == ["foundation/quality.json"]
+    assert list(json.loads((tmp_path / "foundation/quality.json").read_text())["links"].values()) == [
+        {"id": "Q-004", "scan": "orders", "recorded_count": 2, "recorded_of": 45, "observed_at": "2026-10-01"}]
 
 
 def test_failed_phase_a_leaves_no_partial_files(tmp_path, monkeypatch):
