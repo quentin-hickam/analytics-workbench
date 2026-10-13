@@ -5,11 +5,10 @@ canonical view name, loaded through the project's session() helper, or a project
 publication directory or Parquet file. Scope, measure, and dimensions come from the
 investigation's settings unless options override them. Writes the complete scan to
 investigations/<name>/exploration/eda/<scan>[-<label>].json, its only output file, and prints
-a compact summary that names it. <scan> is the view name, <dataset>-<publication-id> for a
-publication directory (any other directory gives its last two path parts joined by "-"), or a
-Parquet file's stem, with each run of characters other than letters, digits, ".", "_" and "-"
-replaced by "-", leading and trailing "-" and "." dropped, and "dataset" if nothing remains.
---show prints one section of that file without scanning again.
+a compact summary that names it. <scan> is the dataset's name made safe for a file name, such
+as shifts-p1 for data/parquet/shifts/p1; the skill's references/scan-file.md gives the exact
+rule, which output_path() and publication_name() implement. --show prints one section of that
+file without scanning again.
 """
 
 import argparse
