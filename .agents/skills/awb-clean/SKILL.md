@@ -46,7 +46,7 @@ Every scan after the edit uses `--rescan`, which keeps the pre-cleaning baseline
 
 ## 5. Flag affected findings
 
-Run `python3 src/awb.py stale`. Flag the findings whose `stale` entry names the corrected view or publication, or a view built on it; findings `stale` lists for other reasons keep their status. `runtime_mismatches` flag nothing; report them as a rerun decision for the user.
+Run `python3 src/awb.py stale` with the interpreter that runs `run.py`, such as the project's virtual environment. Flag the findings whose `stale` entry names the corrected view or publication, or a view built on it; findings `stale` lists for other reasons keep their status. `runtime_mismatches` flag nothing; report them as a rerun decision for the user. A mismatch on every result at once usually means a different interpreter, not an upgrade: rerun `stale` with the right one before reporting.
 
 ## 6. Record
 

@@ -1467,7 +1467,8 @@ def cli_stale(root: Path, argv: list[str]) -> int:
                "flag; and runtime_mismatches, one entry per result whose recorded Python, platform, or "
                "package versions differ from the interpreter running stale: investigation, result_id, "
                "evidence, detail, and findings. A runtime mismatch is a warning to decide on a rerun, not "
-               "stale, and flags nothing. A finding whose linked evidence file is missing is listed under "
+               "stale, and flags nothing. Run stale with the interpreter that runs run.py: a mismatch on "
+               "every result at once usually means a different interpreter, not an upgrade. A finding whose linked evidence file is missing is listed under "
                "results. Exit 0 whether or not anything is stale; 2 for an unknown investigation.")
     parser.add_argument("--investigation", metavar="NAME",
                         help="check only this investigation, by its directory name under investigations/")

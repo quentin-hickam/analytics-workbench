@@ -33,7 +33,8 @@ COMMANDS = {
               "print the active investigation's brief and state to resume; promote or reword findings with "
               "their history, edit issues and next steps, or switch investigations"),
     "stale": ("provenance.py", "cli_stale",
-              "list findings whose evidence no longer matches the current code, views, inputs, or settings"),
+              "list findings whose evidence no longer matches the current code, views, inputs, or settings, "
+              "and warn on runtime differences"),
     "export": ("packaging/draft.py", "cli_export",
                "write the draft's chart and dataset files and the manifest's producing and packaging state; "
                "--result alone refreshes provenance"),
