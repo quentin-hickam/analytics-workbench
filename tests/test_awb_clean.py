@@ -5,6 +5,7 @@
 # test_rescan_reports_delta_with_stable_ids_and_inherited_options: a rescan after a correction view reports before and after counts by issue, keeps ids, and reuses the baseline's options.
 # test_removed_targets_and_options_are_rejected: a saved .sql query is not a scan target; --rescan takes no scan name; --typed-threshold and --max-categories are gone.
 # test_recorded_markers_mark_issues_as_recorded: issues whose `<scan>#<key>` marker is in the quality record are reported as recorded with their quality ID and recorded count beside the current count.
+# test_record_sets_the_view_row_when_a_publication_shares_its_name: a publication row named like its canonical view leaves the view row the one record sets; two non-view rows with one name still refuse.
 # test_record_writes_quality_catalog_and_flags_in_one_call: new quality IDs, issue and correction rows with scan counts and markers dated with no scan link, a catalog row, and a revalidation flag that keeps the prior status.
 # test_record_updates_recorded_issue_and_continues_numbering: a recorded issue has its judgment cells updated and its observation's count and scan date refreshed, in older linked rows and in current rows; a new issue continues the existing ID prefix and width.
 # test_record_checks_everything_before_writing: an unmatched flag or a correction without findings writes nothing; a dry run prints rows and writes nothing.
@@ -202,6 +203,29 @@ def state_file(root):
                         "| --- | --- | --- | --- |\n| Sales leads growth | [r-003](evidence/r-003.json) | supported | |\n"
                         "| Age is stable | [r-004](evidence/r-004.json) | provisional | |\n", 1)
     return write(root, "investigations/churn/state.md", text)
+
+
+def test_record_sets_the_view_row_when_a_publication_shares_its_name(tmp_path):
+    scan_file(tmp_path)
+    catalog = (TEMPLATES / "foundation/catalog.md").read_text().replace(
+        "| --- | --- | --- | --- | --- | --- | --- | --- |\n",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |\n"
+        "| orders | Parquet publication |  | `data/raw/erp/a1/` | `data/parquet/orders/p1/` | `src/preparation/orders.sql` |  |  |\n"
+        "| orders | canonical view | one row per order |  | `foundation/views/01_orders.sql` |  |  |  |\n", 1)
+    write(tmp_path, "foundation/catalog.md", catalog)
+    decisions = {"issues": {"S1": {"impact": "Splits counts", "treatment": "Trim", "status": "corrected",
+                                   "correction": "Trim dept", "change": "`foundation/views/01_orders.sql` trims dept"}},
+                 "findings": "none: stale listed no finding reading orders",
+                 "catalog": {"name": "orders", "cells": {"Preparation rules": "Trims dept ({S1})"}}}
+    assert recorder.record(tmp_path, "orders", decisions, today=TODAY)["catalog"] == "updated orders"
+    text = (tmp_path / "foundation/catalog.md").read_text()
+    assert "| orders | canonical view | one row per order |  | `foundation/views/01_orders.sql` | Trims dept (Q-001) |  |  |" in text
+    assert "| orders | Parquet publication |  | `data/raw/erp/a1/` | `data/parquet/orders/p1/` | `src/preparation/orders.sql` |  |  |" in text
+    # Two rows that are not views stay ambiguous and refuse, writing nothing.
+    write(tmp_path, "foundation/catalog.md", catalog.replace("canonical view", "Parquet publication"))
+    scan_file(tmp_path)
+    with pytest.raises(recorder.RecordError, match="several rows are named orders"):
+        recorder.record(tmp_path, "orders", decisions, today=TODAY)
 
 
 def test_record_writes_quality_catalog_and_flags_in_one_call(tmp_path):

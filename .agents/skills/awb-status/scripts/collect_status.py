@@ -210,6 +210,30 @@ def collect(root):
                 uncertain(path, f"Missing or invalid {key}; requires ISO timestamp with UTC offset")
             return None
 
+    def rerun_since(obj, revised):
+        """Represented results whose evidence was recorded after the draft's last revision, or None if unknown."""
+        checks = obj.get("export_checks") if obj is not None else None
+        if checks == "none":
+            return []
+        if revised is None or not isinstance(checks, list):
+            return None
+        rerun = []
+        for check in checks:
+            evidence = check.get("evidence") if isinstance(check, dict) else None
+            path = (root / evidence).resolve() if isinstance(evidence, str) else None
+            if path is None or not path.is_relative_to(root.resolve()):
+                return None
+            try:
+                recorded = timestamp(json.loads(path.read_text(encoding="utf-8")), "recorded_at")
+            except (OSError, UnicodeError, ValueError):
+                uncertain(path, "Cannot read result evidence; reruns since the draft unknown")
+                return None
+            if recorded is None:
+                return None
+            if recorded > revised:
+                rerun.append(check.get("result_id"))
+        return rerun
+
     def valid_flag(flag):
         if not (isinstance(flag, dict) and isinstance(flag.get("finding"), str) and isinstance(flag.get("reason"), str)):
             return False
@@ -237,6 +261,8 @@ def collect(root):
             entry = {"name": directory.name, "draft_exists": draft.is_dir(), "revised_at": revised.isoformat() if revised else None,
                      "release_inventory_known": release_dirs is not None, "latest_release": latest.name if latest else None, "released_at": released.isoformat() if released else None,
                      "draft_vs_release": ("ahead" if revised > released else "same_or_older") if revised and released else None}
+            # A result rerun after the draft's last revision leaves the package showing its earlier run.
+            entry["rerun_since_draft"] = rerun_since(obj, revised) if draft.is_dir() else None
             flags = obj.get("revalidation_flags") if obj is not None else None
             flags = [] if flags == "none" else flags
             valid_flags = isinstance(flags, list) and all(valid_flag(f) for f in flags)

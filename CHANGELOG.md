@@ -26,6 +26,8 @@ These come from the tool-call audit in `docs/tool-call-audit-2026-10-11/`, which
 - `publish` prints `view_sql`, the canonical view definition with the dataset name and path escaped, beside `catalog_row`.
 - `record_cleaning.py` accepts a recorded quality ID such as `Q-004` as an `issues` key, so a decision on an issue the scan no longer lists revises its row and can append a correction. It refuses a row recorded from another scan, two keys that name the same row, and unknown keys.
 - `awb-eda` names the `state issues` and `state next` commands. `analysis.md` says `state finding` takes `--text`, `--status`, `--reason`, and `--caveat` in one call.
+- `record_cleaning.py` sets the canonical view's catalog row when a publication row has the same name. Previously it refused with `several rows are named <dataset>`, because the `catalog_row` that `publish` prints is named after the dataset, like its view. Two rows with one name that are not views still refuse. A blind rerun of the audit found this in both of its runs.
+- `awb-status` reports `rerun_since_draft` for each package: the represented results whose evidence was recorded after the draft was last revised. It also suggests revising the draft. Previously a rerun that changed a packaged result left the draft and its release reported as current.
 - Upgrading to these helpers replaces `src/preparation/landing.py`, which is producing code. Existing findings therefore show as stale until `run.py` reruns them.
 
 ### Added

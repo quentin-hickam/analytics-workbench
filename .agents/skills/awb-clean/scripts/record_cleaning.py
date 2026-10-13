@@ -273,9 +273,16 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
         cells = {name: fill(value) for name, value in entry["cells"].items()}
         for name in cells:
             table.column(name)
-        matches = [i for i, row in table.rows() if row[0].strip("`") == entry["name"]]
+        named = [(i, row) for i, row in table.rows() if row[0].strip("`") == entry["name"]]
+        matches = [i for i, _ in named]
         if len(matches) > 1:
-            raise RecordError(f"foundation/catalog.md: several rows are named {entry['name']}")
+            # A publication's printed catalog_row shares its dataset's name with the canonical view,
+            # and cleaning corrects the view, so a single view row among them is the one to set.
+            kind = table.column("Kind") if "Kind" in table.columns else None
+            views = [i for i, row in named if kind is not None and "view" in row[kind].lower()]
+            if len(views) != 1:
+                raise RecordError(f"foundation/catalog.md: several rows are named {entry['name']}")
+            matches = views
         if matches:
             rows.append(table.set(matches[0], cells))
             catalog_result = f"updated {entry['name']}"
