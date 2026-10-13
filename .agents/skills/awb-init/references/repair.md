@@ -1,6 +1,6 @@
 # Repair and upgrade
 
-1. Run the installer with `--upgrade`. The user's request authorizes it: it installs missing helpers and guides and replaces only `earlier` copies (unmodified copies that its receipt recorded) of helpers, package formats, and workbench guides. It records what it writes in the project's `.awb-receipt.json`.
+1. Run the installer with `--upgrade`. The user's request authorizes it: it installs missing helpers and guides and replaces only `earlier` copies (unmodified older copies that its receipt recorded) of helpers, package formats, and workbench guides. It records what it writes in the project's `.awb-receipt.json`.
 
    ```sh
    python3 <skill-directory>/scripts/install_helpers.py <project-root> --upgrade
