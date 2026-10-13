@@ -1,23 +1,32 @@
 """Read-only status facts for standard workbench Markdown records and manifest.json files.
 
-Run with Python 3.10+: collect_status.py [PROJECT_ROOT]. Emits compact JSON;
-uncertainties identify records requiring targeted agent interpretation.
+Run with Python 3.10+: collect_status.py [PROJECT_ROOT] [--probe-upstream]. Emits compact JSON;
+uncertainties identify records requiring targeted agent interpretation. Only --probe-upstream
+touches the network: one HEAD request per landed file whose provenance.json records an HTTP URL
+and an ETag or Last-Modified, comparing those validators. It writes nothing.
 """
 
 import argparse
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
+from email.utils import parsedate_to_datetime
+import http.client
+import urllib.error
+import urllib.request
 
 DISPOSITIONS = {"none", "revalidate", "omit", "release_with_caveat"}
 BLOCKING = {"none", "revalidate"}
 
 
-def collect(root):
+PROBE_TIMEOUT = 10
+
+
+def collect(root, *, probe_upstream=False):
     root = Path(root).resolve()
     uncertainties = []
 
@@ -180,6 +189,7 @@ def collect(root):
     result["acquisitions"] = None if acquisitions is None else {"count": len(acquisitions), "without_retained_copy": sum(not row["Retained copy"] or row["Retained copy"].strip("`").strip().lower() == "this checkout only" for row in acquisitions)}
     result["landed_data_storage"] = storage(field(readme, "Landed data is kept at", readme_path, optional=True))
     result["release_storage"] = storage(field(readme, "Released packages are kept at", readme_path, optional=True))
+    result["upstream"] = upstream(root, probe_upstream, uncertain)
 
     def manifest(directory, *, release=False):
         """Read manifest.json, recording an uncertainty when it is absent, unreadable, or not a JSON object."""
@@ -287,6 +297,75 @@ def collect(root):
     return result
 
 
+def upstream(root, probe, uncertain):
+    """Count landed files a HEAD request can check; with probe, check each and report the rest."""
+    probeable, not_probeable, without = [], [], 0
+    raw = root / "data/raw"
+    for directory in sorted(raw.glob("*/*")) if raw.is_dir() else []:
+        path = directory / "provenance.json"
+        if directory.name.endswith(".partial") or not path.is_file():
+            continue
+        try:
+            provenance = json.loads(path.read_text(encoding="utf-8"))
+            files = provenance["files"] if provenance.get("status") == "complete" else []
+            files = sorted((f for f in files if isinstance(f.get("path"), str)), key=lambda f: f["path"])
+        except (OSError, UnicodeError, ValueError, KeyError, TypeError, AttributeError) as error:
+            uncertain(path, f"Cannot read acquisition provenance: {type(error).__name__}")
+            continue
+        for file in files:
+            entry = {"source": directory.parent.name, "acquisition_id": directory.name, "path": file["path"]}
+            recorded = file.get("upstream")
+            if not isinstance(recorded, dict):
+                without += 1
+                continue
+            url = recorded.get("url")
+            if not (isinstance(url, str) and url.split(":", 1)[0].lower() in {"http", "https"}):
+                not_probeable.append({**entry, "reason": "no HTTP URL recorded"})
+            elif not any(isinstance(recorded.get(name), str) for name in ("etag", "last_modified")):
+                not_probeable.append({**entry, "reason": "no ETag or Last-Modified recorded"})
+            else:
+                probeable.append((entry, recorded))
+    report = {"probeable_files": len(probeable)}
+    if probe:
+        report.update(files=[{**entry, **probe_file(recorded)} for entry, recorded in probeable],
+                      not_probeable=not_probeable, without_upstream=without)
+    return report
+
+
+def probe_file(recorded):
+    """HEAD the recorded URL and compare its ETag, else its Last-Modified, with the recorded value."""
+    try:
+        request = urllib.request.Request(recorded["url"], method="HEAD")
+        with urllib.request.urlopen(request, timeout=PROBE_TIMEOUT) as response:
+            headers = response.headers
+    except urllib.error.HTTPError as error:
+        return {"result": "unknown", "reason": f"HTTP {error.code}"}
+    except (OSError, ValueError, http.client.HTTPException) as error:
+        return {"result": "unknown", "reason": f"{type(error).__name__}: {error}"}
+    for name, header in (("etag", "ETag"), ("last_modified", "Last-Modified")):
+        before, now = recorded.get(name), headers.get(header)
+        if not isinstance(before, str) or now is None:
+            continue
+        if name == "etag":
+            # An ETag is opaque, chosen by the server; compare weakly, ignoring a W/ prefix.
+            same = before.strip().removeprefix("W/") == now.strip().removeprefix("W/")
+        else:
+            try:
+                same = http_date(before) == http_date(now)
+            except (TypeError, ValueError):
+                same = before.strip() == now.strip()
+        if same:
+            return {"result": "unchanged", "compared": name}
+        return {"result": "changed", "compared": name, "recorded": before, "current": now}
+    return {"result": "unknown", "reason": "the server sent neither recorded validator"}
+
+
+def http_date(value):
+    """Parse an HTTP date; one without a zone is read as GMT, as HTTP dates are."""
+    parsed = parsedate_to_datetime(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def git_status(root, slug, state_date, uncertain):
     env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
     git_root = root
@@ -364,8 +443,9 @@ def git_status(root, slug, state_date, uncertain):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", nargs="?", default=".", help="Workbench root (default: current directory)")
+    parser.add_argument("--probe-upstream", action="store_true", help="HEAD each landed file with recorded HTTP validators and report it changed, unchanged, or unknown")
     args = parser.parse_args()
-    print(json.dumps(collect(args.root), ensure_ascii=False, separators=(",", ":")))
+    print(json.dumps(collect(args.root, probe_upstream=args.probe_upstream), ensure_ascii=False, separators=(",", ":")))
 
 
 if __name__ == "__main__":
