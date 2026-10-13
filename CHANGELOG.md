@@ -36,6 +36,7 @@ These come from the tool-call audit in `docs/tool-call-audit-2026-10-11/`, which
 
 ### Added
 
+- Datasets declare their publication checks under `[datasets.<name>.checks]` in `foundation/datasets.toml`: required columns, column types, not-null columns, the key, uniqueness, accepted values, ranges, and row-count bounds. `publish()` and the `publish` command run them in DuckDB against every new publication of the dataset and record each as `{name, outcome, detail}` under `checks` in `publication.json`, followed by the `validate` callable's outcome (the `publish` command's `--check`). A failing check refuses publication and is listed under `failed_checks`; details carry counts, never source values. `record_cleaning.py` cites a recorded check in a quality row's Current treatment with a decision's `check`.
 - Mechanical work runs as single commands through a project dispatcher, `python3 src/awb.py <command>`, so agents stop writing throwaway helper scripts and retyping helper output into records:
   - `sql` runs a saved query file or SQL text in a fresh session and prints a capped table; `profile` profiles a view or query, sampling very large results, and saves the full profile.
   - `land` copies files into an acquisition, retains it when a storage location is recorded, and writes its Acquisitions row; `retain` does the same for every acquisition missing a retained copy or row; `publish` converts acquisitions to validated Parquet from a SQL select and an optional check query.
