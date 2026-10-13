@@ -835,7 +835,7 @@ def _write_findings(root, investigation, mutate, *, check=False, render=False, r
     state = findings.state
     state.lines[state.rows_start:state.rows_end] = [
         _row(_finding_cells(e)) + state.newline for e in findings.entries]
-    findings.lines = [json.dumps({"schema": "awb-findings/1", "findings": findings.entries}, indent=2) + "\n"]
+    findings.lines = [json.dumps({"schema": "awb-findings/1", "findings": findings.entries}, indent=2, ensure_ascii=False) + "\n"]
     _commit([findings, state] + ([findings.history] if findings.history else []),
             replaced=replaced, prior_rows=findings.prior_rows)
     return result
