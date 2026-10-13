@@ -15,8 +15,10 @@ SCAN_NAME names foundation/scans/<SCAN_NAME>.json written by scan_dataset.py. De
 Text may name an issue as {S1} or {Q-004}; it becomes the issue's quality ID.
 A recorded quality ID, such as Q-004, also works as a key: it revises only judgment cells,
 keeps the observation and link, and its correction carries no rescan suffix.
-A check names a publication directory and one of the checks its publication.json records; the
-citation, with the check's outcome, is appended to the row's Current treatment once.
+A check names a publication directory, data/parquet/<dataset>/<publication-id>/ relative to
+PROJECT_ROOT or absolute inside it, and one of the checks its publication.json records; the
+citation, with the check's outcome and the root-relative path, is appended to the row's Current
+treatment once.
 
 Quality issue rows get the next ID, the scan's counts and examples, and the marker
 `<scan>#<key>` with its scan date. foundation/quality.json holds hashed scan links and recorded
@@ -164,8 +166,16 @@ def _citation(root, check):
     if (not isinstance(check, dict) or set(check) != {"publication", "name"}
             or not all(isinstance(check[k], str) and check[k].strip() for k in check)):
         raise RecordError('check needs {"publication": "data/parquet/<dataset>/<publication-id>/", "name": "<check>"}')
-    publication = check["publication"].strip().rstrip("/")
-    path = root / publication / "publication.json"
+    # One spelling per publication, root-relative, so a citation is appended once and names no local path.
+    # normpath keeps a symlinked data/parquet; resolve() admits an absolute path through a symlinked root.
+    given = Path(os.path.normpath(root / check["publication"].strip()))
+    directory = given if given.is_relative_to(root) else given.resolve()
+    parts = directory.relative_to(root).parts if directory.is_relative_to(root) else ()
+    if len(parts) != 4 or parts[:2] != ("data", "parquet") or parts[3].endswith(".partial"):
+        raise RecordError(f"check publication {check['publication']!r} is not a "
+                          "data/parquet/<dataset>/<publication-id>/ directory in this project")
+    publication = "/".join(parts)
+    path = directory / "publication.json"
     try:
         recorded = json.loads(path.read_text(encoding="utf-8")).get("checks") or []
     except (OSError, ValueError, AttributeError) as error:
