@@ -7,12 +7,12 @@
 # test_html_comments_are_ignored: single-line and multi-line comments are dropped without shifting line numbers.
 # test_names_match_whole_tokens_case_sensitively: names, including a hyphenated slug, match only as whole tokens and in exact case.
 # test_name_takes_precedence_over_other_kinds: a given name reports once as a name, not again as an identifier.
-# test_fractions_dates_and_plain_word_slashes_are_prose: digit-only fractions and dates, open/closed, yes/no and and/or yield no rows.
-# test_path_prefixes_are_paths: relative, absolute, home and scheme prefixes identify paths.
+# test_fractions_dates_and_plain_word_slashes_are_prose: digit-only fractions and dates, open/closed, yes/no, and/or, and slashes with no word beside them yield no rows.
+# test_path_prefixes_are_paths: relative and scheme prefixes identify paths, ./2026 included; a leading slash needs a second one.
 # test_multiple_slashes_are_paths: two or more slashes identify a path without a known root or file name.
 # test_file_and_underscore_segments_are_paths: a file extension or underscore in any segment identifies a path.
 # test_workbench_roots_are_paths: known workbench roots identify single-slash paths; src/awb.py stays a path.
-# test_project_name_roots_are_paths: orders/region is a path only when orders is in the given names.
+# test_project_name_roots_are_paths: a slash token with a given name or plain-word root as any segment is a path, and prose otherwise.
 
 import importlib.util
 from pathlib import Path
@@ -147,17 +147,18 @@ def test_fractions_dates_and_plain_word_slashes_are_prose(write):
     path = write(
         "About 3/4 of cases on 6/30/2026 were late; open/closed status differed.\n"
         "Choose yes/no and/or another answer.\n"
+        "Revenue / cost rose // fell, per /month.\n"
     )
     assert draft.check_findings(path) == []
 
 
 def test_path_prefixes_are_paths(write):
-    path = write("./notes ../notes /notes ~/notes https://example.org s3://bucket\n")
+    path = write("./notes ../notes ./2026 /usr/local https://example.org s3://bucket\n")
     assert draft.check_findings(path) == [
         {"line": 1, "kind": "path", "text": "./notes"},
         {"line": 1, "kind": "path", "text": "../notes"},
-        {"line": 1, "kind": "path", "text": "/notes"},
-        {"line": 1, "kind": "path", "text": "/notes"},
+        {"line": 1, "kind": "path", "text": "./2026"},
+        {"line": 1, "kind": "path", "text": "/usr/local"},
         {"line": 1, "kind": "path", "text": "https://example.org"},
         {"line": 1, "kind": "path", "text": "s3://bucket"},
     ]
@@ -202,8 +203,9 @@ def test_workbench_roots_are_paths(write):
 
 
 def test_project_name_roots_are_paths(write):
-    path = write("orders/region\n")
+    path = write("orders/region reports/orders\n")
     assert draft.check_findings(path) == []
-    assert draft.check_findings(path, names={"orders"}) == [
+    assert draft.check_findings(path, names={"orders"}) == draft.check_findings(path, roots={"orders"}) == [
         {"line": 1, "kind": "path", "text": "orders/region"},
+        {"line": 1, "kind": "path", "text": "reports/orders"},
     ]
