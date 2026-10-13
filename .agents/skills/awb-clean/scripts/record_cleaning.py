@@ -17,7 +17,8 @@ keeps the observation and link, and its correction carries no rescan suffix.
 
 Quality issue rows get the next ID, the scan's counts and examples, and the marker
 `<scan>#<key>` with its scan date. foundation/quality.json holds hashed scan links and recorded
-counts and dates, backfilled from legacy rows when absent. A baseline observation supplies both
+counts and dates, built from a row's prose when a link is missing; a marker on several rows, or on a
+row whose ID repeats, refuses a decision on that issue. A baseline observation supplies both
 counts and date; otherwise the current scan does. Reopening updates the link and judgment cells,
 keeping the observation. Correction rows carry the rescan's before and after counts. A flag goes through the project's provenance helper and sets
 the finding's status to `revalidation-needed (was <status>)`, adds the reason, and updates
@@ -37,7 +38,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from quality_links import OBJECT, OBSERVATION, ActiveRows, QualityLinks, position
+from quality_links import OBJECT, OBSERVATION, QualityLinks, position
 
 TEMPLATES = Path(__file__).resolve().parents[2] / "awb-init/assets/workbench/foundation"
 ACTIVE = "## Active limitations and issues"
@@ -202,13 +203,19 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     except ValueError as error:
         raise RecordError(str(error)) from error
     recorded = {}
+    decided = {by_id[k]["key"] for k in issues if k in by_id}
     for issue in scan["issues"] + baseline:
         key = issue["key"]
-        link = links.get(scan["name"], key)
-        if link:
-            recorded[key] = (links.active.rows[link["id"]][0], link["id"])
-        else:
-            links.discard(scan["name"], key)
+        resolved = links.resolve(scan["name"], key)
+        if resolved:
+            recorded[key] = (resolved[0], resolved[1]["id"])
+            continue
+        links.discard(scan["name"], key)
+        carriers = links.active.markers.get((scan["name"], key), [])
+        if key in decided and carriers:
+            raise RecordError(f"marker `{marker}{key}` is on rows {', '.join(links.active.qid(i) or '(no ID)' for i in carriers)} "
+                              "with no single row and ID to link; give the rows distinct IDs and one marker, "
+                              "or revise a row by its quality ID")
 
     # Allocate IDs first so {S1} and {Q-004} placeholders resolve anywhere in the decisions.
     ids, new_ids, named = {}, _next_ids(active), {}
@@ -243,7 +250,9 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                         or decisions.get("findings"))
 
     added, updated, corrections, rows = [], [], [], []
-    judged = {"impact": "Analytical impact", "treatment": "Current treatment", "status": "Status"}
+    judged = {key: active.columns[position(active.columns, name, default)] for key, name, default in (
+        ("impact", "Analytical impact", 3), ("treatment", "Current treatment", 4),
+        ("status", "Status", len(active.columns) - 1))}
     for issue_id, decision in issues.items():
         issue = by_id.get(issue_id)
         qid = ids[issue_id]
@@ -342,39 +351,37 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     flagged = [{"investigation": f["investigation"], "result": f["result"],
                 "status": flag_statuses[f["investigation"], f["result"]]} for f in flags]
 
-    try:
-        ActiveRows(quality_active)
-        ActiveRows(quality)
-    except ValueError as error:
-        raise RecordError(str(error)) from error
     versions = {relative: "\n".join(files[relative]) + "\n" for relative in changed}
-    versions["foundation/quality.json"] = links.text()
+    if links.changed():
+        versions["foundation/quality.json"] = links.text()
     active_text = "\n".join(quality_active) + "\n"
     for text in [*versions.values(), active_text]:
         text.encode("utf-8")
 
-    written, phases, flagged_investigations = [], [], []
+    written, phases, partials, flagged_investigations = [], [], {}, []
     def prepare(relative, text):
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         partial = path.with_name(path.name + ".tmp")
+        partials[relative] = partial
         partial.write_text(text, encoding="utf-8")
         return partial
 
     def replace(relative, partial):
         os.replace(partial, root / relative)
+        partials.pop(relative, None)
         if relative not in written:
             written.append(relative)
 
     if not dry_run:
         try:
-            phase_a = {"foundation/quality.json": versions["foundation/quality.json"]}
+            phase_a = {"foundation/quality.json": versions["foundation/quality.json"]} \
+                if "foundation/quality.json" in versions else {}
             if "foundation/quality.md" in changed:
                 phase_a["foundation/quality.md"] = active_text
             if "foundation/catalog.md" in changed:
                 phase_a["foundation/catalog.md"] = versions["foundation/catalog.md"]
-            partials = {relative: prepare(relative, text) for relative, text in phase_a.items()}
-            for relative, partial in partials.items():
+            for relative, partial in [(r, prepare(r, text)) for r, text in phase_a.items()]:
                 replace(relative, partial)
             phases.append("A")
             for investigation, batch in batches.items():
@@ -388,6 +395,8 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                 replace(relative, prepare(relative, versions[relative]))
             phases.append("C")
         except (OSError, ValueError) as error:
+            for partial in partials.values():  # a partial quality.md quotes source values
+                partial.unlink(missing_ok=True)
             for path in getattr(error, "replaced", []):
                 relative = Path(path).relative_to(root).as_posix()
                 if relative not in written:

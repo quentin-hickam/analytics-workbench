@@ -34,4 +34,4 @@ Null rates and the commonest co-null column patterns are reported for informatio
 
 Examples are real values, up to ten per issue and 80 characters each.
 
-An issue whose `<name>#<key>` marker appears in a `foundation/quality.md` row is reported as recorded, with that row's ID, status, and the count in its `(<count> of <of>)`. `record_cleaning.py` writes the marker into every issue row it adds and refreshes the count when it updates a recorded issue.
+An issue is reported as recorded when `foundation/quality.json` links it to a `foundation/quality.md` row whose observation carries its `<name>#<key>` marker, with that row's ID and status and the link's recorded count. A marker on exactly one row with no link is linked from that row's `(<count> of <of>)`. `record_cleaning.py` writes the marker into every issue row it adds and moves the link's count and date to the reopened values when it updates a recorded issue; the observation keeps its first count.
