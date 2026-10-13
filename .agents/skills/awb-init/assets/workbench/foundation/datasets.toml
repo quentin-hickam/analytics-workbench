@@ -16,8 +16,9 @@
 #       null in the columns are not compared
 #   accepted_values = { column = [values] }                    # accepted_values:<column>; nulls pass
 #   range = { column = { min = 0, max = 100 } }                # range:<column>; inclusive, either
-#       bound optional, numbers or TOML dates; nulls pass
-#   row_count = { min = 1, max = 1000000 }                     # row_count; either bound optional
+#       bound optional, both numbers or both TOML dates, min <= max; nulls pass
+#   row_count = { min = 1, max = 1000000 }                     # row_count; either bound optional,
+#       min <= max
 # A foundation/quality.md row cites a check by name and publication; see awb-clean's record step.
 #
 # [datasets.orders.checks]

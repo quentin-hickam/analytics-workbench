@@ -30,16 +30,20 @@
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
 # test_publish_records_validate_detail_and_no_checks_by_default: without declared checks publication.json records no declared check; a string validate returns is its check's detail; another dataset's declaration does not apply.
-# test_declared_checks_refuse_a_malformed_declaration_before_conversion: unknown and malformed keys, a non-checks key, and invalid TOML refuse before any partial directory exists.
+# test_declared_checks_refuse_a_malformed_declaration_before_conversion: unknown and malformed keys, range bounds other than numbers or dates, a min above its max, a non-checks key, an unknown top-level table, and invalid TOML refuse before any partial directory exists.
+# test_declared_checks_accept_the_shipped_template_and_its_example: the shipped commented template declares nothing, and its example, uncommented, is a valid declaration.
+# test_publish_refuses_declared_checks_without_duckdb_before_conversion: declared checks without the duckdb package refuse before any partial directory exists.
 # test_publish_runs_declared_checks_and_records_them: every declared check kind runs in DuckDB over the partial Parquet and is recorded by name, in the documented key order whatever the declaration order, before validate's check.
 # test_publish_keeps_a_failing_declared_check_unpublished: a failing declared check raises ChecksFailed listing every check, skips validate, and leaves the partial unpublished.
 # test_declared_check_failures_report_counts_not_values: each failing kind reports counts; a check that cannot compare its declared values fails without quoting DuckDB's message.
+# test_a_check_that_declares_no_values_fails_to_run_without_the_values_hint: a check that cannot run for another reason names the error's kind without pointing at declared values.
 # test_cli_publish_records_declared_checks: the publish command records declared checks with its --check outcome, counts them in its output and catalog_row, and prints failed_checks on refusal.
 
 import hashlib
 import importlib.util
 import json
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -683,7 +687,15 @@ def test_publish_records_validate_detail_and_no_checks_by_default(tmp_path):
     ('[datasets.events.checks]\nnot_null = "id"\n', "checks.not_null is malformed"),
     ('[datasets.events.checks]\nkey = []\n', "checks.key is malformed"),
     ('[datasets.events.checks]\nrange = { amount = { low = 0 } }\n', "checks.range is malformed"),
+    ('[datasets.events.checks]\nrange = { amount = { min = [0, 1] } }\n', "checks.range is malformed"),
+    ('[datasets.events.checks]\nrange = { amount = { min = { at = 0 } } }\n', "checks.range is malformed"),
+    ('[datasets.events.checks]\nrange = { amount = { min = "10" } }\n', "checks.range is malformed"),
+    ('[datasets.events.checks]\nrange = { amount = { max = nan } }\n', "checks.range is malformed"),
+    ('[datasets.events.checks]\nrange = { amount = { min = 10, max = 0 } }\n', "checks.range is malformed"),
+    ('[datasets.events.checks]\nrange = { day = { min = 0, max = 2024-01-01 } }\n', "checks.range is malformed"),
     ('[datasets.events.checks]\nrow_count = { min = -1 }\n', "checks.row_count is malformed"),
+    ('[datasets.events.checks]\nrow_count = { min = 5, max = 1 }\n', "checks.row_count is malformed"),
+    ('[dataset.events.checks]\nnot_null = ["id"]\n', "unknown table dataset"),
     ('[datasets.events.checks]\ntypes = { id = "INT; DROP" }\n', "checks.types is malformed"),
     ('[datasets.events]\ncheck = { key = ["id"] }\n', "holds only a checks table"),
     ('[datasets.events.checks\n', "foundation/datasets.toml"),
@@ -695,6 +707,28 @@ def test_declared_checks_refuse_a_malformed_declaration_before_conversion(tmp_pa
     called = []
     with pytest.raises(ValueError, match=message):
         landing.publish(tmp_path, "events", "v1", lambda path: called.append(path), acquisitions=[original])
+    assert called == []
+    assert not (tmp_path / "data/parquet").exists()
+
+
+def test_declared_checks_accept_the_shipped_template_and_its_example(tmp_path):
+    pytest.importorskip("tomllib")
+    text = (ASSET.parent / "workbench/foundation/datasets.toml").read_text()
+    declare(tmp_path, text)
+    assert landing.declared_checks(tmp_path, "orders") == {}
+    example = text.split("# [datasets.orders.checks]", 1)[1]
+    declare(tmp_path, "[datasets.orders.checks]\n" + "\n".join(line[2:] for line in example.splitlines()))
+    assert set(landing.declared_checks(tmp_path, "orders")) == set(landing.CHECK_KEYS) - {"unique"}
+
+
+def test_publish_refuses_declared_checks_without_duckdb_before_conversion(tmp_path, monkeypatch):
+    pytest.importorskip("tomllib")
+    original = acquisition(tmp_path)
+    declare(tmp_path, '[datasets.events.checks]\nnot_null = ["id"]\n')
+    monkeypatch.setitem(sys.modules, "duckdb", None)  # import duckdb raises ImportError
+    called = []
+    with pytest.raises(ImportError, match="declared checks need the duckdb package"):
+        landing.publish(tmp_path, "events", "v1", called.append, acquisitions=[original])
     assert called == []
     assert not (tmp_path / "data/parquet").exists()
 
@@ -792,6 +826,21 @@ row_count = { max = 2 }
     }
     assert details["range:status"][0] == "fail" and "shipped" not in details["range:status"][1]
     assert "secret-value" not in str(error.value) and "shipped" not in str(error.value)
+
+
+def test_a_check_that_declares_no_values_fails_to_run_without_the_values_hint(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    declare(tmp_path, '[datasets.events.checks]\nnot_null = ["status"]\n')
+
+    def convert(directory):  # two files whose schemas cannot be read as one
+        duckdb.execute(f"COPY (SELECT 1 AS id, 'a' AS status) TO '{directory / 'a.parquet'}' (FORMAT parquet)")
+        duckdb.execute(f"COPY (SELECT 'x' AS name, 2 AS id) TO '{directory / 'b.parquet'}' (FORMAT parquet)")
+
+    with pytest.raises(landing.ChecksFailed) as error:
+        landing.publish(tmp_path, "events", "v1", convert, acquisitions=[acquisition(tmp_path)])
+    [check] = error.value.checks
+    assert check["name"] == "not_null:status" and check["outcome"] == "fail"
+    assert check["detail"].startswith("The check could not run (") and check["detail"].endswith(").")
 
 
 def test_cli_publish_records_declared_checks(tmp_path, capsys):

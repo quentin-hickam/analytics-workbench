@@ -21,12 +21,13 @@ Paths are sorted POSIX paths relative to their acquisition or publication.
 import argparse
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -126,9 +127,30 @@ def _names(value):
     return isinstance(value, list) and all(isinstance(name, str) and name for name in value)
 
 
-def _bounds(value, kind):
-    return (isinstance(value, dict) and value and set(value) <= {"min", "max"}
-            and all(isinstance(bound, kind) and not isinstance(bound, bool) for bound in value.values()))
+def _number_or_date(bound):
+    """A range bound: a number other than NaN, or a TOML date or date-time."""
+    if isinstance(bound, float):
+        return not math.isnan(bound)
+    return isinstance(bound, (int, date)) and not isinstance(bound, bool)
+
+
+def _bounds(value, accepts):
+    """{min, max}, either optional, each accepted, with min no greater than max."""
+    if not (isinstance(value, dict) and value and set(value) <= {"min", "max"}
+            and all(accepts(bound) for bound in value.values())):
+        return False
+    try:
+        return "min" not in value or "max" not in value or value["min"] <= value["max"]
+    except TypeError:  # bounds of different kinds, such as a number and a date
+        return False
+
+
+def _duckdb():
+    try:
+        import duckdb
+    except ImportError as error:
+        raise ImportError("declared checks need the duckdb package") from error
+    return duckdb
 
 
 def declared_checks(project_root: str | Path, dataset: str) -> dict:
@@ -144,9 +166,13 @@ def declared_checks(project_root: str | Path, dataset: str) -> dict:
     except ImportError as error:
         raise ImportError(f"reading {DATASETS} needs Python 3.11 or the tomli package") from error
     try:
-        datasets = tomllib.loads(path.read_text(encoding="utf-8")).get("datasets", {})
+        document = tomllib.loads(path.read_text(encoding="utf-8"))
     except ValueError as error:
         raise ValueError(f"{DATASETS}: {error}") from error
+    if set(document) - {"datasets"}:  # such as [dataset.<name>.checks], which would declare nothing
+        raise ValueError(f"{DATASETS}: unknown table {', '.join(sorted(set(document) - {'datasets'}))}; "
+                         "declare checks under [datasets.<name>.checks]")
+    datasets = document.get("datasets", {})
     if not isinstance(datasets, dict):
         raise ValueError(f"{DATASETS}: datasets must be a table of [datasets.<name>] tables")
     where = f"{DATASETS} [datasets.{dataset}]"
@@ -164,8 +190,8 @@ def declared_checks(project_root: str | Path, dataset: str) -> dict:
             (isinstance(item, str) and item) or (_names(item) and item) for item in v),
         "accepted_values": lambda v: isinstance(v, dict) and all(
             isinstance(values, list) and values for values in v.values()),
-        "range": lambda v: isinstance(v, dict) and all(_bounds(bounds, object) for bounds in v.values()),
-        "row_count": lambda v: _bounds(v, int) and all(bound >= 0 for bound in v.values()),
+        "range": lambda v: isinstance(v, dict) and all(_bounds(bounds, _number_or_date) for bounds in v.values()),
+        "row_count": lambda v: _bounds(v, lambda bound: type(bound) is int and bound >= 0),
     }
     for key, value in spec.items():
         if key not in shapes:
@@ -189,10 +215,7 @@ def _span(bounds):
 
 def _run_checks(directory, spec):
     """Run spec's checks over the Parquet files under directory; return [{name, outcome, detail}]."""
-    try:
-        import duckdb
-    except ImportError as error:
-        raise ImportError("declared checks need the duckdb package") from error
+    duckdb = _duckdb()
     files = [directory / path for path in _files(directory) if path.endswith(".parquet")]
     if not files:
         raise ValueError("Declared checks need the publication's Parquet files; none were written")
@@ -309,10 +332,12 @@ def _run_checks(directory, spec):
         for name, measure, arguments in planned:
             try:
                 failure, detail = measure(*arguments)
-            except duckdb.Error as error:  # a declared value the column cannot be compared with
+            except duckdb.Error as error:
                 # DuckDB's message can quote a source value; name only the error's kind.
-                failure = (f"The check could not run ({type(error).__name__}); compare its declared "
-                           "values with the column's type.")
+                failure = f"The check could not run ({type(error).__name__})"
+                if name.startswith(("accepted_values:", "range:")):  # declared values the column can't compare with
+                    failure += "; compare its declared values with the column's type"
+                failure += "."
             checks.append({"name": name, "outcome": "fail" if failure else "pass",
                            "detail": failure or detail})
         return checks
@@ -365,6 +390,8 @@ def publish(project_root: str | Path, dataset: str, publication_id: str,
     _check_name(publication_id)
     root = Path(project_root)
     spec = declared_checks(root, dataset)  # a malformed declaration refuses before any output
+    if spec:
+        _duckdb()  # and so does a missing duckdb
     if not acquisitions:
         raise ValueError("At least one completed acquisition is required")
     inputs = []
