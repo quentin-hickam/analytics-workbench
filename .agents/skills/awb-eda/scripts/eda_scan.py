@@ -138,7 +138,7 @@ def as_list(value):
 
 
 def key_columns(value):
-    """The columns of the one declared key. Each --key value or settings item may hold several
+    """The columns of the one declared key. The --key value and each settings item may hold several
     comma-separated columns, so a composite grain copied from the catalog checks as one key."""
     return [column.strip() for item in as_list(value) for column in item.split(",") if column.strip()]
 
@@ -896,9 +896,9 @@ from the first of [eda.<dataset>], [eda], [scope], and the top level; period_sta
 then fall back to [parameters] start and end, the period run.py uses. Keys: where (predicate or
 list, joined with AND), date_column, period_start, period_end (inclusive dates), measure (numeric
 column or expression; a boolean gives a rate), dimensions (list), key (the grain's columns, as a
-comma-separated string or a list), period. Options replace settings. A setting that does not fit
-the dataset prints as `not applied` with its reason; an unconfigured scope or measure prints as
-`not set` with the options to pass.
+comma-separated string or a list, each item split on commas like --key), period. Options replace
+settings. A setting that does not fit the dataset prints as `not applied` with its reason; an
+unconfigured scope or measure prints as `not set` with the options to pass.
 
 --show PATH: dot-separated keys into the saved scan, where a list item is named by its name,
 dimension, or kind, or by index: columns.site.top, measure.by_dimension.site.values,
@@ -926,8 +926,9 @@ def parse(argv):
                         "marked auto")
     parser.add_argument("--key", action="append", metavar="COLS", help="declared grain to check, from the "
                         "dataset's catalog row (the view's row for a canonical view): one comma-separated "
-                        "value for a composite grain, as awb-clean takes it; a repeated --key adds columns "
-                        "to the same key")
+                        "value for a composite grain, as awb-clean takes it (a column whose name holds a comma "
+                        "cannot be declared). Give it once: a scan checks one declared key, so a repeated "
+                        "--key exits 2; scan again with --label to test another key")
     parser.add_argument("--period", choices=PERIODS, help="period for coverage and trends; default by date span: "
                         "day up to 92 days, month up to 10 years, year beyond")
     parser.add_argument("--top", type=int, default=10, help="top values kept per column, and groups compared "
@@ -942,7 +943,10 @@ def parse(argv):
     if options.label is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", options.label):
         parser.error("--label must be a simple name: an ASCII letter or digit, then any number of [A-Za-z0-9._-]")
     if options.key is not None:
-        if not all(key_columns(value) for value in options.key):
+        if len(options.key) > 1:
+            parser.error("--key is given once: pass a composite grain as one comma-separated --key, "
+                         "and scan again with --label to test another key")
+        if not key_columns(options.key):
             parser.error("--key must name at least one column")
         options.key = key_columns(options.key)
     if options.top < 1 or options.min_group < 1:

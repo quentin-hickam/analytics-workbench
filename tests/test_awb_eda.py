@@ -11,7 +11,7 @@
 # test_publication_path_with_label_and_float_columns_keep_distributions: publication directory scanned to a labelled file; unique floats are not keys.
 # test_scan_file_name_follows_the_documented_rule: the examples in references/scan-file.md hold; directory names join up to the last two path parts; characters outside ASCII [A-Za-z0-9._-] become "-", edges are trimmed, "dataset" fills an empty name; colliding names share one file; --help names no <dataset>-<label> file.
 # test_label_must_be_a_simple_name_and_an_empty_one_cannot_overwrite_the_unlabelled_scan: --label "" and other names outside the rule exit 2 before anything is written; "x." is accepted.
-# test_comma_separated_key_is_one_declared_key_from_option_or_settings: --key "a, b" and settings key "a,b" or ["a,b"] give the columns of one key, as awb-clean's composite grain; a repeated --key adds columns; an empty --key exits 2; an absent option column reports key-missing; a settings key with an absent column or none is skipped. Runs without duckdb.
+# test_comma_separated_key_is_one_declared_key_from_option_or_settings: --key "a, b" and settings key "a,b" or ["a,b"] give the columns of one key, as awb-clean's composite grain; a repeated --key or an empty --key exits 2; an absent option column reports key-missing; a settings key with an absent column or none is skipped. Runs without duckdb.
 # test_template_settings_take_the_period_from_parameters_and_name_unset_choices: [parameters] start/end scope the period; unset scope, measure, and dimensions print the options to pass.
 # test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one: --show walks keys and named list items without rescanning; a miss exits 2 listing what is there.
 
@@ -309,15 +309,23 @@ def test_label_must_be_a_simple_name_and_an_empty_one_cannot_overwrite_the_unlab
 
 def test_comma_separated_key_is_one_declared_key_from_option_or_settings(tmp_path, capsys):
     root = str(tmp_path)
-    for args in (["--key", "shift_id, shift_date"], ["--key", "shift_id", "--key", "shift_date"],
-                 ["--key", "shift_id,", "--key", " shift_date "]):
+    for args in (["--key", "shift_id, shift_date"], ["--key=shift_id,shift_date,"],
+                 ["--key", " shift_id ,shift_date "]):
         assert eda.parse([root, "shifts", *args]).key == ["shift_id", "shift_date"]
-    assert eda.parse([root, "shifts", "--key", "a,b", "--key", "c"]).key == ["a", "b", "c"]
     assert eda.parse([root, "shifts"]).key is None
-    for args in (["--key="], ["--key", " , "], ["--key", "shift_id", "--key", ""]):
+    for args in (["--key="], ["--key", " , "]):
         with pytest.raises(SystemExit) as exit:
             eda.parse([root, "shifts", *args])
         assert exit.value.code == 2 and "--key must name at least one column" in capsys.readouterr().err
+    # awb-clean takes a repeated --key as alternative keys; here it would make one weaker composite key and
+    # pass a violated key, so a second --key exits 2 instead of disagreeing silently.
+    for args in (["--key", "shift_id", "--key", "shift_date"], ["--key", "a,b", "--key", "c"],
+                 ["--key", "shift_id", "--key", ""]):
+        with pytest.raises(SystemExit) as exit:
+            eda.parse([root, "shifts", *args])
+        err = capsys.readouterr().err
+        assert exit.value.code == 2
+        assert "--key is given once: pass a composite grain as one comma-separated --key" in err
 
     names = ["shift_id", "shift_date", "site"]
     for value in ("shift_id, shift_date", ["shift_id,shift_date"], ["shift_id", "shift_date"]):
