@@ -23,7 +23,7 @@
 # test_record_ignores_unvalidated_recorded_placeholders: saved scan metadata cannot supply a placeholder ID when no row carries the issue's marker; the refusal writes nothing.
 # test_quality_id_duplicate_keeps_revision_error: duplicate quality-ID revisions retain their specific refusal message and write nothing.
 # test_old_provenance_refuses_before_writes: a project helper without flag_findings refuses with an awb-init repair hint, including dry runs.
-# test_flag_retry_keeps_original_quality_id: a phase B failure followed by another issue allocation keeps the original Q-ID on retry and records its correction exactly once.
+# test_flag_retry_keeps_original_quality_id: a phase B failure followed by another issue allocation keeps the original Q-ID on retry and records its correction exactly once; running the finished call again reports it as corrections_unchanged and leaves quality.md as it was.
 # test_dry_run_prints_flag_rows_and_writes_nothing: a dry run lists the rendered flagged rows beside the quality rows and writes nothing.
 # test_renamed_quality_headers_keep_template_positions: with every Active header renamed, a new row is written in the template's positions, scans read it as recorded, and a reopen sets its status.
 # test_quality_json_is_written_only_when_links_change: a call that changes no link leaves quality.json absent or byte-identical.
@@ -704,8 +704,11 @@ def test_flag_retry_keeps_original_quality_id(tmp_path, monkeypatch):
     result = recorder.record(tmp_path, "orders", decisions, today=TODAY)
     assert result["quality_ids"] == {"S1": "Q-001"} and result["added"] == []
     assert "Q-001 merges labels" in state.read_text() and "Q-002 merges labels" not in state.read_text()
-    recorder.record(tmp_path, "orders", decisions, today=TODAY)
-    assert (tmp_path / "foundation/quality.md").read_text().count("| Q-001 | Trim |") == 1
+    quality = (tmp_path / "foundation/quality.md").read_bytes()
+    again = recorder.record(tmp_path, "orders", decisions, today=TODAY)
+    assert again["corrections"] == [] and again["corrections_unchanged"] == ["Q-001"]
+    assert (tmp_path / "foundation/quality.md").read_bytes() == quality
+    assert quality.decode().count("| Q-001 | Trim |") == 1
 
 
 
