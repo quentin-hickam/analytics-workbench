@@ -16,15 +16,15 @@ Prints one line of JSON:
   files              every src/ helper and workbench guide, and with --upgrade or --package-formats every
                      shipped package format the project holds: installed, missing (--check), current,
                      earlier (an unmodified older copy; --upgrade replaces it), replaced, or customized
-                     (matches no shipped version: the project's own code, kept unless named by --replace)
+                     (differs from the asset and has no matching receipt entry; kept unless named by --replace)
   customized         each customized file -> the installed asset to compare it with
   retired            (--upgrade) files the skills no longer ship: unmodified, removed, or customized (kept)
   requirements, python, packages, install   the third-party packages the helpers and the run.py
                      template need, where they are declared, and whether this interpreter imports them
 Package formats stay absent until awb-package copies them with --package-formats.
 The project's install receipt, .awb-receipt.json, maps each file this script installed or replaced to
-its SHA-256: a file matching its entry is unmodified. A file without an entry, such as one installed
-before receipts, is customized unless it equals the shipped asset; --replace takes it.
+its SHA-256: a file matching its entry is unmodified. A file without an entry is customized unless
+it equals the shipped asset.
 Existing dependency files are only read, and no package is installed. Exit status: 0 done; 1 not a
 workbench, Python too old, or an unreadable receipt, nothing written; 2 unusable arguments.
 """

@@ -105,6 +105,16 @@ def _toml():
     return tomllib
 
 
+_UNUSABLE = f"not {_EVIDENCE_SCHEMA} with result-scoped settings; rerun the result"
+
+
+def _usable_evidence(record):
+    """Evidence this helper reads: awb-evidence/3 whose settings name their result."""
+    if not isinstance(record, dict) or record.get("schema") != _EVIDENCE_SCHEMA:
+        return False
+    return isinstance(record.get("settings"), dict) and bool(record["settings"].get("result"))
+
+
 def _evidence_files(root, investigation):
     """Yield (path, evidence or None, problem or None) for each awb-evidence file."""
     directory = root / "investigations" / investigation / "evidence"
@@ -116,10 +126,10 @@ def _evidence_files(root, investigation):
             continue
         # Export-check lists and other files can sit beside the evidence.
         schema = record.get("schema") if isinstance(record, dict) else None
-        if schema == _EVIDENCE_SCHEMA:
+        if _usable_evidence(record):
             yield path, record, None
         elif str(schema).startswith("awb-evidence/"):
-            yield path, None, f"{_rel(root, path)}: {schema} predates {_EVIDENCE_SCHEMA}; rerun the result"
+            yield path, None, f"{_rel(root, path)}: {_UNUSABLE}"
 
 
 # ---------------------------------------------------------------- internal names in findings.md
@@ -970,10 +980,8 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
         evidence_paths[result_id] = _rel(root, evidence_path)
         try:
             evidence[result_id] = _read_json(evidence_path)
-            schema = evidence[result_id].get("schema")
-            if schema != _EVIDENCE_SCHEMA:
-                raise ValueError(f"{schema} predates {_EVIDENCE_SCHEMA}; rerun the result"
-                                 if str(schema).startswith("awb-evidence/") else "not an awb-evidence file")
+            if not _usable_evidence(evidence[result_id]):
+                raise ValueError(_UNUSABLE)
         except (OSError, ValueError) as error:
             report["errors"].append(f"missing evidence: {evidence_paths[result_id]}: {error}")
     if report["errors"]:

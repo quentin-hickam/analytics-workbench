@@ -16,7 +16,7 @@ result stale. Producing paths are the investigation's code (run.py and other fil
 records, queries/ and settings), the result's own queries, and src/ except the helpers that only
 dispatch, record, or package (awb.py, provenance.py, packaging/), so a repair replacing those
 stales nothing. compare_evidence reads only awb-evidence/3 files whose settings name their result;
-an older file fails every comparison as predating them, so its result must be rerun.
+any other file fails every comparison, so its result must be rerun.
 Paths are project-relative POSIX, except that a files[].path copied from publication.json or
 provenance.json is relative to the directory holding that file, and a publication's
 inputs[].files[].path to its acquisition directory.
@@ -359,12 +359,14 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
     try:
         evidence_path = _relative(root, evidence_path)
         evidence = json.loads((root / evidence_path).read_text())
-        if evidence["schema"] != _SCHEMA or not evidence["settings"].get("result"):
-            raise ValueError(f"{evidence['schema']} without result-scoped settings predates {_SCHEMA}; rerun the result"
-                             if str(evidence["schema"]).startswith("awb-evidence/") else "wrong schema")
+        current = evidence["schema"] == _SCHEMA and evidence["settings"].get("result")
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         return [{"name": name, "paths": [evidence_path], "outcome": "fail",
                  "detail": f"missing evidence: {evidence_path}: {str(error).rstrip('.')}."} for name in names]
+    if not current:
+        return [{"name": name, "paths": [evidence_path], "outcome": "fail",
+                 "detail": f"unusable evidence: {evidence_path}: not {_SCHEMA} with result-scoped settings; "
+                           "rerun the result."} for name in names]
     comparisons = []
     for name in names:
         paths, mismatches = [], []

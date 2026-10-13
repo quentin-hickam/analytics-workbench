@@ -56,9 +56,7 @@ These come from the tool-call audit in `docs/tool-call-audit-2026-10-11/`, which
 
 ### Removed
 
-- Evidence older than result-scoped `awb-evidence/3`: `awb-evidence/1` (0.3.0), `/2`, and `/3` files whose settings name no result. `compare_evidence()`, `stale`, `export`, and `check-draft` report such a file as predating `/3` and refuse to package its result; rerun the result with `run.py` first.
-
-- The installer's frozen list of hashes shipped before receipts (`assets/legacy-shipped-hashes.json`). A helper, guide, or package format installed before receipts now reports as `customized` unless it equals the current asset, and an unmodified retired file from then as customized and kept; check its Git history, then replace it with `--upgrade --replace PATH` or delete it.
+- Readers for evidence other than result-scoped `awb-evidence/3`, and the installer's frozen list of hashes shipped before receipts. Packaging and `stale` refuse other evidence until its result is rerun.
 
 - Cleaning scan files are no longer committed: the workbench `.gitignore` excludes `/foundation/scans/`, and quality rows keep the scan marker and date. In an existing project, add `/foundation/scans/` to `.gitignore` and run `git rm --cached -r foundation/scans` to stop tracking scans while keeping the local files. EDA scans stay tracked.
 
