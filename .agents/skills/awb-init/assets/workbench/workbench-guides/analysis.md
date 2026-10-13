@@ -52,4 +52,5 @@ To word, promote, supersede, or caveat, use `awb.py state finding <id>... --text
 - It refreshes its check segments.
 - It keeps its notes.
 - It moves the flag reason to `history.md`.
- If `run.py` cannot reproduce a flagged finding, extend it first.
+
+If `run.py` cannot reproduce a flagged finding, extend it first.

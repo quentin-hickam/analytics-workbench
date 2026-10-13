@@ -1,6 +1,6 @@
 # Workbench design decisions
 
-These notes record the decisions that the design interview accepted. The workflow design is not complete.
+These notes record accepted decisions from the design interview. The workflow design is not complete.
 
 ## Baseline principles
 
@@ -11,7 +11,7 @@ These notes record the decisions that the design interview accepted. The workflo
 - Keep canonical, reusable views of the data in the shared analytical store. At this time, DuckDB has this role. But the principle stays the same if the storage technology changes.
 - Keep a catalog of the datasets and canonical views in the shared analytical store. Keep this catalog separate from investigation records. Its exact format is not specified yet.
 - Before you present results, validate these items: columns, row counts, joins, nulls, scope, metrics, and values. This checklist comes from the earlier framework. It always applies, and the evidence of each result records it.
-- Make ad hoc deliverables only when the user explicitly invokes them.
+- Make ad hoc deliverables only after an explicit invocation by the user.
 - Track all analytical code in Git. Identify the producing commit in the package manifest.
 
 ## Project and investigation boundaries
@@ -70,7 +70,7 @@ Create or refresh a delivery package only when the user explicitly requests it. 
 
 When you create a package, ask the user which datasets to include. Reuse that selection for revisions, unless the user changes it or the selected datasets no longer fit the scope. When the selected datasets no longer fit, ask again. Do not assume a default set of dataset exports for a new package.
 
-Draft packages can include flagged findings. A draft package with flagged findings has a clear caveat beside each affected conclusion and a short list of unresolved issues. Before you mark the package as delivered, get the disposition of the user for each flagged finding. The disposition is one of these: revalidation, omission of the affected conclusion, or explicit release with the caveat. Packaging does not automatically trigger analysis reruns.
+Draft packages can include flagged findings. A draft package with flagged findings has a clear caveat beside each affected conclusion and a short list of unresolved issues. Before you mark the package as delivered, you must get the disposition of the user for each of them. A disposition is one of these: revalidation, omission of the affected conclusion, or explicit release with the caveat. Packaging does not automatically trigger analysis reruns.
 
 Each package has one stable name and one current working draft. Revisions update that draft until the user explicitly marks it as delivered. That milestone keeps a numbered, frozen release. Later edits start the next working revision. Numbered releases are created only at explicit delivery milestones.
 
@@ -82,7 +82,7 @@ The findings document of each release is self-contained for the audience that th
 
 The methodology document is self-contained as the account of the analysis, and those identifiers belong in it. It lets the M365 agent and analysts look up the internal logic behind a decision. The two documents agree in claims, numbers, qualifications, and caveats. Each finding has a section under the same heading in the two documents. When applicable, the two documents include a brief section that describes changes since the previous release.
 
-An earlier format packaged a journal. The journal was the internal record of decisions and also the source text for the audience document. M365 built its report when it made a narrative from the journal. As a result, file and column names went into delivered documents. Because the two documents are now separate, that internal record stays out of what M365 renders.
+An earlier format packaged a journal. The journal was the internal record of decisions and also the source text for the audience document. To build its report, M365 made a narrative from the journal. As a result, file and column names went into delivered documents. Because the two documents are now separate, that internal record stays out of what M365 renders.
 
 The delivered output is a PowerPoint deck, not Word and Excel documents. The reason is that the conceptual outline of a deck is easier to check than the outline of a report. For this reason, the findings document is written as the slide-by-slide outline of the deck. Each slide has:
 
@@ -143,7 +143,7 @@ The receipt replaced an earlier repository-side record of every shipped version.
 - It folded `draft-provenance` into `export`.
 - It narrowed evidence to the code that computes each result. As a result, repairs and edits to unrelated results no longer mark findings stale.
 
-One gap is known and accepted. A chart CSV that is reused across package revisions is attributed to the current evidence of its result. This is also true when the result was rerun after the file was written. To close the gap, it is necessary to record which run produced each exported file. If a revision reruns a result, it is better to re-export that result.
+One gap is known and accepted. A chart CSV that is reused across package revisions is attributed to the current evidence of its result. This is also true when the result was rerun after the file was written. A fix for this gap needs a record of which run produced each exported file. If a revision reruns a result, it is better to re-export that result.
 
 Release trusts `check-draft --verify-only` as its structural gate. `awb-package` runs every structural check before `check-draft` writes the manifest inventory. A passing verify proves that the draft is byte-identical to what was checked. For this reason, release does not read the package contract or the two narratives again to repeat that review. The items that can change after packaging are investigation-side: findings flagged after the draft was made, and the dispositions that they need. Release has its own review, which covers those items. Also, the `release` command itself runs the verify again before it copies.
 

@@ -36,7 +36,7 @@ This file records all notable changes to this project. The format is based on [K
   - Skill descriptions are shorter and start with their trigger.
   - The project `AGENTS.md` decreases from 667 to 528 words. It names the `awb-init` skill folder, so reference pointers resolve without a search.
   - The references of the guides load only for the rare branches that need them.
-  - One vocabulary is used in all files: *stale* (evidence no longer matches), *flagged* (pending revalidation), *frozen* (a release), *verbatim* (helper output), *saved query*, *release*, and `run.py`.
+  - One vocabulary is used in all files: *stale* (evidence no longer matches), *flagged* (awaiting revalidation), *frozen* (a release), *verbatim* (helper output), *saved query*, *release*, and `run.py`.
 
   A typical cleaning pass decreases from 9–11 tool calls to 6 and an exploration pass decreases from 8–9 to 5–6.
 - Packaging follows a numbered sequence. `export` runs on every revision with the complete set of represented results:
@@ -44,7 +44,7 @@ This file records all notable changes to this project. The format is based on [K
   - `--result` records producing state without the freshness check.
   - A blocked export stops with "changed results need separately authorized analytical work", and does not suggest a rerun.
 
-  `draft-provenance` is merged into `export`. Manifests are `manifest.json`, and exports are CSV. The `audit/` records for each package are removed. `findings.py`, `manifest.py`, and `charts.py` merge into a standard-library `src/packaging/draft.py`. `m365-assembly.md` is copied into the draft and is not read. Each flagged finding has one disposition.
+  `draft-provenance` is merged into `export`. Manifests are `manifest.json`, and exports are CSV. The `audit/` records for each package are removed. `findings.py`, `manifest.py`, and `charts.py` merge into a standard-library `src/packaging/draft.py`. `m365-assembly.md` is copied into the draft, but it is not read before the copy. Each flagged finding has one disposition.
 - `land --records` and `publish --from` take one value for each flag. As a result, the printed usage can be copied as it is. Generated requirements declare `tomli; python_version < "3.11"` when a project asset falls back to that package.
 - `awb-status` has these changes:
   - It counts a `revalidate` disposition as a block on a release.
@@ -170,7 +170,7 @@ These fixes come from the tool-call audit in `docs/tool-call-audit-2026-10-11/`.
   - `findings.md`: the audience-facing account and the only source of document content.
   - `methodology.md`: an internal reference where view names, settings keys, and result IDs belong.
 
-  `findings.md` is written for the audience in the investigation brief. It keeps out file names, view and column names, settings keys, internal identifiers, and code terms. The two documents agree and share finding headings. Delivered documents carried those internal names because M365 built its report from a journal that was also the internal record. This breaks existing drafts: the next revision through `awb-package` rewrites them in the new format. Released packages are not changed. Exported datasets name their columns with glossary display names, and `methodology.md` maps each name back to its source column.
+  `findings.md` is written for the audience in the investigation brief. It keeps out file names, view and column names, settings keys, internal identifiers, and code terms. The two documents agree and share finding headings. Before this change, delivered documents carried those internal names because M365 built its report from a journal that was also the internal record. This breaks existing drafts: the next revision through `awb-package` rewrites them in the new format. Released packages are not changed. Exported datasets name their columns with glossary display names, and `methodology.md` maps each name back to its source column.
 - M365 assembly instructions tell M365 Copilot to do these steps:
   - Distill the executive summary from `findings.md` under stated guidelines: answer first, three to five key findings with their numbers, decision-relevant and revalidation caveats, and no new claims or internal names.
   - Refer to `methodology.md` only to understand a decision.
@@ -202,7 +202,7 @@ These fixes come from the tool-call audit in `docs/tool-call-audit-2026-10-11/`.
 - `awb-init` supplies `awb_landing.py`, which is copied to `src/preparation/landing.py` on the first landing. `land()`, `publish()`, `retain()`, and `session()` replace the landing, publication, retained-copy, and view-loading procedures. Before, the project `AGENTS.md` described these procedures step by step. Provenance and publication files are JSON with fixed keys (`provenance.json`, `publication.json`). `session()` needs `duckdb`.
 - `awb-init` supplies a provenance helper, which is copied to `src/provenance.py` the first time a result needs it. The helper writes the evidence of each result to `investigations/<name>/evidence/<result-id>.json`, and compares the current state with it. `state.md` findings link to that file, and do not hold checksums. `awb-package` export checks run the comparison and record its output. Evidence, acquisition provenance, and publication files are fixed as JSON. The delivery manifest format stays open.
 - `awb-package` supplies a findings check, `awb_findings.py`, which is copied to `src/packaging/findings.py` on first use. `check()` reports these items in `findings.md`: backticked code, paths, file names, snake_case and dotted identifiers, commit SHAs, and internal names that the caller supplies. `awb-package` repairs the draft until the check reports nothing. `awb-release` runs it as part of verification.
-- `check_text()` in the `awb-visualize` figure style lists image text that contains identifiers, file names, or `column = value` facet titles, or that is longer than 65 characters. `save_figure()` runs it and refuses to write a figure that fails.
+- `check_text()` in the `awb-visualize` figure style lists image text that exposes identifiers, file names, or `column = value` facet titles, or that is longer than 65 characters. `save_figure()` runs it and refuses to write a figure that fails.
 
 ### Removed
 
@@ -227,7 +227,7 @@ These fixes come from the tool-call audit in `docs/tool-call-audit-2026-10-11/`.
 ### Added
 
 - `awb-status`: a read-only report of the current status of the project. It covers the active investigation, findings and revalidation flags, open issues, package and release state, and landed data and release storage. It ends with the requests that are applicable now.
-- `awb-visualize`: principles, libraries, and style defaults for charts and tables that show inline in agent chat and stay correct when pasted into a document. It includes a shared matplotlib and seaborn style file, and image paths that hosts can show in chat.
+- `awb-visualize`: principles, libraries, and style defaults for charts and tables that show inline in agent chat and stay intact when pasted into a document. It includes a shared matplotlib and seaborn style file, and image paths that hosts can show in chat.
 - Landed-data retention. `data/raw/` is excluded from Git, and frequently it is not possible to fetch a landed original again. For this reason, before the first landing, the agent asks where landed originals are kept outside the checkout. It records the answer on the `Landed data is kept at` line of the project README. It copies each completed landing there when the location is reachable, and records the retained copy for each acquisition in `foundation/sources.md`. `awb-status` reports landed data that is only in the checkout.
 - `awb-init` reports an instruction file that the current host reads in place of the workbench `AGENTS.md`, for example a `CLAUDE.md` in the project directory or above it. It never creates or edits that file.
 - MIT license (`LICENSE`).

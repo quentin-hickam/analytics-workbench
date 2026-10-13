@@ -159,7 +159,7 @@ Initialization and consequential scope changes use a self-contained interview in
 - record the question, population, decision or exploratory purpose, usefulness criteria, and material unknowns
 - finish when the consequential decisions are settled or explicitly recorded as material unknowns. Then create the records without a separate confirmation round.
 
-Routine implementation choices need no interview. The vocabulary discipline above is part of this workflow. An external interview skill or domain-modeling skill is not necessary.
+Routine implementation choices need no interview. The vocabulary discipline above is part of this workflow. No external interview or domain-modeling skill is necessary.
 
 ## Instruction loading
 
@@ -232,7 +232,7 @@ project-root/
 └── .gitignore
 ```
 
-Create investigation, cache, package and release locations lazily (only when they are necessary). The structure is a stable convention. It is not a requirement to create empty directories or placeholder documents during initialization. There is no `CONTEXT.md` in the generated structure.
+Create investigation, cache, package and release locations lazily. The structure is a stable convention. It is not a requirement to create empty directories or placeholder documents during initialization. There is no `CONTEXT.md` in the generated structure.
 
 ## Packaging and release behavior
 

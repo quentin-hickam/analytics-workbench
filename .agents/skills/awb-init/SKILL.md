@@ -65,7 +65,7 @@ Unknowns can stay open, and they do not block exploration. Create the investigat
 Adapt the asset files to the target. Their instructional comments and example rows are guidance, not project facts. The user-level skills serve every project, so the project holds only these files.
 
 1. Adapt the [orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [agent instructions](assets/workbench/AGENTS.md) into the root files that are missing. Merge `.gitignore` rules one at a time. A repair reconciles existing root files through references/repair.md.
-2. When you merge into an existing `AGENTS.md`, use relative links to the two guides. Make sure that the links resolve.
+2. When you merge into an existing `AGENTS.md`, use relative links to the two guides. Check that the links resolve.
 3. Install the project helpers and the workbench guides, and declare their packages. Use the interpreter that will run the analysis of the project, for example its virtual environment. Run the installer as a black box. With `--check`, it reports and does not write. A repair runs the installer from references/repair.md instead.
 
    ```sh

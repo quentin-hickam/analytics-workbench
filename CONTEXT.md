@@ -1,6 +1,6 @@
 # Analytics Workbench
 
-Terms to organize analytical work around shared data and different business questions.
+Terms to organize analytical work around shared data and separate business questions.
 
 ## Language
 

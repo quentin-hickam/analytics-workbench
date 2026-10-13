@@ -1,6 +1,6 @@
 # Analytics workbench skills
 
-A portable, agent-agnostic workflow for shared data preparation, different investigations, and repeatable delivery packages. Git tracks analytical code. You do not need GitHub hosting.
+A portable, agent-agnostic workflow for shared data preparation, separate investigations, and repeatable delivery packages. Git tracks analytical code. You do not need GitHub hosting.
 
 ## Included skills
 
@@ -64,7 +64,7 @@ User-level skills directories:
   - The relative path down into the project, in the `CLAUDE.md` of an ancestor directory.
 
   Or, set Project instructions in `/config` to `claude-md-and-agents-md`, which reads both files. See [import additional files](https://code.claude.com/docs/en/memory#import-additional-files). On Claude Code versions before 2.1.277, use the import.
-- OpenAI Codex reads `AGENTS.md` from its home directory (`~/.codex` by default). Then it reads the same file from each directory from the Git root down to the working directory. In each of these directories, it prefers an `AGENTS.override.md` in the same directory. See [Custom instructions with AGENTS.md](https://developers.openai.com/codex/guides/agents-md).
+- OpenAI Codex reads `AGENTS.md` from its home directory (`~/.codex` by default). Then it reads the same file from each directory from the Git root down to the working directory. In every directory that it reads, it prefers an `AGENTS.override.md` in the same directory. See [Custom instructions with AGENTS.md](https://developers.openai.com/codex/guides/agents-md).
 
 ## Use
 

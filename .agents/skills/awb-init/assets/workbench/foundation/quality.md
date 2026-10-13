@@ -1,6 +1,6 @@
 # Data quality
 
-Record shared limitations, errors, checks, and accepted corrections that affect canonical data. Investigation-specific filters belong in the settings of that investigation. Do not record execution mistakes. When `foundation/sources.md` restricts copies of the values of the source, confirm before you commit this file. Its rows quote up to three example values.
+Record shared limitations, errors, checks, and accepted corrections that affect canonical data. Investigation-specific filters belong in the settings of that investigation. Do not record execution mistakes. When `foundation/sources.md` restricts copies of the values of the source, confirm before you commit this file, because its rows quote up to three example values.
 
 ## Active limitations and issues
 
