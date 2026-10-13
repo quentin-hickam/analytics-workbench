@@ -1132,10 +1132,15 @@ def cli_export(root: Path, argv: list[str]) -> int:
 
 REVIEW_RULES = "foundation/review-rules.md"
 _SEVERITIES = ("error", "warning")
-_AREA = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
-_RULE_HEADING = re.compile(r"## (R-([a-z0-9]+(?:-[a-z0-9]+)*)-(\d{3,}))\s*")
+# An area's last segment holds a letter, so R-<area>-NNN never reads as another area's ID.
+_AREA_TEXT = r"(?:[a-z0-9]+-)*[a-z0-9]*[a-z][a-z0-9]*"
+_AREA = re.compile(_AREA_TEXT)
+_RULE_HEADING = re.compile(rf"## (R-({_AREA_TEXT})-(\d{{3,}}))\s*")
 _RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Fix|Added): ?(.*)")
+_LOOSE_FIELD = re.compile(r"\s*[-*+]?\s*(?:Severity|Rule|Pattern|Fix|Added)\s*:", re.IGNORECASE)
 _REQUIRED_FIELDS = ("Severity", "Rule", "Pattern", "Fix")
+_BAD_HEADING = ("rule heading is not ## R-<area>-NNN with a lowercase area, its last part holding a letter, "
+                "and a three-digit number")
 _REVIEWED = ("findings.md", "methodology.md")
 _MATCH_CAP = 20
 _RULES_HEADER = """# Review rules
@@ -1157,33 +1162,49 @@ def _parse_pattern(value):
         return None, None
     if len(value) < 3 or not (value.startswith("`") and value.endswith("`")):
         return None, "Pattern is neither none nor a regular expression in backticks"
+    problem = _pattern_problem(value[1:-1])
+    return (None, f"Pattern {problem}") if problem else (value[1:-1], None)
+
+
+def _pattern_problem(pattern):
+    """Why a regular expression is unusable, or None; Python raises more than re.error on some."""
     try:
-        re.compile(value[1:-1])
-    except re.error as error:
-        return None, f"Pattern does not compile: {error}"
-    return value[1:-1], None
+        re.compile(pattern)
+    except (re.error, OverflowError, RecursionError, ValueError) as error:
+        return f"does not compile: {error}"
+    return None
 
 
 def parse_review_rules(text: str) -> tuple:
-    """(rules, problems) from review-rules.md: each `## R-<area>-NNN` section and its `- Field:` lines."""
+    """(rules, problems) from review-rules.md: each `## R-<area>-NNN` section and its `- Field:` lines.
+
+    Any heading ends a section. Inside a rule section only blank and `- Field:` lines may appear, and
+    outside one no heading may name a rule and no line may look like a field, so a rule that a hand edit
+    breaks is reported instead of silently dropped, and its ID is never handed out again by add."""
     rules, problems, current = [], [], None
     for number, line in enumerate(text.splitlines(), 1):
-        if line.startswith("## "):
+        if line.lstrip().startswith("#"):
             heading = _RULE_HEADING.fullmatch(line)
             current = None
             if heading:
                 current = {"id": heading[1], "area": heading[2], "number": int(heading[3]), "line": number,
                            "fields": {}}
                 rules.append(current)
-            elif line[3:].lstrip().startswith("R-"):
-                problems.append({"line": number, "problem": "rule heading is not ## R-<area>-NNN with a "
-                                                            "lowercase area and a three-digit number"})
+            elif re.search(r"R-\w", line):
+                problems.append({"line": number, "problem": _BAD_HEADING})
             continue
-        field = _RULE_FIELD.fullmatch(line.rstrip()) if current else None
+        if current is None:
+            if _LOOSE_FIELD.match(line):
+                problems.append({"line": number, "problem": "rule field outside a ## R-<area>-NNN section"})
+            continue
+        field = _RULE_FIELD.fullmatch(line.rstrip())
         if field:
             if field[1] in current["fields"]:
                 problems.append({"rule": current["id"], "problem": f"repeated {field[1]} line"})
             current["fields"][field[1]] = field[2].strip()
+        elif line.strip():
+            problems.append({"rule": current["id"], "line": number,
+                             "problem": "line is not a - Severity, Rule, Pattern, Fix, or Added field"})
     seen = set()
     for rule in rules:
         fields = rule.pop("fields")
@@ -1271,7 +1292,9 @@ def add_review_rule(root, area, severity, rule, fix, pattern=None, *, today=None
     day = today or datetime.now().astimezone().date().isoformat()
     entry = (f"## {rule_id}\n\n- Severity: {severity}\n- Rule: {rule}\n"
              f"- Pattern: {f'`{pattern}`' if pattern else 'none'}\n- Fix: {fix}\n- Added: {day}\n")
-    existing = path.read_text(encoding="utf-8") if parsed is not None else _RULES_HEADER
+    existing = path.read_text(encoding="utf-8") if parsed is not None else ""
+    if not existing.strip():
+        existing = _RULES_HEADER
     path.parent.mkdir(parents=True, exist_ok=True)
     _write_text(path, existing.rstrip("\n") + "\n\n" + entry)
     return {"added": rule_id, "rules_file": REVIEW_RULES, "created": parsed is None,
@@ -1305,7 +1328,8 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
                "writing nothing, when the rule file has problems that `review-rules check` lists.\nExit 0 "
                "added; 1 refused; 2 unusable arguments.")
     add.add_argument("--area", required=True, help="what the rule governs, lowercase words joined by '-', "
-                                                   "such as periods or metric-definitions")
+                                                   "the last not all digits, such as periods or "
+                                                   "metric-definitions")
     add.add_argument("--severity", required=True, choices=_SEVERITIES,
                      help="error: a violation must be repaired; warning: repaired or accepted by the user")
     add.add_argument("--rule", required=True, help="what every draft must do, in one line")
@@ -1319,16 +1343,15 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
         _print(report)
         return 1 if report["problems"] or report["errors"] else 0
     if not _AREA.fullmatch(args.area):
-        add.error(f"--area must be lowercase letters and digits joined by '-': {args.area!r}")
+        add.error(f"--area must be lowercase letters and digits joined by '-', the last part holding a "
+                  f"letter: {args.area!r}")
     for name in ("rule", "fix", "pattern"):
         value = getattr(args, name)
-        if value is not None and (not value.strip() or "\n" in value or "\r" in value):
+        # Every line break the parser splits on, not only \n and \r, or the rest of the text is lost.
+        if value is not None and (not value.strip() or value.splitlines() != [value]):
             add.error(f"--{name} must be one non-blank line")
-    if args.pattern is not None:
-        try:
-            re.compile(args.pattern)
-        except re.error as error:
-            add.error(f"--pattern does not compile: {error}")
+    if args.pattern is not None and (problem := _pattern_problem(args.pattern)):
+        add.error(f"--pattern {problem}")
     report = add_review_rule(Path(root), args.area, args.severity, args.rule.strip(), args.fix.strip(),
                              args.pattern)
     _print(report)

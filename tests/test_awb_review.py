@@ -2,8 +2,11 @@
 # test_correction_becomes_a_numbered_rule: add creates foundation/review-rules.md with its header and R-<area>-001, numbers per area after every ID used, retired and hand-numbered ones included, and never renumbers earlier rules.
 # test_next_review_reports_against_the_rule: check lists every rule in file order with matched lines from both narratives, no match, no pattern, and retired; matches are capped; nothing is written.
 # test_check_without_rules_or_draft: no rule file reports none recorded and exits 0; a missing draft narrative is an error and exits 1.
-# test_malformed_rule_file_is_reported_and_blocks_add: a bad heading, a repeated ID or field, missing fields, an unknown severity, and an unusable pattern are problems; check exits 1 with the rule unchecked; add refuses and writes nothing.
-# test_add_rejects_unusable_arguments: a bad area, a multi-line or blank text, an unknown severity, or a pattern that does not compile exits 2 and writes nothing.
+# test_malformed_rule_file_is_reported_and_blocks_add: a bad heading, a repeated ID or field, missing fields, an unknown severity, and an unusable pattern (one overflowing included) are problems; check exits 1 with the rule unchecked; add refuses and writes nothing.
+# test_broken_rule_section_is_reported_not_dropped: a rule under a malformed heading, or field lines outside a rule section, are problems; check exits 1 and add refuses, so no ID is reused.
+# test_wrapped_field_line_is_reported: a line inside a rule section that is not a field, such as a wrapped Rule, is a problem rather than lost text.
+# test_add_to_an_empty_rule_file_writes_the_header: add to an empty rule file writes the header before the first rule.
+# test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes or blank, an unknown severity, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
 # test_pattern_round_trips_through_backticks: a pattern holding backticks, or the word none, is written in backticks and read back as the same expression.
 # test_package_and_release_invoke_the_read_only_review: both skills link the review brief and run it before their final command; the brief limits the reviewer to read tools and the read-only command, asks one line per rule, and AGENTS.md says when to append.
 
@@ -135,13 +138,14 @@ def test_malformed_rule_file_is_reported_and_blocks_add(project, capsys):
                     "## R-periods-001\n\n- Severity: error\n- Rule: a\n- Pattern: none\n- Fix: b\n\n"
                     "## R-periods-001\n\n- Severity: error\n- Rule: a\n- Rule: again\n- Pattern: none\n- Fix: b\n\n"
                     "## R-periods-002\n\n- Severity: blocker\n- Rule: a\n- Pattern: (unclosed\n\n"
-                    "## R-periods-003\n\n- Severity: warning\n- Rule: a\n- Pattern: `(unclosed`\n- Fix: b\n")
+                    "## R-periods-003\n\n- Severity: warning\n- Rule: a\n- Pattern: `(unclosed`\n- Fix: b\n\n"
+                    "## R-periods-004\n\n- Severity: warning\n- Rule: a\n- Pattern: `x{4294967296}`\n- Fix: b\n")
     before = path.read_text()
     code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
     assert code == 1
     problems = out["problems"]
-    assert problems[0] == {"line": 3, "problem": "rule heading is not ## R-<area>-NNN with a lowercase area and "
-                                                 "a three-digit number"}
+    assert problems[0] == {"line": 3, "problem": "rule heading is not ## R-<area>-NNN with a lowercase area, its "
+                                                 "last part holding a letter, and a three-digit number"}
     assert {"rule": "R-periods-001", "problem": "repeated Rule line"} in problems
     assert {"rule": "R-periods-001", "problem": "rule ID appears more than once"} in problems
     assert {"rule": "R-periods-002", "problem": "missing Fix"} in problems
@@ -150,14 +154,62 @@ def test_malformed_rule_file_is_reported_and_blocks_add(project, capsys):
         in problems
     assert any(p.get("rule") == "R-periods-003" and p["problem"].startswith("Pattern does not compile")
                for p in problems)
-    assert [row["status"] for row in out["rules"]] == ["no pattern", "no pattern", "unchecked", "unchecked"]
+    assert any(p.get("rule") == "R-periods-004" and p["problem"].startswith("Pattern does not compile")
+               for p in problems)  # OverflowError, not re.error
+    assert [row["status"] for row in out["rules"]] == ["no pattern", "no pattern", "unchecked", "unchecked",
+                                                       "unchecked"]
     code, out = add(project, capsys)
     assert code == 1 and out["added"] is None and out["problems"] and path.read_text() == before
 
 
+RULE = "- Severity: error\n- Rule: Compare only complete months.\n- Pattern: none\n- Fix: Drop it.\n"
+
+
+@pytest.mark.parametrize("text, problem", [
+    ("### R-periods-001\n\n" + RULE, {"line": 3, "problem": "rule heading is not ## R-<area>-NNN with a "
+                                      "lowercase area, its last part holding a letter, and a three-digit number"}),
+    (" ## R-periods-001\n\n" + RULE, {"line": 3, "problem": "rule heading is not ## R-<area>-NNN with a "
+                                      "lowercase area, its last part holding a letter, and a three-digit number"}),
+    ("## R-periods-001-001\n\n" + RULE, {"line": 3, "problem": "rule heading is not ## R-<area>-NNN with a "
+                                         "lowercase area, its last part holding a letter, and a three-digit "
+                                         "number"}),
+    ("## Corrections\n\n" + RULE, {"line": 5, "problem": "rule field outside a ## R-<area>-NNN section"}),
+    ("Severity: error\n", {"line": 3, "problem": "rule field outside a ## R-<area>-NNN section"})])
+def test_broken_rule_section_is_reported_not_dropped(project, capsys, text, problem):
+    # A rule a hand edit breaks is a problem, never a silently missing rule whose ID add hands out again.
+    path = project / RULES
+    path.parent.mkdir(parents=True)
+    path.write_text("# Review rules\n\n" + text)
+    before = path.read_text()
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 1 and out["rules"] == [] and problem in out["problems"]
+    code, out = add(project, capsys)
+    assert code == 1 and out["added"] is None and path.read_text() == before
+
+
+def test_wrapped_field_line_is_reported(project, capsys):
+    path = project / RULES
+    path.parent.mkdir(parents=True)
+    path.write_text("# Review rules\n\n## R-periods-001\n\n- Severity: error\n- Rule: Never compare\n"
+                    "  partial months.\n- Pattern: none\n- Fix: Drop it.\n")
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 1 and out["problems"] == [
+        {"rule": "R-periods-001", "line": 7, "problem": "line is not a - Severity, Rule, Pattern, Fix, or Added field"}]
+
+
+def test_add_to_an_empty_rule_file_writes_the_header(project, capsys):
+    (project / RULES).parent.mkdir(parents=True)
+    (project / RULES).write_text("\n")
+    code, out = add(project, capsys)
+    assert code == 0 and out["added"] == "R-periods-001" and out["created"] is False
+    assert (project / RULES).read_text().startswith("# Review rules\n")
+
+
 @pytest.mark.parametrize("change", [
-    {"area": "Periods"}, {"area": "periods_x"}, {"area": "-periods"}, {"rule": "two\nlines"}, {"fix": "  "},
-    {"severity": "retired"}, {"pattern": "(unclosed"}, {"pattern": ""}])
+    {"area": "Periods"}, {"area": "periods_x"}, {"area": "-periods"}, {"area": "periods-001"}, {"area": "2024"},
+    {"rule": "two\nlines"}, {"rule": "Never compare\u2028partial months."}, {"fix": "a\x85b"},
+    {"pattern": "a\vb"}, {"fix": "  "}, {"severity": "retired"}, {"pattern": "(unclosed"}, {"pattern": ""},
+    {"pattern": "x{4294967296}"}])
 def test_add_rejects_unusable_arguments(project, capsys, change):
     code, out = add(project, capsys, **change)
     assert code == 2 and out is None and not (project / RULES).exists()
