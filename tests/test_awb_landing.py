@@ -1,5 +1,7 @@
 # Kept cases:
 # test_land_writes_complete_provenance_and_publishes_directory: provenance schema/key order, metadata-relative paths, checksums and partial rename.
+# test_land_records_upstream_validators_the_fetch_supplies: upstream fields filled during fetch are recorded per file in fixed key order, with null for absent fields and files.
+# test_land_refuses_malformed_upstream_unpublished: unknown fields, blank or non-string values, and unlanded files keep the acquisition partial.
 # test_land_keeps_failed_fetch_unpublished: fetch failure keeps partial files and writes no provenance.
 # test_publish_records_inputs_and_uncommitted_conversion: publication schema/key order, path bases, copied input checksums, no-commit state and partial rename.
 # test_publish_records_resolved_head: publication conversion_commit records the producing Git HEAD.
@@ -72,9 +74,9 @@ def test_land_writes_complete_provenance_and_publishes_directory(tmp_path):
     assert provenance["notes"] == "café"
     assert provenance["files"] == [
         {"path": "empty.csv", "bytes": 0, "sha256": hashlib.sha256(b"").hexdigest(),
-         "records": None},
+         "records": None, "upstream": None},
         {"path": "nested/page.json", "bytes": 3, "sha256": hashlib.sha256(b"abc").hexdigest(),
-         "records": 3},
+         "records": 3, "upstream": None},
     ]
     for name in ("started_at", "completed_at"):
         timestamp = datetime.fromisoformat(provenance[name])
@@ -82,6 +84,47 @@ def test_land_writes_complete_provenance_and_publishes_directory(tmp_path):
         assert timestamp.microsecond == 0
     assert raw.endswith("\n")
     assert raw.startswith('{\n  "source": "api",\n')
+
+
+def test_land_records_upstream_validators_the_fetch_supplies(tmp_path):
+    upstream = {}
+
+    def fetch(directory):
+        (directory / "a.csv").write_bytes(b"a")
+        (directory / "b.csv").write_bytes(b"b")
+        (directory / "c.csv").write_bytes(b"c")
+        upstream["a.csv"] = {"url": "https://example.test/a.csv", "etag": '"v1"',
+                             "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"}
+        upstream["b.csv"] = {"url": "s3://bucket/b.csv", "version_id": "3HL4kqtJ"}
+        upstream["c.csv"] = {"etag": None}
+
+    final = landing.land(tmp_path, "api", "batch-1", fetch, request="query", upstream=upstream)
+    files = json.loads((final / "provenance.json").read_text(encoding="utf-8"))["files"]
+    assert [list(file) for file in files] == [["path", "bytes", "sha256", "records", "upstream"]] * 3
+    assert list(files[0]["upstream"]) == ["url", "etag", "last_modified", "version_id"]
+    assert [file["upstream"] for file in files] == [
+        {"url": "https://example.test/a.csv", "etag": '"v1"',
+         "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT", "version_id": None},
+        {"url": "s3://bucket/b.csv", "etag": None, "last_modified": None, "version_id": "3HL4kqtJ"},
+        None,
+    ]
+
+
+@pytest.mark.parametrize("upstream, message", [
+    ({"page.json": {"url": "https://example.test", "md5": "x"}}, "upstream fields of page.json"),
+    ({"page.json": {"etag": " "}}, "nonblank strings"),
+    ({"page.json": {"etag": 7}}, "nonblank strings"),
+    ({"page.json": "https://example.test"}, "upstream fields of page.json"),
+    ({"other.json": {"etag": '"v1"'}}, "not landed"),
+    (["page.json"], "dictionary of per-file"),
+])
+def test_land_refuses_malformed_upstream_unpublished(tmp_path, upstream, message):
+    with pytest.raises(ValueError, match=message):
+        landing.land(tmp_path, "api", "batch-1",
+                     lambda directory: (directory / "page.json").write_bytes(b"abc"),
+                     request="query", upstream=upstream)
+    assert not tmp_path.joinpath("data/raw/api/batch-1").exists()
+    assert not (tmp_path / "data/raw/api/batch-1.partial/provenance.json").exists()
 
 
 def test_land_keeps_failed_fetch_unpublished(tmp_path):

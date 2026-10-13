@@ -5,8 +5,9 @@ its cli_* functions as the land, retain, publish, and sql commands.
 
 data/raw/<source>/<acquisition-id>/provenance.json:
     {source, acquisition_id, request, started_at, completed_at, status,
-     files: [{path, bytes, sha256, records}], notes}
-    status is "complete"; records is an integer or null.
+     files: [{path, bytes, sha256, records, upstream}], notes}
+    status is "complete"; records is an integer or null; upstream is null or
+    {url, etag, last_modified, version_id}, each a string or null, as the fetch received them.
 data/parquet/<dataset>/<publication-id>/publication.json:
     {dataset, publication_id,
      inputs: [{source, acquisition_id, files: [{path, sha256}]}],
@@ -78,6 +79,29 @@ def _complete_provenance(directory):
     return provenance
 
 
+UPSTREAM_FIELDS = ("url", "etag", "last_modified", "version_id")
+
+
+def _upstream(upstream, paths):
+    """Return {path: {url, etag, last_modified, version_id}} from land()'s upstream, else raise ValueError."""
+    if upstream is None:
+        return {}
+    if not isinstance(upstream, dict):
+        raise ValueError("upstream must be a dictionary of per-file dictionaries")
+    if set(upstream) - set(paths):
+        raise ValueError("Upstream fields name files that were not landed")
+    entries = {}
+    for path, fields in upstream.items():
+        if not isinstance(fields, dict) or set(fields) - set(UPSTREAM_FIELDS):
+            raise ValueError(f"upstream fields of {path} must be a dictionary of {', '.join(UPSTREAM_FIELDS)}")
+        if any(value is not None and (not isinstance(value, str) or not value.strip())
+               for value in fields.values()):
+            raise ValueError(f"upstream fields of {path} must be nonblank strings or None")
+        if any(value is not None for value in fields.values()):
+            entries[path] = {name: fields.get(name) for name in UPSTREAM_FIELDS}
+    return entries
+
+
 def _finish(partial, final, name, value):
     """Write the metadata file, then rename partial to final; on failure leave no metadata."""
     # Serialize before opening so a serialization error leaves no metadata file.
@@ -96,8 +120,12 @@ def _finish(partial, final, name, value):
 
 def land(project_root: str | Path, source: str, acquisition_id: str,
          fetch: Callable[[Path], object], *, request: Any,
-         records: dict[str, int] | None = None, notes: Any = None) -> Path:
-    """Fetch original files into a partial directory, then write provenance and rename it."""
+         records: dict[str, int] | None = None,
+         upstream: dict[str, dict[str, str | None]] | None = None, notes: Any = None) -> Path:
+    """Fetch original files into a partial directory, then write provenance and rename it.
+
+    records and upstream are read after fetch returns, so fetch may fill them as it writes files.
+    """
     _check_name(source)
     _check_name(acquisition_id)
     final = Path(project_root) / "data/raw" / source / acquisition_id
@@ -116,7 +144,9 @@ def land(project_root: str | Path, source: str, acquisition_id: str,
             raise ValueError("records must be a dictionary of integer counts")
         if set(records) - set(paths):
             raise ValueError("Record counts name files that were not landed")
-    files = [{**entry, "records": (records or {}).get(entry["path"])}
+    validators = _upstream(upstream, paths)
+    files = [{**entry, "records": (records or {}).get(entry["path"]),
+              "upstream": validators.get(entry["path"])}
              for entry in _file_entries(partial, paths)]
     return _finish(partial, final, "provenance.json", {
         "source": source,
