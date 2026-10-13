@@ -18,6 +18,8 @@ The analytical results this package represents.
 - `inputs`: the inputs actually used: source and acquisition or publication identifiers with the checksums their provenance or publication files record, and the view definitions read with their checksums; and
 - `analytical_settings`: the analytical settings represented by the results.
 
+Each result's runtime is recorded beside it under `results`, in **Packaging state**.
+
 `python3 src/awb.py export` writes these fields from the represented results' evidence files. When every result records the same value, the field holds it; when results differ, it holds each distinct value with the results that recorded it, under `value` and `results`. `inputs` holds `publications`, `acquisitions`, and `views` lists copied from the evidence; list entries name the results that recorded them under `results`. An unknown is `{"unknown": "<reason>"}`. For an `uncommitted` state, `producing_uncommitted_changes` holds the checksum of every producing file.
 
 ## Packaging state
@@ -27,7 +29,7 @@ The operation that assembled this package, recorded separately from the producin
 - `packaging_commit`: the packaging checkout commit;
 - `packaging_uncommitted_changes`: `none`, or the relevant uncommitted package-source paths;
 - `export_checks`: each serialized result's `compare_evidence` output, or `none` without exports; and
-- `results`: every represented result, serialized or not, as `result_id` and `evidence` path.
+- `results`: every represented result, serialized or not, as `result_id`, `evidence` path, and `runtime`, the Python version, platform, and package versions its evidence recorded, or `unknown` with the reason when it recorded none.
 
 `export` writes `packaging_commit` and `packaging_uncommitted_changes` (paths under `src/` and `package-format/`), and `export_checks` as one entry per result, each with `result_id`, `evidence`, and the unchanged `comparisons`: a serialized result's entry is replaced, a represented result not serialized keeps its entry, and an entry outside the represented set is dropped.
 

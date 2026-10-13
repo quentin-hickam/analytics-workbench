@@ -1044,8 +1044,11 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     kept = {c.get("result_id"): c for c in previous if isinstance(c, dict)}
     entries = [checks.get(r) or kept.get(r) for r in represented]
     record["export_checks"] = [e for e in entries if e] or "none"
-    # Every represented result with its evidence, serialized or not, so status can see a later rerun.
-    record["results"] = [{"result_id": r, "evidence": evidence_paths[r]} for r in represented]
+    # Every represented result with its evidence, serialized or not, so status can see a later rerun,
+    # and the runtime that evidence recorded.
+    record["results"] = [{"result_id": r, "evidence": evidence_paths[r],
+                          "runtime": evidence[r].get("runtime", {"unknown": "evidence lacks runtime"})}
+                         for r in represented]
     fields = producing_state(evidence)
     fields["packaging_commit"], fields["packaging_uncommitted_changes"] = packaging_state(root)
     record.update(fields)
