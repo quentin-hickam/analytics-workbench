@@ -133,7 +133,9 @@ _LEADING = "([{<\"'*~!“‘"
 _TRAILING = ")]}>\"'*~.,;:!?”’"
 _POSSESSIVE = re.compile(r"['’]s$")
 
-_PATH = re.compile(r"\w/\w")
+_PATH_PREFIX = re.compile(r"^(?:\.{1,2}/|/|~/|[A-Za-z][A-Za-z0-9+.-]*://)")
+_PATH_ROOTS = {"data", "foundation", "investigations", "deliveries", "src", "views",
+               "queries", "results", "evidence", "exploration", "scans"}
 _FRACTION = re.compile(r"[\d.,]+(?:/[\d.,]+)+")  # 3/4, 6/30/2026: numbers, not paths
 _FILE_NAME = re.compile(
     r"\.(?:md|py|csv|parquet|json|sql|png|svg|duckdb|db|xlsx|yaml|yml|toml|txt|ipynb)$",
@@ -157,9 +159,13 @@ def _unwrap(token):
     return token
 
 
-def _token_kind(token):
-    if token.startswith(("./", "../")) or (_PATH.search(token) and not _FRACTION.fullmatch(token)):
-        return "path"
+def _token_kind(token, names):
+    if "/" in token and not _FRACTION.fullmatch(token):
+        segments = token.split("/")
+        if (_PATH_PREFIX.match(token) or len(segments) >= 3
+                or any(_FILE_NAME.search(segment) or "_" in segment for segment in segments)
+                or segments[0] in _PATH_ROOTS or segments[0] in names):
+            return "path"
     if _FILE_NAME.search(token):
         return "file"
     if _SNAKE.search(token) or _DOTTED.search(token):
@@ -179,7 +185,7 @@ def _name_pattern(names):
     )
 
 
-def _scan_line(number, line, names):
+def _scan_line(number, line, names, pattern):
     found = []
     for match in _CODE_SPAN.finditer(line):
         found.append((match.start(), "code", match.group(0)))
@@ -188,8 +194,8 @@ def _scan_line(number, line, names):
         line = _blank(line, match.start() + 1, match.end())
 
     taken = []
-    if names is not None:
-        for match in names.finditer(line):
+    if pattern is not None:
+        for match in pattern.finditer(line):
             found.append((match.start(), "name", match.group(0)))
             taken.append((match.start(), match.end()))
 
@@ -199,7 +205,7 @@ def _scan_line(number, line, names):
         end = start + len(token)
         if not token or any(start < stop and begin < end for begin, stop in taken):
             continue
-        kind = _token_kind(token)
+        kind = _token_kind(token, names)
         if kind:
             found.append((start, kind, token))
 
@@ -210,6 +216,7 @@ def check_findings(path: str | os.PathLike, *, names=()) -> list[dict]:
     """List code, paths, file names, identifiers, SHAs, and given names, by line then column."""
     text = Path(path).read_text(encoding="utf-8")
     text = _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
+    names = set(names)
     pattern = _name_pattern(names)
 
     rows = []
@@ -226,7 +233,7 @@ def check_findings(path: str | os.PathLike, *, names=()) -> list[dict]:
             fence = opening.group(1)
             rows.append({"line": number, "kind": "code", "text": line.strip()})
             continue
-        rows.extend(_scan_line(number, line, pattern))
+        rows.extend(_scan_line(number, line, names, pattern))
     return rows
 
 
