@@ -74,7 +74,7 @@ After installing a newer release of the skills, bring each existing workbench up
 
 > Use awb-init to repair this workbench.
 
-Repair runs the helper installer with `--upgrade`. It replaces only unmodified copies of earlier shipped helpers, package formats, and workbench guides, which it recognizes from the checksum receipt it writes at each install (or, for copies installed before receipts, a fixed list of earlier shipped hashes); it reports customized copies for you to decide and removes retired files only when you ask. The agent then reconciles the project's adapted `AGENTS.md` and `README.md` against the current templates.
+Repair runs the helper installer with `--upgrade`. It replaces only unmodified copies of earlier shipped helpers, package formats, and workbench guides, which it recognizes from the checksum receipt it writes at each install (a copy installed before receipts reports as customized); it reports customized copies for you to decide and removes retired files only when you ask. The agent then reconciles the project's adapted `AGENTS.md` and `README.md` against the current templates.
 
 <!-- dist:exclude -->
 ## Design and validation

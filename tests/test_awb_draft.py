@@ -3,6 +3,7 @@
 # test_names_cover_project_records: names hold created views, sources without CTEs or table functions, settings dotted paths (not bare nested keys), and result IDs from evidence and state links; plain words, including plain investigation and package names, are left out.
 # test_toml_keys_fall_back_to_tomli_then_key_lines: without tomllib, settings keys parse with tomli (no bare nested keys); without either, table headers and key lines; display.toml then names the missing package.
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten, revised_at stamped only when it changes, other manifest fields kept; nothing is written outside the draft.
+# test_evidence_older_than_scoped_3_is_reported_for_rerun: check-draft names an awb-evidence/1 file among its name-set problems with a rerun instruction.
 # test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
@@ -703,3 +704,12 @@ def test_check_draft_checks_findings_drift(project, verify_only):
     assert not report["passed"] and "install_helpers.py --upgrade" in " ".join(report["errors"])
     (project / "investigations/inv/findings.json").unlink()
     assert draft.check_draft(project, "inv", "pkg", verify_only=verify_only)["passed"]
+
+
+def test_evidence_older_than_scoped_3_is_reported_for_rerun(project, capsys):
+    path = project / "investigations/inv/evidence/r-001.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), "schema": "awb-evidence/1"}))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and not report["passed"]
+    assert ("investigations/inv/evidence/r-001.json: awb-evidence/1 predates awb-evidence/3; rerun the result"
+            in report["names_problems"])

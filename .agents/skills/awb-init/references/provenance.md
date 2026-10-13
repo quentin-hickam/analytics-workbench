@@ -16,4 +16,4 @@ Settings are recorded per result: `record_evidence()` refuses a settings file wi
 
 ## Evidence comparison
 
-`awb-package`'s `export` command and `python3 src/awb.py stale`, run `compare_evidence(root, evidence_path)`: five comparisons in order (`committed-code`, `uncommitted-code`, `views`, `inputs`, `settings`), each `{name, paths, outcome, detail}`. It compares state; it does not revalidate. It reads `awb-evidence/1`, `/2`, and `/3` files; the first two, and `/3` files written before settings were always scoped, record settings whole.
+`awb-package`'s `export` command and `python3 src/awb.py stale`, run `compare_evidence(root, evidence_path)`: five comparisons in order (`committed-code`, `uncommitted-code`, `views`, `inputs`, `settings`), each `{name, paths, outcome, detail}`. It compares state; it does not revalidate. It reads only `awb-evidence/3` files whose settings name their result; an older file, `/1`, `/2`, or an unscoped `/3`, fails all five comparisons as predating them, so rerun its result before export.

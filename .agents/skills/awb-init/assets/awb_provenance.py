@@ -15,9 +15,8 @@ out of producing_paths, so other results' tables and other top-level tables neve
 result stale. Producing paths are the investigation's code (run.py and other files outside its
 records, queries/ and settings), the result's own queries, and src/ except the helpers that only
 dispatch, record, or package (awb.py, provenance.py, packaging/), so a repair replacing those
-stales nothing. compare_evidence also reads awb-evidence/1 and /2 files, and /3 files written
-before scoping was required: those record whole-file settings, and /1 files carry a figure
-entry, which it ignores.
+stales nothing. compare_evidence reads only awb-evidence/3 files whose settings name their result;
+an older file fails every comparison as predating them, so its result must be rerun.
 Paths are project-relative POSIX, except that a files[].path copied from publication.json or
 provenance.json is relative to the directory holding that file, and a publication's
 inputs[].files[].path to its acquisition directory.
@@ -114,7 +113,7 @@ def _view_publications(root, path):
         return {"unknown": f"{path}: {error}"}
 
 
-_SCHEMAS = ("awb-evidence/1", "awb-evidence/2", "awb-evidence/3")
+_SCHEMA = "awb-evidence/3"
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _DEFINES = re.compile(r"\bcreate\s+(?:or\s+replace\s+)?(?:temp(?:orary)?\s+)?(?:view|table)\s+"
                       r"(?:if\s+not\s+exists\s+)?((?:\"[^\"]+\"|\w+)(?:\.(?:\"[^\"]+\"|\w+))*)", re.I)
@@ -299,7 +298,7 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
         changes = [{"path": e["path"], "status": "uncommitted" if in_git else "no-vcs", **e}
                    for e in file_checksums(paths, root=root)]
     evidence = {
-        "schema": "awb-evidence/3", "investigation": investigation, "result_id": result_id,
+        "schema": _SCHEMA, "investigation": investigation, "result_id": result_id,
         "recorded_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "producing_commit": commit, "producing_paths": paths, "producing_uncommitted_changes": changes,
         "views": view_entries,
@@ -360,9 +359,10 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
     try:
         evidence_path = _relative(root, evidence_path)
         evidence = json.loads((root / evidence_path).read_text())
-        if evidence["schema"] not in _SCHEMAS:
-            raise ValueError("wrong schema")
-    except (OSError, ValueError, KeyError, TypeError) as error:
+        if evidence["schema"] != _SCHEMA or not evidence["settings"].get("result"):
+            raise ValueError(f"{evidence['schema']} without result-scoped settings predates {_SCHEMA}; rerun the result"
+                             if str(evidence["schema"]).startswith("awb-evidence/") else "wrong schema")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         return [{"name": name, "paths": [evidence_path], "outcome": "fail",
                  "detail": f"missing evidence: {evidence_path}: {str(error).rstrip('.')}."} for name in names]
     comparisons = []
@@ -431,12 +431,11 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
                 entry = evidence["settings"]
                 _known({k: v for k, v in entry.items() if k != "content"})
                 paths = [entry["path"]]
-                scope = entry.get("result")
+                scope = entry["result"]
                 current = _settings(root, entry["path"])
                 old, new = entry["content"], current["content"]
                 if not _is_unknown(old) and not _is_unknown(new):
-                    if scope is not None:
-                        old, new = _settings_keys(old, scope), _settings_keys(_scoped(new, scope), scope)
+                    old, new = _settings_keys(old, scope), _settings_keys(_scoped(new, scope), scope)
                     keys = sorted(k for k in old.keys() | new.keys()
                                   if k not in old or k not in new or old[k] != new[k])
                     if keys:

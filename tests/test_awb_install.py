@@ -2,7 +2,7 @@
 # test_installs_every_missing_helper_and_guide: a bare workbench gets every src/ helper, src/awb.py included, both workbench guides, a requirements.txt and a receipt of what was installed; no package format.
 # test_requirements_match_helper_imports: the static requirements list equals the third-party imports of the shipped helpers and the run.py template, fallbacks included.
 # test_present_helpers_are_classified_and_kept: current, earlier and customized copies are reported and left byte for byte without --upgrade.
-# test_receipt_decides_before_the_legacy_list: a file matching its receipt entry is earlier; a file whose entry differs is customized even when the frozen list knows it.
+# test_receipt_alone_decides_earlier: a file matching its receipt entry is earlier; a file whose entry differs, or without an entry such as one installed before receipts, is customized.
 # test_package_formats_install_on_request: --package-formats installs missing formats into the receipt; without it present formats go unreported.
 # test_check_writes_nothing: --check reports missing helpers and the absent requirements file without writing.
 # test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited.
@@ -38,7 +38,6 @@ def load(name, path):
 
 
 installer = load("awb_install", SCRIPT)
-LEGACY = json.loads(installer.LEGACY.read_text())
 ASSETS = {path: SKILLS / asset for path, asset in installer.COPIED.items() if (SKILLS / asset).is_file()}
 INSTALLED = {path: asset for path, asset in ASSETS.items() if not path.startswith("package-format/")}
 PACKAGES = ["duckdb", "pandas", 'tomli; python_version < "3.11"']
@@ -64,23 +63,22 @@ def sha(data):
 
 
 def earlier_version(path):
-    """A version shipped before receipts other than the current asset, recovered from Git by its frozen hash."""
-    wanted = set(LEGACY[path]) - ({sha(ASSETS[path].read_bytes())} if path in ASSETS else set())
-    log = subprocess.run(["git", "log", "HEAD", "--format=", "--raw", "--no-abbrev", "--", ".agents/skills"],
-                         cwd=ROOT, check=True, capture_output=True, text=True).stdout
-    for blob in {line.split()[3] for line in log.splitlines() if line.startswith(":")}:
-        if set(blob) == {"0"}:
-            continue
-        data = subprocess.run(["git", "cat-file", "blob", blob], cwd=ROOT, capture_output=True).stdout
-        if sha(data) in wanted:
-            return data
-    raise AssertionError(f"no earlier version of {path} in history")
+    """Content standing in for a version an earlier install shipped; earlier() records it in the receipt."""
+    return f"# {path} as an earlier skills version shipped it\n".encode()
 
 
 def write(root, files):
     for path, data in files.items():
         (root / path).parent.mkdir(parents=True, exist_ok=True)
         (root / path).write_bytes(data)
+
+
+def earlier(root, files):
+    """Write earlier shipped copies and their receipt entries, as the install that wrote them would have."""
+    write(root, files)
+    entries = json.loads((root / ".awb-receipt.json").read_text()) if (root / ".awb-receipt.json").exists() else {}
+    entries.update({path: sha(data) for path, data in files.items()})
+    (root / ".awb-receipt.json").write_text(json.dumps(entries))
 
 
 def receipt(root):
@@ -123,10 +121,11 @@ def test_requirements_match_helper_imports():
 
 
 def test_present_helpers_are_classified_and_kept(project, imports_ok):
+    shipped = {"src/provenance.py": earlier_version("src/provenance.py"),
+               "workbench-guides/data.md": earlier_version("workbench-guides/data.md")}
     files = {"src/awb.py": ASSETS["src/awb.py"].read_bytes(),
-             "src/provenance.py": earlier_version("src/provenance.py"),
-             "src/exploration/validate.py": b"# our own validation\n",
-             "workbench-guides/data.md": earlier_version("workbench-guides/data.md")}
+             "src/exploration/validate.py": b"# our own validation\n", **shipped}
+    earlier(project, shipped)
     write(project, files)
     result = installer.install(project)
     assert {path: result["files"][path] for path in files} == {
@@ -136,29 +135,31 @@ def test_present_helpers_are_classified_and_kept(project, imports_ok):
     assert "--upgrade" in result["note"]
     assert all((project / path).read_bytes() == data for path, data in files.items())
     assert result["files"]["src/preparation/landing.py"] == "installed"
-    assert set(receipt(project)) == set(INSTALLED) - set(files)
+    assert set(receipt(project)) == set(INSTALLED) - {"src/awb.py", "src/exploration/validate.py"}
 
 
-def test_receipt_decides_before_the_legacy_list(project, imports_ok):
-    edited, legacy = b"# installed by a later skills version\n", earlier_version("src/provenance.py")
-    write(project, {"src/preparation/landing.py": edited, "src/provenance.py": legacy,
+def test_receipt_alone_decides_earlier(project, imports_ok):
+    edited, other = b"# installed by a later skills version\n", earlier_version("src/provenance.py")
+    write(project, {"src/preparation/landing.py": edited, "src/provenance.py": other,
+                    "workbench-guides/data.md": earlier_version("workbench-guides/data.md"),
                     ".awb-receipt.json": json.dumps({"src/preparation/landing.py": sha(edited),
                                                      "src/provenance.py": sha(b"another copy")}).encode()})
     result = installer.install(project, check=True, upgrade=True)
     assert result["files"]["src/preparation/landing.py"] == "earlier"
     assert result["files"]["src/provenance.py"] == "customized"
+    assert result["files"]["workbench-guides/data.md"] == "customized"  # installed before receipts
 
 
 def test_package_formats_install_on_request(project, imports_ok):
     formats = {path for path in ASSETS if path.startswith("package-format/")}
-    write(project, {"package-format/m365-assembly.md": earlier_version("package-format/m365-assembly.md")})
+    earlier(project, {"package-format/m365-assembly.md": earlier_version("package-format/m365-assembly.md")})
     assert not formats & set(installer.install(project)["files"])
     result = installer.install(project, package_formats=True)
     assert {path: result["files"][path] for path in formats} == {
         path: "earlier" if path == "package-format/m365-assembly.md" else "installed" for path in formats}
     assert {path: receipt(project)[path] for path in formats - {"package-format/m365-assembly.md"}} == {
         path: sha(ASSETS[path].read_bytes()) for path in formats - {"package-format/m365-assembly.md"}}
-    assert "package-format/m365-assembly.md" not in receipt(project)
+    assert receipt(project)["package-format/m365-assembly.md"] == sha(earlier_version("package-format/m365-assembly.md"))
 
 
 def test_check_writes_nothing(project, imports_ok):
@@ -233,14 +234,16 @@ def test_refuses_readme_only_directory(tmp_path):
 
 @pytest.fixture
 def upgradable(project):
-    write(project, {
-        "package-format/findings-template.md": ASSETS["package-format/findings-template.md"].read_bytes(),
+    earlier(project, {
         "package-format/m365-assembly.md": earlier_version("package-format/m365-assembly.md"),
         "workbench-guides/analysis.md": earlier_version("workbench-guides/analysis.md"),
-        "src/provenance.py": b"# our own provenance\n",
         "package-format/journal-template.md": earlier_version("package-format/journal-template.md"),
         "src/presentation/style.py": earlier_version("src/presentation/style.py"),
         "src/packaging/findings.py": earlier_version("src/packaging/findings.py"),
+    })
+    write(project, {
+        "package-format/findings-template.md": ASSETS["package-format/findings-template.md"].read_bytes(),
+        "src/provenance.py": b"# our own provenance\n",
         "src/packaging/charts.py": b"# our own charts\n",
     })
     for path, asset in INSTALLED.items():
@@ -274,8 +277,10 @@ def test_upgrade_replaces_only_earlier_copies(upgradable, imports_ok):
     assert result["files"]["workbench-guides/analysis.md"] == "replaced"
     assert (upgradable / "package-format/m365-assembly.md").read_bytes() == \
         ASSETS["package-format/m365-assembly.md"].read_bytes()
-    assert receipt(upgradable) == {path: sha(ASSETS[path].read_bytes()) for path in
-                                   ("package-format/m365-assembly.md", "workbench-guides/analysis.md")}
+    assert receipt(upgradable) == {
+        **{path: sha(ASSETS[path].read_bytes()) for path in ("package-format/m365-assembly.md", "workbench-guides/analysis.md")},
+        **{path: sha(earlier_version(path)) for path in
+           ("package-format/journal-template.md", "src/presentation/style.py", "src/packaging/findings.py")}}
     assert (upgradable / "src/provenance.py").read_bytes() == b"# our own provenance\n"
     assert result["files"]["src/provenance.py"] == "customized"
     assert (upgradable / "src/presentation/style.py").exists()
@@ -284,8 +289,6 @@ def test_upgrade_replaces_only_earlier_copies(upgradable, imports_ok):
 
 def test_upgrade_replace_and_remove_retired(upgradable, imports_ok):
     (upgradable / "package-format/executive-summary-template.md").write_text("ours\n")
-    write(upgradable, {".awb-receipt.json": json.dumps(
-        {"src/presentation/style.py": sha((upgradable / "src/presentation/style.py").read_bytes())}).encode()})
     result = installer.install(upgradable, upgrade=True, replace=["src/provenance.py"], remove_retired=True)
     assert result["files"]["src/provenance.py"] == "replaced" and "customized" not in result
     assert (upgradable / "src/provenance.py").read_bytes() == ASSETS["src/provenance.py"].read_bytes()
