@@ -74,7 +74,7 @@ I applied awb-package and read the package contract. I installed shared formats 
 
 Failures: none. Lookups: package contract, shared templates, manifest/export help and existing analytical/foundation records. Instruction conflict: package Gather asks you to read run.py. But BRIEF prohibits you to open bundled Python source, except for debugging. I kept the copied runner as a black box. Its run outputs, query/settings, result/evidence and history supplied its relevant behavior. I opened no Python source.
 
-Check-draft passed names/findings/charts/headings/inventory/verify/flags with no errors. The recorded commit plus checksum fully locate the producing provenance. I did not invent missing evidence. I did not clean up missing evidence with a commit only for appearance.
+Check-draft passed names/findings/charts/headings/inventory/verify/flags with no errors. The recorded commit plus checksum fully locate the producing provenance. I did not invent missing evidence. I did not make a commit for appearance to clean up missing evidence.
 
 ## 9 — Release and commit
 
@@ -130,7 +130,7 @@ Failures: none. No more references were necessary. The related-investigation ins
 
 ## Final verification and recording
 
-I verified that the inbox originals are equal to the landed copies. All three raw acquisition files (two CSVs plus provenance) are equal to the retained copies. Both numbered releases match their frozen manifest checksums, and the external release trees match exactly. There were no errors. Latest stale check: one existing result checked, zero stale. Git contains 10 local commits. At completion, only README/glossary/new channel-returns setup is not committed. There was no automatic commit after request 16.
+I verified that the inbox originals are equal to the landed copies. I also verified that all three raw acquisition files (two CSVs plus provenance) are equal to the retained copies. I verified that both numbered releases match their frozen manifest checksums, and that the external release trees match exactly. There were no errors. Latest stale check: one existing result checked, zero stale. Git contains 10 local commits. At completion, only README/glossary/new channel-returns setup is not committed. There was no automatic commit after request 16.
 
 The questions and supplied/assumed answers are logged in `roundtrips.txt`. The initial reconnaissance and the BRIEF read necessarily occurred before I knew its attribution/PATH rules. Those two initial shell calls do not have the necessary prefix. Every later shell command uses `: task=<N>;` first, and the necessary PATH export immediately after it. Commit calls use task=commit.
 
