@@ -70,11 +70,13 @@ That preserves the next numbered release, frozen from then on, once you have cho
 
 Landed source data gets the same treatment. `data/raw/` is also excluded from Git, and a landed original often cannot be fetched again, so before the first acquisition is landed the agent asks where landed originals are kept outside the checkout, records it on the project README's `Landed data is kept at` line, and copies each completed landing there when the location is reachable. `awb-status` reports landed data that exists only in the checkout.
 
+The third-party documentation a source assessment relies on, such as a data dictionary or codebook, is committed under `foundation/references/<source-id>/`; material whose license or confidentiality bars committing it stays outside the checkout, recorded by location and checksum. `awb-status` reports a source assessed from documentation with no linked reference.
+
 After installing a newer release of the skills, bring each existing workbench up to date with `awb-init`'s repair:
 
 > Use awb-init to repair this workbench.
 
-Repair runs the helper installer with `--upgrade`. It replaces only unmodified copies of earlier shipped helpers, package formats, and workbench guides, which it recognizes from the checksum receipt it writes at each install; it reports customized copies for you to decide and removes retired files only when you ask. The agent then reconciles the project's adapted `AGENTS.md` and `README.md` against the current templates.
+Repair runs the helper installer with `--upgrade`. It installs what the workbench lacks, such as the `foundation/references/` folder, and replaces only unmodified copies of earlier shipped helpers, package formats, and workbench guides, which it recognizes from the checksum receipt it writes at each install; it reports customized copies for you to decide and removes retired files only when you ask. The agent then reconciles the project's adapted `AGENTS.md` and `README.md` against the current templates.
 
 <!-- dist:exclude -->
 ## Design and validation
