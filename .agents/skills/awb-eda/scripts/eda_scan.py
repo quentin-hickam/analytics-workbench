@@ -4,8 +4,11 @@ Run with Python 3.10+ and duckdb: eda_scan.py PROJECT_ROOT DATASET [options]. DA
 canonical view name, loaded through the project's session() helper, or a project-relative
 publication directory or Parquet file. Scope, measure, and dimensions come from the
 investigation's settings unless options override them. Writes the complete scan to
-investigations/<name>/exploration/eda/<dataset>[-<label>].json, its only output file, and prints
-a compact summary. --show prints one section of that file without scanning again.
+investigations/<name>/exploration/eda/<scan>[-<label>].json, its only output file, and prints
+a compact summary that names it. <scan> is the dataset's name made safe for a file name, such
+as shifts-p1 for data/parquet/shifts/p1; the skill's references/scan-file.md gives the exact
+rule, which output_path() and publication_name() implement. --show prints one section of that
+file without scanning again.
 """
 
 import argparse
@@ -909,12 +912,13 @@ def parse(argv):
                         "for contrary trends (default 10)")
     parser.add_argument("--min-group", type=int, default=30, help="minimum rows in each half for a contrary "
                         "group, and for the highest and lowest group means (default 30)")
-    parser.add_argument("--label", help="writes <dataset>-<label>.json, so a second scope keeps the first")
+    parser.add_argument("--label", help="appends -<label> to the scan file's name (the summary prints "
+                        "it), so a second scope keeps the first")
     parser.add_argument("--show", metavar="PATH", help="print one section of the saved scan as compact JSON "
                         "and exit without scanning; see below")
     options = parser.parse_args(argv)
-    if options.label and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", options.label):
-        parser.error("--label must be a simple name")
+    if options.label is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", options.label):
+        parser.error("--label must be a simple name: an ASCII letter or digit, then [A-Za-z0-9._-]")
     if options.top < 1 or options.min_group < 1:
         parser.error("--top and --min-group must be positive")
     return options

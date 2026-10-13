@@ -1253,11 +1253,12 @@ def cli_state(root: Path, argv: list[str]) -> int:
     epilog = {
         None: "subcommands:\n" + "\n".join(f"  {name:<8} {summary}" for name, summary in actions.items())
               + "\nRun `awb.py state <subcommand> --help` for its arguments.\n",
-        "finding": "Refused: an ID without a row or evidence file; supported when the evidence is stale, or "
-                   "when failed or not-assessed checks have no caveat note; promoting a flagged finding or "
-                   "changing its caveat (only a run.py rerun clears a flag). --reason is required when the "
-                   "prior status is supported or flagged, or the new one supported or superseded; that "
-                   "change appends one history.md entry. Sets Last updated.\n",
+        "finding": "Refused: an ID without a row or evidence file; any change leaving a finding supported "
+                   "when its evidence is stale, or when its failed or not-assessed checks have no caveat note "
+                   "(kept notes count only for the checks they were written against); promoting a flagged "
+                   "finding or changing its caveat (only a run.py rerun clears a flag). --reason is required "
+                   "when the prior status is supported or flagged, or the new one supported or superseded; "
+                   "that change appends one history.md entry. Sets Last updated.\n",
         "render": "Prints discarded disk rows; without findings.json the table renders empty.\n",
         "flag": "Validates every flag before writing. --check writes nothing. Only a rerun clears a flag.\n",
         "issues": "--drop takes the item's number in the list or text only one item contains (case-sensitive), "

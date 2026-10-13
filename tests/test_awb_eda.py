@@ -9,10 +9,13 @@
 # test_variance_explained_matches_hand_computation: eta squared and group means for a two-group measure.
 # test_options_override_settings_and_unfit_settings_are_skipped: options replace settings; unfit settings print as not applied; a bad option or empty scope exits 2.
 # test_publication_path_with_label_and_float_columns_keep_distributions: publication directory scanned to a labelled file; unique floats are not keys.
+# test_scan_file_name_follows_the_documented_rule: the examples in references/scan-file.md hold; directory names join up to the last two path parts; characters outside ASCII [A-Za-z0-9._-] become "-", edges are trimmed, "dataset" fills an empty name; colliding names share one file; --help names no <dataset>-<label> file.
+# test_label_must_be_a_simple_name_and_an_empty_one_cannot_overwrite_the_unlabelled_scan: --label "" and other names outside the rule exit 2 before anything is written; "x." is accepted.
 # test_template_settings_take_the_period_from_parameters_and_name_unset_choices: [parameters] start/end scope the period; unset scope, measure, and dimensions print the options to pass.
 # test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one: --show walks keys and named list items without rescanning; a miss exits 2 listing what is there.
 
 import importlib.util
+import inspect
 import json
 from pathlib import Path
 import shutil
@@ -243,6 +246,54 @@ def test_publication_path_with_label_and_float_columns_keep_distributions(shifts
     assert near == ["shift_id"]
     assert all("shift_id" not in pair for pair in scan["grain"]["column_pair_keys"])
 
+
+def test_scan_file_name_follows_the_documented_rule(tmp_path, capsys):
+    doc = (ROOT / ".agents/skills/awb-eda/references/scan-file.md").read_text(encoding="utf-8")
+    examples = [("data/parquet/shifts/p1", "shifts-p1"), ("data", "data"), ("daily sales", "daily-sales"),
+                ("Ünïcode_view", "-n-code_view"), ("-n-code_view", "n-code_view"), ("café", "caf"),
+                ("日本", "dataset")]
+    for given, gives in examples:
+        assert f"`{given}` gives `{gives}`" in doc
+    assert "[^A-Za-z0-9._-]+" in inspect.getsource(eda.output_path) and "`[A-Za-z0-9._-]`" in doc
+    publication = tmp_path / "data/parquet/shifts/p1"
+    spaced = tmp_path / "data/parquet/shifts/2026 Q3"
+    for directory in (publication, spaced):
+        directory.mkdir(parents=True)
+    (tmp_path / "data/parquet/daily sales.parquet").touch()
+    assert eda.publication_name(tmp_path, publication) == "shifts-p1"
+    assert eda.publication_name(tmp_path, spaced) == "shifts-2026 Q3"
+    assert eda.publication_name(tmp_path, publication.parent) == "parquet-shifts"
+    assert eda.publication_name(tmp_path, tmp_path / "data") == "data"
+    assert eda.publication_name(tmp_path, tmp_path / "data/parquet/daily sales.parquet") == "daily sales"
+    folder = tmp_path / "investigations/overtime"
+    cases = [("shifts-2026 Q3", "raw"), ("daily sales", None), ("café", None), ("Ünïcode_view", None),
+             ("日本", None), ("-v.1.", None), ("+++", "eu"), ("sales", "raw"), ("sales-raw", None),
+             ("a + b", None), ("a/b", None)]
+    names = [eda.output_path(folder, name, label).relative_to(folder).as_posix() for name, label in cases]
+    assert names == ["exploration/eda/shifts-2026-Q3-raw.json", "exploration/eda/daily-sales.json",
+                     "exploration/eda/caf.json", "exploration/eda/n-code_view.json",
+                     "exploration/eda/dataset.json", "exploration/eda/v.1.json",
+                     "exploration/eda/dataset-eu.json", "exploration/eda/sales-raw.json",
+                     "exploration/eda/sales-raw.json", "exploration/eda/a-b.json", "exploration/eda/a-b.json"]
+    with pytest.raises(SystemExit):
+        eda.parse(["--help"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "appends -<label> to the scan file's name" in help_text and "<dataset>-<label>" not in help_text
+
+
+
+def test_label_must_be_a_simple_name_and_an_empty_one_cannot_overwrite_the_unlabelled_scan(tmp_path, capsys):
+    root = project(tmp_path)
+    saved = write(root, "investigations/overtime/exploration/eda/shifts.json", '{"format": "awb-eda/1"}')
+    for label in ("", "-x", ".x", "a b", "é"):
+        with pytest.raises(SystemExit) as exit:
+            eda.main([str(root), "shifts", f"--label={label}"])
+        assert exit.value.code == 2
+        assert "--label must be a simple name: an ASCII letter or digit, then [A-Za-z0-9._-]" in capsys.readouterr().err
+    assert saved.read_text() == '{"format": "awb-eda/1"}'
+    assert [p.name for p in saved.parent.iterdir()] == ["shifts.json"]
+    assert eda.parse([str(root), "shifts", "--label", "x."]).label == "x."
+    assert eda.parse([str(root), "shifts"]).label is None
 
 TEMPLATE = """[parameters]
 start = 2025-07-01
