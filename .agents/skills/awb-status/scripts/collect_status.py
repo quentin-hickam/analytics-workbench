@@ -15,7 +15,7 @@ import subprocess
 
 DISPOSITIONS = {"none", "revalidate", "omit", "release_with_caveat"}
 # A rendered Claim cell: descriptive, association, or causal with its design basis.
-CLAIM = re.compile(r"(descriptive|association)|causal \((?:experiment|natural experiment): .+\)")
+CLAIM = re.compile(r"(descriptive|association)|causal \((?:experiment|natural experiment): \S.*\)")
 BLOCKING = {"none", "revalidate"}
 
 

@@ -77,7 +77,7 @@ def test_collect_standard_records_without_writes_or_other_conclusions(workbench)
     assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in workbench.rglob("*") if p.is_file()}
 
 
-@pytest.mark.parametrize("claim", ["", "strong", "causal", "causal (survey)", "Association"])
+@pytest.mark.parametrize("claim", ["", "strong", "causal", "causal (survey)", "causal (experiment:  )", "Association"])
 def test_absent_or_unrecognized_claim_strength_fails_the_status_check(workbench, claim):
     path = workbench / "investigations/churn/state.md"
     path.write_text(path.read_text().replace("| supported | causal (experiment: randomized price test) |",
