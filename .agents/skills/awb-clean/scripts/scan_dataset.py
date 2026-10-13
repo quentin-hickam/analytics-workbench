@@ -20,9 +20,10 @@ Scan file (schema awb-scan/1):
             recorded: null | {id, status, count}}
 Issue ids (S1, S2, ...) stay stable from a baseline scan through its rescans; a key names the
 check, column, and value, so a rescan matches issues by key and reports before and after counts.
-foundation/quality.json links issues to Markdown rows with matching `<name>#<key>` markers;
-its recorded count is printed on stdout as recorded_count beside the current count. Without
-that file, legacy markers, counts, and dates in quality.md are backfilled in memory only.
+foundation/quality.json links issues to Markdown rows whose observation carries the matching
+`<name>#<key>` marker; its recorded count is printed on stdout as recorded_count beside the
+current count. A marker on one row that no link names is linked from that row's prose in memory;
+the scan never writes the file.
 Stdout lists at most 25 unrecorded issues; more_issues counts the rest, which are in the scan file.
 """
 
@@ -651,11 +652,10 @@ def _recorded(root, name, keys=None):
         keys = [key for scan, key in links.active.markers if scan == name]
     found = {}
     for key in keys:
-        link = links.get(name, key)
-        if link:
-            cells = links.active.rows[link["id"]][1]
-            found[key] = {"id": link["id"], "status": cells[links.active.status_at],
-                          "count": link["recorded_count"]}
+        resolved = links.resolve(name, key)
+        if resolved:
+            line, link = resolved
+            found[key] = {"id": link["id"], "status": links.active.status(line), "count": link["recorded_count"]}
     return found
 
 

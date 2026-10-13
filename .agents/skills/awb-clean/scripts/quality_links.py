@@ -1,4 +1,4 @@
-"""Scan links beside the Markdown quality record; legacy prose is read only for backfill."""
+"""Scan links beside the Markdown quality record; a row's prose is read only to build a missing link."""
 
 import hashlib
 import json
@@ -7,10 +7,8 @@ from pathlib import Path
 
 SCHEMA = "awb-quality-links/1"
 ACTIVE = "## Active limitations and issues"
-MARKER = re.compile(r"`([A-Za-z0-9][A-Za-z0-9._@-]*)#([^`]+)`")
-
-
 OBJECT, OBSERVATION = "Affected source or catalog object", "Observation and evidence"
+MARKER = re.compile(r"`([A-Za-z0-9][A-Za-z0-9._@-]*)#([^`]+)`")
 
 
 def position(columns, name, default):
@@ -26,15 +24,20 @@ def _cells(line):
     return [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
 
 
+def _cell(cells, at):
+    return cells[at] if 0 <= at < len(cells) else ""
+
+
 class ActiveRows:
-    """Index Active rows by ID, refusing ambiguous IDs or scan markers.
+    """Active rows by ID and by the scan markers in their observation cells.
 
     A column is found by its template header, else by the template's position, so renamed and
-    reordered tables both work.
+    reordered tables both work. Repeated IDs or markers are kept, not refused: they only stop
+    the links they touch from counting.
     """
 
     def __init__(self, lines):
-        self.rows, self.markers, self.columns = {}, {}, []
+        self.lines, self.columns, self.ids, self.markers = lines, [], {}, {}
         start = next((i for i, line in enumerate(lines) if line.strip() == ACTIVE), None)
         if start is None:
             return
@@ -52,45 +55,74 @@ class ActiveRows:
             if not lines[i].strip().startswith("|"):
                 break
             cells = _cells(lines[i])
-            qid = cells[self.id_at] if self.id_at < len(cells) else ""
-            if qid in self.rows:
-                raise ValueError(f"foundation/quality.md: duplicate ID {qid}")
-            self.rows[qid] = (i, cells, lines[i].replace("\\|", "|"))
-            for scan, key in set(MARKER.findall(lines[i].replace("\\|", "|"))):
-                if (scan, key) in self.markers:
-                    raise ValueError(f"foundation/quality.md: marker `{scan}#{key}` appears on two rows")
-                self.markers[scan, key] = qid
+            self.ids.setdefault(_cell(cells, self.id_at), []).append(i)
+            for marker in set(MARKER.findall(self.observation(i))):
+                self.markers.setdefault(marker, []).append(i)
+
+    def observation(self, line):
+        return _cell(_cells(self.lines[line]), self.observation_at).replace("\\|", "|")
+
+    def qid(self, line):
+        return _cell(_cells(self.lines[line]), self.id_at)
+
+    def status(self, line):
+        return _cell(_cells(self.lines[line]), self.status_at)
+
+    def row(self, qid):
+        """The one row with this ID, else None."""
+        lines = self.ids.get(qid, []) if qid else []
+        return lines[0] if len(lines) == 1 else None
 
 
 class QualityLinks:
     def __init__(self, root, lines):
         self.active = ActiveRows(lines)
-        path = Path(root) / "foundation/quality.json"
-        if path.exists():
-            self.document = json.loads(path.read_text(encoding="utf-8"))
+        self.path = Path(root) / "foundation/quality.json"
+        self.saved = self.path.read_text(encoding="utf-8") if self.path.exists() else None
+        if self.saved is not None:
+            self.document = json.loads(self.saved)
             if self.document.get("schema") != SCHEMA or not isinstance(self.document.get("links"), dict):
                 raise ValueError(f"foundation/quality.json: expected {SCHEMA}")
         else:
             self.document = {"schema": SCHEMA, "links": {}}
-            for (scan, key), qid in self.active.markers.items():
-                _, cells, _ = self.active.rows[qid]
-                at = self.active.observation_at
-                observation = cells[at] if at < len(cells) else ""
-                count = re.search(r"\((\d+) of (\d+)\)", observation)
-                observed = re.search(r"`" + re.escape(f"{scan}#{key}")
-                                     + r"`(?: scanned| in \[scan\]\([^)]*\)) (\d{4}-\d{2}-\d{2})",
-                                     observation.replace("\\|", "|"))
-                self.set(scan, key, qid, int(count[1]) if count else None,
-                         int(count[2]) if count else None, observed[1] if observed else None)
+            for scan, key in self.active.markers:
+                if self.marked(scan, key) is not None:
+                    self._from_row(scan, key)
 
-    def get(self, scan, key):
+    def marked(self, scan, key):
+        """The one row carrying this marker, when its ID is also unique, else None."""
+        lines = self.active.markers.get((scan, key), [])
+        if len(lines) == 1 and self.active.row(self.active.qid(lines[0])) == lines[0]:
+            return lines[0]
+        return None
+
+    def ambiguous(self, scan, key):
+        return len(self.active.markers.get((scan, key), [])) > 1
+
+    def _from_row(self, scan, key):
+        """Build a link from the row's observation prose: its count, total, and marker date."""
+        line = self.marked(scan, key)
+        observation = self.active.observation(line)
+        count = re.search(r"\((\d+) of (\d+)\)", observation)
+        observed = re.search(r"`" + re.escape(f"{scan}#{key}")
+                             + r"`(?: scanned| in \[scan\]\([^)]*\)) (\d{4}-\d{2}-\d{2})", observation)
+        self.set(scan, key, self.active.qid(line), int(count[1]) if count else None,
+                 int(count[2]) if count else None, observed[1] if observed else None)
+        return self.document["links"][link_key(scan, key)]
+
+    def resolve(self, scan, key):
+        """(line, link) for an issue's row, else None.
+
+        A stored link counts while exactly one row has its ID and that row carries the marker. With
+        none, a marker on exactly one row with a unique ID is relinked from that row's prose.
+        """
         link = self.document["links"].get(link_key(scan, key))
-        if not link or link.get("scan") != scan:
-            return None
-        row = self.active.rows.get(link.get("id"))
-        if not row or f"`{scan}#{key}`" not in row[2]:
-            return None
-        return link
+        if link and link.get("scan") == scan:
+            line = self.active.row(link.get("id"))
+            if line is not None and line in self.active.markers.get((scan, key), []):
+                return line, link
+        line = self.marked(scan, key)
+        return None if line is None else (line, self._from_row(scan, key))
 
     def discard(self, scan, key):
         self.document["links"].pop(link_key(scan, key), None)
@@ -102,3 +134,9 @@ class QualityLinks:
 
     def text(self):
         return json.dumps(self.document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+    def changed(self):
+        """Whether the file on disk differs; a missing file with no links needs no write."""
+        if self.saved is None:
+            return bool(self.document["links"])
+        return self.text() != self.saved
