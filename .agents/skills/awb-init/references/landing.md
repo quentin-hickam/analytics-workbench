@@ -8,6 +8,8 @@ For an API or other fetched source, call `land()` from a script with a `fetch` c
 
 `land(root, source, acquisition_id, fetch, *, request, records=None, notes=None) -> Path` calls `fetch(partial_directory)`. The callback writes every original file and raises on incomplete acquisition; its return value is ignored. `request` and `notes` must be JSON serializable. `records` maps relative filenames to integer counts; omitted counts become null. `provenance.json` is reserved. After `fetch` returns, `land()` checks the files and `records`, hashes the files, writes provenance, and renames the directory from `.partial`. If `fetch` or any of these steps fails, the directory keeps its `.partial` name and every file `fetch` wrote, including a `provenance.json` it wrote by mistake; `land()` removes only the provenance it wrote itself.
 
+The fetch script reads credentials from environment variables, with local values in the gitignored `.env`; the project's `workbench-guides/data.md` (**Assess and acquire**) holds the full rule. `request` and `notes` name a credential's variable, as `$NAME`, never its value: before fetching, `land()` raises `ValueError` when either holds an obvious secret, such as a bearer token, a `password=` or `token=` assignment, a literal value under a key such as `password` or `Authorization`, credentials in a URL, or a known API key format.
+
 ## Convert with `publish()`
 
 For a conversion a select cannot express, call `publish()` with a `convert` callable.

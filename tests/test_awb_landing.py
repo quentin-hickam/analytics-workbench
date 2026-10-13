@@ -32,10 +32,13 @@
 # test_land_refuses_an_obvious_secret_before_fetch: a bearer token, credential assignment, secret-named field, URL credentials or known key format in request or notes raises before fetching, without echoing the value.
 # test_land_records_a_request_that_names_its_variables: $NAME, ${NAME}, <name>, *** and ALL_CAPS_NAME references, and a page_token cursor, land unchanged.
 # test_cli_land_refuses_a_secret_request_before_landing: --request or --notes holding a secret exits 2 with nothing landed.
+# test_gitignore_template_tracks_env_example: in a fresh repository with the template .gitignore, .env.example is tracked while .env and .env.local stay ignored.
+# test_guides_state_the_credentials_convention: the data guide and landing reference state where credentials live, where they never go, and that records name the variable.
 
 import hashlib
 import importlib.util
 import json
+import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -701,3 +704,28 @@ def test_cli_land_refuses_a_secret_request_before_landing(tmp_path, capsys):
         assert f"{option} appears to hold a secret" in message and "hunter2" not in message
     assert not (tmp_path / "data").exists()
 
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_gitignore_template_tracks_env_example(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    (tmp_path / ".gitignore").write_bytes((WORKBENCH / ".gitignore").read_bytes())
+    for name in (".env", ".env.local", ".env.example"):
+        (tmp_path / name).write_text("ACME_TOKEN=\n")
+    status = subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain", "--ignored",
+                             "--untracked-files=all"], check=True, capture_output=True, text=True)
+    assert sorted(status.stdout.splitlines()) == [
+        "!! .env", "!! .env.local", "?? .env.example", "?? .gitignore"]
+
+
+def test_guides_state_the_credentials_convention():
+    guide = (WORKBENCH / "workbench-guides/data.md").read_text(encoding="utf-8")
+    rule = guide.split("## Assess and acquire")[1].split("\n## ")[0]
+    for fact in ("environment variables", "gitignored `.env`", "tracked `.env.example`",
+                 "Secrets never go in `settings.toml`, saved SQL, `request` or `notes` text, or "
+                 "foundation ledger rows", "the variable's name instead, as `$NAME`",
+                 "refuse a `request` or `notes` value holding an obvious secret"):
+        assert fact in rule
+    reference = (ASSET.parents[1] / "references/landing.md").read_text(encoding="utf-8")
+    for fact in ("environment variables", "gitignored `.env`", "`workbench-guides/data.md` (**Assess and acquire**)",
+                 "name a credential's variable, as `$NAME`, never its value", "`land()` raises `ValueError`"):
+        assert fact in reference

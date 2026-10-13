@@ -41,7 +41,7 @@ The interview is done when the question, population, supported decision or explo
 
 Adapt asset files to the target; their instructional comments and example rows are guidance, not project facts. The user-level skills serve every project, so the project holds only these files.
 
-1. Adapt the [orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [agent instructions](assets/workbench/AGENTS.md) into missing root files; merge `.gitignore` rules one by one. A repair reconciles existing ones through references/repair.md.
+1. Adapt the [orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [agent instructions](assets/workbench/AGENTS.md) into missing root files; merge `.gitignore` rules one by one, each negation after the rule it overrides. A repair reconciles existing ones through references/repair.md.
 2. When merging into an existing `AGENTS.md`, link both guides relatively and check the links resolve.
 3. Install the project helpers and workbench guides and declare their packages, with the interpreter that will run the project's analysis, such as its virtual environment. Run it as a black box; `--check` reports without writing. A repair runs it from references/repair.md instead.
 
@@ -54,7 +54,7 @@ Adapt asset files to the target; their instructional comments and example rows a
 5. Investigation:
    - New: adapt the [brief](assets/workbench/investigation/brief.md), [state](assets/workbench/investigation/state.md), and [history](assets/workbench/investigation/history.md), and copy [run.py](assets/workbench/investigation/run.py) with its [settings.toml](assets/workbench/investigation/settings.toml), under `investigations/<stable-slug>/`, with a slug named for the question rather than the population so an expansion keeps it right. Populate them only with settled facts, put open questions in the brief and state, and point README's `Active investigation` line at the state file.
    - Extending: revise the brief, settings, and state to the settled scope; record superseded findings in the history.
-6. Create `data/raw/`, `data/parquet/`, `data/cache/`, `foundation/views/`, and further code or configuration only when their first content exists.
+6. Create `data/raw/`, `data/parquet/`, `data/cache/`, `foundation/views/`, `.env.example` (credential variable names, under the data guide's rule), and further code or configuration only when their first content exists.
 
 Package templates and `deliveries/` stay absent. If the user explicitly asks for a package, finish initialization, then invoke the sibling [`awb-package` skill](../awb-package/SKILL.md).
 
