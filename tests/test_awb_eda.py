@@ -375,6 +375,7 @@ start = 2025-07-01
 end = 2025-12-31
 
 [results.overtime-by-site]
+question = "Which sites pay the most overtime?"
 queries = ["queries/overtime-by-site.sql"]
 """
 
