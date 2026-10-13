@@ -27,9 +27,12 @@
 # test_unreadable_enumeration_is_unknown_not_empty: an unreadable directory yields unknown, never an empty inventory.
 # test_none_chosen_is_a_recorded_decision: `none chosen`, backticked or bare `none`, reports availability none chosen, not unrecorded.
 # test_absent_storage_remains_actionable_when_acquisitions_and_releases_exist: absent lines read unrecorded alongside acquisitions and releases.
-# test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes: land()'s upstream fields drive one HEAD per probeable file; ETag wins over Last-Modified, a weak ETag and an equal date in another form match, HTTP and network errors are unknown, and nothing is written.
+# test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes: land()'s upstream fields drive one HEAD per probeable file; ETag wins over Last-Modified unless only the ETag changed, a weak ETag and an equal date in another form match, HTTP and network errors are unknown, and nothing is written.
 # test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
-# test_unreadable_provenance_is_an_uncertainty: a provenance.json that is not an acquisition record is named under uncertainties, and partial acquisitions are skipped.
+# test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json is named under uncertainties and makes probeable_files null, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
+# test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key is valid and counts as without upstream.
+# test_unreadable_acquisition_inventory_is_unknown_not_zero: an unreadable data/raw or source directory is an uncertainty and makes probeable_files null, never zero.
+# test_probe_follows_redirects_only_to_http_and_only_as_head: through urllib's own redirect processing, a redirect to ftp is refused before any FTP call and an https redirect is followed as HEAD.
 # test_probe_upstream_flag_reaches_the_probe: the command-line flag runs the probe and prints its results.
 
 """Status observations stay read-only and conservative when records need interpretation."""
@@ -37,6 +40,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 
 import pytest
@@ -465,11 +469,11 @@ landing = importlib.util.module_from_spec(landing_spec)
 landing_spec.loader.exec_module(landing)
 
 
-def land_with_upstream(root, acquisition_id, upstream):
+def land_with_upstream(root, acquisition_id, upstream, source="api"):
     def fetch(directory):
         for name in upstream:
             (directory / name).write_bytes(name.encode())
-    return landing.land(root, "api", acquisition_id, fetch, request="query",
+    return landing.land(root, source, acquisition_id, fetch, request="query",
                         upstream={name: fields for name, fields in upstream.items() if fields})
 
 
@@ -500,8 +504,13 @@ class FakeServer:
         return response
 
 
-def refuse_network(request, timeout):
-    raise AssertionError(f"status sent a request without --probe-upstream: {request.full_url}")
+def serve(monkeypatch, server):
+    """Replace the probe's opener with server, which answers request and timeout."""
+    monkeypatch.setattr(status, "head_opener", lambda: SimpleNamespace(open=server))
+
+
+def refuse_network():
+    raise AssertionError("status built an opener without --probe-upstream")
 
 
 def test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes(workbench, monkeypatch):
@@ -513,6 +522,7 @@ def test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_w
         "moved.csv": {"url": url + "moved", "etag": '"v1"', "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
         "dated.csv": {"url": url + "dated", "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
         "fallback.csv": {"url": url + "fallback", "etag": '"v1"', "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
+        "regzipped.csv": {"url": url + "regzipped", "etag": '"v1-gzip"', "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
         "silent.csv": {"url": url + "silent", "etag": '"v1"'},
         "gone.csv": {"url": url + "gone", "etag": '"v1"'},
         "down.csv": {"url": url + "down", "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
@@ -524,20 +534,21 @@ def test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_w
     server = FakeServer({
         url + "same": {"ETag": '"v1"'},
         url + "weak": {"ETag": '"v1"'},
-        url + "moved": {"ETag": '"v2"', "Last-Modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
+        url + "moved": {"ETag": '"v2"', "Last-Modified": "Tue, 13 Oct 2026 09:00:00 GMT"},
+        url + "regzipped": {"ETag": '"v1"', "Last-Modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
         url + "dated": {"Last-Modified": "Tuesday, 13-Oct-26 08:00:00 GMT"},
         url + "fallback": {"Last-Modified": "Wed, 14 Oct 2026 09:30:00 GMT"},
         url + "silent": {},
         url + "gone": urllib.error.HTTPError(url + "gone", 404, "Not Found", None, None),
         url + "down": urllib.error.URLError("connection refused"),
     })
-    monkeypatch.setattr(status.urllib.request, "urlopen", server)
+    serve(monkeypatch, server)
     before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in workbench.rglob("*") if p.is_file()}
     result = status.collect(workbench, probe_upstream=True)["upstream"]
     assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in workbench.rglob("*") if p.is_file()}
     assert sorted(server.requests) == sorted(("HEAD", url + name, status.PROBE_TIMEOUT) for name in
-                                             ("same", "weak", "moved", "dated", "fallback", "silent", "gone", "down"))
-    assert result["probeable_files"] == 8
+                                             ("same", "weak", "moved", "regzipped", "dated", "fallback", "silent", "gone", "down"))
+    assert result["probeable_files"] == 9
     file = {"source": "api", "acquisition_id": "batch-1"}
     assert result["files"] == [
         {**file, "path": "dated.csv", "result": "unchanged", "compared": "last_modified"},
@@ -546,6 +557,7 @@ def test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_w
          "recorded": "Tue, 13 Oct 2026 08:00:00 GMT", "current": "Wed, 14 Oct 2026 09:30:00 GMT"},
         {**file, "path": "gone.csv", "result": "unknown", "reason": "HTTP 404"},
         {**file, "path": "moved.csv", "result": "changed", "compared": "etag", "recorded": '"v1"', "current": '"v2"'},
+        {**file, "path": "regzipped.csv", "result": "unknown", "reason": "the ETag differs but Last-Modified is unchanged"},
         {**file, "path": "same.csv", "result": "unchanged", "compared": "etag"},
         {**file, "path": "silent.csv", "result": "unknown", "reason": "the server sent neither recorded validator"},
         {**file, "path": "weak.csv", "result": "unchanged", "compared": "etag"},
@@ -558,26 +570,109 @@ def test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_w
 
 
 def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench, monkeypatch):
-    monkeypatch.setattr(status.urllib.request, "urlopen", refuse_network)
+    monkeypatch.setattr(status, "head_opener", refuse_network)
     assert status.collect(workbench)["upstream"] == {"probeable_files": 0}
     land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://example.test/a", "etag": '"v1"'},
                                               "b.csv": {"url": "s3://bucket/b", "version_id": "1"}})
     assert status.collect(workbench)["upstream"] == {"probeable_files": 1}
 
 
-def test_unreadable_provenance_is_an_uncertainty(workbench, monkeypatch):
-    monkeypatch.setattr(status.urllib.request, "urlopen", refuse_network)
-    write(workbench, "data/raw/api/broken/provenance.json", "[1, 2]")
-    write(workbench, "data/raw/api/batch-1.partial/provenance.json", "{")
+@pytest.mark.parametrize("text, reason", [
+    ("[1, 2]", "Malformed acquisition provenance: not a JSON object"),
+    ("{", "Cannot read acquisition provenance: JSONDecodeError"),
+    ("{}", "Malformed acquisition provenance: status is not complete"),
+    ('{"status": "complete", "files": {}}', "Malformed acquisition provenance: files is not a list"),
+    ('{"status": "complete", "files": [{"path": 7, "upstream": null}]}',
+     "Malformed acquisition provenance: a file entry has no path"),
+    ('{"status": "complete", "files": ["a.csv"]}', "Malformed acquisition provenance: a file entry has no path"),
+    ('{"status": "complete", "files": [{"path": "a.csv", "upstream": "https://example.test/a"}]}',
+     "Malformed acquisition provenance: a file's upstream is not an object or null"),
+    (None, "Missing acquisition provenance"),
+])
+def test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown(workbench, monkeypatch, text, reason):
+    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://example.test/a", "etag": '"v1"'}})
+    if text is None:
+        write(workbench, "data/raw/api/broken/a.csv", "a")
+    else:
+        write(workbench, "data/raw/api/broken/provenance.json", text)
+    write(workbench, "data/raw/api/batch-2.partial/provenance.json", "{")
+    write(workbench, "data/raw/api/notes.txt", "not an acquisition")
+    serve(monkeypatch, FakeServer({"https://example.test/a": {"ETag": '"v1"'}}))
     result = status.collect(workbench, probe_upstream=True)
-    assert result["uncertainties"] == [{"path": "data/raw/api/broken/provenance.json",
-                                        "reason": "Cannot read acquisition provenance: AttributeError"}]
-    assert result["upstream"] == {"probeable_files": 0, "files": [], "not_probeable": [], "without_upstream": 0}
+    assert result["uncertainties"] == [{"path": "data/raw/api/broken/provenance.json", "reason": reason}]
+    assert result["upstream"] == {
+        "probeable_files": None,
+        "files": [{"source": "api", "acquisition_id": "batch-1", "path": "a.csv", "result": "unchanged", "compared": "etag"}],
+        "not_probeable": [], "without_upstream": 0}
+
+
+def test_provenance_without_upstream_keys_counts_as_without_upstream(workbench, monkeypatch):
+    monkeypatch.setattr(status, "head_opener", refuse_network)
+    write(workbench, "data/raw/api/old/provenance.json", json.dumps(
+        {"status": "complete", "files": [{"path": "a.csv", "bytes": 1, "sha256": "0", "records": None}]}))
+    result = status.collect(workbench)
+    assert result["uncertainties"] == [] and result["upstream"] == {"probeable_files": 0}
+
+
+@pytest.mark.parametrize("blocked", ["data/raw", "data/raw/api"])
+def test_unreadable_acquisition_inventory_is_unknown_not_zero(workbench, monkeypatch, blocked):
+    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://example.test/a", "etag": '"v1"'}})
+    land_with_upstream(workbench, "batch-1", {"w.csv": {"url": "https://example.test/w", "etag": '"v1"'}}, source="web")
+    original_iterdir = Path.iterdir
+
+    def checked_iterdir(path):
+        if path == workbench / blocked:
+            raise PermissionError("fixture directory unreadable")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", checked_iterdir)
+    serve(monkeypatch, FakeServer({"https://example.test/w": {"ETag": '"v1"'}}))
+    result = status.collect(workbench, probe_upstream=True)
+    assert {"path": blocked, "reason": "Cannot enumerate directory: PermissionError"} in result["uncertainties"]
+    assert result["upstream"]["probeable_files"] is None
+    assert [file["path"] for file in result["upstream"]["files"]] == ([] if blocked == "data/raw" else ["w.csv"])
+
+
+def test_probe_follows_redirects_only_to_http_and_only_as_head(workbench, monkeypatch):
+    """Runs urllib's own redirect processing; only the HTTPS and FTP connections are replaced."""
+    import email.message
+    import io
+    import urllib.request
+    import urllib.response
+    answers = {
+        "https://example.test/ftp": (302, {"Location": "ftp://example.test/source.csv"}),
+        "https://example.test/old": (301, {"Location": "https://example.test/new"}),
+        "https://example.test/new": (200, {"ETag": '"v1"'}),
+    }
+    requests, ftp = [], []
+
+    def https_open(handler, request):
+        requests.append((request.get_method(), request.full_url))
+        code, fields = answers[request.full_url]
+        headers = email.message.Message()
+        for name, value in fields.items():
+            headers[name] = value
+        response = urllib.response.addinfourl(io.BytesIO(b""), headers, request.full_url, code)
+        response.msg = "Redirect" if code != 200 else "OK"
+        return response
+
+    monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", https_open)
+    monkeypatch.setattr(urllib.request.FTPHandler, "ftp_open", lambda handler, request: ftp.append(request.full_url))
+    land_with_upstream(workbench, "batch-1", {"ftp.csv": {"url": "https://example.test/ftp", "etag": '"v1"'},
+                                              "old.csv": {"url": "https://example.test/old", "etag": '"v1"'}})
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["result"], file.get("reason")) for file in files] == [
+        ("ftp.csv", "unknown", "redirected to a URL other than http(s), not followed"),
+        ("old.csv", "unchanged", None),
+    ]
+    assert ftp == []
+    assert requests == [("HEAD", "https://example.test/ftp"), ("HEAD", "https://example.test/old"),
+                        ("HEAD", "https://example.test/new")]
 
 
 def test_probe_upstream_flag_reaches_the_probe(workbench, monkeypatch, capsys):
     land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://example.test/a", "etag": '"v1"'}})
-    monkeypatch.setattr(status.urllib.request, "urlopen", FakeServer({"https://example.test/a": {"ETag": '"v2"'}}))
+    serve(monkeypatch, FakeServer({"https://example.test/a": {"ETag": '"v2"'}}))
     monkeypatch.setattr("sys.argv", ["collect_status.py", str(workbench), "--probe-upstream"])
     status.main()
     files = json.loads(capsys.readouterr().out)["upstream"]["files"]

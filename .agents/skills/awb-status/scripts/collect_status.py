@@ -3,7 +3,8 @@
 Run with Python 3.10+: collect_status.py [PROJECT_ROOT] [--probe-upstream]. Emits compact JSON;
 uncertainties identify records requiring targeted agent interpretation. Only --probe-upstream
 touches the network: one HEAD request per landed file whose provenance.json records an HTTP URL
-and an ETag or Last-Modified, comparing those validators. It writes nothing.
+and an ETag or Last-Modified, comparing those validators, and a redirect is followed only to an
+http(s) URL and only as another HEAD request. It writes nothing.
 """
 
 import argparse
@@ -17,6 +18,7 @@ import subprocess
 from email.utils import parsedate_to_datetime
 import http.client
 import urllib.error
+import urllib.parse
 import urllib.request
 
 DISPOSITIONS = {"none", "revalidate", "omit", "release_with_caveat"}
@@ -298,50 +300,114 @@ def collect(root, *, probe_upstream=False):
 
 
 def upstream(root, probe, uncertain):
-    """Count landed files a HEAD request can check; with probe, check each and report the rest."""
-    probeable, not_probeable, without = [], [], 0
-    raw = root / "data/raw"
-    for directory in sorted(raw.glob("*/*")) if raw.is_dir() else []:
-        path = directory / "provenance.json"
-        if directory.name.endswith(".partial") or not path.is_file():
-            continue
+    """Count landed files a HEAD request can check; with probe, check each and report the rest.
+
+    probeable_files is null when an acquisition directory or provenance.json could not be read;
+    an uncertainty names each one, and the files that were read are still counted and probed.
+    """
+    probeable, not_probeable, without, complete = [], [], 0, True
+
+    def directories(path):
+        nonlocal complete
         try:
-            provenance = json.loads(path.read_text(encoding="utf-8"))
-            files = provenance["files"] if provenance.get("status") == "complete" else []
-            files = sorted((f for f in files if isinstance(f.get("path"), str)), key=lambda f: f["path"])
-        except (OSError, UnicodeError, ValueError, KeyError, TypeError, AttributeError) as error:
-            uncertain(path, f"Cannot read acquisition provenance: {type(error).__name__}")
-            continue
-        for file in files:
-            entry = {"source": directory.parent.name, "acquisition_id": directory.name, "path": file["path"]}
-            recorded = file.get("upstream")
-            if not isinstance(recorded, dict):
-                without += 1
+            return sorted(p for p in path.iterdir() if p.is_dir())
+        except FileNotFoundError:
+            return []
+        except OSError as error:
+            uncertain(path, f"Cannot enumerate directory: {type(error).__name__}")
+            complete = False
+            return []
+
+    for source in directories(root / "data/raw"):
+        for directory in directories(source):
+            if directory.name.endswith(".partial"):
                 continue
-            url = recorded.get("url")
-            if not (isinstance(url, str) and url.split(":", 1)[0].lower() in {"http", "https"}):
-                not_probeable.append({**entry, "reason": "no HTTP URL recorded"})
-            elif not any(isinstance(recorded.get(name), str) for name in ("etag", "last_modified")):
-                not_probeable.append({**entry, "reason": "no ETag or Last-Modified recorded"})
-            else:
-                probeable.append((entry, recorded))
-    report = {"probeable_files": len(probeable)}
+            path = directory / "provenance.json"
+            files = acquisition_files(path, uncertain)
+            if files is None:
+                complete = False
+                continue
+            for file in files:
+                entry = {"source": source.name, "acquisition_id": directory.name, "path": file["path"]}
+                recorded = file.get("upstream")
+                if recorded is None:
+                    without += 1
+                    continue
+                url = recorded.get("url")
+                if not (isinstance(url, str) and url.split(":", 1)[0].lower() in {"http", "https"}):
+                    not_probeable.append({**entry, "reason": "no HTTP URL recorded"})
+                elif not any(isinstance(recorded.get(name), str) for name in ("etag", "last_modified")):
+                    not_probeable.append({**entry, "reason": "no ETag or Last-Modified recorded"})
+                else:
+                    probeable.append((entry, recorded))
+    report = {"probeable_files": len(probeable) if complete else None}
     if probe:
-        report.update(files=[{**entry, **probe_file(recorded)} for entry, recorded in probeable],
+        opener = head_opener()
+        report.update(files=[{**entry, **probe_file(recorded, opener)} for entry, recorded in probeable],
                       not_probeable=not_probeable, without_upstream=without)
     return report
 
 
-def probe_file(recorded):
+def acquisition_files(path, uncertain):
+    """Return a completed acquisition's file entries sorted by path, else record an uncertainty and return None."""
+    try:
+        provenance = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        uncertain(path, "Missing acquisition provenance")
+        return None
+    except (OSError, UnicodeError, ValueError) as error:
+        uncertain(path, f"Cannot read acquisition provenance: {type(error).__name__}")
+        return None
+    files = provenance.get("files") if isinstance(provenance, dict) else None
+    if not isinstance(provenance, dict):
+        defect = "not a JSON object"
+    elif provenance.get("status") != "complete":
+        defect = "status is not complete"
+    elif not isinstance(files, list):
+        defect = "files is not a list"
+    elif not all(isinstance(f, dict) and isinstance(f.get("path"), str) and f["path"] for f in files):
+        defect = "a file entry has no path"
+    elif not all(f.get("upstream") is None or isinstance(f["upstream"], dict) for f in files):
+        defect = "a file's upstream is not an object or null"
+    else:
+        return sorted(files, key=lambda f: f["path"])
+    uncertain(path, f"Malformed acquisition provenance: {defect}")
+    return None
+
+
+class RedirectRefused(urllib.error.URLError):
+    """A redirect to a URL other than http(s), which the probe does not follow."""
+
+
+class HeadRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to an http(s) URL, and only as another HEAD request."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlsplit(newurl).scheme.lower() not in {"http", "https"}:
+            raise RedirectRefused("redirect to a URL other than http(s)")
+        request = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if request is not None:
+            request.method = "HEAD"
+        return request
+
+
+def head_opener():
+    return urllib.request.build_opener(HeadRedirectHandler)
+
+
+def probe_file(recorded, opener):
     """HEAD the recorded URL and compare its ETag, else its Last-Modified, with the recorded value."""
     try:
         request = urllib.request.Request(recorded["url"], method="HEAD")
-        with urllib.request.urlopen(request, timeout=PROBE_TIMEOUT) as response:
+        with opener.open(request, timeout=PROBE_TIMEOUT) as response:
             headers = response.headers
     except urllib.error.HTTPError as error:
         return {"result": "unknown", "reason": f"HTTP {error.code}"}
+    except RedirectRefused:
+        return {"result": "unknown", "reason": "redirected to a URL other than http(s), not followed"}
     except (OSError, ValueError, http.client.HTTPException) as error:
         return {"result": "unknown", "reason": f"{type(error).__name__}: {error}"}
+    compared = {}
     for name, header in (("etag", "ETag"), ("last_modified", "Last-Modified")):
         before, now = recorded.get(name), headers.get(header)
         if not isinstance(before, str) or now is None:
@@ -354,10 +420,18 @@ def probe_file(recorded):
                 same = http_date(before) == http_date(now)
             except (TypeError, ValueError):
                 same = before.strip() == now.strip()
-        if same:
-            return {"result": "unchanged", "compared": name}
-        return {"result": "changed", "compared": name, "recorded": before, "current": now}
-    return {"result": "unknown", "reason": "the server sent neither recorded validator"}
+        compared[name] = (same, before, now)
+    if not compared:
+        return {"result": "unknown", "reason": "the server sent neither recorded validator"}
+    name = "etag" if "etag" in compared else "last_modified"
+    same, before, now = compared[name]
+    if same:
+        return {"result": "unchanged", "compared": name}
+    if name == "etag" and compared.get("last_modified", (False,))[0]:
+        # Servers vary an ETag by content encoding (Apache appends -gzip), so an ETag change
+        # with an unchanged Last-Modified does not establish a content change.
+        return {"result": "unknown", "reason": "the ETag differs but Last-Modified is unchanged"}
+    return {"result": "changed", "compared": name, "recorded": before, "current": now}
 
 
 def http_date(value):
