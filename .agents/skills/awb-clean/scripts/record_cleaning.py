@@ -7,13 +7,16 @@ SCAN_NAME names foundation/scans/<SCAN_NAME>.json written by scan_dataset.py. De
     {"date": "YYYY-MM-DD",                                        optional, default today
      "issues": {"S1": {"impact", "treatment", "status",           judgment columns, required for a new row
                        "correction", "change",                    both or neither: a correction row
-                       "findings", "object"}},                    optional overrides
+                       "findings", "object",                      optional overrides
+                       "check": {"publication", "name"}}},        optional: a publication check to cite
      "findings": "...",                                           correction rows' findings when no flags
      "flags": [{"investigation", "result", "reason"}],            findings to flag
      "catalog": {"name", "cells": {column: text}}}                catalog cells to set
 Text may name an issue as {S1} or {Q-004}; it becomes the issue's quality ID.
 A recorded quality ID, such as Q-004, also works as a key: it revises only judgment cells,
 keeps the observation and link, and its correction carries no rescan suffix.
+A check names a publication directory and one of the checks its publication.json records; the
+citation, with the check's outcome, is appended to the row's Current treatment once.
 
 Quality issue rows get the next ID, the scan's counts and examples, and the marker
 `<scan>#<key>` with its scan date. foundation/quality.json holds hashed scan links and recorded
@@ -156,6 +159,24 @@ def _load_provenance(root):
     return module
 
 
+def _citation(root, check):
+    """Return the text citing a check that a publication's publication.json records."""
+    if (not isinstance(check, dict) or set(check) != {"publication", "name"}
+            or not all(isinstance(check[k], str) and check[k].strip() for k in check)):
+        raise RecordError('check needs {"publication": "data/parquet/<dataset>/<publication-id>/", "name": "<check>"}')
+    publication = check["publication"].strip().rstrip("/")
+    path = root / publication / "publication.json"
+    try:
+        recorded = json.loads(path.read_text(encoding="utf-8")).get("checks") or []
+    except (OSError, ValueError, AttributeError) as error:
+        raise RecordError(f"no publication.json at {publication}/ to cite a check from") from error
+    found = [c for c in recorded if isinstance(c, dict) and c.get("name") == check["name"]]
+    if not found:
+        names = ", ".join(str(c.get("name")) for c in recorded if isinstance(c, dict)) or "none"
+        raise RecordError(f"{publication}/publication.json records no check {check['name']}; it records {names}")
+    return f"check `{check['name']}` {found[0].get('outcome')} in `{publication}/publication.json`"
+
+
 def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     """Validate DECISIONS, then write A (records), B (flags), C (corrections)."""
     root = Path(project_root).resolve()
@@ -258,6 +279,18 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
         issue = by_id.get(issue_id)
         qid = ids[issue_id]
         values = {judged[k]: fill(decision[k]) for k in judged if decision.get(k)}
+        if decision.get("check") is not None:
+            citation = _citation(root, decision["check"])
+            treatment = judged["treatment"]
+            line_index = revised.get(issue_id) if issue is None else (
+                recorded[issue["key"]][0] if issue["key"] in recorded else None)
+            current = values.get(treatment)
+            if current is None and line_index is not None:
+                cells = _cells(quality[line_index])
+                at = active.column(treatment)
+                current = cells[at].replace("\\|", "|") if at < len(cells) else ""  # set() escapes again
+            if current is not None and citation not in current:
+                values[treatment] = f"{current}; {citation}" if current else citation
         if issue is None:  # a quality-ID key: judgment cells only; the observation stays
             if values:
                 rows.append(active.set(revised[issue_id], values))
