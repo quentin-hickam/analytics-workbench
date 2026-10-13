@@ -140,6 +140,28 @@ _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 _LINK_TARGET = re.compile(r"\]\([^)]*\)")
 _TOKEN = re.compile(r"\S+")
 
+
+def _uncomment(text):
+    """Blank HTML comments, keeping their line breaks so line numbers hold."""
+    return _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
+
+
+def _fenced(line, fence):
+    """Follow a fenced code block through `line`: (the open fence marker after it, or None; whether it is code).
+
+    A fence closes only on a marker of its own character, at least as long as the opening one, with
+    nothing after it, so a `~~~` line inside a backtick fence is code.
+    """
+    marker = _FENCE.match(line)
+    if fence is not None:
+        if (marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence)
+                and not line[marker.end():].strip()):
+            return None, True
+        return fence, True
+    if marker and not (marker.group(1)[0] == "`" and "`" in line[marker.end():]):
+        return marker.group(1), True
+    return None, False
+
 # Wrapping punctuation and Markdown emphasis around a token; leading dots stay so `./x` is a path.
 # Underscores are stripped only in matching pairs (`_word_`), so `__init__.py` keeps its own.
 _LEADING = "([{<\"'*~!“‘"
@@ -232,24 +254,18 @@ def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]
     A slash token with any of `names` or `roots` as a segment is a path; `roots` may be plain words,
     which never match alone.
     """
-    text = Path(path).read_text(encoding="utf-8")
-    text = _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
+    text = _uncomment(Path(path).read_text(encoding="utf-8"))
     pattern = _name_pattern(names)
     roots = set(names) | set(roots)
 
     rows = []
     fence = None
     for number, line in enumerate(text.splitlines(), start=1):
-        if fence is not None:
-            closing = _FENCE.match(line)
-            if (closing and closing.group(1)[0] == fence[0] and len(closing.group(1)) >= len(fence)
-                    and not line[closing.end():].strip()):
-                fence = None
-            continue
-        opening = _FENCE.match(line)
-        if opening and not (opening.group(1)[0] == "`" and "`" in line[opening.end():]):
-            fence = opening.group(1)
-            rows.append({"line": number, "kind": "code", "text": line.strip()})
+        outside = fence is None
+        fence, code = _fenced(line, fence)
+        if code:
+            if outside:  # the opening marker line
+                rows.append({"line": number, "kind": "code", "text": line.strip()})
             continue
         rows.extend(_scan_line(number, line, roots, pattern))
     return rows
@@ -476,11 +492,10 @@ def flag_entry_problems(record: dict) -> list[dict]:
 
 
 def _headings(path):
-    headings, fenced = [], False
+    headings, fence = [], None
     for line in Path(path).read_text(encoding="utf-8").splitlines():
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
-        elif not fenced and line.startswith("### "):
+        fence, code = _fenced(line, fence)
+        if not code and line.startswith("### "):
             headings.append(line[4:].strip().rstrip("#").strip())
     return headings
 
@@ -497,15 +512,17 @@ def heading_problems(draft) -> list[dict]:
 # Claim strengths, weakest first, as state.md's Claim column renders them; the project's provenance
 # helper owns the values. Only causal wording is checked: it exceeds descriptive and association.
 _CLAIMS = ("descriptive", "association", "causal")
-_CLAIM_CELL = re.compile(r"(descriptive|association)|(causal) \((?:experiment|natural experiment): .+\)")
-_CLAIM_LINE = re.compile(r"^\*\*Claim strength:\*\*[ \t]*([A-Za-z]*)", re.MULTILINE)
+_CLAIM_CELL = re.compile(r"(descriptive|association)|(causal) \((?:experiment|natural experiment): \S.*\)")
+_CLAIM_LINE = re.compile(r"\*\*Claim strength:\*\*(.*)")
 # Causal wording as whole words, so "data-driven" or "causality" is not one. Bare "because" and
-# "cause" are left out: they also give reasons for analytical choices and state disclaimers.
+# "cause" are left out: they also give reasons for analytical choices and state disclaimers. So are
+# "result(s) in" and "affect": "Results in the North", "the result in June", and "affected stores"
+# are not claims.
 _CAUSAL = re.compile(r"(?<![\w-])(?:" + "|".join([
     r"driv(?:e|es|en|ing)", r"drove", r"drivers?\s+of",
     r"caus(?:es|ed|ing)", r"because\s+of", r"due\s+to",
     r"lead(?:s|ing)?\s+to", r"led\s+to", r"result(?:ed|ing)\s+in", r"as\s+a\s+result\s+of",
-    r"impact(?:s|ed|ing)?", r"effects?\s+(?:of|on)", r"attributable\s+to", r"contribut(?:es|ed|ing)\s+to",
+    r"impact(?:s|ed|ing)?", r"effects?\s+(?:of|on)", r"attributable\s+to", r"contribut(?:e|es|ed|ing)\s+to",
 ]) + r")(?![\w-])", re.IGNORECASE)
 # Slides that describe method, data, and caveats rather than state findings.
 _UNCHECKED = {"How we know", "Limitations and open caveats", "What changed since the last version",
@@ -531,27 +548,26 @@ def state_claims(root, investigation) -> dict:
 
 
 def _regions(text, *, prose=True):
-    """Split Markdown into (level, heading, first body line number, body lines) at `##` and `###` headings.
+    """Split Markdown into (level, heading, first line number, lines) at `##` and `###` headings.
 
-    Level 0 is the text before the first heading. Headings inside fences, as `_headings` reads them,
-    do not split. With `prose`, comments, fenced lines, code spans, and link targets are blanked.
+    Level 0 is the text before the first heading; every other region's lines open with its heading
+    line, so a slide's headline is read with its body. Headings inside fences, as `_headings` reads
+    them, do not split. With `prose`, comments, fenced lines, code spans, and link targets are blanked.
     """
     if prose:
-        text = _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
-    regions, fenced = [[0, None, 1, []]], False
+        text = _uncomment(text)
+    regions, fence = [[0, None, 1, []]], None
     for number, line in enumerate(text.splitlines(), start=1):
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
+        fence, code = _fenced(line, fence)
+        if code:
             line = "" if prose else line
-        elif fenced:
-            line = "" if prose else line
-        elif line.startswith(("## ", "### ")):
-            level = 2 if line.startswith("## ") else 3
-            regions.append([level, line[level + 1:].strip().rstrip("#").strip(), number + 1, []])
-            continue
-        elif prose:
-            for pattern in (_CODE_SPAN, _LINK_TARGET):
-                line = pattern.sub(lambda match: " " * len(match.group(0)), line)
+        else:
+            if line.startswith(("## ", "### ")):
+                level = 2 if line.startswith("## ") else 3
+                regions.append([level, line[level + 1:].strip().rstrip("#").strip(), number, []])
+            if prose:
+                for pattern in (_CODE_SPAN, _LINK_TARGET):
+                    line = pattern.sub(lambda match: " " * len(match.group(0)), line)
         regions[-1][3].append(line)
     return regions
 
@@ -580,35 +596,48 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
     rows = [{"result": r, "problem": "state.md has no findings row with a claim strength for this result"
              if r not in claims else "state.md's Claim cell is not descriptive, association, or causal "
              "with its design basis"} for r in represented if not claims.get(r)]
-    methodology = {}  # raw text, since result IDs sit in code spans and evidence links
-    for level, heading, _, lines in _regions((draft / "methodology.md").read_text(encoding="utf-8"), prose=False):
+    text = (draft / "methodology.md").read_text(encoding="utf-8")
+    cites, stated = {}, {}
+    # Citations keep code spans and evidence links, where result IDs sit, but not comments.
+    for level, heading, _, lines in _regions(_uncomment(text), prose=False):
         if level == 3:
-            methodology.setdefault(heading, "\n".join(lines))
+            cites.setdefault(heading, "\n".join(lines))
+    # A declaration counts only as rendered prose, outside comments and fences.
+    for level, heading, _, lines in _regions(text):
+        if level == 3:
+            stated.setdefault(heading, [m[1].strip() for line in lines if (m := _CLAIM_LINE.match(line))])
     known = [claims[r] for r in represented if claims.get(r)]
     deck = max(known, key=_CLAIMS.index) if known else _CLAIMS[0]
     for level, heading, first, lines in _regions((draft / "findings.md").read_text(encoding="utf-8")):
         if level == 2 and heading in _UNCHECKED:
             continue
         if level == 3:
-            cited = _cited(methodology.get(heading, ""), represented) or list(represented)
+            cited = _cited(cites.get(heading, ""), represented) or list(represented)
             ceiling = _weakest(cited, claims)
-            if heading in methodology:
-                stated = _CLAIM_LINE.search(methodology[heading])
-                if not stated or stated[1].lower() != ceiling:
-                    rows.append({"section": heading, "problem": (
-                        f"methodology.md states {stated[1] or 'nothing'} on its **Claim strength:** line"
-                        if stated else "methodology.md's section has no **Claim strength:** line")
-                        + f"; its results support {ceiling}"})
+            if heading in stated:
+                declared = stated[heading]
+                match = _CLAIM_CELL.fullmatch(declared[0]) if len(declared) == 1 else None
+                problem = (
+                    "methodology.md's section has no **Claim strength:** line" if not declared
+                    else f"methodology.md's section has {len(declared)} **Claim strength:** lines" if len(declared) > 1
+                    else "methodology.md's **Claim strength:** line is not descriptive, association, or causal "
+                         "with its design basis" if not match
+                    else f"methodology.md states {match[1] or match[2]} on its **Claim strength:** line"
+                    if (match[1] or match[2]) != ceiling else None)
+                if problem:
+                    rows.append({"section": heading, "problem": f"{problem}; its results support {ceiling}"})
         else:
             cited, ceiling = list(represented), deck
         if ceiling == "causal":
             continue
         body = "\n".join(lines)
         for match in _CAUSAL.finditer(body):
+            in_heading = level == 3 and match.start() < len(lines[0])
             rows.append({"line": first + body.count("\n", 0, match.start()), "section": heading or "title",
                          "phrase": " ".join(match.group(0).split()), "claim": ceiling, "results": cited,
                          "problem": f"causal wording above the {ceiling} claim strength; reword it, since only "
-                                    "an experiment or an identified natural experiment supports a causal claim"})
+                                    "an experiment or an identified natural experiment supports a causal claim"
+                                    + ("; reword the methodology.md heading to match" if in_heading else "")})
     return rows
 
 
@@ -886,12 +915,13 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                     "and rewrite the manifest inventory, stamping revised_at when it changes; "
                     "--verify-only checks a release candidate and writes nothing.",
         epilog="Prints one JSON line.\nclaims lists each causal phrase (line, section, phrase, claim, results) "
-               "in a findings.md slide above its claim strength: a ### finding slide is held to the weakest "
+               "in a findings.md slide, heading included, above its claim strength: a ### finding slide is held to the weakest "
                "Claim in state.md among the results its methodology.md section cites (all represented results "
                "when it cites none), and the title and other slides that state conclusions to the strongest; "
                "How we know, Limitations and open caveats, What changed since the last version, and Supporting "
                "datasets are not read. It also lists a represented result without a recognized Claim, and a "
-               "methodology finding section whose **Claim strength:** line is missing or differs."
+               "methodology finding section whose **Claim strength:** line is missing, repeated, unrecognized, or "
+               "differs."
                "\nunmatched_flags lists each finding state.md flags whose exact finding "
                "and reason the manifest's revalidation_flags does not record.\nflag_entries lists a missing or "
                "malformed revalidation_flags, an entry without text finding and reason, represented_in that is "

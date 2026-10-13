@@ -836,6 +836,56 @@ def test_check_draft_refuses_causal_wording_above_claim_strength(project, capsys
     assert code == 0 and report["passed"] and report["claims"] == []
 
 
+def test_claim_check_reads_headlines_and_only_rendered_declarations(project, capsys):
+    draft = load(project / "src/packaging/draft.py", "draft_headlines")
+    claims = draft.state_claims(project, "inv")
+    directory = project / "deliveries/inv/pkg/draft"
+    clean = CLAIM_FINDINGS.replace("The new carrier drives the rise", "Late orders rose")
+    # A finding slide's ### heading is its headline, read with the slide.
+    causal_heading = "The new carrier drives late orders up in the west"
+    claim_draft(project, clean.replace("### Late orders rose in the west", f"### {causal_heading}"),
+                CLAIM_METHODOLOGY.replace("### Late orders rose in the west", f"### {causal_heading}"))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert code == 1 and not report["passed"]
+    assert report["claims"] == [{
+        "line": 10, "section": causal_heading, "phrase": "drives", "claim": "association", "results": ["r-009"],
+        "problem": "causal wording above the association claim strength; reword it, since only an experiment or an "
+                   "identified natural experiment supports a causal claim; reword the methodology.md heading to match"}]
+    # A ~~~ line inside a backtick fence does not close it, so the prose after the fence is read.
+    # "contribute to" is causal; the noun "result in" and "affected" are not on the phrase list.
+    claim_draft(project, clean.replace("**Chart 1.**", "```\n~~~\n```\n- The carrier contribute to late "
+                                                     "orders.\n- The result in June affected stores.\n\n**Chart 1.**"))
+    rows = draft.claim_problems(directory, ["r-009", "r-002"], claims)
+    assert [(r["section"], r["phrase"], r["line"]) for r in rows] == [
+        ("Late orders rose in the west", "contribute to", 18)]
+    # A declaration in a comment or a fence is not rendered, and one must name a single strength.
+    unrecognized = ("methodology.md's **Claim strength:** line is not descriptive, association, or causal with its "
+                    "design basis")
+    for hidden, problem in [
+            ("<!--\n**Claim strength:** association\n-->", "methodology.md's section has no **Claim strength:** line"),
+            ("```markdown\n**Claim strength:** association\n```",
+             "methodology.md's section has no **Claim strength:** line"),
+            ("**Claim strength:** association / causal", unrecognized),
+            ("**Claim strength:** causal (experiment:  )", unrecognized),
+            ("**Claim strength:** association\n\n**Claim strength:** causal (experiment: a test)",
+             "methodology.md's section has 2 **Claim strength:** lines")]:
+        claim_draft(project, clean, CLAIM_METHODOLOGY.replace("**Claim strength:** association", hidden))
+        rows = draft.claim_problems(directory, ["r-009", "r-002"], claims)
+        assert rows == [{"section": "Late orders rose in the west",
+                         "problem": problem + "; its results support association"}], hidden
+    # A result ID in a comment is not a citation: the section cites nothing and takes the weakest claim.
+    claim_draft(project, clean.replace("Randomized discounts led to", "Randomized discounts drive"),
+                CLAIM_METHODOLOGY.replace("Result `r-002`.", "<!-- TODO: compare with r-002 -->"))
+    rows = draft.claim_problems(directory, ["r-009", "r-002"], claims)
+    assert [(r["section"], r.get("phrase"), r.get("results")) for r in rows] == [
+        ("Discounts cut late orders by 4 points", None, None),
+        ("Discounts cut late orders by 4 points", "drive", ["r-009", "r-002"])]
+    # A causal Claim cell needs design text, not just spaces.
+    state = project / "investigations/inv/state.md"
+    state.write_text(state.read_text().replace("(experiment: randomized discount test)", "(experiment:  )"))
+    assert draft.state_claims(project, "inv")["r-002"] is None
+
+
 def test_claim_strength_follows_cited_results_and_records(project, capsys):
     draft = load(project / "src/packaging/draft.py", "draft_claims")
     claims = draft.state_claims(project, "inv")
