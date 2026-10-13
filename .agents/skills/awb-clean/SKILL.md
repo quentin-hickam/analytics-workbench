@@ -15,7 +15,7 @@ Run the bundled scripts as black boxes, by path, with the project's Python envir
 python3 <skill-directory>/scripts/scan_dataset.py <project-root> <dataset> [--key COLS] [--ref COL=TARGET.COL] [--range COL=MIN:MAX] [--columns COLS]
 ```
 
-`<dataset>` is usually the canonical view; `--help` lists the other targets. Pass the catalog's grain as `--key` when you know it; otherwise the scan proposes candidate keys. Pass the joins the question uses as `--ref`, and known valid ranges and the reporting period as `--range`; each is repeatable. For a wide dataset, `--columns` limits per-column checks to the columns in scope.
+`<dataset>` is usually the canonical view; `--help` lists the other targets. Pass the catalog's grain as `--key` when you know it; otherwise the scan proposes candidate keys. Pass the joins the question uses as `--ref`, and known valid ranges and the reporting period as `--range`; `--key`, `--ref`, and `--range` are each repeatable. For a wide dataset, `--columns` limits per-column checks to the columns in scope.
 
 Stdout prints the scan path (its stem is `<scan-name>` in step 6) and lists up to 25 unrecorded issues as `S<n>` with key, count, and three examples; `more_issues` counts the rest, which are in the scan file's `issues`. Open the scan file only for those, or when a decision needs more than three examples. Issues under `recorded` already have a quality row: reopen one whose status is `corrected` or whose `count` differs from its `recorded_count`; leave the rest as recorded. Read [checks.md](references/checks.md) when a likely false positive or a check's threshold bears on a decision.
 
@@ -30,7 +30,7 @@ The active question bounds the work: decide issues in the columns the active inv
 
 Decide yourself the fixes that change only representation: `whitespace`, `text-typed`, case- or punctuation-only `variants`, a clear `parse` format error, a `date-formats` mix with one reading, and `duplicate-rows` under a recorded grain — except in a code or identifier column, where case, padding, and numeric form can carry meaning. Ask when examples or source context leave meaning ambiguous. Record `all-null` as an open limitation yourself. The user decides every other issue, because each changes meaning: what a placeholder stands for (missing, zero, or real), the canonical label, whether repeated rows or keys are errors and which row wins, whether out-of-range values are wrong, a parsed value that carries meaning such as `<5`, how to treat orphans and null keys, and an ambiguous day-month order. Ask all of these in one message, as a table of issue, observation with count and examples, proposed treatment, and the alternative. Ask in sequence only when one answer changes which later questions arise, such as the grain deciding which repeated keys are issues.
 
-Decide is done when every in-scope `S<n>`, including any past stdout's 25, has a class and every question asked has an answer or is recorded as `open`.
+Decide is done when every in-scope `S<n>`, including any beyond the 25 that stdout lists, has a class and every question asked has an answer or is recorded as `open`.
 
 ## 3. Correct
 

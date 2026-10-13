@@ -14,7 +14,7 @@ Read this for an anomaly kind's confirmation check, or when you cannot tell a sh
 | `high-nulls` | At least 20% null. | Decide whether missingness matters to the question. Look at `null_patterns` for co-missing columns. |
 | `null-shift` | The null rate moves 25 points or more across periods. | Often a field introduced or dropped mid-history, or a load change. Find the change point in `null_patterns.by_period`. |
 | `extreme-values` | Values lie beyond 3 IQR. | Heavy tails are common in amounts and durations. Check whether the extremes are plausible units, and whether results change without them. |
-| `period-gaps` | Periods with no rows inside the date range. | A real absence, such as a closure, is a local matter. Check the source's acquisitions: a missing load is a coverage limitation (SKILL step 5). |
+| `period-gaps` | Periods with no rows inside the date range. | A real absence, such as a closure, is a local matter. Check the source's acquisitions: a missing load is a coverage limitation (SKILL.md step 5). |
 | `low-periods` | Interior periods under half the median rows. | Partial loads look like this, as do seasonal lows. The first and last periods are excluded, because they are often partial by construction. |
 | `contrary-trend` | A group's mean moved against the overall mean between the halves of the date range, by more than about two standard errors. | Keep these: they challenge an expected explanation. Confirm with the group's own series in a follow-up, since the scan compares halves rather than fitting a trend. |
 

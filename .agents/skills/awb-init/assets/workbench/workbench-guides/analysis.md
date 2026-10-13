@@ -18,4 +18,4 @@ Before rerunning a supported or flagged finding, suggest committing its evidence
 
 ## Rerun flagged findings
 
-`awb-clean` makes shared corrections and flags the findings they affect. To rerun flagged findings on request, pass their result IDs, from each Evidence link, to `run.py`; it returns each to `provisional`, or `superseded` if it was, refreshes its check segments, keeps its notes, and moves the flag reason to `history.md`. If `run.py` cannot reproduce a flagged finding, extend it first.
+`awb-clean` makes shared corrections and flags the findings they affect. To rerun flagged findings on request, pass their result IDs, from each Evidence link, to `run.py`; it returns each to `provisional`, or `superseded` if it was, refreshes its check segments, keeps its notes, and moves the flag reason to `history.md`. If `run.py` cannot reproduce a flagged finding, extend `run.py` first.

@@ -84,7 +84,7 @@ Apply the organization's approved template, typography, and page furniture when 
 
 ## Revision boundary
 
-When a requested change affects the storyline, wording, findings, numbers, charts, scope, or dataset contents, make that revision in the upstream workbench draft, send the refreshed package forward, and build the deck again. Deck edits stay in the deck. Layout, theme, and visual polish within the rules above are made here.
+When a requested change affects the storyline, wording, findings, numbers, charts, scope, or dataset contents, do not make it in the deck: the revision is made in the upstream workbench draft, the refreshed package is sent forward, and you build the deck again. Deck edits stay in the deck. Layout, theme, and visual polish within the rules above are made here.
 
 ## Before handing back
 
