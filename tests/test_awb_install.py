@@ -7,7 +7,7 @@
 # test_check_writes_nothing: --check reports missing helpers and the absent requirements file without writing.
 # test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited; a wheel URL declares its package, not its scheme.
 # test_missing_packages_get_an_install_command: a package that fails to import is reported with a pip command for this interpreter.
-# test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks.
+# test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks; without the provenance asset an existing requirements.txt is reported unchecked, not a crash.
 # test_refuses_non_workbench_old_python_and_unreadable_receipt: none of these writes anything.
 # test_refuses_readme_only_directory: README.md is not a marker; reports missing markers and initialization guidance with exit 1, without writing.
 # test_upgrade_check_classifies_without_writing: current, earlier, customized copies and retired files, the merged packaging helpers included, are reported; nothing changes.
@@ -204,6 +204,8 @@ def test_absent_mapped_asset_is_skipped(project, monkeypatch, imports_ok):
     monkeypatch.setattr(installer, "COPIED", {"src/awb.py": "awb-init/assets/awb_cli.py",
                                               "src/packaging/later.py": "awb-package/assets/awb_not_shipped.py"})
     assert installer.install(project, upgrade=True)["files"] == {"src/awb.py": "installed"}
+    assert installer.install(project, check=True)["requirements"] == {
+        "path": "requirements.txt", "status": "unchecked", "packages": PACKAGES}
 
 
 def test_refuses_non_workbench_old_python_and_unreadable_receipt(tmp_path, project, monkeypatch):

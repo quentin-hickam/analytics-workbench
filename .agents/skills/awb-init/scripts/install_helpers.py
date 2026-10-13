@@ -79,8 +79,12 @@ def _distribution(requirement):
 
 
 def _requirement_name():
-    """The provenance helper's requirements.txt line parser, so runtime records and this check agree."""
-    spec = importlib.util.spec_from_file_location("awb_asset_provenance", SKILLS / COPIED["src/provenance.py"])
+    """The provenance helper's requirements.txt line parser, so runtime records and this check agree;
+    None when the skills directory lacks that asset."""
+    asset = COPIED.get("src/provenance.py")
+    if asset is None or not (SKILLS / asset).is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("awb_asset_provenance", SKILLS / asset)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.requirement_name
@@ -92,12 +96,16 @@ def _copies():
 
 
 def _declared(root):
-    """(dependency files present, normalized names they declare, or None when unreadable)."""
+    """(dependency files present, normalized names they declare, or None when unreadable or the
+    requirements.txt parser is missing)."""
     files, names = [], set()
     requirements = root / "requirements.txt"
     if requirements.is_file():
         files.append("requirements.txt")
-        names |= {name for name in map(_requirement_name(), requirements.read_text(
+        parse = _requirement_name()
+        if parse is None:
+            return files, None
+        names |= {name for name in map(parse, requirements.read_text(
             encoding="utf-8", errors="replace").splitlines()) if name}
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
