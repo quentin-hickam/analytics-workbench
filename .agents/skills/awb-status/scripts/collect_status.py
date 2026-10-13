@@ -418,7 +418,8 @@ def probe_file(recorded, opener):
         else:
             try:
                 same = http_date(before) == http_date(now)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
+                # An out-of-range year overflows the parser; such a date is compared as text.
                 same = before.strip() == now.strip()
         compared[name] = (same, before, now)
     if not compared:

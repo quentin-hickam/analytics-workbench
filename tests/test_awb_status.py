@@ -28,6 +28,7 @@
 # test_none_chosen_is_a_recorded_decision: `none chosen`, backticked or bare `none`, reports availability none chosen, not unrecorded.
 # test_absent_storage_remains_actionable_when_acquisitions_and_releases_exist: absent lines read unrecorded alongside acquisitions and releases.
 # test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes: land()'s upstream fields drive one HEAD per probeable file; ETag wins over Last-Modified unless only the ETag changed, a weak ETag and an equal date in another form match, HTTP and network errors are unknown, and nothing is written.
+# test_out_of_range_server_date_is_compared_as_text_and_the_probe_continues: a Last-Modified the date parser overflows on falls back to text comparison, and the remaining files are still probed.
 # test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
 # test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json is named under uncertainties and makes probeable_files null, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
 # test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key is valid and counts as without upstream.
@@ -567,6 +568,17 @@ def test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_w
         {**file, "path": "s3.csv", "reason": "no HTTP URL recorded"},
     ]
     assert result["without_upstream"] == 1
+
+
+def test_out_of_range_server_date_is_compared_as_text_and_the_probe_continues(workbench, monkeypatch):
+    date = "Tue, 13 Oct 2026 08:00:00 GMT"
+    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://example.test/a", "last_modified": date},
+                                              "b.csv": {"url": "https://example.test/b", "last_modified": date}})
+    serve(monkeypatch, FakeServer({"https://example.test/a": {"Last-Modified": "Tue, 13 Oct 9999999999 08:00:00 GMT"},
+                                   "https://example.test/b": {"Last-Modified": date}}))
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["result"], file.get("current")) for file in files] == [
+        ("a.csv", "changed", "Tue, 13 Oct 9999999999 08:00:00 GMT"), ("b.csv", "unchanged", None)]
 
 
 def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench, monkeypatch):
