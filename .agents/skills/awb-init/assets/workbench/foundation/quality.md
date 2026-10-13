@@ -16,4 +16,4 @@ A confirmed coverage gap, such as a missing or low period or a field that stops 
 | Date | Issue ID | Accepted correction and rationale | Preparation or view change | Findings that may need revalidation |
 | --- | --- | --- | --- | --- |
 
-`awb-clean` alone records corrections here, each with the findings it flagged in their investigations' `state.md`; prior conclusions stay in each investigation's history.
+`awb-clean` alone records corrections here, each with the findings the correction flagged in their investigations' `state.md`; prior conclusions stay in each investigation's history.

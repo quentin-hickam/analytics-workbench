@@ -9,7 +9,7 @@ A release is a *frozen* copy of the existing draft. Changes to the draft go thro
 
 ## 1. Identify the draft
 
-Identify the investigation and package being delivered; when the request could refer to more than one, ask which. The draft lives at `deliveries/<investigation>/<package>/draft/`. When it is absent, say so and direct the user to awb-package to create it.
+Identify the investigation and package being delivered; when the request could refer to more than one investigation or package, ask which. The draft lives at `deliveries/<investigation>/<package>/draft/`. When it is absent, say so and direct the user to awb-package to create it.
 
 When README's `Released packages are kept at` line is missing, blank, or `not yet recorded`, ask where releases are kept and record it as in step 4 before releasing, so `release` copies it.
 

@@ -32,6 +32,6 @@ Null rates and the commonest co-null column patterns are reported for informatio
 
 `foundation/scans/<name>.json` stays local to the checkout. It holds the target, options, row count, per-column type, parsed type, non-null and distinct counts and null rate, candidate keys (complete and unique columns), null patterns, and every issue with up to ten examples. A rescan also holds the `baseline` it compares with and the `delta`. The scan name defaults to the view name, `<dataset>@<publication-id>`, `<source>@<acquisition-id>`, or the file stem; `--name` overrides it.
 
-Examples are real values, up to ten per issue and 80 characters each.
+Examples are real values, up to ten per issue, with text longer than 80 characters truncated (40 per column in multi-column examples, such as exact duplicate rows and composite keys).
 
 An issue is reported as recorded when `foundation/quality.json` links it to a `foundation/quality.md` row whose observation carries its `<name>#<key>` marker, with that row's ID and status and the link's recorded count. A marker on exactly one row with no link is linked from that row's `(<count> of <of>)`. `record_cleaning.py` writes the marker into every issue row it adds and moves the link's count and date to the reopened values when it updates a recorded issue; the observation keeps its first count.
