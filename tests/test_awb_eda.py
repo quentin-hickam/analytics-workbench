@@ -9,6 +9,7 @@
 # test_variance_explained_matches_hand_computation: eta squared and group means for a two-group measure.
 # test_options_override_settings_and_unfit_settings_are_skipped: options replace settings; unfit settings print as not applied; a bad option or empty scope exits 2.
 # test_publication_path_with_label_and_float_columns_keep_distributions: publication directory scanned to a labelled file; unique floats are not keys.
+# test_scan_file_name_follows_the_documented_rule: directory names join the last two path parts; other characters become "-", edges are trimmed, "dataset" fills an empty name; --help names no <dataset>-<label> file.
 # test_template_settings_take_the_period_from_parameters_and_name_unset_choices: [parameters] start/end scope the period; unset scope, measure, and dimensions print the options to pass.
 # test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one: --show walks keys and named list items without rescanning; a miss exits 2 listing what is there.
 
@@ -242,6 +243,28 @@ def test_publication_path_with_label_and_float_columns_keep_distributions(shifts
     near = [n["column"] for n in scan["grain"]["near_unique_columns"]]
     assert near == ["shift_id"]
     assert all("shift_id" not in pair for pair in scan["grain"]["column_pair_keys"])
+
+
+def test_scan_file_name_follows_the_documented_rule(tmp_path, capsys):
+    publication = tmp_path / "data/parquet/shifts/2026 Q3"
+    publication.mkdir(parents=True)
+    (tmp_path / "data/parquet/daily sales.parquet").touch()
+    assert eda.publication_name(tmp_path, publication) == "shifts-2026 Q3"
+    assert eda.publication_name(tmp_path, publication.parent) == "parquet-shifts"
+    assert eda.publication_name(tmp_path, tmp_path / "data/parquet/daily sales.parquet") == "daily sales"
+    folder = tmp_path / "investigations/overtime"
+    names = {name: eda.output_path(folder, name, label).relative_to(folder).as_posix()
+             for name, label in [("shifts-2026 Q3", "raw"), ("daily sales", None), ("café", None),
+                                 ("-v.1.", None), ("+++", "eu")]}
+    assert names == {"shifts-2026 Q3": "exploration/eda/shifts-2026-Q3-raw.json",
+                     "daily sales": "exploration/eda/daily-sales.json",
+                     "café": "exploration/eda/caf.json",
+                     "-v.1.": "exploration/eda/v.1.json",
+                     "+++": "exploration/eda/dataset-eu.json"}
+    with pytest.raises(SystemExit):
+        eda.parse(["--help"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "appends -<label> to the scan file's name" in help_text and "<dataset>-<label>" not in help_text
 
 
 TEMPLATE = """[parameters]

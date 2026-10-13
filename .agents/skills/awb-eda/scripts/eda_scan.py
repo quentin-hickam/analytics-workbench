@@ -5,8 +5,11 @@ canonical view name, loaded through the project's session() helper, or a project
 publication directory or Parquet file. Scope, measure, and dimensions come from the
 investigation's settings unless options override them. Writes the complete scan to
 investigations/<name>/exploration/eda/<scan>[-<label>].json, its only output file, and prints
-a compact summary. <scan> is the view name, <dataset>-<publication-id> for a publication
-directory, or a Parquet file's stem. --show prints one section of that file without scanning again.
+a compact summary that names it. <scan> is the view name, <dataset>-<publication-id> for a
+publication directory (any other directory gives its last two path parts joined by "-"), or a
+Parquet file's stem, with each run of characters other than letters, digits, ".", "_" and "-"
+replaced by "-", leading and trailing "-" and "." dropped, and "dataset" if nothing remains.
+--show prints one section of that file without scanning again.
 """
 
 import argparse
@@ -910,7 +913,8 @@ def parse(argv):
                         "for contrary trends (default 10)")
     parser.add_argument("--min-group", type=int, default=30, help="minimum rows in each half for a contrary "
                         "group, and for the highest and lowest group means (default 30)")
-    parser.add_argument("--label", help="writes <dataset>-<label>.json, so a second scope keeps the first")
+    parser.add_argument("--label", help="appends -<label> to the scan file's name (the summary prints "
+                        "it), so a second scope keeps the first")
     parser.add_argument("--show", metavar="PATH", help="print one section of the saved scan as compact JSON "
                         "and exit without scanning; see below")
     options = parser.parse_args(argv)

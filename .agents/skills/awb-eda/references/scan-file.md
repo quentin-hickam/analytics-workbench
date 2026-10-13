@@ -1,10 +1,10 @@
 # The scan file
 
-Read this to name a section for `--show` beyond a column's `top` or a dimension's `values`. Each scan replaces `investigations/<name>/exploration/eda/<scan>[-<label>].json`, where `<scan>` is the `dataset` name below. `--show` takes dot-separated keys, and names a list item by its `name`, `dimension`, or `kind`, or by index.
+Read this to name a section for `--show` beyond a column's `top` or a dimension's `values`. Each scan replaces `investigations/<name>/exploration/eda/<scan>[-<label>].json`, where `<scan>` is the `dataset` name below with each run of characters other than letters, digits, `.`, `_` and `-` replaced by `-`, leading and trailing `-` and `.` dropped, and `dataset` if nothing remains. `--show` takes dot-separated keys, and names a list item by its `name`, `dimension`, or `kind`, or by index.
 
 Top-level keys:
 
-- `format` (`awb-eda/1`), `generated_at`, `investigation`, `dataset` (name, kind, and the view definition file or publication path). The name is the view name, `<dataset>-<publication-id>` for a publication directory, or a Parquet file's name without `.parquet`.
+- `format` (`awb-eda/1`), `generated_at`, `investigation`, `dataset` (name, kind, and the view definition file or publication path). The name is the view name, `<dataset>-<publication-id>` for a publication directory (any other directory gives its last two path parts joined by `-`), or a Parquet file's name without `.parquet`.
 - `scope`: `applied` filters with their sources, `skipped` settings with reasons, `not_set` choices with the options to pass, `rows_before`, `rows`, `settings_path`, `settings_note`, and `settings_unused`.
 - `date_column`: name, source, and period.
 - `grain`: `duplicate_rows`, `single_column_keys`, `near_unique_columns`, `column_pair_keys`, and `declared_key` (duplicated values, rows in them, rows with a null key).
