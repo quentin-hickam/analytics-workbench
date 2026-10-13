@@ -26,8 +26,8 @@
 # test_finding_row_reuses_state_text_and_names_check_gaps: the row keeps existing finding text, escapes pipes, names failed and unassessed checks.
 # test_cli_stale_lists_changed_results_with_their_findings: stale lists failing results with state.md rows, missing linked evidence, skips non-evidence JSON, rejects an unknown investigation.
 # test_record_evidence_records_runtime: the runtime block holds this interpreter's Python and platform and the versions of duckdb, pandas, and each requirements.txt name, null when not installed.
-# test_requirement_name_reads_names_and_direct_references: names with extras, versions, markers, or @ URL; #egg= and wheel or sdist file names of direct references, -e included; options, comments, and references naming no package give none.
-# test_runtime_records_a_wheel_url_package_and_its_drift: a requirements.txt wheel URL records its package's installed version, and a changed recorded version is a runtime mismatch.
+# test_requirement_name_reads_names_and_direct_references: names with extras, versions, markers, or @ URL; #egg= and wheel or sdist file names of direct references (URL, POSIX or Windows path), -e included, with trailing --hash or other per-requirement options and a continuation backslash ignored; options, comments, and references naming no package give none.
+# test_runtime_records_a_wheel_url_package_and_its_drift: a hash-pinned requirements.txt wheel URL or path, continued or not, records its package's installed version, and a changed recorded version is a runtime mismatch.
 # test_runtime_records_missing_version_metadata_as_unknown: an installed distribution whose metadata has no Version is unknown, not null (not installed).
 # test_cli_stale_reports_runtime_mismatch_as_a_warning: a changed recorded duckdb or Python version, or no runtime block, is listed under runtime_mismatches with its findings rows, never under results, and compare_evidence still passes.
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
@@ -610,6 +610,13 @@ def test_requirement_name_reads_names_and_direct_references():
         "https://example.invalid/scipy-1.14.1-py3-none-any.whl#sha256=ab": "scipy",
         "numpy-1.26.0-cp312-cp312-macosx_11_0_arm64.whl": "numpy", "./dist/foo_bar-2.0.tar.gz": "foo-bar",
         "-e git+https://example.invalid/r.git#egg=ed": "ed", "--editable=./src/x#egg=edx": "edx",
+        "numpy-1.26.0-cp312-cp312-macosx_11_0_arm64.whl --hash=sha256:ab": "numpy",
+        "./dist/numpy-1.26.0.tar.gz --hash=sha256:ab": "numpy",
+        "https://example.invalid/numpy-1.26.0.tar.gz --hash=sha256:ab --hash=sha256:cd": "numpy",
+        "https://example.invalid/numpy-1.26.0-py3-none-any.whl --hash=sha256:ab \\": "numpy",
+        "-e git+https://example.invalid/r.git#egg=cfg --config-settings k=v": "cfg",
+        r"C:\wheels\winpkg-1.0-py3-none-any.whl": "winpkg", r"C:\dist\win_sdist-2.0.tar.gz": "win-sdist",
+        "    --hash=sha256:ab": None,
         "src/mypkg": None, "-e .": None, "git+https://example.invalid/r.git": None, "-r other.txt": None,
         "--index-url https://example.invalid": None, "# comment": None, "": None,
     }
@@ -617,15 +624,20 @@ def test_requirement_name_reads_names_and_direct_references():
 
 
 def test_runtime_records_a_wheel_url_package_and_its_drift(project, capsys):
-    write(project, "requirements.txt", b"https://example.invalid/pytest-0.0.1-py3-none-any.whl\n")
+    digest = "--hash=sha256:" + "0" * 64
+    write(project, "requirements.txt", (
+        f"https://example.invalid/pytest-0.0.1-py3-none-any.whl {digest}\n"
+        f"./wheels/pluggy-0.0.1-py3-none-any.whl {digest} \\\n    {digest}\n").encode())
     path = record(project)
     evidence = json.loads(path.read_text())
-    assert "https" not in evidence["runtime"]["packages"]
-    assert evidence["runtime"]["packages"]["pytest"] == installed("pytest") is not None
-    evidence["runtime"]["packages"]["pytest"] = "0.0.1-fixture"
+    assert set(evidence["runtime"]["packages"]) == {"duckdb", "pandas", "pluggy", "pytest"}
+    for name in ("pytest", "pluggy"):
+        assert evidence["runtime"]["packages"][name] == installed(name) is not None
+        evidence["runtime"]["packages"][name] = "0.0.1-fixture"
     path.write_text(json.dumps(evidence))
     provenance.cli_stale(project, [])
     assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["detail"] == (
+        f"pluggy 0.0.1-fixture recorded, {installed('pluggy')} now; "
         f"pytest 0.0.1-fixture recorded, {installed('pytest')} now.")
 
 

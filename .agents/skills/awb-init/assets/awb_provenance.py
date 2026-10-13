@@ -249,10 +249,13 @@ def requirement_name(line):
     """The normalized package name a requirements.txt line installs, or None when it names none.
 
     A name with optional extras, versions, markers, or `@ URL` gives that name. A direct reference,
-    alone or after -e, gives its #egg= name or its wheel or sdist file name's package; one naming no
-    package, such as a local directory or a VCS URL without #egg=, and every other option line give None.
+    alone or after -e, gives its #egg= name or its wheel or sdist file name's package (a POSIX or
+    Windows path, or a URL); one naming no package, such as a local directory or a VCS URL without
+    #egg=, and every other option line give None. Per-requirement options after the requirement, such
+    as --hash, and a trailing line-continuation backslash are ignored.
     """
     line = re.sub(r"(^|\s)#.*", "", line).strip()
+    line = re.split(r"\s+-", line.rstrip("\\").strip(), maxsplit=1)[0]
     editable = re.match(r"(?:-e|--editable)(?:\s+|=)(.*)", line)
     if editable:
         line = editable[1].strip()
@@ -268,7 +271,7 @@ def requirement_name(line):
     egg = re.search(r"[#&]egg=([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)", reference)
     if egg:
         return _package(egg[1])
-    archive = reference.split("#")[0].split("?")[0].rstrip("/").rsplit("/", 1)[-1]
+    archive = re.split(r"[/\\]", reference.split("#")[0].split("?")[0].rstrip("/\\"))[-1]
     lower = archive.lower()
     if lower.endswith(".whl"):
         return _package(archive.split("-")[0]) if "-" in archive else None
