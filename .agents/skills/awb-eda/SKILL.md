@@ -30,7 +30,7 @@ Check in order:
 - **Scope.** Are the rows before and after the filters plausible? Does a `not set` or `not applied` line, or an unread settings key, mean the population differs from the brief's? If so, scan again with the missing options and say so.
 - **Grain.** Do the candidate keys match the grain on the dataset's catalog row, the declared key passed in step 2? Check duplicates and any declared-key violation or missing column.
 - **Anomalies.** Give every printed anomaly one disposition: a shared data problem, confirmed by a follow-up query or the source register before the step 5 hand-off; a local analytical matter; or dismissed with a reason. The `route` column is the scan's guess, not the disposition.
-- **Relationships.** Read variance explained, the trend, the measure's correlations, and **contrary** groups. Variance explained rises with group count, and a trend where a high-variance dimension's shares shift may be mix rather than change. Name candidate explanations and keep every contrary pattern.
+- **Relationships.** Read variance explained, the trend, the measure's correlations, and **contrary** groups. Variance explained rises with group count, and a trend where a high-variance dimension's shares shift may be mix rather than change. Name candidate explanations and keep every contrary pattern. These are associations: a finding built on them is worded as one, never as a cause.
 
 Read [reading the scan](references/reading-the-scan.md) for an anomaly kind's confirmation check, or when a data problem and a real pattern are hard to tell apart. Draft the observations that bear on the question, labeled exploratory, with candidate explanations and contrary patterns, for the report.
 

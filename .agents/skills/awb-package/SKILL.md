@@ -53,7 +53,7 @@ Run `python3 src/awb.py export <investigation> <package> --chart <result>[:<colu
 
 Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it.
 
-**Done** when `check-draft` prints `passed: true` on the final files and you have confirmed what it cannot check: both narratives carry the same numbers, qualifications, and caveats; every `revalidation_flags` place carries its caveat or omission; every claim in `findings.md` traces to `methodology.md`. Any edit after `check-draft` reruns it. Report its rows verbatim.
+**Done** when `check-draft` prints `passed: true` on the final files and you have confirmed what it cannot check: both narratives carry the same numbers, qualifications, and caveats; no finding is worded more strongly than its claim strength; every `revalidation_flags` place carries its caveat or omission; every claim in `findings.md` traces to `methodology.md`. Any edit after `check-draft` reruns it. Report its rows verbatim.
 
 ## 6. Report
 

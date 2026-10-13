@@ -32,7 +32,7 @@ State the validation checks performed on the results presented, with their outco
 
 ### Use the same heading text as the finding in findings.md
 
-Give one `###` section per finding in `findings.md`, its heading identical to that finding's heading. Record the reasoning that supports the finding, its result IDs and evidence paths, the chart file each of its charts reads with the result it serializes and the source column of each header, the settings it depends on, and the results that complicate or contradict it.
+Give one `###` section per finding in `findings.md`, its heading identical to that finding's heading. Open it with `**Claim strength:** <claim>`: the weakest Claim in `state.md` among its results, with a causal claim's design basis. Record the reasoning that supports the finding, its result IDs and evidence paths, the chart file each of its charts reads with the result it serializes and the source column of each header, the settings it depends on, and the results that complicate or contradict it.
 
 ## Methodological corrections
 
