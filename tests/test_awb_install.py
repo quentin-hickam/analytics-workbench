@@ -9,6 +9,7 @@
 # test_missing_packages_get_an_install_command: a package that fails to import is reported with a pip command for this interpreter.
 # test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks.
 # test_refuses_non_workbench_old_python_and_unreadable_receipt: none of these writes anything.
+# test_refuses_readme_only_directory: README.md is not a marker; reports missing markers and initialization guidance with exit 1, without writing.
 # test_upgrade_check_classifies_without_writing: current, earlier, customized copies and retired files, the merged packaging helpers included, are reported; nothing changes.
 # test_upgrade_replaces_only_earlier_copies: --upgrade rewrites earlier helpers, package formats and guides, records them in the receipt, and leaves customized ones byte for byte.
 # test_upgrade_replace_and_remove_retired: named customized copies are replaced; unmodified retired files are removed with their emptied directory and receipt entry; customized retired files stay.
@@ -202,7 +203,11 @@ def test_absent_mapped_asset_is_skipped(project, monkeypatch, imports_ok):
 
 def test_refuses_non_workbench_old_python_and_unreadable_receipt(tmp_path, project, monkeypatch):
     assert installer.install(tmp_path / "missing") == {"project": str((tmp_path / "missing").resolve()),
-                                                       "workbench": False}
+                                                       "workbench": False,
+                                                       "missing": ["AGENTS.md", "foundation/", "investigations/"],
+                                                       "hint": "No workbench markers here. At the project root, first adapt "
+                                                               "README.md and AGENTS.md (awb-init SKILL.md, section 4, "
+                                                               "item 1); otherwise pass the project root."}
     (project / ".awb-receipt.json").write_text("{")
     before = snapshot(project)
     result = installer.install(project, upgrade=True)
@@ -211,6 +216,19 @@ def test_refuses_non_workbench_old_python_and_unreadable_receipt(tmp_path, proje
     result = installer.install(project)
     assert not result["python"]["ok"] and "error" in result
     assert snapshot(project) == before
+
+
+def test_refuses_readme_only_directory(tmp_path):
+    (tmp_path / "README.md").write_text("# Project\n")
+    before = list(tmp_path.iterdir())
+    report = installer.install(tmp_path)
+    assert report["workbench"] is False
+    assert report["missing"] == ["AGENTS.md", "foundation/", "investigations/"]
+    assert report["hint"] == "No workbench markers here. At the project root, first adapt README.md and AGENTS.md " \
+        "(awb-init SKILL.md, section 4, item 1); otherwise pass the project root."
+    result = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path)], capture_output=True, text=True)
+    assert result.returncode == 1 and json.loads(result.stdout) == report
+    assert list(tmp_path.iterdir()) == before
 
 
 @pytest.fixture
