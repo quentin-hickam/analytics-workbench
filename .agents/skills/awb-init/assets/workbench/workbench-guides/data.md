@@ -14,7 +14,7 @@ Land user-supplied or already-downloaded files:
 python3 src/awb.py land <source> <acquisition-id> <file-or-directory>... [--request TEXT] [--records NAME=COUNT] [--notes TEXT]
 ```
 
-For an API or other fetched source, save the fetch as `src/preparation/fetch_<source>.py`, calling `land()` from `src/preparation/landing.py` with a `fetch` callable; run it by path, then run `python3 src/awb.py retain`.
+For an API or other fetched source, save the fetch as `src/preparation/fetch_<source>.py`, calling `land()` from `src/preparation/landing.py` with a `fetch` callable and the upstream URL and validators it receives; run it by path, then run `python3 src/awb.py retain`. Land a changed upstream again under a new acquisition ID, only on request; rerunning analysis never re-lands.
 
 ## Retain originals
 
