@@ -29,14 +29,15 @@
 # test_cli_publish_keeps_a_failed_check_or_empty_result_unpublished: check rows or an empty select keep the partial directory unpublished and print the failures.
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
-# test_land_refuses_an_obvious_secret_before_fetch: a bearer token, credential assignment, secret-named field, URL credentials or known key format in request or notes raises before fetching, without echoing the value.
-# test_land_records_a_request_that_names_its_variables: $NAME, ${NAME}, <name>, *** and ALL_CAPS_NAME references, and a page_token cursor, land unchanged.
-# test_cli_land_refuses_a_secret_request_before_landing: --request or --notes holding a secret exits 2 with nothing landed.
+# test_land_refuses_an_obvious_secret_before_fetch: a bearer token, credential assignment (quoted or prefixed), secret-named field (prefixed, as X-Api-Key), a reference with a literal around it, URL credentials or known key format in request or notes raises before fetching, without echoing the value.
+# test_land_records_a_request_that_names_its_variables: $NAME, ${NAME}, <name>, *** and ALL_CAPS_NAME references, quoted or after an auth scheme, and page_token and next-token cursors, land unchanged.
+# test_cli_land_refuses_a_secret_request_before_landing: --request or --notes holding a secret, bare or quoted, exits 2 with nothing landed.
 # test_gitignore_template_tracks_env_example: in a fresh repository with the template .gitignore, .env.example is tracked while .env and .env.local stay ignored.
 # test_guides_state_the_credentials_convention: the data guide and landing reference state where credentials live, where they never go, and that records name the variable.
 
 import hashlib
 import importlib.util
+import itertools
 import json
 import shutil
 import subprocess
@@ -663,6 +664,15 @@ SECRETS = [
     "key AKIAIOSFODNN7EXAMPLE",
     {"headers": {"Authorization": "Basic cmVhZGVyOmh1bnRlcjI="}},
     [{"password": "hunter2"}],
+    {"headers": {"X-Api-Key": "9f8e7d6c5b4a39281706"}},
+    {"db_password": "hunter2"},
+    "connect with password='hunter2'",
+    'GET /orders?x-api-key="9f8e7d6c5b4a39281706"',
+    "UID=reader;db_pwd=hunter2;",
+    {"password": "pa$hunter2"},
+    {"Authorization": "hunter2 ($ACME_TOKEN)"},
+    "password=${ERP_PASSWORD}hunter2",
+    "api_key=<redacted>hunter2",
 ]
 
 
@@ -673,17 +683,18 @@ def test_land_refuses_an_obvious_secret_before_fetch(tmp_path, field, secret):
     values = {"request": "orders export", "notes": None, field: secret}
     with pytest.raises(ValueError, match=f"^{field} appears to hold a secret") as error:
         landing.land(tmp_path, "api", "batch-1", called.append, **values)
-    for fragment in ("hunter2", "a1b2c3d4", "eyJhbGci", "AKIAIOSFODNN7EXAMPLE", "cmVhZGVy"):
+    for fragment in ("hunter2", "a1b2c3d4", "eyJhbGci", "AKIAIOSFODNN7EXAMPLE", "cmVhZGVy", "9f8e7d6c"):
         assert fragment not in str(error.value)
     assert called == []
     assert not (tmp_path / "data").exists()
 
 
 def test_land_records_a_request_that_names_its_variables(tmp_path):
-    request = {"url": "https://api.example.com/orders?page_token=a1b2c3d4&access_token=$ACME_TOKEN",
+    request = {"url": "https://api.example.com/orders?page_token=a1b2c3d4&access_token=$ACME_TOKEN"
+                      "&next-token=b2c3d4e5",
                "headers": {"Authorization": "Bearer ${ACME_TOKEN}", "X-Api-Key": "<acme key>"},
-               "api_key": "ACME_API_KEY", "password": "***", "token": "",
-               "dsn": "DRIVER=sql;UID=reader;PWD=$ERP_PASSWORD;",
+               "api_key": "ACME_API_KEY", "db_password": "***", "token": "", "page_token": "a1b2",
+               "dsn": "DRIVER=sql;UID=reader;PWD=$ERP_PASSWORD;api_key='<acme key>';",
                "auth": "Bearer authentication_by_header"}
     final = landing.land(tmp_path, "api", "batch-1",
                          lambda output: (output / "page.json").write_bytes(b"{}"),
@@ -695,10 +706,10 @@ def test_land_records_a_request_that_names_its_variables(tmp_path):
 
 def test_cli_land_refuses_a_secret_request_before_landing(tmp_path, capsys):
     (tmp_path / "x.csv").write_bytes(b"1")
-    for option in ("--request", "--notes"):
+    for option, value in itertools.product(("--request", "--notes"),
+                                           ("pulled with password=hunter2", "password='hunter2'")):
         with pytest.raises(SystemExit) as error:
-            landing.cli_land(tmp_path, ["orders", "r1", str(tmp_path / "x.csv"),
-                                        option, "pulled with password=hunter2"])
+            landing.cli_land(tmp_path, ["orders", "r1", str(tmp_path / "x.csv"), option, value])
         assert error.value.code == 2
         message = capsys.readouterr().err
         assert f"{option} appears to hold a secret" in message and "hunter2" not in message

@@ -69,29 +69,33 @@ def _check_name(value):
 
 
 # Obvious credential shapes, refused in the request and notes that provenance.json and the
-# Acquisitions row keep. A variable reference ($NAME, ${NAME}, <name>, ***) or an ALL_CAPS_NAME
-# passes. Each pattern's value group is what must be a reference. A guard, not a scanner: a
-# secret in another shape is recorded as given.
+# Acquisitions row keep. A value that is wholly a variable reference ($NAME, ${NAME}, <name>, ***)
+# or an ALL_CAPS_NAME passes; under a secret-named key, so does an auth scheme followed by one
+# (Bearer ${NAME}). Each pattern's value group is what must be a reference. A secret name may carry
+# a prefix (db_password, X-Api-Key); bare `token` may not, so cursors such as page_token and
+# next-token pass. A guard, not a scanner: a secret in another shape is recorded as given.
+_SECRET_NAME = (r"(?:[\w-]*[_-])?(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token"
+                r"|auth[_-]?token)")
 _SECRET_PATTERNS = [
     ("a bearer token", re.compile(
         r"\bbearer\s+(?P<value>(?=[A-Za-z._~+/=-]*\d)[A-Za-z0-9._~+/=-]{16,})", re.I)),
     ("a credential assignment", re.compile(
-        r"\b(?:password|passwd|pwd|secret|client_secret|api[_-]?key|access[_-]?token|auth[_-]?token"
-        r"|token)\s*=\s*(?P<value>[^\s&;,'\"]+)", re.I)),
+        rf"(?<![\w-])(?:{_SECRET_NAME}|token)\s*=\s*['\"]?"
+        r"(?P<value><[^<>\n]*>[^\s&;,'\"]*|[^\s&;,'\"]+)", re.I)),
     ("credentials in a URL", re.compile(r"://[^/\s:@]+:(?P<value>[^/\s@]+)@")),
     ("a private key", re.compile(r"(?P<value>-----BEGIN [A-Z ]*PRIVATE KEY-----)")),
     ("a known key format", re.compile(
         r"\b(?P<value>AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{36,}"
         r"|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,})")),
 ]
-_SECRET_KEY = re.compile(r"password|passwd|pwd|secret|client_secret|api[_-]?key|access[_-]?token"
-                         r"|auth[_-]?token|token|authorization", re.I)
-_REFERENCE = re.compile(r"\$\{?[A-Za-z_]\w*|<[^<>]+>|\*{3,}")
-_VARIABLE_NAME = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
+_SECRET_KEY = re.compile(rf"{_SECRET_NAME}|(?:[\w-]*[_-])?authorization|token", re.I)
+_REFERENCE = r"\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})|<[^<>]+>|\*{3,}|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+"
+_VARIABLE = re.compile(_REFERENCE)
+_SCHEMED_VARIABLE = re.compile(rf"(?:(?i:basic|bearer|digest|token|bot)\s+)?(?:{_REFERENCE})")
 
 
 def _names_a_variable(value):
-    return bool(_REFERENCE.match(value) or _VARIABLE_NAME.fullmatch(value))
+    return bool(_VARIABLE.fullmatch(value))
 
 
 def _secret_kind(value):
@@ -103,7 +107,7 @@ def _secret_kind(value):
     elif isinstance(value, dict):
         for key, item in value.items():
             if (isinstance(key, str) and _SECRET_KEY.fullmatch(key) and isinstance(item, str)
-                    and item and not _REFERENCE.search(item) and not _VARIABLE_NAME.fullmatch(item)):
+                    and item and not _SCHEMED_VARIABLE.fullmatch(item.strip())):
                 return f"a literal {key!r} value"
             kind = _secret_kind(key) or _secret_kind(item)
             if kind:
