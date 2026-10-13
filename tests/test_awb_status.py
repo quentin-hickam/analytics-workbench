@@ -17,7 +17,7 @@
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
-# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: and gives a link or a location and SHA-256; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
+# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by a complete link, or a location and its SHA-256 (sha256, SHA-256, or sha256:), so a placeholder followed by an unrelated link or checksum, or an unclosed link, is listed; a <br> opens a clause; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
 # test_absent_project_and_unsafe_active_pointer: a missing project is not a workbench; an unsafe pointer is an uncertainty.
 # test_standard_active_state_pointer: link, path, and backticked pointer forms resolve to the investigation.
 # test_other_state_reader_stops_before_conclusions: another investigation's state is read only up to its first section.
@@ -307,11 +307,18 @@ def test_sources_assessed_from_documentation_need_a_reference(workbench):
         "| negated | Negated | x | y | z | from documentation: fit | candidate | no reference: vendor publishes none |",
         "| unlabelled | Unlabelled | x | y | z | from documentation: fit | candidate | kept at /secure/unlabelled/manual.pdf, sha256 ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 |",
         "| short | Short | x | y | z | from documentation: fit | candidate | reference: /secure/short/manual.pdf, sha256 ab12 |",
+        "| later-link | Later-Link | x | y | z | from documentation: fit | candidate | reference: not yet retained. Owner: [HR](https://example.org/hr) |",
+        "| later-comma | Later-Comma | x | y | z | from documentation: fit | candidate | reference: not yet retained, see [request](https://tickets.example/42) |",
+        "| later-sum | Later-Sum | x | y | z | from documentation: fit | candidate | reference: none kept. Landing checked against /data/raw/later-sum, sha256 ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 |",
+        "| unclosed | Unclosed | x | y | z | from documentation: fit | candidate | reference: [codebook](references/unclosed/codebook.pdf |",
+        "| spelled | Spelled | x | y | z | from documentation: fit | candidate | reference: /secure/spelled/manual.pdf, SHA-256 ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 |",
+        "| digest | Digest | x | y | z | from documentation: fit | candidate | reference: /secure/digest/manual.pdf, sha256:ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 |",
+        "| broken | Broken | x | y | z | from documentation: fit | candidate | Owner confirmed<br>reference: [codebook](references/broken/codebook.pdf) |",
         "| new | New | x | y | z | | candidate | |",
         "| loose | Loose | x | y | z | not from documentation; from landed records | candidate | |"])
     path.write_text(path.read_text().replace("| --- | --- | --- | --- | --- | --- | --- | --- |\n", "| --- | --- | --- | --- | --- | --- | --- | --- |\n" + rows + "\n", 1))
     result = status.collect(workbench)
-    assert result["sources"] == {"count": 13, "documentation_without_reference": ["hr", "blank", "pending", "negated", "unlabelled", "short"]}
+    assert result["sources"] == {"count": 20, "documentation_without_reference": ["hr", "blank", "pending", "negated", "unlabelled", "short", "later-link", "later-comma", "later-sum", "unclosed"]}
     assert result["acquisitions"] == {"count": 0, "without_retained_copy": 0}
     assert result["uncertainties"] == [{"path": "foundation/sources.md", "reason": "Source loose: Relevance and fitness does not begin with its basis"}]
     path.write_text(path.read_text().replace("| Relevance and fitness |", "| Fitness |", 1))

@@ -188,10 +188,11 @@ def collect(root):
         return basis is not None and basis.group(1).lower() == "documentation"
 
     def referenced(notes):
-        """Whether a Notes clause opens with `reference:` and gives a link, or a retained location and its SHA-256."""
-        clauses = re.finditer(r"(?:^|(?<=[;,.]))\s*`?reference:`?(?P<body>[^;]*)", notes, re.I)
-        return any(re.search(r"\[[^\]]*\]\(\s*[^)\s]+", clause["body"]) or re.search(r"\S.*\bsha256:?\s+[0-9a-f]{64}\b", clause["body"], re.I)
-                   for clause in clauses)
+        """Whether a Notes clause opens with `reference:` directly followed by a complete link, or by a retained location and its SHA-256."""
+        # A clause opens the cell or follows `;`, `,`, `.`, or a `<br>` line break. Only what directly
+        # follows the label counts, so `reference: pending. See [x](y)` records no reference.
+        form = r"(?:\[[^\]]*\]\(\s*[^)\s]+[^)]*\)|(?:`[^`]+`|[^\s`]+?)(?:,\s*|\s+)sha-?256:?\s*[0-9a-f]{64}\b)"
+        return re.search(r"(?:^|(?<=[;,.>]))\s*`?reference:`?\s*" + form, notes, re.I) is not None
 
     # foundation/sources.md states the basis and reference forms these read.
     result["sources"] = None if registered is None else {"count": len(registered), "documentation_without_reference": [
