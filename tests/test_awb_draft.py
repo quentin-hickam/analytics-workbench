@@ -25,6 +25,8 @@
 # test_release_reports_fields_for_the_report: datasets, dispositions marked new against the prior release's manifest (unknown when it is unreadable), provenance gaps, checkout-only acquisitions, and a clean local verify.
 # test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy compared.
 # test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do.
+# test_check_draft_refuses_causal_wording_above_claim_strength: causal wording on an association finding's slide fails with a row naming the phrase, line, and claim; a causal finding's slide and the Answer slide under a causal represented finding pass; method and caveat slides, code, comments, and hyphenated words are not read; release refuses on the row.
+# test_claim_strength_follows_cited_results_and_records: a slide citing several results takes the weakest claim; one citing none takes the weakest represented; with no causal finding the Answer slide fails too; a missing Claim, a missing results list, and a missing or differing methodology Claim strength line each fail.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
 
 import hashlib
@@ -56,16 +58,18 @@ SELECT r.*, EXTRACT(year FROM r.ordered_at) AS y FROM recent r JOIN main.regions
 SETTINGS = b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n[results.r-001]\n\n[results.r-002]\n"
 STALE_SETTINGS = SETTINGS.replace(b"minimum_count = 5", b"minimum_count = 6")
 FINDINGS = "# Order quality\n\n### Late orders rose in the west\n\n**Chart 1.** Bar: late share by region\n"
-METHODOLOGY = "# Methodology\n\n## Findings\n\n### Late orders rose in the west\n"
+METHODOLOGY = "# Methodology\n\n## Findings\n\n### Late orders rose in the west\n\n**Claim strength:** association\n"
 STATE = """# Current investigation state
 
 Last updated: 2026-10-01
 
 ## Current findings
 
-| Finding | Evidence | Status | Revalidation reason or caveat |
-| --- | --- | --- | --- |
-| Late orders rose in the west | [r-009](evidence/r-009.json) | {status} | {reason} |
+| Finding | Evidence | Status | Claim | Revalidation reason or caveat |
+| --- | --- | --- | --- | --- |
+| Late orders rose in the west | [r-009](evidence/r-009.json) | {status} | association | {reason} |
+| West volume is stable | [r-001](evidence/r-001.json) | supported | association | |
+| Discounts cut late orders | [r-002](evidence/r-002.json) | supported | causal (experiment: randomized discount test) | |
 
 ## Next steps
 """
@@ -91,14 +95,15 @@ def findings_for(state, text):
     """Write the findings.json a state.md's rows render from, as run.py and `state` would have."""
     entries = []
     for line in text.splitlines():
-        match = re.fullmatch(r"\| (.*) \| \[(.+)\]\(evidence/\2\.json\) \| (.*) \| ?(.*?) ?\|", line)
+        match = re.fullmatch(r"\| (.*) \| \[(.+)\]\(evidence/\2\.json\) \| (.*) \| (.*) \| ?(.*?) ?\|", line)
         if match:
-            finding, result, status, reason = (part.strip() for part in match.groups())
+            finding, result, status, claim, reason = (part.strip() for part in match.groups())
+            claim, _, basis = claim.partition(" (")
             flagged = re.fullmatch(r"revalidation-needed(?: \(was (.+)\))?", status)
             entries.append({"result": result, "text": finding, "status": "revalidation-needed" if flagged else status,
                             "prior_status": flagged[1] if flagged else None,
                             "flag_reason": reason if flagged else "", "notes": [] if flagged or not reason else [reason],
-                            "checks_caveat": "", "notes_checks": ""})
+                            "checks_caveat": "", "notes_checks": "", "claim": claim, "claim_basis": basis[:-1]})
     path = state.with_name("findings.json")
     if entries:
         path.write_text(json.dumps({"schema": "awb-findings/1", "findings": entries}, indent=2) + "\n")
@@ -147,7 +152,8 @@ def project(tmp_path):
     write(draft, "charts/chart-1.csv", "Region,Late (%)\nWest,21\n")
     write(draft, "manifest.json", json.dumps({
         "investigation": "inv", "package": "pkg", "status": "draft",
-        "revalidation_flags": "none", "inventory": []}))
+        "revalidation_flags": "none", "inventory": [],
+        "results": [{"result_id": "r-009", "evidence": "investigations/inv/evidence/r-009.json"}]}))
     return tmp_path
 
 
@@ -338,7 +344,7 @@ def test_export_results_records_provenance_only(project, capsys):
 
 def state_rows(*rows):
     """A state.md whose Current findings table holds (finding, status, reason) rows."""
-    lines = "".join(f"| {finding} | [r-001](evidence/r-001.json) | {status} | {reason} |\n"
+    lines = "".join(f"| {finding} | [r-001](evidence/r-001.json) | {status} | association | {reason} |\n"
                     for finding, status, reason in rows)
     return STATE.split("| Late orders")[0] + lines + "\n## Next steps\n"
 
@@ -711,12 +717,19 @@ def test_check_draft_checks_findings_drift(project, verify_only):
     draft = load(project / "src/packaging/draft.py", "draft_findings_drift")
     assert draft.check_draft(project, "inv", "pkg")["passed"]
     write(project, "investigations/inv/state.md", STATE.format(status="supported", reason=""))
-    content = {"schema": "awb-findings/1", "findings": [
-        {"result": "r-009", "text": "Late orders rose in the west", "status": "supported", "prior_status": None,
-         "flag_reason": "", "notes": [], "checks_caveat": "", "notes_checks": ""}]}
-    write(project, "investigations/inv/findings.json", json.dumps(content, indent=2) + "\n")
+    path = project / "investigations/inv/findings.json"
+    content = json.loads(path.read_text())
+    assert content["findings"][0] == {
+        "result": "r-009", "text": "Late orders rose in the west", "status": "supported", "prior_status": None,
+        "flag_reason": "", "notes": [], "checks_caveat": "", "notes_checks": "", "claim": "association",
+        "claim_basis": ""}
     report = draft.check_draft(project, "inv", "pkg", verify_only=verify_only)
     assert report["passed"] and report["errors"] == []
+    del content["findings"][0]["claim"]  # an absent claim strength fails, never defaulted
+    path.write_text(json.dumps(content))
+    report = draft.check_draft(project, "inv", "pkg", verify_only=verify_only)
+    assert not report["passed"] and "no valid claim strength" in " ".join(report["errors"])
+    write(project, "investigations/inv/state.md", STATE.format(status="supported", reason=""))
     state = project / "investigations/inv/state.md"
     state.write_text(state.read_text().replace("Late orders rose in the west", "Hand edited finding"))
     report = draft.check_draft(project, "inv", "pkg", verify_only=verify_only)
@@ -747,3 +760,130 @@ def test_evidence_older_than_scoped_3_is_reported_for_rerun(project, capsys, unu
             in report["names_problems"])
     code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-001")
     assert code == 1 and any("rerun the result" in e for e in out["errors"])
+
+
+CLAIM_FINDINGS = """# Order quality for the operations team
+Operations leads, all regions, January to June 2026
+
+## Answer
+
+**Headline:** Discounts drive 4 points fewer late orders
+
+## Findings
+
+### Late orders rose in the west
+
+- The new carrier drives the rise to 21%, a data-driven view.
+- West volume, <!-- causes --> its comment unread, is flat.
+
+**Chart 1.** Bar: late share by region
+
+### Discounts cut late orders by 4 points
+
+- Randomized discounts led to 4 points fewer late orders.
+
+## How we know
+
+**Headline:** Totals reconcile to the ledger
+
+- June is short due to a feed outage.
+
+## Limitations and open caveats
+
+- Late orders may rise because of holiday volume.
+"""
+CLAIM_METHODOLOGY = """# Methodology
+
+## Findings
+
+### Late orders rose in the west
+
+**Claim strength:** association
+
+Result `r-009`, evidence [r-009](../../../../investigations/inv/evidence/r-009.json).
+
+### Discounts cut late orders by 4 points
+
+**Claim strength:** causal (experiment: randomized discount test)
+
+Result `r-002`.
+"""
+
+
+def claim_draft(project, findings=CLAIM_FINDINGS, methodology=CLAIM_METHODOLOGY, results=("r-009", "r-002")):
+    draft = project / "deliveries/inv/pkg/draft"
+    write(draft, "findings.md", findings)
+    write(draft, "methodology.md", methodology)
+    path = draft / "manifest.json"
+    record = json.loads(path.read_text())
+    record["results"] = [{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json"} for r in results]
+    path.write_text(json.dumps(record))
+
+
+def test_check_draft_refuses_causal_wording_above_claim_strength(project, capsys):
+    claim_draft(project)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and not report["passed"]
+    assert report["claims"] == [{
+        "line": 12, "section": "Late orders rose in the west", "phrase": "drives", "claim": "association",
+        "results": ["r-009"], "problem": "causal wording above the association claim strength; reword it, since "
+        "only an experiment or an identified natural experiment supports a causal claim"}]
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
+    assert [row["phrase"] for row in report["check"]["claims"]] == ["drives"]
+    claim_draft(project, CLAIM_FINDINGS.replace("The new carrier drives the rise", "Late orders rose"))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["claims"] == []
+
+
+def test_claim_strength_follows_cited_results_and_records(project, capsys):
+    draft = load(project / "src/packaging/draft.py", "draft_claims")
+    claims = draft.state_claims(project, "inv")
+    assert claims == {"r-009": "association", "r-001": "association", "r-002": "causal"}
+    directory = project / "deliveries/inv/pkg/draft"
+    clean = CLAIM_FINDINGS.replace("The new carrier drives the rise", "Late orders rose")
+    # Citing r-009 too holds the discount slide to the weaker association claim.
+    claim_draft(project, clean, CLAIM_METHODOLOGY.replace("Result `r-002`.", "Results `r-002` and `r-009`."))
+    rows = draft.claim_problems(directory, ["r-009", "r-002"], claims)
+    assert [(r.get("section"), r.get("phrase")) for r in rows] == [
+        ("Discounts cut late orders by 4 points", None), ("Discounts cut late orders by 4 points", "led to")]
+    assert rows[0]["problem"] == ("methodology.md states causal on its **Claim strength:** line; its results "
+                                  "support association")
+    # Without a causal represented finding, the Answer slide is held to association as well.
+    claim_draft(project, clean, CLAIM_METHODOLOGY, results=("r-009", "r-001"))
+    rows = draft.claim_problems(directory, ["r-009", "r-001"], claims)
+    assert [(r.get("section"), r.get("phrase"), r.get("line")) for r in rows] == [
+        ("Answer", "drive", 6), ("Discounts cut late orders by 4 points", None, None),
+        ("Discounts cut late orders by 4 points", "led to", 19)]
+    # A phrase across a line break is found at its first line.
+    split = clean.replace("Randomized discounts led to", "Late orders fell\nbecause of discounts, by")
+    claim_draft(project, split)
+    rows = draft.claim_problems(directory, ["r-009", "r-002"], {**claims, "r-002": "association"})
+    assert [(r.get("phrase"), r.get("line")) for r in rows if r.get("phrase")] == [("drive", 6), ("because of", 20)]
+    # Code spans, fenced blocks, and link text targets are not wording.
+    claim_draft(project, clean.replace("Late orders rose to 21%", "Late orders rose to 21% (`drives`)")
+                + "\n```\ndrives\n```\n[link](drives.md)\n")
+    assert draft.claim_problems(directory, ["r-009", "r-002"], claims) == []
+    # A represented result without a recognized Claim, or with no row, fails.
+    rows = draft.claim_problems(directory, ["r-009", "r-002", "r-003"], {**claims, "r-002": None})
+    assert rows[:2] == [
+        {"result": "r-002", "problem": "state.md's Claim cell is not descriptive, association, or causal with its "
+                                       "design basis"},
+        {"result": "r-003", "problem": "state.md has no findings row with a claim strength for this result"}]
+    claim_draft(project, clean, CLAIM_METHODOLOGY.replace("**Claim strength:** association\n", ""))
+    rows = draft.claim_problems(directory, ["r-009", "r-002"], claims)
+    assert rows == [{"section": "Late orders rose in the west",
+                     "problem": "methodology.md's section has no **Claim strength:** line; its results support "
+                                "association"}]
+    # The rendered table without a Claim column, and a manifest without results, are errors.
+    state = project / "investigations/inv/state.md"
+    state.write_text(state.read_text().replace("| Claim |", "| Strength |"))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and any(e.startswith("claims: investigations/inv/state.md has no Current findings table with "
+                                          "Evidence and Claim columns") for e in report["errors"])
+    write(project, "investigations/inv/state.md", STATE.format(status="supported", reason=""))
+    record = json.loads((directory / "manifest.json").read_text())
+    del record["results"]
+    (directory / "manifest.json").write_text(json.dumps(record))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and "manifest: manifest.json records no results list; rerun export" in report["errors"]

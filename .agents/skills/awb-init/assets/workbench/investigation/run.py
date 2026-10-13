@@ -5,7 +5,8 @@ Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With 
 produces every result in settings.toml. For each result it runs the result's saved queries in a
 fresh session of canonical views, validates the result, saves the table and its profile under
 results/, records evidence under evidence/, writes its state.md findings row, and prints one
-compact JSON line with the paths, failed and unassessed checks, and what it did to the row.
+compact JSON line with the paths, failed and unassessed checks, and what it did to the row,
+with the row's status and claim strength.
 
 Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml
 and its query in queries/<id>.sql. Add a producer below only when a result needs more than its
@@ -96,7 +97,7 @@ def produce_result(connection, result_id, config, parameters):
         "evidence": evidence.relative_to(ROOT).as_posix(),
         "table": table.relative_to(ROOT).as_posix(),
         "profile": profile_path.relative_to(ROOT).as_posix(),
-        "state": state["action"], "status": state["status"], "history": state["history"],
+        "state": state["action"], "status": state["status"], "claim": state["claim"], "history": state["history"],
     }
 
 

@@ -492,6 +492,126 @@ def heading_problems(draft) -> list[dict]:
             for heading in _headings(Path(draft) / "findings.md") if heading not in methodology]
 
 
+# ---------------------------------------------------------------- claim strength
+
+# Claim strengths, weakest first, as state.md's Claim column renders them; the project's provenance
+# helper owns the values. Only causal wording is checked: it exceeds descriptive and association.
+_CLAIMS = ("descriptive", "association", "causal")
+_CLAIM_CELL = re.compile(r"(descriptive|association)|(causal) \((?:experiment|natural experiment): .+\)")
+_CLAIM_LINE = re.compile(r"^\*\*Claim strength:\*\*[ \t]*([A-Za-z]*)", re.MULTILINE)
+# Causal wording as whole words, so "data-driven" or "causality" is not one. Bare "because" and
+# "cause" are left out: they also give reasons for analytical choices and state disclaimers.
+_CAUSAL = re.compile(r"(?<![\w-])(?:" + "|".join([
+    r"driv(?:e|es|en|ing)", r"drove", r"drivers?\s+of",
+    r"caus(?:es|ed|ing)", r"because\s+of", r"due\s+to",
+    r"lead(?:s|ing)?\s+to", r"led\s+to", r"result(?:ed|ing)\s+in", r"as\s+a\s+result\s+of",
+    r"impact(?:s|ed|ing)?", r"effects?\s+(?:of|on)", r"attributable\s+to", r"contribut(?:es|ed|ing)\s+to",
+]) + r")(?![\w-])", re.IGNORECASE)
+# Slides that describe method, data, and caveats rather than state findings.
+_UNCHECKED = {"How we know", "Limitations and open caveats", "What changed since the last version",
+              "Supporting datasets"}
+
+
+def state_claims(root, investigation) -> dict:
+    """Map each result state.md's findings table links to its claim strength, or None when unrecognized."""
+    path = Path(root) / "investigations" / investigation / "state.md"
+    try:
+        table = _section_table(path.read_text(encoding="utf-8"), "Current findings")
+    except (OSError, UnicodeError) as error:
+        raise ValueError(f"investigations/{investigation}/state.md: unreadable ({error})") from error
+    if table is None or not {"Evidence", "Claim"} <= set(table[0]):
+        raise ValueError(f"investigations/{investigation}/state.md has no Current findings table with "
+                         "Evidence and Claim columns")
+    claims = {}
+    for row in table[1]:
+        match = _CLAIM_CELL.fullmatch(row.get("Claim", ""))
+        for result_id in _EVIDENCE_LINK.findall(row.get("Evidence", "")):
+            claims[result_id] = (match[1] or match[2]) if match else None
+    return claims
+
+
+def _regions(text, *, prose=True):
+    """Split Markdown into (level, heading, first body line number, body lines) at `##` and `###` headings.
+
+    Level 0 is the text before the first heading. Headings inside fences, as `_headings` reads them,
+    do not split. With `prose`, comments, fenced lines, code spans, and link targets are blanked.
+    """
+    if prose:
+        text = _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
+    regions, fenced = [[0, None, 1, []]], False
+    for number, line in enumerate(text.splitlines(), start=1):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            line = "" if prose else line
+        elif fenced:
+            line = "" if prose else line
+        elif line.startswith(("## ", "### ")):
+            level = 2 if line.startswith("## ") else 3
+            regions.append([level, line[level + 1:].strip().rstrip("#").strip(), number + 1, []])
+            continue
+        elif prose:
+            for pattern in (_CODE_SPAN, _LINK_TARGET):
+                line = pattern.sub(lambda match: " " * len(match.group(0)), line)
+        regions[-1][3].append(line)
+    return regions
+
+
+def _cited(text, represented):
+    """The represented results a methodology section names by ID or evidence link."""
+    pattern = _name_pattern(represented)
+    found = set(_EVIDENCE_LINK.findall(text)) | set(pattern.findall(text) if pattern else ())
+    return [r for r in represented if r in found]
+
+
+def _weakest(results, claims):
+    known = [claims[r] for r in results if claims.get(r)]
+    return min(known, key=_CLAIMS.index) if known else _CLAIMS[0]
+
+
+def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
+    """List causal wording in findings.md above its claim strength, and claim records that are missing.
+
+    A `###` finding slide is held to the weakest claim among the results its methodology.md namesake
+    cites, or among all represented results when it cites none; the title, Answer, Implications,
+    and any other slide that states conclusions, to the strongest represented claim. Each finding's
+    methodology section states its strength on a `**Claim strength:**` line.
+    """
+    draft = Path(draft)
+    rows = [{"result": r, "problem": "state.md has no findings row with a claim strength for this result"
+             if r not in claims else "state.md's Claim cell is not descriptive, association, or causal "
+             "with its design basis"} for r in represented if not claims.get(r)]
+    methodology = {}  # raw text, since result IDs sit in code spans and evidence links
+    for level, heading, _, lines in _regions((draft / "methodology.md").read_text(encoding="utf-8"), prose=False):
+        if level == 3:
+            methodology.setdefault(heading, "\n".join(lines))
+    known = [claims[r] for r in represented if claims.get(r)]
+    deck = max(known, key=_CLAIMS.index) if known else _CLAIMS[0]
+    for level, heading, first, lines in _regions((draft / "findings.md").read_text(encoding="utf-8")):
+        if level == 2 and heading in _UNCHECKED:
+            continue
+        if level == 3:
+            cited = _cited(methodology.get(heading, ""), represented) or list(represented)
+            ceiling = _weakest(cited, claims)
+            if heading in methodology:
+                stated = _CLAIM_LINE.search(methodology[heading])
+                if not stated or stated[1].lower() != ceiling:
+                    rows.append({"section": heading, "problem": (
+                        f"methodology.md states {stated[1] or 'nothing'} on its **Claim strength:** line"
+                        if stated else "methodology.md's section has no **Claim strength:** line")
+                        + f"; its results support {ceiling}"})
+        else:
+            cited, ceiling = list(represented), deck
+        if ceiling == "causal":
+            continue
+        body = "\n".join(lines)
+        for match in _CAUSAL.finditer(body):
+            rows.append({"line": first + body.count("\n", 0, match.start()), "section": heading or "title",
+                         "phrase": " ".join(match.group(0).split()), "claim": ceiling, "results": cited,
+                         "problem": f"causal wording above the {ceiling} claim strength; reword it, since only "
+                                    "an experiment or an identified natural experiment supports a causal claim"})
+    return rows
+
+
 # ---------------------------------------------------------------- inventory and tree comparison
 
 _CHUNK_BYTES = 1024 * 1024  # 1 MiB reads keep memory flat on large datasets
@@ -663,8 +783,8 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
 
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
-            and report["charts"] == [] and report["headings"] == [] and report["verify"] == []
-            and report["flag_entries"] == [])
+            and report["charts"] == [] and report["headings"] == [] and report["claims"] == []
+            and report["verify"] == [] and report["flag_entries"] == [])
 
 
 def check_draft(root, investigation, package, *, verify_only=False) -> dict:
@@ -672,7 +792,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
-              "charts": None, "headings": None, "inventory": None, "verify": None,
+              "charts": None, "headings": None, "claims": None, "inventory": None, "verify": None,
               "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
@@ -711,6 +831,11 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     except ValueError as error:
         flags = None
         report["errors"].append(f"flags: {error}")
+    try:
+        claims = state_claims(root, investigation)
+    except ValueError as error:
+        claims = None
+        report["errors"].append(f"claims: {error}")
 
     try:
         path = draft / MANIFEST
@@ -718,6 +843,15 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             raise ValueError(f"no manifest at {_rel(root, path)}; run export first")
         record = _read_json(path)
         report["flag_entries"] = flag_entry_problems(record)
+        represented = record.get("results")
+        if not isinstance(represented, list) or not all(
+                isinstance(r, dict) and isinstance(r.get("result_id"), str) for r in represented):
+            raise ValueError(f"{MANIFEST} records no results list; rerun export")
+        if claims is not None:
+            try:
+                report["claims"] = claim_problems(draft, [r["result_id"] for r in represented], claims)
+            except (OSError, UnicodeError) as error:
+                report["errors"].append(f"claims check: {error}")
         if not verify_only:
             rows = inventory(draft)
             if rows != record.get("inventory"):
@@ -747,14 +881,22 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py check-draft", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Run every mechanical draft check (internal names in findings.md, chart files, "
-                    "matching finding headings, the manifest inventory, and state.md's current flags) "
+                    "matching finding headings, causal wording against claim strength, the manifest "
+                    "inventory, and state.md's current flags) "
                     "and rewrite the manifest inventory, stamping revised_at when it changes; "
                     "--verify-only checks a release candidate and writes nothing.",
-        epilog="Prints one JSON line.\nunmatched_flags lists each finding state.md flags whose exact finding "
+        epilog="Prints one JSON line.\nclaims lists each causal phrase (line, section, phrase, claim, results) "
+               "in a findings.md slide above its claim strength: a ### finding slide is held to the weakest "
+               "Claim in state.md among the results its methodology.md section cites (all represented results "
+               "when it cites none), and the title and other slides that state conclusions to the strongest; "
+               "How we know, Limitations and open caveats, What changed since the last version, and Supporting "
+               "datasets are not read. It also lists a represented result without a recognized Claim, and a "
+               "methodology finding section whose **Claim strength:** line is missing or differs."
+               "\nunmatched_flags lists each finding state.md flags whose exact finding "
                "and reason the manifest's revalidation_flags does not record.\nflag_entries lists a missing or "
                "malformed revalidation_flags, an entry without text finding and reason, represented_in that is "
                "neither none nor a list of places, and an unknown disposition.\nExit 0 only when names_problems, "
-               "findings, charts, headings, verify, flag_entries, unmatched_flags, and errors are all empty.")
+               "findings, charts, headings, claims, verify, flag_entries, unmatched_flags, and errors are all empty.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
                         help="verify against the recorded inventory without rewriting it (the release gate)")

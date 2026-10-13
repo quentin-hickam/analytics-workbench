@@ -30,8 +30,9 @@ omitted acquisitions from those publications' publication.json inputs. cli_stale
 prior_result and record_finding write a recorded result's state.md findings row for run.py, and
 cli_state backs `python3 src/awb.py state`, which shows and updates investigation state.
 findings.json (awb-findings/1) owns the Current findings table, which every findings write
-re-renders whole; hand edits to it are refused as drift. Other lines keep their bytes, and the
-writers add the history.md entries for reruns and status changes that matter.
+re-renders whole; hand edits to it are refused as drift. Each row carries a claim strength
+(descriptive, association, or causal with its design basis). Other lines keep their bytes, and the
+writers add the history.md entries for reruns and status and claim changes that matter.
 """
 
 import argparse
@@ -491,20 +492,21 @@ def _check_caveat(checks):
 
 
 def finding_row(project_root, investigation: str, result_id: str, checks: list[dict], *,
-                finding: str | None = None, status: str = "provisional") -> str:
+                finding: str | None = None, status: str = "provisional", claim: str = "association") -> str:
     """Return the state.md Current findings row for a recorded result, without writing it.
 
-    The Finding cell keeps the text of a row already linking this result's evidence, else uses
-    `finding`, else a placeholder to replace. The caveat names failed and not-assessed checks.
-    record_finding writes the row; this stays for run.py copies that print it.
+    The Finding and Claim cells keep those of a row already linking this result's evidence, else use
+    `finding` and `claim`, else a placeholder to replace. The caveat names failed and not-assessed
+    checks. record_finding writes the row; this stays for run.py copies that print it.
     """
     existing = finding_rows(Path(project_root) / "investigations" / investigation / "state.md")
-    if result_id in existing:
-        # Split on unescaped pipes; the first cell is the finding text, already escaped.
-        text = re.split(r"(?<!\\)\|", existing[result_id][0])[1].strip()
+    cells = _cells(existing[result_id][0]) if result_id in existing else []
+    if len(cells) == len(_COLUMNS):  # cells keep their escapes
+        text, claim = cells[0], cells[3]
     else:
-        text = _cell(finding or f"<state the finding from {result_id}>")
-    return f"| {text} | [{result_id}](evidence/{result_id}.json) | {_cell(status)} | {_cell(_check_caveat(checks))} |"
+        text, claim = _cell(finding or f"<state the finding from {result_id}>"), _cell(claim)
+    return (f"| {text} | [{result_id}](evidence/{result_id}.json) | {_cell(status)} | {claim} | "
+            f"{_cell(_check_caveat(checks))} |")
 
 
 # Investigation state: findings.json, state.md, history.md, and README's Active investigation line.
@@ -515,8 +517,13 @@ class StateError(ValueError):
     """A record is malformed, a guard refused, or a write failed with recovery details."""
 
 
-_COLUMNS = ["Finding", "Evidence", "Status", "Revalidation reason or caveat"]
+_COLUMNS = ["Finding", "Evidence", "Status", "Claim", "Revalidation reason or caveat"]
 _STATUSES = ("provisional", "supported", "superseded")
+# Claim strength, weakest first: the strongest wording a finding's narrative may use. A new result
+# starts at association, which exploration can reach; causal needs a stated design basis.
+_CLAIMS = ("descriptive", "association", "causal")
+_DEFAULT_CLAIM = "association"
+_BASIS = re.compile(r"(?:experiment|natural experiment): \S.*")
 _FLAGGED = "revalidation-needed"
 _ITEM = re.compile(r"([-*+]|(\d+)([.)]))[ \t]+(.*)")
 _LISTS = {"issues": "Unresolved issues", "next": "Next steps"}
@@ -612,7 +619,8 @@ class _State(_Record):
                 self.rows_end += 1
                 continue
             if len(cells) != len(_COLUMNS):
-                raise StateError(f"{self.label}: findings row {self.rows_end + 1} does not have four cells")
+                raise StateError(f"{self.label}: findings row {self.rows_end + 1} does not have "
+                                 f"{len(_COLUMNS)} cells")
             for result_id in set(_EVIDENCE_LINK.findall(cells[1])):
                 if result_id in linked:
                     raise StateError(f"{self.label}: rows {linked[result_id] + 1} and {self.rows_end + 1} "
@@ -714,18 +722,36 @@ def _commit(records, *, replaced=None, prior_rows=()):
             temporary.unlink(missing_ok=True)
 
 
+def _claim(claim, basis):
+    return f"{claim} ({basis})" if basis else claim
+
+
 def _finding_cells(entry):
     status = entry["status"]
     if status == _FLAGGED and entry["prior_status"] is not None:
         status += f" (was {entry['prior_status']})"
     caveat = "; ".join(p for p in [entry["checks_caveat"], *entry["notes"], entry["flag_reason"]] if p)
     return [_cell(entry["text"]), f"[{entry['result']}](evidence/{entry['result']}.json)",
-            _cell(status), _cell(caveat)]
+            _cell(status), _cell(_claim(entry["claim"], entry["claim_basis"])), _cell(caveat)]
 
 
 # notes_checks is the checks caveat the notes were written against (null: none); a promotion counts
-# the notes as explaining failed or not-assessed checks only while it equals the current one.
-_ENTRY_KEYS = {"result", "text", "status", "prior_status", "flag_reason", "notes", "checks_caveat", "notes_checks"}
+# the notes as explaining failed or not-assessed checks only while it equals the current one. claim
+# is one of _CLAIMS; claim_basis is the design basis a causal claim requires, and empty otherwise.
+_ENTRY_KEYS = {"result", "text", "status", "prior_status", "flag_reason", "notes", "checks_caveat", "notes_checks",
+               "claim", "claim_basis"}
+
+
+def _claim_problem(entry):
+    """Why an entry's claim strength is absent or invalid, or None."""
+    claim, basis = entry.get("claim"), entry.get("claim_basis")
+    if claim not in _CLAIMS or not isinstance(basis, str):
+        return f"claim must be one of {', '.join(_CLAIMS)}, with a claim_basis string"
+    if claim == "causal" and not _BASIS.fullmatch(basis):
+        return "a causal claim needs a claim_basis beginning 'experiment: ' or 'natural experiment: '"
+    if claim != "causal" and basis:
+        return f"claim_basis is only for a causal claim, not {claim}"
+    return None
 
 
 class _Findings:
@@ -744,6 +770,9 @@ class _Findings:
             self.entries = content["findings"]
             seen = set()
             for entry in self.entries:
+                problem = _claim_problem(entry) if isinstance(entry, dict) else None
+                if problem:  # an absent claim strength is never defaulted
+                    raise ValueError(f"finding {entry.get('result')!r} has no valid claim strength: {problem}")
                 if (not isinstance(entry, dict) or set(entry) != _ENTRY_KEYS
                         or entry["notes_checks"] is not None and not isinstance(entry["notes_checks"], str)
                         or not all(isinstance(entry[k], str) for k in
@@ -786,8 +815,8 @@ class _Findings:
             details.append(f"disk: {row['disk']}; rendered: {row['rendered']}")
             cells = _cells(row["disk"]) if row["disk"] else []
             entry = by_id.get(row["result"])
-            if len(cells) == 4 and cells[2].startswith(_FLAGGED) and entry and entry["status"] != _FLAGGED:
-                parts = _segments(cells[3].replace(r"\|", "|"))[1]
+            if len(cells) == len(_COLUMNS) and cells[2].startswith(_FLAGGED) and entry and entry["status"] != _FLAGGED:
+                parts = _segments(cells[4].replace(r"\|", "|"))[1]
                 notes = entry["notes"]
                 if parts[:len(notes)] == notes:
                     parts = parts[len(notes):]
@@ -938,7 +967,7 @@ def _rerun_entry(today, result_id, old, cells, exact, flag_reason, citation):
         f"{resulting}; re-promote with `awb.py state finding`"
     return ["", f"### {today} — {result_id} rerun: {old[2]} → {resulting}", "",
             f"- **Change or finding:** prior row `{_row(old)}`; now {resulting}, caveat "
-            f"{cells[3] or 'none'}" + ("; table, checks and settings unchanged." if exact else "."),
+            f"{cells[4] or 'none'}" + ("; table, checks and settings unchanged." if exact else "."),
             f"- **Evidence:** [{result_id}](evidence/{result_id}.json); prior evidence {_cite(citation)}.",
             "- **Reasoning or decision:** rerun" + (f"; flag reason: {flag_reason}" if flag_reason else ""),
             f"- **Impact and caveats:** {impact}.",
@@ -950,12 +979,13 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
     """Write a just-recorded result's state.md row; run.py calls this after record_evidence.
 
     `prior` is prior_result(), taken before the rerun. A new result gets a provisional placeholder
-    row. An unflagged row whose table, checks, and scoped settings all equal the prior baseline is
+    row at association claim strength; a rerun keeps the row's claim. An unflagged row whose table,
+    checks, and scoped settings all equal the prior baseline is
     kept untouched; otherwise its reserved caveat segments are replaced, its status becomes
     provisional unless superseded, and history.md records a rerun of a supported row. A flagged row
     returns to superseded if it was superseded, else provisional, with its notes kept, its flag reason
     dropped, and a history entry naming that reason. When findings.json is not replaced, the evidence just recorded is removed before raising.
-    Returns {action: added|kept|refreshed|flag cleared, status, history (bool)}.
+    Returns {action: added|kept|refreshed|flag cleared, status, claim, history (bool)}.
     """
     root = Path(project_root).resolve()
     today = today or _today()
@@ -971,7 +1001,8 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
         if entry is None:
             entry = {"result": result_id, "text": f"<state the finding from {result_id}>",
                      "status": "provisional", "prior_status": None, "flag_reason": "", "notes": [],
-                     "checks_caveat": _check_caveat(checks), "notes_checks": _check_caveat(checks)}
+                     "checks_caveat": _check_caveat(checks), "notes_checks": _check_caveat(checks),
+                     "claim": _DEFAULT_CLAIM, "claim_basis": ""}
             findings.entries.append(entry)
             action = "added"
         else:
@@ -981,7 +1012,7 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
                 prior["baseline"] == _baseline(table, checks, evidence["settings"].get("content"))
             flagged = entry["status"] == _FLAGGED
             if not flagged and exact:
-                return {"action": "kept", "status": entry["status"], "history": False}
+                return {"action": "kept", "status": entry["status"], "claim": entry["claim"], "history": False}
             flag_reason = entry["flag_reason"] if flagged else ""
             entry["status"] = "superseded" if (entry["prior_status"] if flagged else entry["status"]) == \
                 "superseded" else "provisional"
@@ -995,7 +1026,7 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
         findings.history, findings.changed = history, True
         findings.prior_rows = [_row(old)] if old else []
         findings.state.touch(today)
-        return {"action": action, "status": entry["status"], "history": history is not None}
+        return {"action": action, "status": entry["status"], "claim": entry["claim"], "history": history is not None}
 
     try:
         return _write_findings(root, investigation, mutate, replaced=replaced)
@@ -1006,24 +1037,34 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
 
 
 def update_findings(project_root, investigation: str, result_ids: list[str], *, status: str | None = None,
-                    text: str | None = None, caveat: str | None = None, reason: str | None = None,
-                    today: str | None = None) -> dict:
-    """Change findings rows' status, or one row's wording or caveat notes, checking every row first.
+                    text: str | None = None, caveat: str | None = None, claim: str | None = None,
+                    basis: str | None = None, reason: str | None = None, today: str | None = None) -> dict:
+    """Change findings rows' status, or one row's wording, caveat notes, or claim, checking every row first.
 
+    A causal claim needs `basis`, 'experiment: <design>' or 'natural experiment: <design>'; a claim
+    change needs `reason`, for history.md.
     ValueError for unusable arguments, including a missing reason when history needs one;
     StateError when a guard refuses. Returns {rows (the changed rows), unchanged, warnings,
     history (the entry's heading, or None)}.
     """
     root = Path(project_root).resolve()
     today = today or _today()
-    if not result_ids or status is None and text is None and caveat is None:
-        raise ValueError("give --status, --text, or --caveat")
+    if not result_ids or status is None and text is None and caveat is None and claim is None:
+        raise ValueError("give --status, --text, --caveat, or --claim")
     if status is not None and status not in _STATUSES:
         raise ValueError(f"status must be one of {', '.join(_STATUSES)}")
-    if len(result_ids) > 1 and (status is None or text is not None or caveat is not None):
+    if len(result_ids) > 1 and (status is None or text is not None or caveat is not None or claim is not None):
         raise ValueError("several result IDs take --status only, with --reason")
     if text is not None and not text.strip():
         raise ValueError("the finding text is empty")
+    if claim is not None and claim not in _CLAIMS:
+        raise ValueError(f"claim must be one of {', '.join(_CLAIMS)}")
+    basis = " ".join((basis or "").split())
+    if basis and claim != "causal":
+        raise ValueError("--basis goes only with --claim causal")
+    if claim == "causal" and not _BASIS.fullmatch(basis):
+        raise ValueError("--claim causal needs --basis naming its design: 'experiment: <design>' or "
+                         "'natural experiment: <design>'")
     notes = [_cell(part) for part in (caveat or "").split(";") if part.strip()]
     if any(note.startswith(_CHECK_LABELS) for note in notes):
         raise ValueError("--caveat cannot use the reserved prefixes 'failed checks:' or 'not assessed:'")
@@ -1045,15 +1086,19 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
                 cells[0] = _cell(text)
             if status is not None:
                 cells[2] = status
+            if claim is not None:
+                cells[3] = _cell(_claim(claim, basis))
             if caveat is not None:
-                cells[3] = "; ".join(p for p in [_cell(entry["checks_caveat"]), *notes] if p)
+                cells[4] = "; ".join(p for p in [_cell(entry["checks_caveat"]), *notes] if p)
             if cells == old:
                 unchanged.append(result_id)
                 continue
             flagged = old[2].startswith(_FLAGGED)
-            if flagged and (status in ("provisional", "supported") or caveat is not None):
+            raised = cells[3] != old[3] and _CLAIMS.index(claim) >= _CLAIMS.index(entry["claim"])
+            if flagged and (status in ("provisional", "supported") or caveat is not None or raised):
                 raise StateError(f"{result_id} is flagged ({old[2]}); only a rerun clears the flag, so it can be "
-                                 "superseded or reworded but not promoted or given a caveat")
+                                 "superseded, reworded, or given a weaker claim, but not promoted, given a caveat, "
+                                 "or given a stronger claim or another design basis")
             if flagged and cells[0] != old[0]:
                 warnings.append(f"warning: {result_id} is flagged; package dispositions recorded against its old "
                                 "text reopen")
@@ -1069,7 +1114,8 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
                               "those that still hold" if entry["notes"] and caveat is None else "")
                     raise StateError(f"{result_id} has failed or not-assessed checks ({gaps}); "
                                      f"explain them with --caveat before promoting it{detail}")
-            logged = (old[2] == "supported" or flagged) or cells[2] in ("supported", "superseded")
+            logged = (old[2] == "supported" or flagged) or cells[2] in ("supported", "superseded") \
+                or cells[3] != old[3]
             changes.append((result_id, index, old, cells, logged))
         if not changes:
             return {"rows": [], "unchanged": unchanged, "warnings": warnings, "history": None}
@@ -1079,18 +1125,21 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
                 raise ValueError("--reason is required: this change is recorded in history.md")
             words = []
             for _, _, old, cells, _ in changes:
-                words += (["reworded"] if cells[0] != old[0] else []) + (["caveat revised"] if cells[3] != old[3] else [])
+                words += (["reworded"] if cells[0] != old[0] else []) + (["caveat revised"] if cells[4] != old[4] else [])
+                words += [f"claim set to {cells[3]}"] if cells[3] != old[3] else []
                 if cells[2] != old[2]:
                     words.append("promoted to supported" if cells[2] == "supported" else f"set to {cells[2]}")
             heading = f"### {today} — {', '.join(c[0] for c in changes)} {' and '.join(dict.fromkeys(words))}"
             entry = ["", heading, "",
                      "- **Change or finding:** " + " ".join(
-                         f"{rid} was `{_row(old)}`; now \"{cells[0]}\" ({cells[2]})." for rid, _, old, cells, _ in changes),
+                         f"{rid} was `{_row(old)}`; now \"{cells[0]}\" ({cells[2]}"
+                         + (f"; claim {cells[3]}" if cells[3] != old[3] else "") + ")."
+                         for rid, _, old, cells, _ in changes),
                      "- **Evidence:** " + "; ".join(
                          f"[{rid}](evidence/{rid}.json) {_cite(evidence_commit(root, investigation, rid))}"
                          for rid, *_ in changes) + ".",
                      f"- **Reasoning or decision:** {' '.join(reason.split())}",
-                     "- **Impact and caveats:** " + "; ".join(f"{rid}: {cells[3] or 'none'}"
+                     "- **Impact and caveats:** " + "; ".join(f"{rid}: {cells[4] or 'none'}"
                                                              for rid, _, _, cells, _ in changes) + ".",
                      "- **Supersedes or revalidation link:**"]
             history = _history(root, investigation, entry)
@@ -1106,6 +1155,8 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
             if caveat is not None:
                 entry["notes"] = [part.replace(r"\|", "|") for part in notes]
                 entry["notes_checks"] = entry["checks_caveat"]
+            if claim is not None:
+                entry["claim"], entry["claim_basis"] = claim, basis
         state.touch(today)
         findings.history, findings.changed = history, True
         findings.prior_rows = [_row(old) for _, _, old, _, _ in changes]
@@ -1241,8 +1292,8 @@ def cli_state(root: Path, argv: list[str]) -> int:
     """Show or update an investigation's state.md and history.md, or README's Active investigation line."""
     root = Path(root).resolve()
     actions = {
-        "finding": "promote, supersede, or reword findings; history.md records supported, superseded, and "
-                   "flagged changes",
+        "finding": "promote, supersede, or reword findings, or set their claim strength; history.md records "
+                   "supported, superseded, flagged, and claim changes",
         "render": "restore the Current findings table from findings.json",
         "flag": "flag findings from a JSON list of result and reason on stdin",
         "issues": "add or drop Unresolved issues items",
@@ -1256,9 +1307,11 @@ def cli_state(root: Path, argv: list[str]) -> int:
         "finding": "Refused: an ID without a row or evidence file; any change leaving a finding supported "
                    "when its evidence is stale, or when its failed or not-assessed checks have no caveat note "
                    "(kept notes count only for the checks they were written against); promoting a flagged "
-                   "finding or changing its caveat (only a run.py rerun clears a flag). --reason is required "
-                   "when the prior status is supported or flagged, or the new one supported or superseded; "
-                   "that change appends one history.md entry. Sets Last updated.\n",
+                   "finding, changing its caveat, or strengthening its claim (only a run.py rerun clears a "
+                   "flag); --claim causal without a --basis naming an experiment or natural experiment. A new "
+                   "result's claim is association; --claim descriptive narrows it. --reason is required "
+                   "when the prior status is supported or flagged, the new one supported or superseded, or "
+                   "the claim changes; that change appends one history.md entry. Sets Last updated.\n",
         "render": "Prints discarded disk rows; without findings.json the table renders empty.\n",
         "flag": "Validates every flag before writing. --check writes nothing. Only a rerun clears a flag.\n",
         "issues": "--drop takes the item's number in the list or text only one item contains (case-sensitive), "
@@ -1284,6 +1337,12 @@ def cli_state(root: Path, argv: list[str]) -> int:
         parser.add_argument("--text", help="new finding wording (one ID)")
         parser.add_argument("--caveat", help="replace the caveat's notes, keeping the checks segments run.py "
                                              "writes; '' clears them (one ID)")
+        parser.add_argument("--claim", choices=_CLAIMS,
+                            help="the strongest wording the finding supports; check-draft refuses causal wording "
+                                 "above it (one ID)")
+        parser.add_argument("--basis", metavar="TEXT",
+                            help="the design behind --claim causal: 'experiment: <design>' or "
+                                 "'natural experiment: <design>'")
         parser.add_argument("--reason", help="why, for the history.md entry")
     elif action == "flag":
         parser.add_argument("--check", action="store_true", help="validate without writing")
@@ -1328,7 +1387,7 @@ def cli_state(root: Path, argv: list[str]) -> int:
             print(json.dumps(result))
         elif action == "finding":
             result = update_findings(root, name, args.result_ids, status=args.status, text=args.text,
-                                     caveat=args.caveat, reason=args.reason)
+                                     caveat=args.caveat, claim=args.claim, basis=args.basis, reason=args.reason)
             print("\n".join(result["warnings"] + result["rows"]
                             + [f"unchanged: {', '.join(result['unchanged'])}"] * bool(result["unchanged"])
                             + [f"history.md: {result['history']}"] * bool(result["history"])))
