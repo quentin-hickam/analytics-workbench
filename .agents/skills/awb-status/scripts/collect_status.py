@@ -179,9 +179,23 @@ def collect(root):
     acquisitions = table(section(sources, "Acquisitions", sources_path), ["Acquisition ID", "Source ID", "Acquired at", "Source version, query, or request", "Landed directory", "Retained copy", "Integrity or completeness check", "Restrictions", "Notes"], sources_path)
     result["acquisitions"] = None if acquisitions is None else {"count": len(acquisitions), "without_retained_copy": sum(not row["Retained copy"] or row["Retained copy"].strip("`").strip().lower() == "this checkout only" for row in acquisitions)}
     registered = table(section(sources, "Sources", sources_path), ["Source ID", "System or provider", "Contents and grain", "Owner or contact", "Acquisition method", "Relevance and fitness", "Status", "Notes"], sources_path)
-    # The register names an assessment's basis in Relevance and fitness and each reference it relied on as `reference:` in Notes.
+
+    def documentation_basis(row):
+        """Whether Relevance and fitness begins with the `from documentation` basis; an unlabelled assessment is uncertain."""
+        basis = re.match(r"\s*`?from (documentation|landed records)\b", row["Relevance and fitness"], re.I)
+        if basis is None and row["Relevance and fitness"]:
+            uncertain(sources_path, f"Source {row['Source ID']}: Relevance and fitness does not begin with its basis")
+        return basis is not None and basis.group(1).lower() == "documentation"
+
+    def referenced(notes):
+        """Whether a Notes clause opens with `reference:` and gives a link, or a retained location and its SHA-256."""
+        clauses = re.finditer(r"(?:^|(?<=[;,.]))\s*`?reference:`?(?P<body>[^;]*)", notes, re.I)
+        return any(re.search(r"\[[^\]]*\]\(\s*[^)\s]+", clause["body"]) or re.search(r"\S.*\bsha256:?\s+[0-9a-f]{64}\b", clause["body"], re.I)
+                   for clause in clauses)
+
+    # foundation/sources.md states the basis and reference forms these read.
     result["sources"] = None if registered is None else {"count": len(registered), "documentation_without_reference": [
-        row["Source ID"] for row in registered if re.search(r"\bfrom documentation\b", row["Relevance and fitness"], re.I) and not re.search(r"\breference:", row["Notes"], re.I)]}
+        row["Source ID"] for row in registered if documentation_basis(row) and not referenced(row["Notes"])]}
     result["landed_data_storage"] = storage(field(readme, "Landed data is kept at", readme_path, optional=True))
     result["release_storage"] = storage(field(readme, "Released packages are kept at", readme_path, optional=True))
 

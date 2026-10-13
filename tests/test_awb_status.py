@@ -17,7 +17,7 @@
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
-# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness says from documentation and whose Notes hold no reference: is listed; a committed or retained reference, or a landed-records basis, is not; an unsupported Sources table is null with an uncertainty.
+# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: and gives a link or a location and SHA-256; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
 # test_absent_project_and_unsafe_active_pointer: a missing project is not a workbench; an unsafe pointer is an uncertainty.
 # test_standard_active_state_pointer: link, path, and backticked pointer forms resolve to the investigation.
 # test_other_state_reader_stops_before_conclusions: another investigation's state is read only up to its first section.
@@ -298,13 +298,22 @@ def test_sources_assessed_from_documentation_need_a_reference(workbench):
     rows = "\n".join([
         "| hr | HRIS | employees, one row each | HR ops | export | From documentation: has tenure | candidate | owner confirmed |",
         "| pay | Payroll | pay lines | Finance | API | from documentation; fit | acquired | reference: [dictionary](references/pay/dictionary.pdf) |",
-        "| vendor | Vendor feed | events | Vendor | SFTP | from documentation | candidate | Reference: /secure/vendor/manual.pdf, sha256 ab12 |",
-        "| crm | CRM | accounts | Sales | export | from landed records: sparse | rejected | |"])
+        "| vendor | Vendor feed | events | Vendor | SFTP | from documentation | candidate | Owner confirmed. Reference: /secure/vendor/manual.pdf, sha256 ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 |",
+        "| ads | Ad platform | spend by day | Marketing | API | `from documentation`: fit | candidate | `reference:` [schema](references/ads/schema.json) |",
+        "| crm | CRM | accounts | Sales | export | from landed records: sparse | rejected | |",
+        "| erp | ERP | orders | Finance | export | from landed records: verified field absent from documentation | acquired | |",
+        "| blank | Blank | x | y | z | from documentation: fit | candidate | reference: |",
+        "| pending | Pending | x | y | z | from documentation: fit | candidate | reference: not yet retained |",
+        "| negated | Negated | x | y | z | from documentation: fit | candidate | no reference: vendor publishes none |",
+        "| unlabelled | Unlabelled | x | y | z | from documentation: fit | candidate | kept at /secure/unlabelled/manual.pdf, sha256 ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 |",
+        "| short | Short | x | y | z | from documentation: fit | candidate | reference: /secure/short/manual.pdf, sha256 ab12 |",
+        "| new | New | x | y | z | | candidate | |",
+        "| loose | Loose | x | y | z | not from documentation; from landed records | candidate | |"])
     path.write_text(path.read_text().replace("| --- | --- | --- | --- | --- | --- | --- | --- |\n", "| --- | --- | --- | --- | --- | --- | --- | --- |\n" + rows + "\n", 1))
     result = status.collect(workbench)
-    assert result["sources"] == {"count": 4, "documentation_without_reference": ["hr"]}
+    assert result["sources"] == {"count": 13, "documentation_without_reference": ["hr", "blank", "pending", "negated", "unlabelled", "short"]}
     assert result["acquisitions"] == {"count": 0, "without_retained_copy": 0}
-    assert result["uncertainties"] == []
+    assert result["uncertainties"] == [{"path": "foundation/sources.md", "reason": "Source loose: Relevance and fitness does not begin with its basis"}]
     path.write_text(path.read_text().replace("| Relevance and fitness |", "| Fitness |", 1))
     result = status.collect(workbench)
     assert result["sources"] is None
