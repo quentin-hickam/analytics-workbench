@@ -1,0 +1,370 @@
+{
+ ".agents/skills/awb-clean/SKILL.md": [
+  "\"flags\": [",
+  "Preparation rules",
+  "awb.py sql",
+  "awb.py stale",
+  "canonical view",
+  "install_helpers.py --upgrade",
+  "merges department labels",
+  "none: stale listed"
+ ],
+ ".agents/skills/awb-clean/references/checks.md": [
+  "after the scan date",
+  "before 1900",
+  "beyond five interquartile ranges",
+  "with leading or trailing whitespace"
+ ],
+ ".agents/skills/awb-clean/references/correction-views.md": [
+  "CREATE VIEW",
+  "SELECT * FROM",
+  "awb.py publish",
+  "canonical view"
+ ],
+ ".agents/skills/awb-eda/SKILL.md": [
+  "Exit status",
+  "Next steps",
+  "Unresolved issues",
+  "awb.py sql",
+  "awb.py state",
+  "canonical view",
+  "project root",
+  "variance explained"
+ ],
+ ".agents/skills/awb-eda/references/reading-the-scan.md": [
+  "lowest mean"
+ ],
+ ".agents/skills/awb-eda/references/scan-file.md": [
+  "duplicated values,",
+  "rows with a null key",
+  "variance explained"
+ ],
+ ".agents/skills/awb-init/SKILL.md": [
+  "Active investigation",
+  "project root"
+ ],
+ ".agents/skills/awb-init/assets/workbench/AGENTS.md": [
+  "# Analytics workbench",
+  "<command> --help",
+  "awb.py profile",
+  "awb.py sql",
+  "awb.py state",
+  "state finding"
+ ],
+ ".agents/skills/awb-init/assets/workbench/README.md": [
+  "# Analytics workbench",
+  "Active investigation",
+  "Active investigation:",
+  "Active investigation: none",
+  "Landed data is kept at",
+  "Landed data is kept at:",
+  "Landed data is kept at: not yet recorded",
+  "Released packages are kept at",
+  "Released packages are kept at:",
+  "Released packages are kept at: not yet recorded",
+  "awb.py state",
+  "canonical view",
+  "kept at: not yet recorded",
+  "not yet recorded",
+  "up to date"
+ ],
+ ".agents/skills/awb-init/assets/workbench/foundation/catalog.md": [
+  "## Published datasets and views",
+  "Preparation rules",
+  "canonical view"
+ ],
+ ".agents/skills/awb-init/assets/workbench/foundation/quality.md": [
+  "## Active limitations and issues",
+  "## Correction record",
+  "Affected source or catalog object",
+  "Analytical impact",
+  "Current treatment",
+  "Observation and evidence",
+  "| Analytical impact | Current treatment | Status |",
+  "| ID | Affected source or catalog object | Observation and evidence |"
+ ],
+ ".agents/skills/awb-init/assets/workbench/foundation/sources.md": [
+  "# Source register",
+  "## Acquisitions",
+  "## Sources",
+  "Acquired at",
+  "Acquisition ID",
+  "Integrity or completeness check",
+  "Landed directory",
+  "Retained copy",
+  "Source version, query, or request",
+  "Status is one of:",
+  "| Acquisition ID | Source ID | Acquired at | Source version, query, or request | Landed directory | Retained copy | Integrity or completeness check | Restrictions | Notes |",
+  "| Source ID | System or provider | Contents and grain | Owner or contact | Acquisition method | Relevance and fitness | Status | Notes |"
+ ],
+ ".agents/skills/awb-init/assets/workbench/investigation/brief.md": [
+  "Business question",
+  "Material unknowns"
+ ],
+ ".agents/skills/awb-init/assets/workbench/investigation/history.md": [
+  "- **Change or finding:**",
+  "- **Evidence:**",
+  "- **Impact and caveats:**",
+  "- **Reasoning or decision:**",
+  "- **Supersedes or revalidation link:**",
+  "awb.py state",
+  "state finding"
+ ],
+ ".agents/skills/awb-init/assets/workbench/investigation/state.md": [
+  "# Current investigation state",
+  "## Current findings",
+  "## Next steps",
+  "## Unresolved issues",
+  "<!-- use an ISO date -->",
+  "Current findings",
+  "Keep this a short list.",
+  "Last updated",
+  "Last updated:",
+  "Next steps",
+  "Revalidation reason or caveat",
+  "Unresolved issues",
+  "awb.py state",
+  "revalidation-needed (was supported)",
+  "state finding",
+  "| Finding | Evidence |",
+  "| Finding | Evidence | Status | Revalidation reason or caveat |"
+ ],
+ ".agents/skills/awb-init/assets/workbench/workbench-guides/analysis.md": [
+  "awb.py profile",
+  "awb.py state",
+  "state finding"
+ ],
+ ".agents/skills/awb-init/assets/workbench/workbench-guides/data.md": [
+  "Active investigation",
+  "Landed data is kept at",
+  "`none chosen`",
+  "awb.py land",
+  "awb.py publish",
+  "awb.py retain",
+  "canonical view",
+  "none chosen",
+  "not yet recorded",
+  "originals exist only in this checkout"
+ ],
+ ".agents/skills/awb-init/references/landing.md": [
+  "<command> --help",
+  "awb.py retain"
+ ],
+ ".agents/skills/awb-init/references/provenance.md": [
+  "awb.py stale",
+  "awb.py state",
+  "failed checks:",
+  "flag cleared",
+  "not assessed",
+  "not assessed:",
+  "state finding"
+ ],
+ ".agents/skills/awb-init/references/repair.md": [
+  "package formats, and workbench guides"
+ ],
+ ".agents/skills/awb-init/references/validation.md": [
+  "not assessed"
+ ],
+ ".agents/skills/awb-package/SKILL.md": [
+  "awb.py check-draft",
+  "awb.py export",
+  "project root"
+ ],
+ ".agents/skills/awb-package/assets/package-format/findings-template.md": [
+  "## Findings"
+ ],
+ ".agents/skills/awb-package/assets/package-format/manifest-template.md": [
+  "awb.py check-draft",
+  "awb.py export",
+  "copied from",
+  "producing commit"
+ ],
+ ".agents/skills/awb-package/assets/package-format/methodology-template.md": [
+  "# Methodology",
+  "## Findings",
+  "## Sources",
+  "Business question"
+ ],
+ ".agents/skills/awb-package/references/package-contract.md": [
+  "<command> --help",
+  "install_helpers.py --upgrade",
+  "project root"
+ ],
+ ".agents/skills/awb-release/SKILL.md": [
+  "Active investigation",
+  "Landed data is kept at",
+  "Released packages are kept at",
+  "Released packages are kept at:",
+  "`none chosen`",
+  "awb.py copy-releases",
+  "awb.py release",
+  "check-draft --verify-only does not pass",
+  "flagged findings without a release disposition",
+  "none chosen",
+  "not yet recorded",
+  "python3 src/awb.py release <investigation> <package>"
+ ],
+ ".agents/skills/awb-status/SKILL.md": [
+  "Next steps",
+  "`none chosen`",
+  "awb.py state",
+  "none chosen",
+  "out of date",
+  "up to date"
+ ],
+ "CHANGELOG.md": [
+  "Current findings",
+  "Landed data is kept at",
+  "`none chosen`",
+  "awb.py export",
+  "awb.py sql",
+  "canonical view",
+  "dataset name",
+  "install_helpers.py --upgrade",
+  "none chosen",
+  "out of date",
+  "producing commit",
+  "state finding",
+  "tomli; python_version < \"3.11\"",
+  "up to date"
+ ],
+ "CONTEXT.md": [
+  "out of date",
+  "producing commit",
+  "project's data",
+  "revalidation-needed (was supported)"
+ ],
+ "README.md": [
+  "# Analytics workbench",
+  "Landed data is kept at",
+  "`none chosen`",
+  "awb.py copy-releases",
+  "canonical view",
+  "none chosen",
+  "package formats, and workbench guides",
+  "producing commit",
+  "up to date"
+ ],
+ "docs/skill-reviews-2026-10-09/awb-init.md": [
+  "## Findings",
+  "Active investigation",
+  "Active investigation:",
+  "producing commit"
+ ],
+ "docs/skill-reviews-2026-10-09/awb-package.md": [
+  "## Findings",
+  "Revalidation reason or caveat",
+  "out of date",
+  "project root"
+ ],
+ "docs/skill-reviews-2026-10-09/awb-release.md": [
+  "## Findings",
+  "`none chosen`",
+  "none chosen",
+  "this checkout only"
+ ],
+ "docs/skill-reviews-2026-10-09/awb-status.md": [
+  "## Findings",
+  "Active investigation",
+  "Active investigation:",
+  "Active investigation: none",
+  "`none chosen`",
+  "no commits yet; all work uncommitted",
+  "none chosen",
+  "nothing to compare",
+  "revalidation-needed (was supported)",
+  "this checkout only"
+ ],
+ "docs/skill-reviews-2026-10-09/awb-visualize.md": [
+  "## Findings",
+  "canonical view"
+ ],
+ "docs/token-efficiency.md": [
+  "words and is listed under that side's `missing`, so the script runs across layout changes."
+ ],
+ "docs/tool-call-audit-2026-10-11/README.md": [
+  "## Findings",
+  "CREATE VIEW",
+  "Next steps",
+  "Unresolved issues",
+  "display name in",
+  "flagged findings without a release disposition",
+  "revalidation_flags is missing; record none or each flag",
+  "state finding"
+ ],
+ "docs/tool-call-audit-2026-10-11/blind-rerun/BRIEF.template.md": [
+  "up to date"
+ ],
+ "docs/tool-call-audit-2026-10-11/blind-rerun/README.md": [
+  "canonical view",
+  "several rows are named orders"
+ ],
+ "docs/tool-call-audit-2026-10-11/blind-rerun/codex-report-baseline.md": [
+  "Active investigation",
+  "Active investigation:",
+  "Explore orders",
+  "awb.py state",
+  "canonical view",
+  "flag cleared",
+  "flagged findings without a release disposition",
+  "foundation/catalog.md: several rows are named",
+  "indeterminate at date precision",
+  "not a git repository",
+  "producing commit",
+  "revalidation-needed (was supported)",
+  "several rows are named orders",
+  "state finding",
+  "up to date"
+ ],
+ "docs/tool-call-audit-2026-10-11/blind-rerun/codex-report-fixed.md": [
+  "# Workbench",
+  ": bounds are numbers or ISO dates",
+  "Active investigation",
+  "Next steps",
+  "awb.py profile",
+  "awb.py sql",
+  "awb.py state",
+  "canonical view",
+  "flagged findings without a release disposition",
+  "foundation/catalog.md: several rows are named",
+  "indeterminate at date precision",
+  "not a git repository",
+  "producing commit",
+  "revalidation-needed (was supported)",
+  "several rows are named orders",
+  "state finding"
+ ],
+ "docs/tool-call-audit-2026-10-11/fix-plan.md": [
+  "AS SELECT * FROM",
+  "AS SELECT * FROM read_parquet(",
+  "AS SELECT * FROM read_parquet('",
+  "CREATE VIEW",
+  "Released packages are kept at",
+  "SELECT * FROM",
+  "awb.py state",
+  "not yet recorded",
+  "revalidation_flags is missing; rerun export"
+ ],
+ "docs/workbench-design.md": [
+  "# Workbench",
+  "awb.py state",
+  "canonical view",
+  "producing commit",
+  "state finding",
+  "up to date"
+ ],
+ "docs/workbench-spec.md": [
+  "Current findings",
+  "Landed data is kept at",
+  "Landed data is kept at:",
+  "Parquet publication",
+  "`none chosen`",
+  "awb.py state",
+  "canonical view",
+  "none chosen",
+  "package formats, and workbench guides",
+  "this checkout only",
+  "unsupported formats",
+  "up to date"
+ ]
+}
