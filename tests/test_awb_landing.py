@@ -1,7 +1,7 @@
 # Kept cases:
 # test_land_writes_complete_provenance_and_publishes_directory: provenance schema/key order, metadata-relative paths, checksums and partial rename.
 # test_land_records_upstream_validators_the_fetch_supplies: upstream fields filled during fetch are recorded per file in fixed key order, with null for absent fields and files.
-# test_land_refuses_malformed_upstream_unpublished: unknown fields, blank or non-string values, unlanded files, and a url with userinfo or credential parameters keep the acquisition partial, and the refusal echoes no secret.
+# test_land_refuses_malformed_upstream_unpublished: unknown fields, blank or non-string values, unlanded files, and a url with userinfo (with or without //) or credential query, fragment, or path parameters (split on & or ;) keep the acquisition partial, and the refusal echoes no secret.
 # test_land_keeps_failed_fetch_unpublished: fetch failure keeps partial files and writes no provenance.
 # test_publish_records_inputs_and_uncommitted_conversion: publication schema/key order, path bases, copied input checksums, no-commit state and partial rename.
 # test_publish_records_resolved_head: publication conversion_commit records the producing Git HEAD.
@@ -93,7 +93,7 @@ def test_land_records_upstream_validators_the_fetch_supplies(tmp_path):
         (directory / "a.csv").write_bytes(b"a")
         (directory / "b.csv").write_bytes(b"b")
         (directory / "c.csv").write_bytes(b"c")
-        upstream["a.csv"] = {"url": "https://example.test/a.csv?format=csv&page=2", "etag": '"v1"',
+        upstream["a.csv"] = {"url": "https://example.test/v;rev=2/a.csv?format=csv;page=2", "etag": '"v1"',
                              "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"}
         upstream["b.csv"] = {"url": "s3://bucket/b.csv", "version_id": "3HL4kqtJ"}
         upstream["c.csv"] = {"etag": None}
@@ -103,7 +103,7 @@ def test_land_records_upstream_validators_the_fetch_supplies(tmp_path):
     assert [list(file) for file in files] == [["path", "bytes", "sha256", "records", "upstream"]] * 3
     assert list(files[0]["upstream"]) == ["url", "etag", "last_modified", "version_id"]
     assert [file["upstream"] for file in files] == [
-        {"url": "https://example.test/a.csv?format=csv&page=2", "etag": '"v1"',
+        {"url": "https://example.test/v;rev=2/a.csv?format=csv;page=2", "etag": '"v1"',
          "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT", "version_id": None},
         {"url": "s3://bucket/b.csv", "etag": None, "last_modified": None, "version_id": "3HL4kqtJ"},
         None,
@@ -124,6 +124,11 @@ def test_land_records_upstream_validators_the_fetch_supplies(tmp_path):
      r"parameters \(X-Amz-Credential, X-Amz-Signature\)"),
     ({"page.json": {"url": "https://a.blob.example.test/x?sv=2024&sig=SECRET"}}, r"parameters \(sig\)"),
     ({"page.json": {"url": "https://api.example.test/x#access_token=SECRET"}}, r"parameters \(access_token\)"),
+    ({"page.json": {"url": "https://api.example.test/x?a=1;api_key=SECRET"}}, r"parameters \(api_key\)"),
+    ({"page.json": {"url": "https://api.example.test/x;token=SECRET/page"}}, r"parameters \(token\)"),
+    ({"page.json": {"url": "https://api.example.test/x#a=1;access_token=SECRET"}}, r"parameters \(access_token\)"),
+    ({"page.json": {"url": "user:SECRET@api.example.test/x"}}, "user name or password"),
+    ({"page.json": {"url": "https:user:SECRET@api.example.test/x"}}, "user name or password"),
 ])
 def test_land_refuses_malformed_upstream_unpublished(tmp_path, upstream, message):
     with pytest.raises(ValueError, match=message) as refused:
