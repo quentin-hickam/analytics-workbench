@@ -749,12 +749,18 @@ def _migrate_row(cells, label):
     checks, notes = _segments("; ".join(" ".join(part.split()) for part in caveat.split(";") if part.strip()))
     entry = {"result": links[0], "text": text, "status": status, "prior_status": prior,
              "flag_reason": "; ".join(notes) if status == _FLAGGED else "",
-             "notes": [] if status == _FLAGGED else notes, "checks_caveat": "; ".join(checks)}
+             "notes": [] if status == _FLAGGED else notes, "checks_caveat": "; ".join(checks),
+             "notes_checks": "; ".join(checks)}
     rendered = _finding_cells(entry)
     if " ".join(text.split()) != rendered[0].replace(r"\|", "|") or _segment_set(caveat) != _segment_set(rendered[3]):
         raise StateError(f"{label}: row {_row(cells)} would render as {_row(rendered)}; fix the row, then "
                          "rerun the command")
     return entry
+
+
+# notes_checks is the checks caveat the notes were written against (null: none); a promotion counts
+# the notes as explaining failed or not-assessed checks only while it equals the current one.
+_ENTRY_KEYS = {"result", "text", "status", "prior_status", "flag_reason", "notes", "checks_caveat", "notes_checks"}
 
 
 class _Findings:
@@ -779,8 +785,10 @@ class _Findings:
             self.entries = content["findings"]
             seen = set()
             for entry in self.entries:
-                if (not isinstance(entry, dict) or set(entry) !=
-                        {"result", "text", "status", "prior_status", "flag_reason", "notes", "checks_caveat"}
+                if isinstance(entry, dict) and isinstance(entry.get("checks_caveat"), str):
+                    entry.setdefault("notes_checks", entry["checks_caveat"])  # written before notes_checks
+                if (not isinstance(entry, dict) or set(entry) != _ENTRY_KEYS
+                        or entry["notes_checks"] is not None and not isinstance(entry["notes_checks"], str)
                         or not all(isinstance(entry[k], str) for k in
                                    ("result", "text", "status", "flag_reason", "checks_caveat"))
                         or not _ID.fullmatch(entry["result"]) or entry["result"] in seen
@@ -998,7 +1006,8 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
     kept untouched; otherwise its reserved caveat segments are replaced, its status becomes
     provisional unless superseded, and history.md records a rerun of a supported row. A flagged row
     returns to superseded if it was superseded, else provisional, with its notes kept, its flag reason
-    dropped, and a history entry naming that reason. When findings.json is not replaced, the evidence just recorded is removed before raising.
+    dropped, and a history entry naming that reason; a row migrated while flagged holds its notes in
+    that reason. When findings.json is not replaced, the evidence just recorded is removed before raising.
     Returns {action: added|kept|refreshed|flag cleared, status, history (bool)}.
     """
     root = Path(project_root).resolve()
@@ -1015,7 +1024,7 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
         if entry is None:
             entry = {"result": result_id, "text": f"<state the finding from {result_id}>",
                      "status": "provisional", "prior_status": None, "flag_reason": "", "notes": [],
-                     "checks_caveat": _check_caveat(checks)}
+                     "checks_caveat": _check_caveat(checks), "notes_checks": _check_caveat(checks)}
             findings.entries.append(entry)
             action = "added"
         else:
@@ -1105,10 +1114,14 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
                 failed = [c["name"] for c in compare_evidence(root, evidence_path) if c["outcome"] == "fail"]
                 if failed:
                     raise StateError(f"{result_id} is stale ({', '.join(failed)}); rerun it before promoting it")
-                checks = json.loads(evidence_path.read_text()).get("checks") or []
-                if _check_caveat(checks) and not (notes if caveat is not None else entry["notes"]):
-                    raise StateError(f"{result_id} has failed or not-assessed checks ({_check_caveat(checks)}); "
-                                     "explain them with --caveat before promoting it")
+                gaps = _check_caveat(json.loads(evidence_path.read_text()).get("checks") or [])
+                # Kept notes explain the checks only while those checks are the ones they were written for.
+                current = entry["notes"] and entry["notes_checks"] == gaps
+                if gaps and not (notes if caveat is not None else current):
+                    detail = (f"; its notes were written for {entry['notes_checks'] or 'no checks'}, so restate "
+                              "those that still hold" if entry["notes"] and caveat is None else "")
+                    raise StateError(f"{result_id} has failed or not-assessed checks ({gaps}); "
+                                     f"explain them with --caveat before promoting it{detail}")
             logged = (old[2] == "supported" or flagged) or cells[2] in ("supported", "superseded")
             changes.append((result_id, index, old, cells, logged))
         if not changes:
@@ -1140,11 +1153,12 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
                 entry["text"] = text
             if status is not None:
                 if entry["status"] == _FLAGGED and entry["flag_reason"]:
-                    entry["notes"].append(entry["flag_reason"])
-                    entry["flag_reason"] = ""
+                    entry["notes"].append(entry["flag_reason"])  # a flag reason explains no check
+                    entry["flag_reason"], entry["notes_checks"] = "", None
                 entry["status"], entry["prior_status"] = status, None
             if caveat is not None:
                 entry["notes"] = [part.replace(r"\|", "|") for part in notes]
+                entry["notes_checks"] = entry["checks_caveat"]
         state.touch(today)
         findings.history, findings.changed = history, True
         findings.prior_rows = [_row(old) for _, _, old, _, _ in changes]
