@@ -20,8 +20,10 @@ Scan file (schema awb-scan/1):
             recorded: null | {id, status, count}}
 Issue ids (S1, S2, ...) stay stable from a baseline scan through its rescans; a key names the
 check, column, and value, so a rescan matches issues by key and reports before and after counts.
-Keys written into foundation/quality.md as `<name>#<key>` mark an issue as recorded; the row's
-"(<count> of <of>)" is its recorded count, printed on stdout as recorded_count beside the current count.
+foundation/quality.json links issues to Markdown rows whose observation carries the matching
+`<name>#<key>` marker; its recorded count is printed on stdout as recorded_count beside the
+current count. A marker on one row that no link names is linked from that row's prose in memory;
+the scan never writes the file.
 Stdout lists at most 25 unrecorded issues; more_issues counts the rest, which are in the scan file.
 """
 
@@ -35,6 +37,9 @@ import sys
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from quality_links import QualityLinks
 
 SCHEMA = "awb-scan/1"
 TEXT_SENTINELS = ("", "n/a", "na", "#n/a", "null", "none", "nil", "nan", "-", "--", "?", ".",
@@ -638,24 +643,19 @@ def _parse_ref(spec):
 
 # ----- records, baselines, and output ------------------------------------------------------------
 
-def _recorded(root, name):
-    """Map `<name>#<key>` markers in the quality record to their row's ID, status, and recorded count."""
+def _recorded(root, name, keys=None):
+    """Read validated links and Markdown statuses for the issue keys in hand."""
     path = root / "foundation/quality.md"
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return {}
-    marker = re.compile(r"`" + re.escape(name) + r"#([^`]+)`")
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    links = QualityLinks(root, lines)
+    if keys is None:
+        keys = [key for scan, key in links.active.markers if scan == name]
     found = {}
-    for line in lines:
-        if not line.strip().startswith("|"):
-            continue
-        cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
-        for key in marker.findall(line):
-            cell = next((c for c in cells if f"`{name}#{key}`" in c), "")
-            count = re.search(r"\((\d+) of \d+\)", cell)
-            found[key.replace("\\|", "|")] = {"id": cells[0], "status": cells[-1],
-                                              "count": int(count.group(1)) if count else None}
+    for key in keys:
+        resolved = links.resolve(name, key)
+        if resolved:
+            line, link = resolved
+            found[key] = {"id": link["id"], "status": links.active.status(line), "count": link["recorded_count"]}
     return found
 
 
@@ -730,7 +730,7 @@ def scan(project_root, dataset, *, keys=(), refs=(), ranges=(), columns=None, na
     else:
         for number, issue in enumerate(issues, 1):
             issue["id"] = f"S{number}"
-    recorded = _recorded(root, name)
+    recorded = _recorded(root, name, [i["key"] for i in issues + (baseline or {}).get("issues", [])])
     for issue in issues:
         issue["recorded"] = recorded.get(issue["key"])
     delta = _delta(baseline, row_count, info, issues) if baseline else None

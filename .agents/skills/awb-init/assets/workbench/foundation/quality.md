@@ -9,6 +9,8 @@ Record shared limitations, errors, checks, and accepted corrections that affect 
 
 A confirmed coverage gap, such as a missing or low period or a field that stops being filled, is an `open` row under the next ID, citing the scan that found it.
 
+`awb-clean` keeps scan links in `foundation/quality.json`; don't edit it by hand.
+
 ## Correction record
 
 | Date | Issue ID | Accepted correction and rationale | Preparation or view change | Findings that may need revalidation |
