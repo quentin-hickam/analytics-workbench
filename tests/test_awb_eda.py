@@ -10,6 +10,7 @@
 # test_options_override_settings_and_unfit_settings_are_skipped: options replace settings; unfit settings print as not applied; a bad option or empty scope exits 2.
 # test_publication_path_with_label_and_float_columns_keep_distributions: publication directory scanned to a labelled file; unique floats are not keys.
 # test_scan_file_name_follows_the_documented_rule: the examples in references/scan-file.md hold; directory names join up to the last two path parts; characters outside ASCII [A-Za-z0-9._-] become "-", edges are trimmed, "dataset" fills an empty name; colliding names share one file; --help names no <dataset>-<label> file.
+# test_label_must_be_a_simple_name_and_an_empty_one_cannot_overwrite_the_unlabelled_scan: --label "" and other names outside the rule exit 2 before anything is written; "x." is accepted.
 # test_template_settings_take_the_period_from_parameters_and_name_unset_choices: [parameters] start/end scope the period; unset scope, measure, and dimensions print the options to pass.
 # test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one: --show walks keys and named list items without rescanning; a miss exits 2 listing what is there.
 
@@ -279,6 +280,20 @@ def test_scan_file_name_follows_the_documented_rule(tmp_path, capsys):
     help_text = " ".join(capsys.readouterr().out.split())
     assert "appends -<label> to the scan file's name" in help_text and "<dataset>-<label>" not in help_text
 
+
+
+def test_label_must_be_a_simple_name_and_an_empty_one_cannot_overwrite_the_unlabelled_scan(tmp_path, capsys):
+    root = project(tmp_path)
+    saved = write(root, "investigations/overtime/exploration/eda/shifts.json", '{"format": "awb-eda/1"}')
+    for label in ("", "-x", ".x", "a b", "é"):
+        with pytest.raises(SystemExit) as exit:
+            eda.main([str(root), "shifts", f"--label={label}"])
+        assert exit.value.code == 2
+        assert "--label must be a simple name: an ASCII letter or digit, then [A-Za-z0-9._-]" in capsys.readouterr().err
+    assert saved.read_text() == '{"format": "awb-eda/1"}'
+    assert [p.name for p in saved.parent.iterdir()] == ["shifts.json"]
+    assert eda.parse([str(root), "shifts", "--label", "x."]).label == "x."
+    assert eda.parse([str(root), "shifts"]).label is None
 
 TEMPLATE = """[parameters]
 start = 2025-07-01
