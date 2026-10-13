@@ -1,6 +1,6 @@
 ---
 name: awb-init
-description: Initialize or repair an analytics workbench. Use when the user sets one up, brings a new business question, changes an investigation's scope, or asks to update the workbench to newer skills.
+description: Initialize or repair an analytics workbench. Use this skill when the user sets up a workbench, brings a new business question, changes the scope of an investigation, or asks to update the workbench to newer skills.
 ---
 
 # Initialize an analytics workbench

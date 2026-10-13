@@ -1,6 +1,6 @@
 ---
 name: awb-eda
-description: "Explore one dataset (EDA) for the active analytics workbench investigation. Use when the user asks to explore, profile, or understand a dataset or view for the investigation's question."
+description: "Explore one dataset (EDA) for the active analytics workbench investigation. Use this skill when the user asks to explore, profile, or understand a dataset or view for the question of the investigation."
 ---
 
 # Explore a dataset for an investigation

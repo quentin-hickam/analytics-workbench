@@ -27,16 +27,16 @@ One non-Markdown file changed: `SOURCES_TEMPLATE` in `.agents/skills/awb-init/as
    - HIGH: the drift changes what an agent or a user does, a requirement, or a factual claim.
    - MEDIUM: the drift loses nuance or a reason that a reader needs.
    - LOW: the drift is a small change of shading.
-5. The auditors fixed every HIGH and MEDIUM finding, and most LOW findings. Then the structural check, the test suite, and `scripts/build-dist.sh` ran again.
+5. The auditors fixed every HIGH and MEDIUM finding, and most LOW findings. The `description` lines of the six skills had a separate audit, because hosts compare requests with these lines to select a skill. That audit treated any change to the set of requests that starts a skill as HIGH. Then the structural check, the test suite, and `scripts/build-dist.sh` ran again.
 
 ## Results
 
 | Measure | Value |
 | --- | --- |
 | Files audited | 52 |
-| Units compared | 1957 |
-| Drift findings | 38 (3 HIGH, 5 MEDIUM, 30 LOW) |
-| Findings fixed | 32 (all HIGH and MEDIUM) |
+| Units compared | 1962 |
+| Drift findings | 39 (3 HIGH, 5 MEDIUM, 31 LOW) |
+| Findings fixed | 33 (all HIGH and MEDIUM) |
 | Findings kept, with a reason | 6 (all LOW) |
 | Structural check | 0 errors in 52 files |
 | Tests | 319 passed, 1 skipped (the same as at `6ebca3a`) |
@@ -44,7 +44,7 @@ One non-Markdown file changed: `SOURCES_TEMPLATE` in `.agents/skills/awb-init/as
 | Sentences over 25 words | 507 before, 157 after |
 | Semicolons in sentences | 728 before, 72 after |
 
-The categories of the 38 findings are: scope 10, term 9, actor 9, modal 3, condition 2, sequence 2, omission 1, addition 1, quote 1. [findings.tsv](findings.tsv) lists each finding with the original text, the drifted text, and the resolution. [units.tsv](units.tsv) gives the number of units and findings for each file.
+The categories of the 39 findings are: scope 11, term 9, actor 9, modal 3, condition 2, sequence 2, omission 1, addition 1, quote 1. [findings.tsv](findings.tsv) lists each finding with the original text, the drifted text, and the resolution. [units.tsv](units.tsv) gives the number of units and findings for each file.
 
 The three HIGH findings were these:
 
@@ -53,7 +53,7 @@ The three HIGH findings were these:
 
 Most drift came from three causes:
 
-- Scope (10 findings): a sentence split or a new word order moved the scope of "only", "each", or "whether or not".
+- Scope (11 findings): a sentence split or a new word order moved the scope of "only", "each", or "whether or not".
 - Actor (9 findings): a description became an instruction, or the rewrite gave a subject that the original did not give.
 - Term (9 findings): a word changed to a word with a different or less exact meaning, for example "distinct" to "different".
 
@@ -66,7 +66,6 @@ In many of these findings, the rewriter chose one reading of an ambiguous origin
   - headings, because code parses some of them and links use them as anchors
   - text that the code parses
   - verbatim quotes
-  - the `description` lines in the frontmatter of the six skills. Hosts compare requests with these lines to select a skill, so a change of words can change which skill runs.
 - 157 sentences are still longer than 25 words. Most are verbatim quotes or proposed replacement text in the review records. Some are a bold label that the sentence counter joins to the next sentence.
 - The audit is a model-based reading, not a proof. Each file had one independent auditor.
 

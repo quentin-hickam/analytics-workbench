@@ -1,6 +1,6 @@
 ---
 name: awb-release
-description: "Release an analytics workbench package: a numbered, frozen copy of its draft. Use only when the user marks a package delivered or sets where releases are kept."
+description: "Release an analytics workbench package: a numbered, frozen copy of its draft. Use this skill only when the user marks a package as delivered, or sets the location where releases are kept."
 ---
 
 # Release a delivery package

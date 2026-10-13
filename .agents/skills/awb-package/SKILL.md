@@ -1,6 +1,6 @@
 ---
 name: awb-package
-description: "Draft or revise an analytics workbench delivery package (deck outline, charts, datasets). Use only when the user asks for a package or deck, or a change to its draft."
+description: "Draft or revise an analytics workbench delivery package (deck outline, charts, datasets). Use this skill only when the user asks for a package or deck, or for a change to its draft."
 ---
 
 # Draft a delivery package

@@ -1,6 +1,6 @@
 ---
 name: awb-clean
-description: "Clean one analytics workbench dataset: find its data errors and correct them in the shared canonical views. Use when the user asks to clean or quality-check a dataset or source."
+description: "Clean one analytics workbench dataset: find its data errors and correct them in the shared canonical views. Use this skill when the user asks to clean or quality-check a dataset or source."
 ---
 
 # Clean one dataset

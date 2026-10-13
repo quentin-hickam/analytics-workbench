@@ -1,6 +1,6 @@
 ---
 name: awb-status
-description: Report where an analytics workbench stands and what to ask next. Use when the user asks for status or what to do next.
+description: Report the status of an analytics workbench and what to ask next. Use this skill when the user asks for the status or for what to do next.
 ---
 
 # Report workbench status
