@@ -6,7 +6,9 @@ Existing project layouts remain authoritative. Read `references/landing.md` only
 
 ## Assess and acquire
 
-Assess a candidate from its documentation or schema when that settles relevance and fitness; inspect records only from landed copies, landing only what the assessment needs. Record the assessment and its basis in `foundation/sources.md` under its Status rules.
+Assess a candidate from its documentation or schema when that settles relevance and fitness; inspect records only from landed copies, landing only what the assessment needs. Record the assessment, its basis, and its references in `foundation/sources.md` under its rules.
+
+Keep each data dictionary, manual, codebook, or schema export that an assessment or catalog row relies on under `foundation/references/<source-id>/`, and commit it. Material whose license or confidentiality bars committing it stays out of Git, as a landed original does: keep it at a retained location outside the checkout and record that location and its SHA-256 instead. Link a reference from the catalog rows that rely on it as `foundation/catalog.md` describes.
 
 Land user-supplied or already-downloaded files:
 

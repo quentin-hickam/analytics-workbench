@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
-"""Install the workbench helpers and guides, declare the packages they need, and upgrade shipped copies.
+"""Install the workbench helpers, guides, and references README; declare their packages; upgrade shipped copies.
 
 Run with the interpreter that will run the project's analysis:
-    install_helpers.py [PROJECT_ROOT]                    install missing helpers and workbench guides;
-                                                         write requirements.txt if absent
+    install_helpers.py [PROJECT_ROOT]                    install missing helpers, workbench guides, and the
+                                                         foundation/references/ README; write requirements.txt
+                                                         if absent
     install_helpers.py [PROJECT_ROOT] --package-formats  also install missing package formats
     install_helpers.py [PROJECT_ROOT] --upgrade          also replace unmodified earlier copies of helpers,
-                                                         package formats, and workbench guides
+                                                         package formats, workbench guides, and that README
     install_helpers.py [PROJECT_ROOT] --upgrade --replace PATH [--replace PATH]... [--remove-retired]
     install_helpers.py [PROJECT_ROOT] --check ...        report the same without writing
 
 Prints one line of JSON:
   project, workbench  the project root and whether workbench markers exist; when absent, missing lists
                      the markers and hint explains how to initialize the root or choose another
-  files              every src/ helper and workbench guide, and with --upgrade or --package-formats every
-                     shipped package format the project holds: installed, missing (--check), current,
-                     earlier (an unmodified older copy; --upgrade replaces it), replaced, or customized
-                     (differs from the asset and has no matching receipt entry; kept unless named by --replace)
+  files              every src/ helper, workbench guide, and the references README, and with --upgrade or
+                     --package-formats every shipped package format the project holds: installed, missing
+                     (--check), current, earlier (an unmodified older copy; --upgrade replaces it), replaced,
+                     or customized (differs from the asset and has no matching receipt entry; kept unless
+                     named by --replace)
   customized         each customized file -> the installed asset to compare it with
   retired            (--upgrade) files the skills no longer ship: unmodified, removed, or customized (kept)
   requirements, python, packages, install   the third-party packages the helpers and the run.py
@@ -42,6 +44,7 @@ SKILLS = Path(__file__).resolve().parents[2]
 RECEIPT = ".awb-receipt.json"
 PYTHON = (3, 10)
 # Project path -> asset under the skills directory, for every file the skills copy into a project.
+# Every path outside package-format/ is installed into each workbench; package formats wait for awb-package.
 COPIED = {
     "src/awb.py": "awb-init/assets/awb_cli.py",
     "src/provenance.py": "awb-init/assets/awb_provenance.py",
@@ -50,6 +53,7 @@ COPIED = {
     "src/packaging/draft.py": "awb-package/assets/awb_draft.py",
     "workbench-guides/data.md": "awb-init/assets/workbench/workbench-guides/data.md",
     "workbench-guides/analysis.md": "awb-init/assets/workbench/workbench-guides/analysis.md",
+    "foundation/references/README.md": "awb-init/assets/workbench/foundation/references/README.md",
     "package-format/findings-template.md": "awb-package/assets/package-format/findings-template.md",
     "package-format/methodology-template.md": "awb-package/assets/package-format/methodology-template.md",
     "package-format/m365-assembly.md": "awb-package/assets/package-format/m365-assembly.md",
@@ -147,7 +151,7 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
     files, customized, written = {}, {}, dict(receipt)
     for path, asset in copies:
         target = root / path
-        reported = path.startswith(("src/", "workbench-guides/")) or package_formats
+        reported = not path.startswith("package-format/") or package_formats
         if not target.is_file():
             if reported:
                 if not check:

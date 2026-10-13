@@ -1,5 +1,7 @@
 # Kept cases:
-# test_installs_every_missing_helper_and_guide: a bare workbench gets every src/ helper, src/awb.py included, both workbench guides, a requirements.txt and a receipt of what was installed; no package format.
+# test_installs_every_missing_helper_and_guide: a bare workbench gets every src/ helper, src/awb.py included, both workbench guides, the references README, a requirements.txt and a receipt of what was installed; no package format.
+# test_fresh_workbench_gets_the_references_folder_and_guide_text: a fresh install creates foundation/references/ with its README, whose link resolves to the data guide that says what the folder keeps.
+# test_repair_adds_the_references_folder: --upgrade on a workbench that lacks foundation/references/ installs its README into the receipt and leaves existing records alone.
 # test_requirements_match_helper_imports: the static requirements list equals the third-party imports of the shipped helpers and the run.py template, fallbacks included.
 # test_present_helpers_are_classified_and_kept: current, earlier and customized copies are reported and left byte for byte without --upgrade.
 # test_receipt_alone_decides_earlier: a file matching its receipt entry is earlier; a file whose entry differs, or without an entry such as one installed before receipts, is customized.
@@ -19,6 +21,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -89,7 +92,7 @@ def test_installs_every_missing_helper_and_guide(project):
     result = subprocess.run([sys.executable, str(SCRIPT), str(project)], capture_output=True, text=True, check=True)
     assert "\n" not in result.stdout.strip()
     report = json.loads(result.stdout)
-    assert "src/awb.py" in INSTALLED and "workbench-guides/analysis.md" in INSTALLED
+    assert {"src/awb.py", "workbench-guides/analysis.md", "foundation/references/README.md"} <= set(INSTALLED)
     assert report["files"] == {path: "installed" for path in INSTALLED}
     for path, asset in INSTALLED.items():
         assert (project / path).read_bytes() == asset.read_bytes()
@@ -100,6 +103,31 @@ def test_installs_every_missing_helper_and_guide(project):
     assert lines[0].startswith("#") and lines[1:] == PACKAGES
     expected = {"duckdb", "pandas"} | ({"tomli"} if sys.version_info < (3, 11) else set())
     assert set(report["packages"]) == expected and report["python"]["ok"]
+
+
+def test_fresh_workbench_gets_the_references_folder_and_guide_text(project, imports_ok):
+    result = installer.install(project)
+    assert result["files"]["foundation/references/README.md"] == "installed"
+    readme = (project / "foundation/references/README.md").read_text()
+    link = re.search(r"\[data guide\]\(([^)]+)\)", readme)[1]
+    guide = (project / "foundation/references" / link).resolve()
+    assert guide == (project / "workbench-guides/data.md").resolve() and guide.is_file()
+    text = guide.read_text()
+    assert "foundation/references/<source-id>/" in text and "SHA-256" in text
+    assert "references/<source-id>/" in (SKILLS / "awb-init/assets/workbench/foundation/sources.md").read_text()
+
+
+def test_repair_adds_the_references_folder(project, imports_ok):
+    shipped = {path: asset.read_bytes() for path, asset in INSTALLED.items() if path != "foundation/references/README.md"}
+    earlier(project, shipped)
+    write(project, {"foundation/sources.md": b"# Source register\n"})
+    before = snapshot(project)
+    result = installer.install(project, upgrade=True)
+    assert result["files"]["foundation/references/README.md"] == "installed"
+    assert {path for path, status in result["files"].items() if status != "current"} == {"foundation/references/README.md"}
+    assert (project / "foundation/references/README.md").read_bytes() == INSTALLED["foundation/references/README.md"].read_bytes()
+    assert receipt(project)["foundation/references/README.md"] == sha(INSTALLED["foundation/references/README.md"].read_bytes())
+    assert all(path.read_bytes() == data for path, data in before.items() if path.name != ".awb-receipt.json")
 
 
 def test_requirements_match_helper_imports():
