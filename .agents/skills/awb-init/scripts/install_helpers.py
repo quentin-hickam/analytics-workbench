@@ -16,15 +16,15 @@ Prints one line of JSON:
   files              every src/ helper and workbench guide, and with --upgrade or --package-formats every
                      shipped package format the project holds: installed, missing (--check), current,
                      earlier (an unmodified older copy; --upgrade replaces it), replaced, or customized
-                     (matches no shipped version: the project's own code, kept unless named by --replace)
+                     (differs from the asset and has no matching receipt entry; kept unless named by --replace)
   customized         each customized file -> the installed asset to compare it with
   retired            (--upgrade) files the skills no longer ship: unmodified, removed, or customized (kept)
   requirements, python, packages, install   the third-party packages the helpers and the run.py
                      template need, where they are declared, and whether this interpreter imports them
 Package formats stay absent until awb-package copies them with --package-formats.
 The project's install receipt, .awb-receipt.json, maps each file this script installed or replaced to
-its SHA-256: a file matching its entry is unmodified. A file without an entry is unmodified when it
-matches assets/legacy-shipped-hashes.json, the versions shipped before receipts, which is frozen.
+its SHA-256: a file matching its entry is unmodified. A file without an entry is customized unless
+it equals the shipped asset.
 Existing dependency files are only read, and no package is installed. Exit status: 0 done; 1 not a
 workbench, Python too old, or an unreadable receipt, nothing written; 2 unusable arguments.
 """
@@ -39,7 +39,6 @@ import sys
 from pathlib import Path
 
 SKILLS = Path(__file__).resolve().parents[2]
-LEGACY = Path(__file__).resolve().parents[1] / "assets/legacy-shipped-hashes.json"
 RECEIPT = ".awb-receipt.json"
 PYTHON = (3, 10)
 # Project path -> asset under the skills directory, for every file the skills copy into a project.
@@ -143,14 +142,13 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
     except (OSError, ValueError) as error:
         return {"project": str(root), "workbench": True,
                 "error": f"{RECEIPT} is unreadable ({error}); restore it from Git"}
-    legacy = json.loads(LEGACY.read_text())
     copies = _copies()
     unknown = set(replace) - {path for path, _ in copies}
     if unknown:
         raise ValueError(f"--replace names files the skills do not copy: {', '.join(sorted(unknown))}")
 
     def unmodified(path, digest):
-        return digest == receipt[path] if path in receipt else digest in legacy.get(path, ())
+        return path in receipt and digest == receipt[path]
 
     files, customized, written = {}, {}, dict(receipt)
     for path, asset in copies:

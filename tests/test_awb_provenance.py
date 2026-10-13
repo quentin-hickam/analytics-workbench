@@ -2,7 +2,7 @@
 # test_record_evidence_records_clean_producing_state: evidence JSON schema/key order and clean producing state.
 # test_record_evidence_captures_modified_code: uncommitted producing paths retain status, size and checksum.
 # test_record_evidence_rejects_invalid_checks: a check outside the validation record shape raises.
-# test_compare_evidence_accepts_schema_1_evidence: evidence written before awb-evidence/2, with its figure entry, still compares clean.
+# test_compare_evidence_refuses_evidence_older_than_scoped_3: awb-evidence/1 and unscoped /3 files fail all five comparisons with a rerun instruction.
 # test_compare_evidence_clean_committed_state_passes_five_comparisons: clean state passes all five ordered comparisons in the contract shape.
 # test_compare_evidence_detects_view_changed_after_recording: view mutation fails the views comparison.
 # test_compare_evidence_names_changed_setting: settings mutation fails the settings comparison.
@@ -147,13 +147,16 @@ def test_record_evidence_rejects_invalid_checks(project):
             checks=[{"name": "scope", "outcome": "ok", "detail": "wrong"}])
 
 
-def test_compare_evidence_accepts_schema_1_evidence(project):
+def test_compare_evidence_refuses_evidence_older_than_scoped_3(project):
     path = record(project)
     evidence = json.loads(path.read_text())
-    evidence["schema"] = "awb-evidence/1"
-    evidence["figure"] = None
-    path.write_text(json.dumps(evidence))
-    assert [c["outcome"] for c in provenance.compare_evidence(project, path)] == ["pass"] * 5
+    for schema, settings in (("awb-evidence/1", evidence["settings"]),
+                             ("awb-evidence/3", {k: v for k, v in evidence["settings"].items() if k != "result"})):
+        path.write_text(json.dumps({**evidence, "schema": schema, "settings": settings}))
+        comparisons = provenance.compare_evidence(project, path)
+        assert [c["outcome"] for c in comparisons] == ["fail"] * 5
+        assert all("not awb-evidence/3 with result-scoped settings; rerun the result" in c["detail"]
+                   for c in comparisons)
 
 
 NAMES = ["committed-code", "uncommitted-code", "views", "inputs", "settings"]
@@ -271,14 +274,15 @@ def test_compare_evidence_missing_file_fails_all_five_comparisons(project):
     assert all(c["detail"].startswith("missing evidence:") for c in comparisons)
 
 
-@pytest.mark.parametrize("bad_content", [b"{", b' {"schema": "other"}'])
-def test_compare_evidence_bad_files_still_return_five_failures(project, bad_content):
+@pytest.mark.parametrize("bad_content, prefix", [(b"{", "missing evidence:"),
+                                                 (b' {"schema": "other"}', "unusable evidence:")])
+def test_compare_evidence_bad_files_still_return_five_failures(project, bad_content, prefix):
     path = project / "bad.json"
     path.write_bytes(bad_content)
     comparisons = provenance.compare_evidence(project, path)
     assert [c["name"] for c in comparisons] == NAMES
     assert [c["outcome"] for c in comparisons] == ["fail"] * 5
-    assert all(c["detail"].startswith("missing evidence:") for c in comparisons)
+    assert all(c["detail"].startswith(prefix) for c in comparisons)
 
 
 @pytest.mark.parametrize("path,new_bytes", [

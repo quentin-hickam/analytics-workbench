@@ -26,7 +26,7 @@ from pathlib import Path
 
 MANIFEST = "manifest.json"
 _SIMPLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
-_EVIDENCE_SCHEMAS = ("awb-evidence/1", "awb-evidence/2", "awb-evidence/3")
+_EVIDENCE_SCHEMA = "awb-evidence/3"
 _EVIDENCE_LINK = re.compile(r"evidence/([A-Za-z0-9][A-Za-z0-9._-]*)\.json")
 _DISPOSITIONS = ("omit", "release_with_caveat")
 _STORAGE_LINE = "Released packages are kept at:"
@@ -105,6 +105,16 @@ def _toml():
     return tomllib
 
 
+_UNUSABLE = f"not {_EVIDENCE_SCHEMA} with result-scoped settings; rerun the result"
+
+
+def _usable_evidence(record):
+    """Evidence this helper reads: awb-evidence/3 whose settings name their result."""
+    if not isinstance(record, dict) or record.get("schema") != _EVIDENCE_SCHEMA:
+        return False
+    return isinstance(record.get("settings"), dict) and bool(record["settings"].get("result"))
+
+
 def _evidence_files(root, investigation):
     """Yield (path, evidence or None, problem or None) for each awb-evidence file."""
     directory = root / "investigations" / investigation / "evidence"
@@ -115,8 +125,11 @@ def _evidence_files(root, investigation):
             yield path, None, f"{_rel(root, path)}: unreadable ({error})"
             continue
         # Export-check lists and other files can sit beside the evidence.
-        if isinstance(record, dict) and record.get("schema") in _EVIDENCE_SCHEMAS:
+        schema = record.get("schema") if isinstance(record, dict) else None
+        if _usable_evidence(record):
             yield path, record, None
+        elif str(schema).startswith("awb-evidence/"):
+            yield path, None, f"{_rel(root, path)}: {_UNUSABLE}"
 
 
 # ---------------------------------------------------------------- internal names in findings.md
@@ -967,8 +980,8 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
         evidence_paths[result_id] = _rel(root, evidence_path)
         try:
             evidence[result_id] = _read_json(evidence_path)
-            if evidence[result_id].get("schema") not in _EVIDENCE_SCHEMAS:
-                raise ValueError("not an awb-evidence file")
+            if not _usable_evidence(evidence[result_id]):
+                raise ValueError(_UNUSABLE)
         except (OSError, ValueError) as error:
             report["errors"].append(f"missing evidence: {evidence_paths[result_id]}: {error}")
     if report["errors"]:
