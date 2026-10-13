@@ -133,7 +133,10 @@ _LEADING = "([{<\"'*~!“‘"
 _TRAILING = ")]}>\"'*~.,;:!?”’"
 _POSSESSIVE = re.compile(r"['’]s$")
 
-_PATH = re.compile(r"\w/\w")
+# A leading slash alone is no path signal: "/ " and "/month" are prose; /usr/local has two slashes.
+_PATH_PREFIX = re.compile(r"^(?:\.{1,2}/|[A-Za-z][A-Za-z0-9+.-]*://)")
+_PATH_ROOTS = {"data", "foundation", "investigations", "deliveries", "src", "views",
+               "queries", "results", "evidence", "exploration", "scans"}
 _FRACTION = re.compile(r"[\d.,]+(?:/[\d.,]+)+")  # 3/4, 6/30/2026: numbers, not paths
 _FILE_NAME = re.compile(
     r"\.(?:md|py|csv|parquet|json|sql|png|svg|duckdb|db|xlsx|yaml|yml|toml|txt|ipynb)$",
@@ -157,9 +160,13 @@ def _unwrap(token):
     return token
 
 
-def _token_kind(token):
-    if token.startswith(("./", "../")) or (_PATH.search(token) and not _FRACTION.fullmatch(token)):
-        return "path"
+def _token_kind(token, roots):
+    if "/" in token and re.search(r"\w", token):
+        segments = token.split("/")
+        if _PATH_PREFIX.match(token) or not _FRACTION.fullmatch(token) and (
+                len(segments) >= 3 or segments[0] in _PATH_ROOTS
+                or any(_FILE_NAME.search(segment) or "_" in segment or segment in roots for segment in segments)):
+            return "path"
     if _FILE_NAME.search(token):
         return "file"
     if _SNAKE.search(token) or _DOTTED.search(token):
@@ -179,7 +186,7 @@ def _name_pattern(names):
     )
 
 
-def _scan_line(number, line, names):
+def _scan_line(number, line, roots, pattern):
     found = []
     for match in _CODE_SPAN.finditer(line):
         found.append((match.start(), "code", match.group(0)))
@@ -188,8 +195,8 @@ def _scan_line(number, line, names):
         line = _blank(line, match.start() + 1, match.end())
 
     taken = []
-    if names is not None:
-        for match in names.finditer(line):
+    if pattern is not None:
+        for match in pattern.finditer(line):
             found.append((match.start(), "name", match.group(0)))
             taken.append((match.start(), match.end()))
 
@@ -199,18 +206,23 @@ def _scan_line(number, line, names):
         end = start + len(token)
         if not token or any(start < stop and begin < end for begin, stop in taken):
             continue
-        kind = _token_kind(token)
+        kind = _token_kind(token, roots)
         if kind:
             found.append((start, kind, token))
 
     return [{"line": number, "kind": kind, "text": text} for _, kind, text in sorted(found)]
 
 
-def check_findings(path: str | os.PathLike, *, names=()) -> list[dict]:
-    """List code, paths, file names, identifiers, SHAs, and given names, by line then column."""
+def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]:
+    """List code, paths, file names, identifiers, SHAs, and given names, by line then column.
+
+    A slash token with any of `names` or `roots` as a segment is a path; `roots` may be plain words,
+    which never match alone.
+    """
     text = Path(path).read_text(encoding="utf-8")
     text = _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
     pattern = _name_pattern(names)
+    roots = set(names) | set(roots)
 
     rows = []
     fence = None
@@ -226,7 +238,7 @@ def check_findings(path: str | os.PathLike, *, names=()) -> list[dict]:
             fence = opening.group(1)
             rows.append({"line": number, "kind": "code", "text": line.strip()})
             continue
-        rows.extend(_scan_line(number, line, pattern))
+        rows.extend(_scan_line(number, line, roots, pattern))
     return rows
 
 
@@ -276,6 +288,12 @@ def _toml_keys(text):
 
 def project_names(root, investigation, package):
     """Return the findings-check names the project records, and problems that leave it incomplete."""
+    names, problems = _recorded_names(root, investigation, package)
+    return sorted(name for name in names if not _PLAIN_WORD.fullmatch(name)), problems
+
+
+def _recorded_names(root, investigation, package):
+    """Every recorded name, plain words included, and the problems that leave the set incomplete."""
     root = Path(root)
     names, problems = {investigation, package}, []
     view_files = set((root / "foundation/views").rglob("*.sql")) if (root / "foundation/views").is_dir() else set()
@@ -334,7 +352,7 @@ def project_names(root, investigation, package):
     if not settings_found:
         problems.append(f"no settings found: investigations/{investigation}/settings.toml is absent "
                         "and no evidence records a settings file")
-    return sorted(name for name in names if name and not _PLAIN_WORD.fullmatch(name)), problems
+    return {name for name in names if name}, problems
 
 
 # ---------------------------------------------------------------- flags and headings
@@ -647,11 +665,12 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
         return report
 
-    names, report["names_problems"] = project_names(root, investigation, package)
+    recorded, report["names_problems"] = _recorded_names(root, investigation, package)
+    names = sorted(name for name in recorded if not _PLAIN_WORD.fullmatch(name))
     report["names"] = len(names)
     findings_path = draft / "findings.md"
     try:
-        report["findings"] = check_findings(findings_path, names=names)
+        report["findings"] = check_findings(findings_path, names=names, roots=recorded)
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"findings check: {error}")
     try:

@@ -116,6 +116,8 @@ Separate a concise current-state summary from a chronological history of meaning
 
 The agent maintains these records automatically when a finding, decision, or next step changes. Explicit checkpoints are also available before switching investigations.
 
+The findings table and the scan links behind quality rows are machine state that helpers must read back, so each lives in a JSON file beside its Markdown record (`findings.json`, `foundation/quality.json`) rather than inside table cells parsed by pattern. The findings table is rendered from its file and a hand edit is refused as drift, because the promotion guards in `awb.py state finding` mean nothing if the table can be edited around them. The quality record keeps every cell in Markdown, since people write coverage-gap rows and statuses by hand; its file holds only links, keyed by a hash because scan issue keys can embed source values.
+
 When a shared data correction could affect investigation findings, flag those findings and explain the reason. Do not automatically rerun the affected analysis or revise its conclusions. Releases stay frozen.
 
 When work resumes, continue the last active investigation unless the user indicates a switch, and briefly identify that investigation. If a request could fit multiple investigations, ask before changing their records.

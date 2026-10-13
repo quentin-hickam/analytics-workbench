@@ -11,6 +11,8 @@ Run with the interpreter that will run the project's analysis:
     install_helpers.py [PROJECT_ROOT] --check ...        report the same without writing
 
 Prints one line of JSON:
+  project, workbench  the project root and whether workbench markers exist; when absent, missing lists
+                     the markers and hint explains how to initialize the root or choose another
   files              every src/ helper and workbench guide, and with --upgrade or --package-formats every
                      shipped package format the project holds: installed, missing (--check), current,
                      earlier (an unmodified older copy; --upgrade replaces it), replaced, or customized
@@ -130,7 +132,10 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
         return {"project": str(root), "python": python,
                 "error": "the helpers need Python 3.10+; rerun with a newer interpreter"}
     if not any((root / name).exists() for name in ("AGENTS.md", "foundation", "investigations")):
-        return {"project": str(root), "workbench": False}
+        return {"project": str(root), "workbench": False,
+                "missing": ["AGENTS.md", "foundation/", "investigations/"],
+                "hint": "No workbench markers here. At the project root, first adapt README.md and AGENTS.md "
+                        "(awb-init SKILL.md, section 4, item 1); otherwise pass the project root."}
     try:
         receipt = json.loads((root / RECEIPT).read_text()) if (root / RECEIPT).exists() else {}
         if not isinstance(receipt, dict):
