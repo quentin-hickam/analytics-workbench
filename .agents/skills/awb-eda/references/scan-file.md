@@ -4,7 +4,7 @@ Read this for the scan file's exact name, or to name a section for `--show` beyo
 
 ## File name
 
-A scan writes `investigations/<name>/exploration/eda/<scan>.json`, or `<scan>-<label>.json` with `--label`, and replaces any file already at that path. `output_path()` and `publication_name()` in `scripts/eda_scan.py` build `<scan>` in three steps:
+A scan writes `investigations/<name>/exploration/eda/<scan>.json`, or `<scan>-<label>.json` with `--label`, and replaces any file already at that path. `resolve_source()`, `publication_name()`, and `output_path()` in `scripts/eda_scan.py` build `<scan>` in three steps:
 
 1. **Source name.** A view gives its name as passed. A directory or Parquet file is named from its path after symlinks are resolved, which must lie inside the project. A directory gives its last two path parts relative to the project root joined by `-` (`data/parquet/shifts/p1` gives `shifts-p1`, and so does a link `data/parquet/shifts/current` to `p1`), or its one part when it sits directly under the root (`data` gives `data`). A Parquet file gives its file name without `.parquet`. This is the `dataset` name recorded in the scan.
 2. **Replace.** Each run of characters outside `[A-Za-z0-9._-]`, which holds ASCII letters and digits only, becomes one `-`: `daily sales` gives `daily-sales`, `Ünïcode_view` gives `-n-code_view`.

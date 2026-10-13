@@ -30,7 +30,7 @@ Save the conversion as `src/preparation/<dataset>.sql`, one SELECT reading lande
 python3 src/awb.py publish <dataset> <publication-id> --from <acquisition-dir> --sql <select.sql> --check <check.sql>
 ```
 
-`--from` names exactly the acquisition directories the select reads. Each canonical view in `foundation/views/` names its publication. Start the view from the printed `view_sql`. In `foundation/catalog.md`, record the publication from the printed `catalog_row`, completing its grain and availability, and give the view its own row (Kind `canonical view`) with the view's grain and the publication it reads under `Inputs`. `awb-clean` reads the grain from the view's row and records corrections there. Switching publications is a deliberate preparation change. Remove a superseded publication once no reader needs it.
+`--from` names exactly the acquisition directories the select reads. Each canonical view in `foundation/views/` names its publication. Start the view from the printed `view_sql`. In `foundation/catalog.md`, record the publication from the printed `catalog_row`, completing its grain and availability, and give the view its own row (Kind `canonical view`) with the view's grain and the publication it reads under `Inputs`. `awb-clean` reads the grain from the view's row and records corrections there. Switching publications is a deliberate preparation change. Remove a superseded publication, and its catalog row, once no reader needs it.
 
 Sessions load `foundation/views/*.sql` in filename order, so a dependent view's file sorts after its inputs.
 

@@ -7,8 +7,8 @@ investigation's settings unless options override them. Writes the complete scan 
 investigations/<name>/exploration/eda/<scan>[-<label>].json, its only output file, and prints
 a compact summary that names it. <scan> is the dataset's name made safe for a file name, such
 as shifts-p1 for data/parquet/shifts/p1; the skill's references/scan-file.md gives the exact
-rule, which output_path() and publication_name() implement. --show prints one section of that
-file without scanning again.
+rule, which resolve_source(), publication_name(), and output_path() implement. --show prints
+one section of that file without scanning again.
 """
 
 import argparse
@@ -940,7 +940,7 @@ def parse(argv):
                         "and exit without scanning; see below")
     options = parser.parse_args(argv)
     if options.label is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", options.label):
-        parser.error("--label must be a simple name: an ASCII letter or digit, then any of [A-Za-z0-9._-]")
+        parser.error("--label must be a simple name: an ASCII letter or digit, then any number of [A-Za-z0-9._-]")
     if options.key is not None:
         if not all(key_columns(value) for value in options.key):
             parser.error("--key must name at least one column")
