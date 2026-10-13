@@ -685,11 +685,11 @@ def test_copy_releases_copies_compares_and_never_overwrites(project, capsys, tmp
 @pytest.mark.parametrize("verify_only", [False, True])
 def test_check_draft_checks_findings_drift(project, verify_only):
     draft = load(project / "src/packaging/draft.py", "draft_findings_drift")
-    assert draft.check_draft(project, "inv", "pkg")["passed"]  # no JSON: legacy tables remain readable
+    assert draft.check_draft(project, "inv", "pkg")["passed"]  # no findings.json: nothing to compare
     write(project, "investigations/inv/state.md", "Last updated: 2026-10-01\n" + STATE.format(status="supported", reason=""))
     content = {"schema": "awb-findings/1", "findings": [
         {"result": "r-009", "text": "Late orders rose in the west", "status": "supported", "prior_status": None,
-         "flag_reason": "", "notes": [], "checks_caveat": ""}]}
+         "flag_reason": "", "notes": [], "checks_caveat": "", "notes_checks": ""}]}
     write(project, "investigations/inv/findings.json", json.dumps(content, indent=2) + "\n")
     report = draft.check_draft(project, "inv", "pkg", verify_only=verify_only)
     assert report["passed"] and report["errors"] == []

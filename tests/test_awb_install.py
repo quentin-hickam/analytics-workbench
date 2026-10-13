@@ -232,8 +232,13 @@ def test_refuses_readme_only_directory(tmp_path):
     assert list(tmp_path.iterdir()) == before
 
 
+RETIRED = ["package-format/journal-template.md", "package-format/executive-summary-template.md",
+           "src/presentation/style.py", "src/packaging/findings.py", "src/packaging/charts.py"]
+
+
 @pytest.fixture
-def upgradable(project):
+def upgradable(project, monkeypatch):
+    monkeypatch.setattr(installer, "RETIRED", RETIRED)  # the skills retire none today
     earlier(project, {
         "package-format/m365-assembly.md": earlier_version("package-format/m365-assembly.md"),
         "workbench-guides/analysis.md": earlier_version("workbench-guides/analysis.md"),

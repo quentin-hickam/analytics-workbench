@@ -226,7 +226,7 @@ def _settings_keys(content, result_id):
 
 
 # Investigation entries that are records or outputs, or that other results own, not producing code.
-_NOT_CODE = {"brief.md", "state.md", "findings.json", "history.md", "evidence", "figures", "exploration", "results", "queries"}
+_NOT_CODE = {"brief.md", "state.md", "findings.json", "history.md", "evidence", "exploration", "results", "queries"}
 # Helpers that dispatch, record evidence, or package; replacing them changes no result.
 _NOT_PRODUCING = ("src/awb.py", "src/provenance.py", "src/packaging/")
 
@@ -259,7 +259,6 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
     prefix = f"investigations/{investigation}/"
     code = [p for p in _expand(root, [p for p in ("src", prefix) if (root / p).is_dir()])
             if not p.startswith(_NOT_PRODUCING)
-            # figures/ is excluded for investigations laid out before awb-evidence/2.
             and not (p.startswith(prefix) and p[len(prefix):].split("/")[0] in _NOT_CODE)]
     code += _expand(root, [prefix + query for query in queries] + list(code_paths or []))
     view_entries = [{**e, "publications": _view_publications(root, e["path"])}
@@ -724,41 +723,6 @@ def _finding_cells(entry):
             _cell(status), _cell(caveat)]
 
 
-def _segment_set(caveat):
-    return sorted(" ".join(part.split()) for part in caveat.replace(r"\|", "|").split(";") if part.strip())
-
-
-def _migrate_row(cells, label):
-    """Build a findings.json entry from a legacy row, keeping its meaning.
-
-    The Evidence cell is rewritten to its one link, status case and caveat segment order and spacing
-    are normalized; a row without exactly one evidence link or with an unknown status is refused.
-    """
-    links = list(dict.fromkeys(_EVIDENCE_LINK.findall(cells[1]) if len(cells) > 1 else []))
-    if len(cells) != len(_COLUMNS) or len(links) != 1:
-        raise StateError(f"{label}: row {_row(cells)} must have four cells and link exactly one evidence "
-                         "file; fix the row, then rerun the command")
-    text, _, status, caveat = [c.replace(r"\|", "|") for c in cells]
-    status = " ".join(status.split()).lower()
-    prior = None
-    match = re.fullmatch(r"revalidation-needed \(was (.+)\)", status)
-    if match:
-        status, prior = _FLAGGED, match[1]
-    if status not in (*_STATUSES, _FLAGGED):
-        raise StateError(f"{label}: row {_row(cells)} has an unknown status; use one of "
-                         f"{', '.join((*_STATUSES, _FLAGGED))}, then rerun the command")
-    checks, notes = _segments("; ".join(" ".join(part.split()) for part in caveat.split(";") if part.strip()))
-    entry = {"result": links[0], "text": text, "status": status, "prior_status": prior,
-             "flag_reason": "; ".join(notes) if status == _FLAGGED else "",
-             "notes": [] if status == _FLAGGED else notes, "checks_caveat": "; ".join(checks),
-             "notes_checks": "; ".join(checks)}
-    rendered = _finding_cells(entry)
-    if " ".join(text.split()) != rendered[0].replace(r"\|", "|") or _segment_set(caveat) != _segment_set(rendered[3]):
-        raise StateError(f"{label}: row {_row(cells)} would render as {_row(rendered)}; fix the row, then "
-                         "rerun the command")
-    return entry
-
-
 # notes_checks is the checks caveat the notes were written against (null: none); a promotion counts
 # the notes as explaining failed or not-assessed checks only while it equals the current one.
 _ENTRY_KEYS = {"result", "text", "status", "prior_status", "flag_reason", "notes", "checks_caveat", "notes_checks"}
@@ -770,14 +734,8 @@ class _Findings:
         self.path = self.state.path.with_name("findings.json")
         self.label = f"investigations/{investigation}/findings.json"
         self.history, self.prior_rows, self.changed = None, [], False
-        self.normalizations = []
-        if not self.path.exists():
+        if not self.path.exists():  # no finding recorded yet: the table renders empty
             self.entries = []
-            for line in self.state.lines[self.state.rows_start:self.state.rows_end]:
-                entry = _migrate_row(_cells(line), self.state.label)
-                self.entries.append(entry)
-                if _bare(line) != _row(_finding_cells(entry)):
-                    self.normalizations.append({"disk": _bare(line), "rendered": _row(_finding_cells(entry))})
             return
         try:
             content = json.loads(self.path.read_text(encoding="utf-8"))
@@ -786,8 +744,6 @@ class _Findings:
             self.entries = content["findings"]
             seen = set()
             for entry in self.entries:
-                if isinstance(entry, dict) and isinstance(entry.get("checks_caveat"), str):
-                    entry.setdefault("notes_checks", entry["checks_caveat"])  # written before notes_checks
                 if (not isinstance(entry, dict) or set(entry) != _ENTRY_KEYS
                         or entry["notes_checks"] is not None and not isinstance(entry["notes_checks"], str)
                         or not all(isinstance(entry[k], str) for k in
@@ -821,8 +777,6 @@ class _Findings:
         return differences
 
     def refuse_drift(self, investigation):
-        if not self.path.exists():
-            return
         differences = self.drift()
         if not differences:
             return
@@ -848,22 +802,15 @@ class _Findings:
 
 
 def findings_drift(project_root, investigation) -> list[dict]:
-    """Compare the rendered table with findings.json, without migrating or writing."""
-    root = Path(project_root).resolve()
-    if not (root / "investigations" / investigation / "findings.json").exists():
-        return []
-    return _Findings(root, investigation).drift()
+    """Compare the table with its render from findings.json (empty when absent), writing nothing."""
+    return _Findings(Path(project_root).resolve(), investigation).drift()
 
 
-def _write_findings(root, investigation, mutate, *, check=False, render=False, replaced=None, report=True):
-    if render and not (root / "investigations" / investigation / "findings.json").exists():
-        raise StateError("nothing to render; the next state write migrates the table")
+def _write_findings(root, investigation, mutate, *, check=False, render=False, replaced=None):
     findings = _Findings(root, investigation, render=render)
     if not render:
         findings.refuse_drift(investigation)
     result = mutate(findings)
-    if findings.normalizations and report:
-        result["normalizations"] = findings.normalizations
     if check or not findings.changed:
         return result
     state = findings.state
@@ -972,7 +919,7 @@ def prior_result(project_root, investigation: str, result_id: str) -> dict:
     """
     root = Path(project_root).resolve()
     base = root / "investigations" / investigation
-    # Load or migrate findings and check drift before run.py removes evidence; a missing state.md refuses here.
+    # Check drift before run.py removes evidence; a missing state.md refuses here.
     _Findings(root, investigation).refuse_drift(investigation)
     baseline = None
     try:
@@ -1007,8 +954,7 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
     kept untouched; otherwise its reserved caveat segments are replaced, its status becomes
     provisional unless superseded, and history.md records a rerun of a supported row. A flagged row
     returns to superseded if it was superseded, else provisional, with its notes kept, its flag reason
-    dropped, and a history entry naming that reason; a row migrated while flagged holds its notes in
-    that reason. When findings.json is not replaced, the evidence just recorded is removed before raising.
+    dropped, and a history entry naming that reason. When findings.json is not replaced, the evidence just recorded is removed before raising.
     Returns {action: added|kept|refreshed|flag cleared, status, history (bool)}.
     """
     root = Path(project_root).resolve()
@@ -1052,7 +998,7 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
         return {"action": action, "status": entry["status"], "history": history is not None}
 
     try:
-        return _write_findings(root, investigation, mutate, replaced=replaced, report=False)
+        return _write_findings(root, investigation, mutate, replaced=replaced)
     except BaseException:
         if base / "findings.json" not in replaced:
             evidence_path.unlink(missing_ok=True)
@@ -1312,7 +1258,7 @@ def cli_state(root: Path, argv: list[str]) -> int:
                    "changing its caveat (only a run.py rerun clears a flag). --reason is required when the "
                    "prior status is supported or flagged, or the new one supported or superseded; that "
                    "change appends one history.md entry. Sets Last updated.\n",
-        "render": "Prints discarded disk rows. Refuses without findings.json; the next state write migrates it.\n",
+        "render": "Prints discarded disk rows; without findings.json the table renders empty.\n",
         "flag": "Validates every flag before writing. --check writes nothing. Only a rerun clears a flag.\n",
         "issues": "--drop takes the item's number in the list or text only one item contains (case-sensitive), "
                   "resolved before any change. Only list-item lines change. Sets Last updated.\n",
