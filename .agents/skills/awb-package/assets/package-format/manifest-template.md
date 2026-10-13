@@ -39,3 +39,9 @@ The operation that assembled this package, recorded separately from the producin
 `export` writes both, and each `revalidation_flags` entry's finding and reason, one per flagged finding; you fill `represented_in` and the user's `disposition`, required when `represented_in` lists places. The package contract's **Revalidation caveats** defines the field.
 
 Say the provenance locates the producing state; never call a package reproducible. Record an undeterminable field as `unknown` with the reason.
+
+## Numbers
+
+- `allowed_numbers`: `none`, or each narrative number that no represented result records as `{text, reason}`: `text` exactly as `check-draft` reports it in a `numbers` row, and `reason` naming the record that supports it, such as the earlier release it comes from. An absent field is `none`.
+
+You record it and `export` keeps it; `check-draft` accepts a listed `text` wherever it appears in either narrative.
