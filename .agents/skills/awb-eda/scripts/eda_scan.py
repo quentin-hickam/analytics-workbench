@@ -4,8 +4,9 @@ Run with Python 3.10+ and duckdb: eda_scan.py PROJECT_ROOT DATASET [options]. DA
 canonical view name, loaded through the project's session() helper, or a project-relative
 publication directory or Parquet file. Scope, measure, and dimensions come from the
 investigation's settings unless options override them. Writes the complete scan to
-investigations/<name>/exploration/eda/<dataset>[-<label>].json, its only output file, and prints
-a compact summary. --show prints one section of that file without scanning again.
+investigations/<name>/exploration/eda/<scan>[-<label>].json, its only output file, and prints
+a compact summary. <scan> is the view name, <dataset>-<publication-id> for a publication
+directory, or a Parquet file's stem. --show prints one section of that file without scanning again.
 """
 
 import argparse
