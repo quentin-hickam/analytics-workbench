@@ -26,6 +26,8 @@ BLOCKING = {"none", "revalidate"}
 
 
 PROBE_TIMEOUT = 10
+# The fields land() records per file as upstream, each null or a nonblank string (awb_landing.py).
+UPSTREAM_FIELDS = ("url", "etag", "last_modified", "version_id")
 
 
 def collect(root, *, probe_upstream=False):
@@ -369,6 +371,11 @@ def acquisition_files(path, uncertain):
         defect = "a file entry has no path"
     elif not all(f.get("upstream") is None or isinstance(f["upstream"], dict) for f in files):
         defect = "a file's upstream is not an object or null"
+    elif not all(set(f.get("upstream") or {}) <= set(UPSTREAM_FIELDS) for f in files):
+        defect = f"a file's upstream has a field other than {', '.join(UPSTREAM_FIELDS)}"
+    elif not all(value is None or (isinstance(value, str) and value.strip())
+                 for f in files for value in (f.get("upstream") or {}).values()):
+        defect = "a file's upstream field is not null or a nonblank string"
     else:
         return sorted(files, key=lambda f: f["path"])
     uncertain(path, f"Malformed acquisition provenance: {defect}")

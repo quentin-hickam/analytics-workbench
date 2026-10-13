@@ -30,7 +30,7 @@
 # test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes: land()'s upstream fields drive one HEAD per probeable file; ETag wins over Last-Modified unless only the ETag changed, a weak ETag and an equal date in another form match, HTTP and network errors are unknown, and nothing is written.
 # test_out_of_range_server_date_is_compared_as_text_and_the_probe_continues: a Last-Modified the date parser overflows on falls back to text comparison, and the remaining files are still probed.
 # test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
-# test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json is named under uncertainties and makes probeable_files null, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
+# test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including an upstream field land() would refuse, is named under uncertainties and makes probeable_files null, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
 # test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key is valid and counts as without upstream.
 # test_unreadable_acquisition_inventory_is_unknown_not_zero: an unreadable data/raw or source directory is an uncertainty and makes probeable_files null, never zero.
 # test_probe_follows_redirects_only_to_http_and_only_as_head: through urllib's own redirect processing, a redirect to ftp is refused before any FTP call and an https redirect is followed as HEAD.
@@ -599,6 +599,12 @@ def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench
     ('{"status": "complete", "files": ["a.csv"]}', "Malformed acquisition provenance: a file entry has no path"),
     ('{"status": "complete", "files": [{"path": "a.csv", "upstream": "https://example.test/a"}]}',
      "Malformed acquisition provenance: a file's upstream is not an object or null"),
+    ('{"status": "complete", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "lastModified": "x"}}]}',
+     "Malformed acquisition provenance: a file's upstream has a field other than url, etag, last_modified, version_id"),
+    ('{"status": "complete", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "etag": 7}}]}',
+     "Malformed acquisition provenance: a file's upstream field is not null or a nonblank string"),
+    ('{"status": "complete", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "etag": " "}}]}',
+     "Malformed acquisition provenance: a file's upstream field is not null or a nonblank string"),
     (None, "Missing acquisition provenance"),
 ])
 def test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown(workbench, monkeypatch, text, reason):
