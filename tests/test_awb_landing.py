@@ -29,9 +29,11 @@
 # test_cli_publish_keeps_a_failed_check_or_empty_result_unpublished: check rows or an empty select keep the partial directory unpublished and print the failures.
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
-# test_land_refuses_an_obvious_secret_before_fetch: a bearer token, credential assignment (quoted or prefixed), secret-named field (prefixed, as X-Api-Key), a reference with a literal around it, URL credentials or known key format in request or notes raises before fetching, without echoing the value.
+# test_land_refuses_an_obvious_secret_before_fetch: a bearer token, credential assignment (quoted through its closing quote), field with a secret word anywhere in its name (X-Api-Key, aws_secret_access_key), a reference with a literal around it, URL credentials or known key format in request or notes raises before fetching, without echoing the value.
+# test_land_refusal_never_echoes_a_key: a refused secret-named key is not quoted in the message, so a credential inside the key stays out of it.
+# test_land_records_a_reference_or_look_alike: a key format inside a <name> reference, a quoted or scheme-prefixed reference, a cursor or descriptor name (secret_name, token_url), and URL or key look-alikes land unchanged.
 # test_land_records_a_request_that_names_its_variables: $NAME, ${NAME}, <name>, *** and ALL_CAPS_NAME references, quoted or after an auth scheme, and page_token and next-token cursors, land unchanged.
-# test_cli_land_refuses_a_secret_request_before_landing: --request or --notes holding a secret, bare or quoted, exits 2 with nothing landed.
+# test_cli_land_refuses_a_secret_request_before_landing: --request or --notes holding a secret, bare or quoted (including a quoted value starting with a delimiter), exits 2 with nothing landed.
 # test_gitignore_template_tracks_env_example: in a fresh repository with the template .gitignore, .env.example is tracked while .env and .env.local stay ignored.
 # test_guides_state_the_credentials_convention: the data guide and landing reference state where credentials live, where they never go, and that records name the variable.
 
@@ -673,6 +675,26 @@ SECRETS = [
     {"Authorization": "hunter2 ($ACME_TOKEN)"},
     "password=${ERP_PASSWORD}hunter2",
     "api_key=<redacted>hunter2",
+    # A secret word anywhere in the name.
+    "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    {"aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
+    "refresh_token=1//0gabcdefghijkl",
+    {"refresh_token": "1//0gabcdefghijkl"},
+    {"secret_key": "hunter2"},
+    {"private_key": "hunter2"},
+    {"clientSecret": "hunter2"},
+    "export DB_PASSWORD=hunter2 && fetch --url=https://erp.example.com/?password=hunter2",
+    # A quoted value is read through its closing quote.
+    "password=' hunter2'",
+    "password='&Xk9pLq2'",
+    'password=",Xk9pLq2"',
+    "password='${ERP_PASSWORD}&hunter2'",
+    "password='${ERP_PASSWORD} hunter2'",
+    "password='$ERP_PASSWORD'hunter2",
+    # A reference with a literal around it, in a bearer header or URL.
+    "Authorization: Bearer ${ACME_TOKEN}abcdefghijklmnop1",
+    "https://reader:${ERP_PASSWORD}hunter2@erp.example.com/export",
+    "key sk-proj-Ab3dEf6hIj9kLm2nOp5q",
 ]
 
 
@@ -683,10 +705,46 @@ def test_land_refuses_an_obvious_secret_before_fetch(tmp_path, field, secret):
     values = {"request": "orders export", "notes": None, field: secret}
     with pytest.raises(ValueError, match=f"^{field} appears to hold a secret") as error:
         landing.land(tmp_path, "api", "batch-1", called.append, **values)
-    for fragment in ("hunter2", "a1b2c3d4", "eyJhbGci", "AKIAIOSFODNN7EXAMPLE", "cmVhZGVy", "9f8e7d6c"):
+    for fragment in ("hunter2", "a1b2c3d4", "eyJhbGci", "AKIAIOSFODNN7EXAMPLE", "cmVhZGVy", "9f8e7d6c",
+                     "wJalrXUt", "1//0gabc", "Xk9pLq2", "abcdefghijklmnop1", "Ab3dEf6h"):
         assert fragment not in str(error.value)
     assert called == []
     assert not (tmp_path / "data").exists()
+
+
+def test_land_refusal_never_echoes_a_key(tmp_path):
+    with pytest.raises(ValueError) as error:
+        landing.land(tmp_path, "api", "batch-1", lambda output: None,
+                     request={"AKIAIOSFODNN7EXAMPLE_password": "hunter2"})
+    assert "AKIA" not in str(error.value) and "hunter2" not in str(error.value)
+
+
+# References, cursors and descriptor names, each checked whole, and look-alikes of a URL or key.
+ALLOWED = [
+    "<sk-api-key-from-environment>",
+    {"api_key": "<sk-api-key-from-environment>"},
+    {"Authorization": "Bearer <sk-api-key-from-environment>"},
+    "token from <xoxb-slack-bot-token>",
+    "Authorization: Bearer ${GITHUB_TOKEN_V2}",
+    "password=' $ERP_PASSWORD '",
+    "authorization=\"Bearer $ACME_TOKEN\"",
+    "SET s3_secret_access_key='$AWS_SECRET_ACCESS_KEY'",
+    'curl -d "token=$ACME_TOKEN" "https://api.example.com/orders"',
+    "https://reader:${ERP_PASSWORD}@erp.example.com/export",
+    "https://api.example.com:8443?email=me@example.com",
+    "https://example.com:443#a@b",
+    "slug sk-bratislava-region-2026-q1",
+    {"nextPageToken": "c3d4e5f6", "continuation_token": "d4e5f6a7"},
+    {"secret_name": "prod/erp-db", "token_url": "https://auth.example.com/oauth/token",
+     "aws_access_key_id": "$AWS_ACCESS_KEY_ID"},
+]
+
+
+@pytest.mark.parametrize("value", ALLOWED)
+def test_land_records_a_reference_or_look_alike(tmp_path, value):
+    final = landing.land(tmp_path, "api", "batch-1",
+                         lambda output: (output / "page.json").write_bytes(b"{}"), request=value)
+    assert json.loads((final / "provenance.json").read_text())["request"] == value
 
 
 def test_land_records_a_request_that_names_its_variables(tmp_path):
@@ -707,7 +765,8 @@ def test_land_records_a_request_that_names_its_variables(tmp_path):
 def test_cli_land_refuses_a_secret_request_before_landing(tmp_path, capsys):
     (tmp_path / "x.csv").write_bytes(b"1")
     for option, value in itertools.product(("--request", "--notes"),
-                                           ("pulled with password=hunter2", "password='hunter2'")):
+                                           ("pulled with password=hunter2", "password='hunter2'",
+                                            "password='&hunter2'")):
         with pytest.raises(SystemExit) as error:
             landing.cli_land(tmp_path, ["orders", "r1", str(tmp_path / "x.csv"), option, value])
         assert error.value.code == 2
