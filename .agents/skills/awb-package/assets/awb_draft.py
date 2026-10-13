@@ -504,32 +504,71 @@ def heading_problems(draft) -> list[dict]:
 # ---------------------------------------------------------------- numbers in the narratives
 
 NARRATIVES = ("findings.md", "methodology.md")
-_MONTHS = ("Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
-           "|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?")
-_DAY = r"[0-9]{1,2}(?:st|nd|rd|th)?"
+_MONTH = (r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
+          r"|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?")
+_DAY = r"(?:3[01]|[12][0-9]|0?[1-9])"  # a calendar day, so "June 77 orders" stays a count
+_DAYS = rf"{_DAY}(?:\s*(?:[-–—]|to|through)\s*{_DAY})?"
+_YEAR = r"(?:19|20)[0-9]{2}"
+_YEARS = rf"{_YEAR}(?:\s*(?:[-–—,]|and|or|to|through|vs\.?)\s*{_YEAR})*"
+# A day beside a month name is a date after one of these words or before a year or punctuation.
+_ON = (r"(?i:\b(?:on|by|to|from|until|till|since|through|before|after|between|as\s+of"
+       r"|(?:mon|tues|wednes|thurs|fri|satur|sun)day,?))\s+")
+# A year is a year after one of these words, a month name, or a quarter or half, or in parentheses.
+_IN = (rf"(?:(?i:\b(?:in|from|since|during|until|till|through|before|after|between|early|mid|late|fiscal"
+       rf"|calendar|year|FY|CY))\s+|{_MONTH}\s+|\b[QH][1-4]\s+)")
 # Dates, times, chart numbers, list markers, and footnote marks are blanked before numbers are read.
 _NOT_QUANTITY = re.compile(
     r"(?<![\w.])(?:[0-9]{4}-[0-9]{1,2}(?:-[0-9]{1,2})?(?:T[0-9:.]+(?:Z|[+-][0-9:]+)?)?"
-    r"|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?"
-    rf"|(?:{_MONTHS})\.?\s+{_DAY}|{_DAY}\s+(?:{_MONTHS})"
-    r"|[Cc]harts?\s+[0-9]+)(?![\w%]|[.,][0-9])"
+    r"|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?(?:\s?(?i:[ap]\.?m\.?))?"
+    rf"|{_ON}{_MONTH}\s+{_DAYS}(?:,?\s+{_YEAR})?"
+    rf"|{_MONTH}\s+{_DAYS}(?:,?\s+{_YEAR}|(?=\s*(?:[,.;:)|]|$)))"
+    rf"|{_DAYS}\s+{_MONTH}(?:,?\s+{_YEAR})?"
+    rf"|{_IN}{_YEARS}|\(\s*{_YEARS}\s*\)"
+    r"|[Cc]harts?\s+[0-9]+(?:(?:\s*,\s*(?:and\s+|or\s+)?|\s+(?:and|or|to|through)\s+|\s*[-–—]\s*)[0-9]+)*)"
+    r"(?![\w%]|[.,][0-9])"
     r"|^\s*[0-9]+[.)]\s|\[\^[^\]]*\]", re.MULTILINE)
 # A number not glued to a word, path, version, or hyphenated name (Q-3, chart-1), with its unit.
+# Scientific notation needs a one-digit mantissa and an exponent of at most three digits, so an
+# all-digit hash with one e (12345e6) stays a glued name.
 _NUMBER = re.compile(
     r"(?<![\w.,/\\])(?<![A-Za-z_]-)"
-    r"([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?|\.[0-9]+)"
+    r"([0-9](?:\.[0-9]+)?[eE][-+]?[0-9]{1,3}|[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?|\.[0-9]+)"
     r"(\s?%|\s?(?:per\s?cent|percentage\s+points?|pp)(?!\w)|(?:mn|bn|tn|[kKmMbB])(?!\w)"
     r"|\s(?:thousand|million|billion|trillion)(?!\w)|[x×](?!\w))?"
     r"(?!\w|[.,/][0-9])")
 _RANGE = re.compile(r"\s?(?:[-–—]|to|and)\s?")
 _SCALES = {"k": 3, "thousand": 3, "m": 6, "mn": 6, "million": 6, "b": 9, "bn": 9, "billion": 9,
            "tn": 12, "trillion": 12}
-# Recorded text is read liberally: every digit run, so a value inside a label or detail still counts.
-_RECORDED_NUMBER = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]*\.?[0-9]+")
+
+
+def _quantities(line):
+    """Yield (text, body, unit) for each number a line states, after the skips check_numbers names."""
+    for pattern in (_CODE_SPAN, _NOT_QUANTITY):
+        line = pattern.sub(lambda match: " " * len(match.group(0)), line)
+    line = _LINK_TARGET.sub(lambda match: "]" + " " * (len(match.group(0)) - 1), line)
+    matches = list(_NUMBER.finditer(line))
+    for index, match in enumerate(matches):
+        body, unit = match.group(1), match.group(2) or ""
+        if not unit and index + 1 < len(matches) and _RANGE.fullmatch(line[match.end():matches[index + 1].start()]):
+            unit = matches[index + 1].group(2) or ""  # 10-15%: the lower bound takes the upper's unit
+        if not re.fullmatch(r"0[0-9]+", body):  # a zero-padded code such as release 002
+            yield match.group(0).strip(), body, " ".join(unit.lower().split())
+
+
+def _value(body):
+    """Return a number's value and half a unit of its last written place."""
+    mantissa, _, exponent = body.replace(",", "").lower().partition("e")
+    exponent = int(exponent or 0)
+    return (Decimal(mantissa).scaleb(exponent),
+            Decimal(5).scaleb(exponent - len(mantissa.partition(".")[2]) - 1))
 
 
 def _magnitudes(value, into, *, text=True):
-    """Add the absolute value of every finite number in a JSON or CSV value; text only when `text`."""
+    """Add the absolute value of every finite number in a JSON or CSV value; text only when `text`.
+
+    A string that is not a number whole is read the way check_numbers reads a narrative line, adding
+    each number and, with a scale such as M, its scaled value.
+    """
     if isinstance(value, bool):
         return
     if isinstance(value, (int, float)):
@@ -548,8 +587,14 @@ def _magnitudes(value, into, *, text=True):
         number = Decimal(value.strip())
         found = [number] if number.is_finite() else []
     except InvalidOperation:
-        found = [Decimal(match.replace(",", "")) for match in _RECORDED_NUMBER.findall(value)]
-    into.update(abs(number) for number in found)
+        found = []
+        for line in value.splitlines():
+            for _, body, unit in _quantities(line):
+                number = _value(body)[0]
+                found.append(number)
+                if unit in _SCALES:
+                    found.append(number.scaleb(_SCALES[unit]))
+    into.update(number.copy_abs() for number in found)  # copy_abs never rounds, so 4e1234567 cannot overflow
 
 
 def _evidence_numbers(record):
@@ -575,9 +620,9 @@ def recorded_values(root, investigation, results) -> tuple[list, list[str]]:
         table = base / "results" / f"{result_id}.csv"
         try:
             with table.open(newline="", encoding="utf-8") as stream:
-                for row in csv.reader(stream):
-                    for cell in row:
-                        _magnitudes(cell, values)
+                cells = {cell for row in csv.reader(stream) for cell in row}
+            for cell in cells:  # each distinct cell is read once
+                _magnitudes(cell, values)
         except FileNotFoundError:
             problems.append(f"{_rel(root, table)} is missing; numbers from {result_id} cannot be traced")
         except (OSError, UnicodeError, csv.Error) as error:
@@ -621,11 +666,9 @@ def _within(values, low, high):
 
 
 def _traces(body, unit, values):
-    number = Decimal(body.replace(",", ""))
     # Written to d places, the number stands for any value within half a unit of its last place.
-    half = Decimal(5).scaleb(-len(body.partition(".")[2]) - 1)
+    number, half = _value(body)
     windows = [(number - half, number + half)]
-    unit = " ".join(unit.lower().split())
     if unit.startswith(("%", "per", "pp")):
         windows.append(((number - half) / 100, (number + half) / 100))
     elif unit in _SCALES:
@@ -637,24 +680,14 @@ def check_numbers(path: str | os.PathLike, values, *, allowed=()) -> list[dict]:
     """List each number in a narrative file that no recorded value rounds to and `allowed` lacks.
 
     `values` are sorted magnitudes from recorded_values(). Code, comments, link targets, dates, times,
-    years, chart numbers, list markers, slash-joined numbers, and zero-padded codes are not read.
+    years in a year's context, chart numbers, list markers, slash-joined numbers, and zero-padded codes
+    are not read.
     """
     rows = []
     for number, line, opens in _unfenced(path):
         if opens:
             continue
-        for pattern in (_CODE_SPAN, _NOT_QUANTITY):
-            line = pattern.sub(lambda match: " " * len(match.group(0)), line)
-        line = _LINK_TARGET.sub(lambda match: "]" + " " * (len(match.group(0)) - 1), line)
-        matches = list(_NUMBER.finditer(line))
-        for index, match in enumerate(matches):
-            body, unit = match.group(1), match.group(2) or ""
-            if not unit and index + 1 < len(matches) and _RANGE.fullmatch(line[match.end():matches[index + 1].start()]):
-                unit = matches[index + 1].group(2) or ""  # 10-15%: the lower bound takes the upper's unit
-            if (body[0] == "0" and len(body) > 1 and "." not in body
-                    or not unit and len(body) == 4 and body.isdigit() and 1900 <= int(body) <= 2099):
-                continue  # a zero-padded code (release 002) or a year
-            text = match.group(0).strip()
+        for text, body, unit in _quantities(line):
             if text not in allowed and not _traces(body, unit, values):
                 rows.append({"file": Path(path).name, "line": number, "text": text})
     return rows
@@ -932,9 +965,10 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                     "changes; --verify-only checks a release candidate and writes nothing.",
         epilog="Prints one JSON line.\nnumbers lists, as file, line, and text, each number in findings.md or "
                "methodology.md that no represented result's table, profile, check details, or settings round to "
-               "and the manifest's allowed_numbers does not list; numbers_problems names a missing table or a "
-               "malformed results or allowed_numbers.\nunmatched_flags lists each finding state.md flags whose "
-               "exact finding and reason the manifest's revalidation_flags does not record.\nflag_entries lists a "
+               "and the manifest's allowed_numbers does not list; numbers_problems names a missing table, an "
+               "unreadable table, profile, or evidence file, or a malformed results or allowed_numbers.\n"
+               "unmatched_flags lists each finding state.md flags whose exact finding and reason the manifest's "
+               "revalidation_flags does not record.\nflag_entries lists a "
                "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
                "that is neither none nor a list of places, and an unknown disposition.\nExit 0 only when "
                "names_problems, findings, charts, headings, numbers, numbers_problems, verify, flag_entries, "

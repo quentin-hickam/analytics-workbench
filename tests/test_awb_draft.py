@@ -10,7 +10,8 @@
 # test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
 # test_check_draft_traces_narrative_numbers: numbers in both narratives trace to a represented result's table cells within rounding, check details, settings, and profile rates as percents; an untraced number fails with its file, line, and text in both modes and refuses release; allowed_numbers accepts it and export keeps that field; dropping a result from the represented set untraces its numbers.
 # test_check_draft_reports_number_problems: a malformed allowed_numbers value or entry, a malformed results value or result_id, a missing result table, and an unreadable profile are numbers_problems that fail the check.
-# test_check_numbers_reads_formats: thousands separators, percents of fractions, scales, multipliers, ranges, and rounding trace; dates, years, times, codes, glued names, chart numbers, list markers, footnotes, code, comments, and link targets are skipped; allowed texts pass.
+# test_check_numbers_reads_formats: thousands separators, percents of fractions, scales, multipliers, scientific notation, ranges, and rounding trace; dates, years in a year's context, times with am or pm, codes, glued names and hashes, chart number lists, list markers, footnotes, code, comments, and link targets are skipped; a count beside a month name or a bare year-like count is read; allowed texts pass.
+# test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's digits add nothing; evidence text adds scaled and scientific values a narrative can write in full.
 # test_verify_only_never_writes: a changed file is reported against the recorded inventory; the manifest stays byte-identical.
 # test_missing_manifest_runs_other_checks: without manifest.json the findings and chart checks still run; verify is not run and the check fails.
 # test_export_results_records_provenance_only: --result alone writes shared commit, inputs, settings, and packaging state, creates the manifest with its identity fields, leaves chart files untouched, and is not gated by a changed setting.
@@ -343,9 +344,8 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["passed"] and report["numbers"] == []
     allowed = manifest(project)["allowed_numbers"]
-    code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-002")
+    code, _ = run(project, capsys, "export", "inv", "pkg", "--result", "r-002")
     assert code == 0 and manifest(project)["allowed_numbers"] == allowed  # export keeps the hand-recorded field
-    code, report = run(project, capsys, "check-draft", "inv", "pkg")
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and {"file": "findings.md", "line": 5, "text": "2.7%"} in report["numbers"]
 
@@ -388,11 +388,28 @@ def test_check_numbers_reads_formats(tmp_path):
 44
 ```
 - Untraced: 21.4%, 1,250, 4.3M, 16%, 2.
+- Skipped: in 2026, Q3 2026, (2025), Charts 2 and 3, 9:30am, 9:30 a.m., on June 5, June 5-7, 2026, Monday, June 5 met.
+- Traced: 1.24e3, 4.213e6, 1.5e-1 and 5e-1; a hash 12345e6. Untraced: 1e-5, 1.5e6, June 77 orders, in June 31 orders, 1950 orders.
 """)
     assert draft.check_numbers(path, values) == [
         {"file": "findings.md", "line": 6, "text": "7"},
-        *({"file": "findings.md", "line": 11, "text": t} for t in ("21.4%", "1,250", "4.3M", "16%", "2"))]
-    assert draft.check_numbers(path, values, allowed={"7", "2", "16%", "1,250", "4.3M", "21.4%"}) == []
+        *({"file": "findings.md", "line": 11, "text": t} for t in ("21.4%", "1,250", "4.3M", "16%", "2")),
+        *({"file": "findings.md", "line": 13, "text": t} for t in ("1e-5", "1.5e6", "77", "31", "1950"))]
+    assert draft.check_numbers(path, values, allowed={"7", "2", "16%", "1,250", "4.3M", "21.4%", "1e-5", "1.5e6",
+                                                      "77", "31", "1950"}) == []
+
+
+def test_recorded_values_reads_whole_cells_and_quantities(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_recorded")
+    write(tmp_path, "investigations/inv/results/r-001.csv", "customer_hash,orders,label\n4e1234567,3,ORD-123\n")
+    write(tmp_path, "investigations/inv/evidence/r-001.json", json.dumps(
+        {"checks": [{"detail": "Revenue is $4.2M on 2026-06-30"}], "settings": {"content": "threshold = 1e-5\n"}}))
+    values, problems = draft.recorded_values(tmp_path, "inv", [{"result_id": "r-001"}])
+    assert problems == [] and values == sorted(
+        Decimal(v) for v in ("3", "4e1234567", "4.2", "4.2e6", "0.00001"))  # no 123 from ORD-123, no overflow
+    path = tmp_path / "findings.md"
+    path.write_text("Revenue was 4,200,000 against a threshold of 0.00001.\n")
+    assert draft.check_numbers(path, values) == []
 
 
 def test_verify_only_never_writes(project, capsys):
