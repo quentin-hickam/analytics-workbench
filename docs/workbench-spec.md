@@ -19,13 +19,13 @@ The eventual implementation must provide these artifacts:
 3. **Status skill (`awb-status`).** A read-only report of the active investigation, its findings including flagged ones, unresolved issues, package and release state, and landed data and release storage, ending with the requests that are relevant now. It changes nothing and makes the workbench's request-gated capabilities discoverable to the analyst.
 4. **Packaging skill (`awb-package`).** Creates or revises a named delivery package's working draft only when the user explicitly requests it. It gathers the package's dataset selection, records provenance, carries a caveat for each flagged finding, and produces an audience-facing findings document, an internal methodology reference, and M365 assembly instructions. It owns the draft layout, shared package format, manifest fields, and draft consistency rules.
 5. **Release skill (`awb-release`).** Preserves a frozen, numbered release from the working draft only when the user explicitly marks the package delivered. Its structural gate is `check-draft --verify-only`: a pass proves the draft is byte-identical to the one the packaging skill checked, so release's own review covers only what can change after packaging: a disposition for each flagged finding the draft represents. It records the project's release storage location, copying each release there when reachable; `copy-releases` copies existing releases when that location is recorded or changed later.
-6. **Cleaning skill (`awb-clean`).** Cleans one dataset at the shared foundation level: a scan proposes candidate issues in one call, the user decides those that change meaning, corrections become canonical view definitions or a new validated publication, and a record script writes quality rows and catalog cells and flags affected findings in one call. Question-specific exclusions stay in the investigation.
+6. **Cleaning skill (`awb-clean`).** Cleans one dataset at the shared foundation level: a scan proposes candidate issues in one call, the user decides those that change meaning, corrections become canonical view definitions or a new validated publication, and a record script writes quality rows and catalog cells and, through the project's provenance helper, flags affected findings in one call. Question-specific exclusions stay in the investigation.
 7. **Exploration skill (`awb-eda`).** Explores one dataset for the active investigation within its scope and settings: one scan writes the complete exploration under the investigation's `exploration/`, follow-ups are saved queries, shared data problems go to `awb-clean`, and a confirmed coverage gap becomes an open row in `foundation/quality.md`. Exploration records no findings.
 8. **Supporting templates.** Provide consistent starting formats for the shared source register, data catalog, quality record, glossary, investigation brief, current state, investigation history, package findings and methodology documents, M365 assembly instructions, and package manifest. Templates should be created or instantiated only when the corresponding artifact is needed.
 
 Every skill name carries the `awb-` prefix so the workbench's actions group together in hosts that list skills as commands.
 
-The skills may also provide a concise project orientation file and ignore rules appropriate to the selected analytical backend. Those details must support the accepted workflow without introducing another required ledger or documentation system.
+The skills may also provide a concise project orientation file and ignore rules appropriate to the selected analytical backend. Those details must support the accepted workflow without introducing another required ledger or documentation system. The two JSON files named in **Records and vocabulary**, `findings.json` and `foundation/quality.json`, are part of their Markdown records, not second ledgers.
 
 ## Core working model
 
@@ -93,6 +93,13 @@ Each investigation separates a concise current state from a chronological histor
 
 The workbench updates these records automatically when a finding, decision, flag, or next step changes. The user can also request a checkpoint before switching investigations. Records and a package's methodology document retain limitations and errors in the data and the methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, but exclude routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding. Git remains the record for code evolution.
 
+Two Markdown records keep machine state in a JSON file beside them. Each table cell has exactly one owner, and a JSON file that is absent is built from its Markdown record by the first write that needs it; an upgrade leaves the records as they are.
+
+- An investigation's `findings.json` owns every cell of the Current findings table in `state.md`. Only the project's provenance helper (`src/provenance.py`, shipped as `awb_provenance.py`) writes it and renders the table from it: `run.py` and `awb.py state` write through it, and `awb-clean` flags a finding by calling it, never by editing `state.md`. When the project's helper predates `findings.json`, `awb-clean` refuses to flag and points to `awb-init` repair. A writer refuses when the table differs from its render, so a hand edit to the table is reported as drift rather than overwritten or kept. Other readers of findings, such as status and packaging, read the rendered table. The rest of `state.md` and all of `history.md` remain Markdown.
+- `foundation/quality.json`, written by `awb-clean`'s scan and record scripts, holds only the links from cleaning-scan issues to quality rows. A link is keyed by the lowercase hex SHA-256 of the UTF-8 text `<scan name> + "\n" + <issue key>`, where the scan name is the scan file's name under `foundation/scans/`, and it records the row's quality ID with the issue count, total, and observation date that row recorded; `awb-clean` compares later scans with those. Every cell of `quality.md`, including its IDs, statuses, and the observation's `<scan>#<key>` marker and counts, remains Markdown. A link counts only while exactly one row has its quality ID and that row carries its marker; the observation prose is read back only to build an absent `quality.json`.
+
+`findings.json` holds only the table's own cells, so it adds no value `state.md` does not already show. `quality.json` holds issue keys only as hashes, because a key can embed source values; a quality row's example values and its marker's key stay in `quality.md`, under the confirmation before commit that the quality record requires when `foundation/sources.md` restricts copying the source's values.
+
 Shared business and analytical terms live in `foundation/glossary.md`. Investigations inherit those definitions. A deliberate local meaning or departure is recorded and explained in that investigation's `brief.md`; the full glossary is not copied. Population and reporting-period choices are settings rather than competing definitions.
 
 The glossary defines terminology; the catalog describes actual datasets, canonical views, and caches. Keep these responsibilities distinct rather than duplicating their contents.
@@ -141,12 +148,15 @@ project-root/
 │   ├── sources.md                # Provenance, relevance, and fitness assessments
 │   ├── catalog.md                # Canonical datasets, views, and deliberate caches
 │   ├── quality.md                # Limitations, errors, and correction rationale
+│   ├── quality.json              # Links from cleaning-scan issues to quality rows (written by awb-clean)
+│   ├── scans/                    # Cleaning scans; Git-ignored because they quote source values
 │   ├── glossary.md               # Shared business and analytical vocabulary
 │   └── views/                    # Version-controlled canonical definitions, if used
 ├── investigations/
 │   └── <investigation-name>/
 │       ├── brief.md              # Question, scope, purpose, audience, usefulness, local terms
 │       ├── state.md              # Current findings, flags, issues, and next steps
+│       ├── findings.json         # The findings table's source, rendered into state.md
 │       ├── history.md            # Meaningful learnings and analytical decisions
 │       ├── <configuration>       # Population and analytical settings
 │       ├── run.py                # Run script: thin composition of shared operations

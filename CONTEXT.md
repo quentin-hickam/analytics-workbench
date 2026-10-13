@@ -47,7 +47,7 @@ An inquiry into a business question, with its own scope, analytical choices, pro
 An investigation's `run.py`, the thin entry point that composes shared operations under the investigation's settings and produces, validates, and records its results in one run.
 
 **Finding**:
-A validated result an investigation records as a row of `state.md`, with a status and a link to its result evidence. Exploration notes are recorded separately and are not findings.
+A validated result an investigation records as a row of `state.md`, with a status and a link to its result evidence. The row is rendered from the investigation's `findings.json`, which the provenance helper alone writes. Exploration notes are recorded separately and are not findings.
 
 **Flagged**:
 Awaiting revalidation: a finding that a shared correction or changed input may affect, marked with the reason and with its prior status kept visible in the status value, as in `revalidation-needed (was supported)`. Scan output is an anomaly in EDA and an issue in cleaning, never a flag.
