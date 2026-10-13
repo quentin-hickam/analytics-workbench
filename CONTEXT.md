@@ -50,7 +50,7 @@ An investigation's `run.py`. It is the thin entry point that composes shared ope
 A validated result that an investigation records as a row of `state.md`, with a status and a link to its result evidence. The row is rendered from the investigation's `findings.json`. Only the provenance helper writes that file. Exploration notes are recorded separately and are not findings.
 
 **Flagged**:
-Pending revalidation: a finding that a shared correction or changed input can affect. It is marked with the reason, and its previous status stays visible in the status value, as in `revalidation-needed (was supported)`. Scan output is an anomaly in EDA and an issue in cleaning. Scan output is never a flag.
+Awaiting revalidation: a finding that a shared correction or changed input can affect. It is marked with the reason, and its previous status stays visible in the status value, as in `revalidation-needed (was supported)`. Scan output is an anomaly in EDA and an issue in cleaning. Scan output is never a flag.
 
 **Stale**:
 A finding whose result evidence no longer matches the current producing code, view definitions, input publications and acquisitions, or resolved settings. The `stale` comparison reports this condition. An export refuses a stale result. A record whose date is behind recent work is out of date, not stale.

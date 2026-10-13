@@ -27,7 +27,7 @@ Keep one package for each investigation, unless another package has an independe
 
 From the project root, install the missing shared formats with `python3 <awb-init skill directory>/scripts/install_helpers.py . --package-formats`. This command keeps existing files and records what it installs in `.awb-receipt.json`.
 
-For a new package, ask which audience-facing datasets to include. Explicitly offer **none** as a choice. There is no default export set. A revision keeps the selection in the current manifest, unless the user changes it or it no longer fits the package scope. In that case, explain why and ask for a new selection before you export.
+For a new package, ask which audience-facing datasets to include. Explicitly offer **none** as a choice. There is no default export set. A revision keeps the selection in the current manifest, unless the user changes it or it no longer fits the package scope. If it no longer fits, explain why and ask for a new selection before you export.
 
 Read the **Audience** section of the investigation's `brief.md`. It gives:
 

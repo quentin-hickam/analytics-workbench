@@ -1,12 +1,12 @@
 # Data acquisition, retention, and preparation
 
-`references/` and `assets/` paths below are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (Codex).
+The `references/` and `assets/` paths below are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (Codex).
 
-Existing project layouts remain authoritative. Read `references/landing.md` only to write a `fetch` callable for `land()` or a `convert` callable for `publish()`.
+Existing project layouts stay authoritative. Read `references/landing.md` only to write a `fetch` callable for `land()` or a `convert` callable for `publish()`.
 
 ## Assess and acquire
 
-Assess a candidate from its documentation or schema when that settles relevance and fitness; inspect records only from landed copies, landing only what the assessment needs. Record the assessment and its basis in `foundation/sources.md` under its Status rules.
+If the documentation or schema of a candidate settles its relevance and fitness, assess the candidate from that documentation or schema. Examine records only from landed copies. Land only what the assessment needs. Record the assessment and its basis in `foundation/sources.md`, under its Status rules.
 
 Land user-supplied or already-downloaded files:
 
@@ -14,28 +14,33 @@ Land user-supplied or already-downloaded files:
 python3 src/awb.py land <source> <acquisition-id> <file-or-directory>... [--request TEXT] [--records NAME=COUNT] [--notes TEXT]
 ```
 
-For an API or other fetched source, save the fetch as `src/preparation/fetch_<source>.py`, calling `land()` from `src/preparation/landing.py` with a `fetch` callable; run it by path, then run `python3 src/awb.py retain`.
+For an API or other fetched source, save the fetch as `src/preparation/fetch_<source>.py`. Make this script call `land()` from `src/preparation/landing.py` with a `fetch` callable. Run the script by path. Then run `python3 src/awb.py retain`.
 
 ## Retain originals
 
-`data/raw/` is excluded from Git, and acquisitions may be impossible to fetch again. Before the first landing, if README's `Landed data is kept at` line is absent or `not yet recorded`, ask for an external retention location and record it there, inserting a missing line directly after `Active investigation`. If the user declines, record `none chosen` and warn after each landing that originals exist only in this checkout. Record a location whenever the user provides one.
+`data/raw/` is excluded from Git, and it is possible that you cannot fetch acquisitions again. Before the first landing, examine the `Landed data is kept at` line of README. If it is absent or `not yet recorded`, ask for an external retention location and record the location in that line. If the line is missing, insert it directly after `Active investigation`. If the user declines, record `none chosen`. Then, after each landing, warn that the originals exist only in this checkout. Whenever the user gives a location, record it.
 
-`land` and `retain` copy to a reachable filesystem location and write the Acquisitions row themselves; report any conflict or discrepancy they print verbatim. For any other location, tell the user exactly what to copy where, and record the destination once the copy is verified or the user confirms it. After recording or changing a location, run `python3 src/awb.py retain`. Fill each new row's Restrictions yourself.
+`land` and `retain` copy to a reachable filesystem location and write the Acquisitions row themselves. If they print a conflict or discrepancy, report it verbatim. For any other location:
+
+- Tell the user exactly what to copy where.
+- After the copy is verified or the user confirms it, record the destination.
+
+After you record or change a location, run `python3 src/awb.py retain`. Fill the Restrictions of each new row yourself.
 
 ## Publish and prepare
 
-Save the conversion as `src/preparation/<dataset>.sql`, one SELECT reading landed files by project-relative path, and its check as `src/preparation/<dataset>-check.sql`, a query over the view `publication` whose returned rows are failures. Suggest committing both first so the publication's `conversion_commit` holds them. Then publish:
+Save the conversion as `src/preparation/<dataset>.sql`. The conversion is one SELECT that reads landed files by project-relative path. Save its check as `src/preparation/<dataset>-check.sql`. The check is a query over the view `publication`, and each row that it returns is a failure. First, suggest a commit of the two files, so that the `conversion_commit` of the publication holds them. Then publish:
 
 ```
 python3 src/awb.py publish <dataset> <publication-id> --from <acquisition-dir> --sql <select.sql> --check <check.sql>
 ```
 
-`--from` names exactly the acquisition directories the select reads. Each canonical view in `foundation/views/` names its publication; record it in `foundation/catalog.md`, starting from the printed `view_sql` and `catalog_row`. Switching publications is a deliberate preparation change. Remove a superseded publication once no reader needs it.
+`--from` names exactly the acquisition directories that the select reads. Each canonical view in `foundation/views/` names its publication. Record it in `foundation/catalog.md`, and start from the printed `view_sql` and `catalog_row`. A change from one publication to a different one is a deliberate preparation change. When no reader needs a superseded publication, remove it.
 
-Sessions load `foundation/views/*.sql` in filename order, so a dependent view's file sorts after its inputs.
+Sessions load `foundation/views/*.sql` in filename order, so the file of a dependent view sorts after its inputs.
 
-Preparation owns reusable parsing, normalization, checks, and corrections; their rationale goes in `foundation/quality.md`. EDA consumes canonical data, with population, periods, filters, exclusions, and assumptions local to the investigation; preparation and EDA may iterate before cleaning finishes. Promote a generally valid exploratory rule into preparation, or a saved query into `foundation/views/`, deliberately.
+Preparation owns reusable parsing, normalization, checks, and corrections. Their rationale goes in `foundation/quality.md`. EDA uses canonical data, and its population, periods, filters, exclusions, and assumptions are local to the investigation. Preparation and EDA can iterate before cleaning finishes. Deliberately promote a generally valid exploratory rule into preparation, or a saved query into `foundation/views/`.
 
 ## Storage
 
-Materialize only publications and cataloged caches of expensive, rebuildable results in `data/cache/`; normalization and corrections stay in views. A justified alternate backend preserves independent source landing and the preparation/EDA boundary. Add versioning, invalidation, or pipeline machinery only for a concrete need.
+Materialize only publications and cataloged caches of expensive, rebuildable results in `data/cache/`. Normalization and corrections stay in views. A justified alternate backend keeps independent source landing and the preparation/EDA boundary. Add versioning, invalidation, or pipeline machinery only for a concrete need.

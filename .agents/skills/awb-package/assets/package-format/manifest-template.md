@@ -13,7 +13,7 @@ The manifest is `manifest.json`. Record times in ISO 8601 with a UTC offset, for
 
 The analytical results that this package represents.
 
-- `producing_commit`: the producing commit SHA. Recover it from result evidence in the investigation records or from an earlier manifest. Never assume it from the packaging checkout. If no commit existed, the value is `uncommitted`, with the recorded SHA-256 checksums of the producing files.
+- `producing_commit`: the producing commit SHA. The SHA is recovered from result evidence in the investigation records or from an earlier manifest. It is never assumed from the packaging checkout. If no commit existed, the value is `uncommitted`, with the recorded SHA-256 checksums of the producing files.
 - `producing_uncommitted_changes`: `none`, or each affected code, view, and settings path, with the checksum that was recorded for it when the result was produced. The reason is that a SHA with uncommitted changes does not fully identify the producing code. Paths without recorded checksums are listed as such, and then the producing state is not recoverable.
 - `inputs`: the inputs that were actually used. These are the source and acquisition or publication identifiers, with the checksums that their provenance or publication files record. They also include the view definitions that were read, with their checksums.
 - `analytical_settings`: the analytical settings that the results represent.

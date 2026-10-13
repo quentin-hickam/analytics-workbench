@@ -150,7 +150,7 @@ Fix: Apply F7, F8 and F10–F12. A new reference file is not necessary.
    - No history entry is later than `disposition_recorded_at`.
 
    State the test one time at line 32 and delete the restatement in line 40. This removes the main source of variance in the critical stop-and-ask step. It also makes the skill agree with awb-package and awb-status.
-2. **Point Copy to storage directly at `manifest-helper.md` (F2).** This lets the storage-only branch find the install path and the reporting rules of the helper. Also, add a `verify` of the local `released/<NNN>/` copy as the completion criterion of Create the release (F3). Then every release gets an integrity check, if external storage is reachable or not.
+2. **Point Copy to storage directly at `manifest-helper.md` (F2).** This lets the storage-only branch find the install path and the reporting rules of the helper. Also, add a `verify` of the local `released/<NNN>/` copy as the completion criterion of Create the release (F3). Then every release gets an integrity check, when external storage is reachable and also when it is not.
 3. **Collapse the "frozen copy" prohibitions and the cross-file verification duplicates (F7, F8).** Keep "A release is a frozen copy of the draft" as the leading word, and delete its five negated restatements. Make awb-release the single home for the release verification procedure. Make the helper references the home for the conventions to call the helpers. This gives the largest saving in tokens and legibility. It also removes the duplication across four files.
 
 Counts: high 2, medium 7, low 6 (15 total).

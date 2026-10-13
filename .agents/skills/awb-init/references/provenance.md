@@ -1,19 +1,39 @@
 # Result evidence helper
 
-Call the project copy at `src/provenance.py`; its module docstring holds the full `awb-evidence/3` schema.
+Call the project copy at `src/provenance.py`. Its module docstring holds the full `awb-evidence/3` schema.
 
 ## The findings row
 
-A result that raises prints `{"result_id", "error"}` with the traceback on stderr, the other results still run, and `run.py` exits 1. Before it unlinks the evidence, `run.py` calls `prior_result()`, which captures the `evidence_commit()` citation and, as the baseline, the saved table's sha256 with the evidence's checks and scoped settings. After `record_evidence()`, `record_finding()` writes the result's one row and `run.py` prints `state`: `added` (a `provisional` placeholder row), `kept` (baseline unchanged, nothing written), `refreshed`, or `flag cleared`. A refreshed row becomes `provisional` unless superseded and gets a history entry when it was supported; a flagged row returns to `superseded` or `provisional`, keeping its notes and dropping its flag reason, which the history entry records. Each entry's `notes_checks` records the checks caveat its notes were written against, and `state finding` counts the notes as explaining failed or not-assessed checks only while it equals the current one. The caveat's `failed checks:` and `not assessed:` segments are reserved for the writer; other segments are notes from `awb.py state finding --caveat`. `findings.json` (`awb-findings/1`) owns all four cells; without the file the table renders empty, so a row written by hand is drift. Writers refuse table drift, and `prior_result()` checks before a rerun removes evidence. `python3 src/awb.py state render --investigation <name>` restores the JSON table and prints discarded rows; re-apply intended edits with `state finding`, or flags with `state flag` (a JSON list of `result` and `reason` on stdin; `--check` validates without writing). Only table rows are rendered, and a row cut off below the table still counts as drift; `state issues` and `state next` never touch the table. All temporary files are written first, then findings, state, and history are replaced in order with signals deferred. New evidence is removed only if findings.json was not replaced. A failed state replacement names `state render`; a failed history replacement names its missing prior rows. A kill or power loss between replacements can still leave the table behind findings.json, which `state render` restores, or lose the history entry, risks accepted over a recovery mechanism. `finding_row()` returns the row without writing it.
+A result that raises an exception prints `{"result_id", "error"}`, with the traceback on stderr. The other results still run, and `run.py` exits 1. Before `run.py` unlinks the evidence, it calls `prior_result()`. `prior_result()` captures the `evidence_commit()` citation. As the baseline, it also captures the sha256 of the saved table, with the checks and scoped settings of the evidence. After `record_evidence()`, `record_finding()` writes the one row of the result. Then `run.py` prints `state`, which is one of these values:
 
-The saved table under `results/` holds the computed values packaging later serializes. `results/` is output, not producing code. `run.py` deletes a result's evidence before rewriting its table, so a run that fails partway leaves no evidence rather than evidence for another table.
+- `added` (a `provisional` placeholder row)
+- `kept` (the baseline did not change, and nothing was written)
+- `refreshed`
+- `flag cleared`
+
+A refreshed row becomes `provisional` unless it is superseded. A refreshed row gets a history entry when it was supported. A flagged row returns to `superseded` or `provisional`. It keeps its notes and drops its flag reason, and the history entry records that flag reason.
+
+The `notes_checks` of each entry records the checks caveat that its notes were written against. `state finding` counts the notes as an explanation of failed or not-assessed checks only while `notes_checks` is equal to the current checks caveat. The `failed checks:` and `not assessed:` segments of the caveat are reserved for the writer. Other segments are notes from `awb.py state finding --caveat`.
+
+`findings.json` (`awb-findings/1`) owns all four cells. Without the file, the table renders empty. For this reason, a row written by hand is drift. Writers refuse table drift, and `prior_result()` checks before a rerun removes evidence. `python3 src/awb.py state render --investigation <name>` restores the JSON table and prints the discarded rows. Apply intended edits again with `state finding`. Apply flags again with `state flag`, which reads a JSON list of `result` and `reason` on stdin. With `--check`, `state flag` validates and does not write. Only table rows are rendered. A row that is cut off below the table still counts as drift. `state issues` and `state next` never touch the table.
+
+All temporary files are written first. Then findings, state, and history are replaced in that order, with signals deferred. New evidence is removed only if findings.json was not replaced. A failed state replacement names `state render`. A failed history replacement names its missing prior rows. A kill or a power loss between replacements can still leave the table behind findings.json (`state render` restores it), or lose the history entry. These risks are accepted instead of a recovery mechanism. `finding_row()` returns the row but does not write it.
+
+The saved table under `results/` holds the computed values that packaging serializes later. `results/` is output, not producing code. `run.py` deletes the evidence of a result before it writes the table again. As a result, a run that fails partway leaves no evidence, not evidence for a different table.
 
 ## Adapt what a result records
 
-`run.py` records each result through `record_evidence()`. Set `views = [...]` in a result's settings when its producer reads views its queries do not name (detection errs toward recording a view). Producing code is `run.py`, the result's own `queries`, the investigation's other code, and `src/` except `awb.py`, `provenance.py`, and `packaging/`, which only dispatch, record, or package; another result's queries never make it stale. Pass `code_paths=[...]` in `run.py`'s `record_evidence` call to add producing code outside those, such as exploration SQL a producer reads. Unknown provenance is recorded as `{"unknown": reason}`.
+`run.py` records each result through `record_evidence()`. If the producer of a result reads views that its queries do not name, set `views = [...]` in the settings of that result. (When detection is not certain, it records the view.) Producing code is:
 
-Settings are recorded per result: `record_evidence()` refuses a settings file without the result's `[results.<id>]` table, and the evidence keeps only `[parameters]` and that table, compared by content alone. Adding or editing another result's table, or another top-level table such as `[eda]`, leaves the result current, while a change to `[parameters]` or its own table fails the `settings` comparison. Keep anything a result reads in `[parameters]` or its own table.
+- `run.py`
+- the `queries` that belong to the result
+- the other code of the investigation
+- `src/`, except `awb.py`, `provenance.py`, and `packaging/`, which only dispatch, record, or package
+
+The queries of another result never make a result stale. To add producing code outside these, pass `code_paths=[...]` in the `record_evidence` call of `run.py`. An example is exploration SQL that a producer reads. Unknown provenance is recorded as `{"unknown": reason}`.
+
+Settings are recorded for each result. `record_evidence()` refuses a settings file that does not have the `[results.<id>]` table of the result. The evidence keeps only `[parameters]` and that table, and compares them by content alone. If you add or edit the table of another result, or another top-level table (for example `[eda]`), the result stays current. But a change to `[parameters]` or to the table of the result fails the `settings` comparison. Keep everything that a result reads in `[parameters]` or in its own table.
 
 ## Evidence comparison
 
-`awb-package`'s `export` command and `python3 src/awb.py stale`, run `compare_evidence(root, evidence_path)`: five comparisons in order (`committed-code`, `uncommitted-code`, `views`, `inputs`, `settings`), each `{name, paths, outcome, detail}`. It compares state; it does not revalidate. It reads only `awb-evidence/3` files whose settings name their result; any other evidence fails all five comparisons, so rerun its result.
+The `export` command of `awb-package` and `python3 src/awb.py stale` run `compare_evidence(root, evidence_path)`. It does five comparisons in this order: `committed-code`, `uncommitted-code`, `views`, `inputs`, `settings`. Each comparison is `{name, paths, outcome, detail}`. It compares state. It does not revalidate. It reads only `awb-evidence/3` files whose settings name their result. Any other evidence fails all five comparisons, so rerun its result.

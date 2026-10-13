@@ -22,7 +22,7 @@ Run the bundled scripts as black boxes, by path, with the Python environment of 
 python3 <skill-directory>/scripts/scan_dataset.py <project-root> <dataset> [--key COLS] [--ref COL=TARGET.COL] [--range COL=MIN:MAX] [--columns COLS]
 ```
 
-`<dataset>` is usually the canonical view. `--help` lists the other targets. If you know the grain from the catalog, give it as `--key`. If not, the scan proposes candidate keys. Give the joins that the question uses as `--ref`. Give the known valid ranges and the reporting period as `--range`. You can repeat each of these two options. For a wide dataset, `--columns` limits the per-column checks to the columns in scope.
+`<dataset>` is usually the canonical view. `--help` lists the other targets. If you know the grain from the catalog, give it as `--key`. If not, the scan proposes candidate keys. Give the joins that the question uses as `--ref`. Give the known valid ranges and the reporting period as `--range`. You can repeat each of these options. For a wide dataset, `--columns` limits the per-column checks to the columns in scope.
 
 Stdout shows the scan path (the stem of this path is `<scan-name>` in step 6). Stdout also lists up to 25 unrecorded issues as `S<n>`, each with its key, count, and three examples. `more_issues` gives the number of the other issues, which are in `issues` in the scan file. Open the scan file only for these other issues, or when a decision needs more than three examples. Issues under `recorded` already have a quality row. Reopen a recorded issue if its status is `corrected`, or if its `count` is different from its `recorded_count`. Keep the other recorded issues as recorded. Read [checks.md](references/checks.md) when a decision depends on a probable false positive or on the threshold of a check.
 
@@ -33,7 +33,7 @@ The active question sets the limits of the work. Decide the issues in the column
 - **Shared cleaning rule** (`whitespace`, `variants`, `near-variants`, `sentinel`, `parse`, `date-formats`, `text-typed`, `duplicate-rows`, `duplicate-key`, `ancient-date`, `range` as a validity rule): an error in the data itself, which is wrong for every investigation. Examples are a placeholder that means missing, or a row that was landed two times.
 - **Shared limitation** (`null-key`, `orphans`, `all-null`): a real defect that no rule can fix. Examples are orphans from a partial extract, null keys, or a column that the source never fills. Record it with the status `open`. The view stays as it is.
 - **Investigation-local choice** (`range` as the reporting period, `extreme`): data that is correct, but that the question chooses to exclude or to treat in a special way. Examples are test accounts, a period, or real outliers. In the report, name the exclusion for the settings of that investigation. When the property is useful to know for all of the project, also record it with the treatment "none in the foundation; investigations decide".
-- **Not an issue** (often `negative`, `future-date`, `extreme`): real values that only look strange, such as refunds or due dates. Record one only when the record prevents a second request for a user decision or for a non-obvious reason.
+- **Not an issue** (often `negative`, `future-date`, `extreme`): real values that only look strange, such as refunds or due dates. Record one only when, without the record, someone would ask again for a user decision or for a non-obvious reason.
 
 Decide yourself the fixes that change only the representation:
 
@@ -60,7 +60,7 @@ Ask all of these questions in one message, as a table. The table has these colum
 
 Decide is done when these two conditions are true:
 
-- Every in-scope `S<n>` has a class. This includes the issues from each earlier stdout (up to 25, from each).
+- Every in-scope `S<n>` has a class. This includes each in-scope issue after the first 25, which stdout does not list.
 - Every question that you asked has an answer or is recorded as `open`.
 
 ## 3. Correct

@@ -1,21 +1,55 @@
 # Analytical implementation, validation, and evidence
 
-`references/` and `assets/` paths below are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (Codex).
+The `references/` and `assets/` paths below are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (Codex).
 
 ## Structure
 
-Put reusable operations in `src/`: `src/preparation/` for acquisition, landing, conversion, session loading, normalization, and corrections; `src/exploration/` for neutral measurements, comparisons, profiles, and graph operations; `src/packaging/` for shared package assembly. Reuse existing operations first. Each investigation's `run.py` selects shared operations and its `settings.toml` supplies scope and settings. An investigation without `run.py` gets one adapted from `assets/workbench/investigation/run.py` and `settings.toml` before its next rerun.
+Put reusable operations in `src/`:
+
+- `src/preparation/` for acquisition, landing, conversion, session loading, normalization, and corrections.
+- `src/exploration/` for neutral measurements, comparisons, profiles, and graph operations.
+- `src/packaging/` for shared package assembly.
+
+Reuse existing operations first. The `run.py` of each investigation selects shared operations, and its `settings.toml` supplies scope and settings. An investigation without `run.py` gets one before its next rerun, adapted from `assets/workbench/investigation/run.py` and `settings.toml`.
 
 ## Add a result
 
-A new result is a `[results.<id>]` table in `settings.toml`, its `[results.<id>.validation]` table, and a query in `queries/<id>.sql`. Add a producer to `run.py` only when a result needs more than its query. Read `references/validation.md` only to write a validation spec beyond the keys the settings comments list, and `references/provenance.md` only to adapt `run.py`'s evidence recording or to port it.
+A new result is a `[results.<id>]` table in `settings.toml`, its `[results.<id>.validation]` table, and a query in `queries/<id>.sql`. Add a producer to `run.py` only when a result needs more than its query. Read `references/validation.md` only to write a validation spec beyond the keys that the settings comments list. Read `references/provenance.md` only to adapt the evidence recording of `run.py` or to port it.
 
-Specify four mechanical checks: required columns; plausible counts before and after each filter; joins without unexpected multiplication, inspecting key uniqueness whenever counts change; and null rates for important fields. Supply three judgments, each an outcome with a one-sentence detail: scope (explicit date filters and grouping dimensions), metrics (definitions, assumptions, and column meanings), and values (distinct values that drive business interpretation, inspected with `awb.py profile`).
+Specify four mechanical checks:
 
-Result queries use a stable total `ORDER BY`, with tie-breakers, so an unchanged result saves an identical table.
+- Required columns.
+- Plausible counts before and after each filter.
+- Joins without unexpected multiplication. Whenever counts change, examine key uniqueness.
+- Null rates for important fields.
 
-Before rerunning a supported or flagged finding, suggest committing its evidence. Run `python3 investigations/<name>/run.py [result-id ...]`. It writes each row and prints one JSON line per result with the evidence path, `failed_checks`, `not_assessed`, and `state`: a new result gets a `provisional` placeholder; a rerun with unchanged table, checks, and settings keeps its row; any other makes it `provisional` unless superseded, logging a supported one in history. Validation is done when each `failed_checks` entry is understood and recorded, and each `not_assessed` entry is either supplied in settings or justified with a caveat. Word, promote, supersede, or caveat with `awb.py state finding <id>... --text --status --reason --caveat` in one call. Before re-promoting, check the interpretation-driving values, which supported finding text includes, and the prior caveats in the rerun's history entry. Notes explain failed or not-assessed checks only for the checks they were written against: when a rerun changes those checks, promotion is refused until `--caveat` restates the notes that still hold.
+Supply three judgments. Each judgment is an outcome with a one-sentence detail:
+
+- Scope: explicit date filters and grouping dimensions.
+- Metrics: definitions, assumptions, and column meanings.
+- Values: distinct values that drive business interpretation, examined with `awb.py profile`.
+
+Result queries use a stable total `ORDER BY`, with tie-breakers, so that an unchanged result saves an identical table.
+
+Before you rerun a supported or flagged finding, suggest a commit of its evidence. Run `python3 investigations/<name>/run.py [result-id ...]`. It writes each row. For each result, it prints one JSON line with the evidence path, `failed_checks`, `not_assessed`, and `state`:
+
+- A new result gets a `provisional` placeholder.
+- A rerun with an unchanged table, checks, and settings keeps its row.
+- Any other rerun makes the row `provisional`, unless it is superseded. If the row was supported, the rerun logs it in history.
+
+Validation is complete when these conditions are true:
+
+- Each `failed_checks` entry is understood and recorded.
+- Each `not_assessed` entry is supplied in settings or justified with a caveat.
+
+To word, promote, supersede, or caveat, use `awb.py state finding <id>... --text --status --reason --caveat` in one call. Before you promote a finding again, check the interpretation-driving values, which supported finding text includes. Also check the prior caveats in the history entry of the rerun. Notes explain failed or not-assessed checks only for the checks that they were written against. When a rerun changes those checks, promotion is refused until `--caveat` restates the notes that still apply.
 
 ## Rerun flagged findings
 
-`awb-clean` makes shared corrections and flags the findings they affect. To rerun flagged findings on request, pass their result IDs, from each Evidence link, to `run.py`; it returns each to `provisional`, or `superseded` if it was, refreshes its check segments, keeps its notes, and moves the flag reason to `history.md`. If `run.py` cannot reproduce a flagged finding, extend it first.
+`awb-clean` makes shared corrections and flags the findings that they affect. To rerun flagged findings on request, pass their result IDs to `run.py`. Get each result ID from its Evidence link. For each finding, `run.py` does these steps:
+
+- It returns the finding to `provisional`, or to `superseded` if it was superseded.
+- It refreshes its check segments.
+- It keeps its notes.
+- It moves the flag reason to `history.md`.
+ If `run.py` cannot reproduce a flagged finding, extend it first.

@@ -22,6 +22,6 @@ Kinds with the route `awb-clean` that this table does not list: the scan of awb-
 
 ## Interpretation checklist
 
-- **Scope first.** When a distribution is surprising and it is possible that the scope filter causes it, scan again with `--no-scope --label all` and compare.
+- **Scope first.** When a distribution is unexpected and it is possible that the scope filter causes it, scan again with `--no-scope --label all` and compare.
 - **Small groups** make the highest and lowest means unstable. `--min-group` sets the minimum.
 - **Correlation** is Pearson. It is linear and sensitive to extremes. When a measure correlates with its own components, the correlation is arithmetic.

@@ -79,7 +79,7 @@ Step 4 says to pass one `--chart` for each chart specification. It also says to 
 
 The README says that `awb-release` asks where releases are kept before the first release. But the skill asks after `release` runs. As a result, `copy-releases` is necessary as one more call. In task 12, the location was already recorded, and `release` copied the release itself.
 
-**Fix:** check the README storage line in step 1, and ask at that time. Then the first `release` also copies.
+**Fix:** check the README storage line in step 1 and ask at that time. Then the first `release` also copies.
 
 ### F5. The disposition is asked only after another refused release (task 12, 2 calls)
 
@@ -107,7 +107,7 @@ The user changed the decision on an issue that was already corrected (Q-004: the
 
 ### F9. Minor single calls
 
-- **Publish (task 3):** neither `publish` nor the data guide shows a view definition. The one-line `CREATE VIEW … read_parquet(…)` pattern is only in `awb-clean`'s `correction-views.md`. A `view_sql` line printed next to `catalog_row` will remove the lookup.
+- **Publish (task 3):** neither `publish` nor the data guide shows a view definition. The one-line `CREATE VIEW … read_parquet(…)` pattern is only in `awb-clean`'s `correction-views.md`. If `publish` printed a `view_sql` line next to `catalog_row`, the lookup would not be necessary.
 - **Clean (task 4):** step 5 runs `stale` even when no investigation has findings. It is possible to skip this step when every `state.md` findings table is empty.
 - **Analysis (task 6):** `analysis.md` names `--text --status --reason` together, but it gives `--caveat` separately. As a result, one `state finding --help` call was spent to confirm that all four combine in one call.
 
