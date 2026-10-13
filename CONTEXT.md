@@ -76,6 +76,9 @@ The condition of every release: its files, results, and provenance stay exactly 
 **Disposition**:
 The user's choice for a flagged finding that a draft represents: revalidate it, omit it, or release it with its caveat. A new or changed flag reopens the choice. A release proceeds only when every place the finding appears is omitted or released with its caveat; revalidation pauses it for separate analytical work.
 
+**Review rule**:
+A numbered rule, `R-<area>-NNN`, recorded from a correction the user made while reviewing a package draft, which every later review of a draft checks. Its ID is never renumbered or reused.
+
 **Investigation state**:
 The current understanding of an investigation, including its active question, findings, unresolved issues, and next steps.
 
