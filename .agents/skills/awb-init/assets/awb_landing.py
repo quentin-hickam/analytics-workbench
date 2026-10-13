@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -67,6 +68,63 @@ def _check_name(value):
         raise ValueError(f"Invalid directory name: {value!r}")
 
 
+# Obvious credential shapes, refused in the request and notes that provenance.json and the
+# Acquisitions row keep. A variable reference ($NAME, ${NAME}, <name>, ***) or an ALL_CAPS_NAME
+# passes. Each pattern's value group is what must be a reference. A guard, not a scanner: a
+# secret in another shape is recorded as given.
+_SECRET_PATTERNS = [
+    ("a bearer token", re.compile(
+        r"\bbearer\s+(?P<value>(?=[A-Za-z._~+/=-]*\d)[A-Za-z0-9._~+/=-]{16,})", re.I)),
+    ("a credential assignment", re.compile(
+        r"\b(?:password|passwd|pwd|secret|client_secret|api[_-]?key|access[_-]?token|auth[_-]?token"
+        r"|token)\s*=\s*(?P<value>[^\s&;,'\"]+)", re.I)),
+    ("credentials in a URL", re.compile(r"://[^/\s:@]+:(?P<value>[^/\s@]+)@")),
+    ("a private key", re.compile(r"(?P<value>-----BEGIN [A-Z ]*PRIVATE KEY-----)")),
+    ("a known key format", re.compile(
+        r"\b(?P<value>AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{36,}"
+        r"|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk-[A-Za-z0-9_-]{20,})")),
+]
+_SECRET_KEY = re.compile(r"password|passwd|pwd|secret|client_secret|api[_-]?key|access[_-]?token"
+                         r"|auth[_-]?token|token|authorization", re.I)
+_REFERENCE = re.compile(r"\$\{?[A-Za-z_]\w*|<[^<>]+>|\*{3,}")
+_VARIABLE_NAME = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
+
+
+def _names_a_variable(value):
+    return bool(_REFERENCE.match(value) or _VARIABLE_NAME.fullmatch(value))
+
+
+def _secret_kind(value):
+    """Name the first obvious secret in a JSON-like value, else return None."""
+    if isinstance(value, str):
+        for kind, pattern in _SECRET_PATTERNS:
+            if any(not _names_a_variable(match["value"]) for match in pattern.finditer(value)):
+                return kind
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if (isinstance(key, str) and _SECRET_KEY.fullmatch(key) and isinstance(item, str)
+                    and item and not _REFERENCE.search(item) and not _VARIABLE_NAME.fullmatch(item)):
+                return f"a literal {key!r} value"
+            kind = _secret_kind(key) or _secret_kind(item)
+            if kind:
+                return kind
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            kind = _secret_kind(item)
+            if kind:
+                return kind
+    return None
+
+
+def _refuse_secrets(**fields):
+    """Raise ValueError naming a field that holds an obvious secret, without echoing it."""
+    for name, value in fields.items():
+        kind = _secret_kind(value)
+        if kind:
+            raise ValueError(f"{name} appears to hold a secret ({kind}); record the environment "
+                             "variable's name, such as $NAME, instead")
+
+
 def _complete_provenance(directory):
     """Return the provenance of a completed acquisition directory, else raise ValueError."""
     metadata = directory / "provenance.json"
@@ -100,6 +158,7 @@ def land(project_root: str | Path, source: str, acquisition_id: str,
     """Fetch original files into a partial directory, then write provenance and rename it."""
     _check_name(source)
     _check_name(acquisition_id)
+    _refuse_secrets(request=request, notes=notes)
     final = Path(project_root) / "data/raw" / source / acquisition_id
     partial = final.with_name(final.name + ".partial")
     _refuse_existing(final, partial)
@@ -494,11 +553,12 @@ def cli_land(root: Path, argv: list[str]) -> int:
                         help="new acquisition directory name under data/raw/<source>/")
     parser.add_argument("files", nargs="+", metavar="file",
                         help="file or directory to copy under its own name; relative to the current directory")
-    parser.add_argument("--request", help="source version, query, or request (default: the copied paths)")
+    parser.add_argument("--request", help="source version, query, or request (default: the copied paths); "
+                                          "name a credential's variable, never its value")
     parser.add_argument("--records", action="append", default=[], metavar="NAME=COUNT",
                         help="record count of a landed file, by its path inside the acquisition; "
                              "repeat the flag for each file")
-    parser.add_argument("--notes", help="note recorded in the Acquisitions row")
+    parser.add_argument("--notes", help="note recorded in the Acquisitions row; never a secret")
     args = parser.parse_args(argv)
     records = {}
     for item in args.records:
@@ -522,6 +582,10 @@ def cli_land(root: Path, argv: list[str]) -> int:
                 shutil.copyfile(path, output / path.name)
 
     request = args.request or "copied from " + ", ".join(map(str, inputs))
+    try:
+        _refuse_secrets(**{"--request": request, "--notes": args.notes})
+    except ValueError as error:
+        parser.error(str(error))
     try:
         directory = land(root, args.source, args.acquisition_id, fetch, request=request,
                          records=records or None, notes=args.notes)

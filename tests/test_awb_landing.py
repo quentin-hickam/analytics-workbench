@@ -29,6 +29,9 @@
 # test_cli_publish_keeps_a_failed_check_or_empty_result_unpublished: check rows or an empty select keep the partial directory unpublished and print the failures.
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
+# test_land_refuses_an_obvious_secret_before_fetch: a bearer token, credential assignment, secret-named field, URL credentials or known key format in request or notes raises before fetching, without echoing the value.
+# test_land_records_a_request_that_names_its_variables: $NAME, ${NAME}, <name>, *** and ALL_CAPS_NAME references, and a page_token cursor, land unchanged.
+# test_cli_land_refuses_a_secret_request_before_landing: --request or --notes holding a secret exits 2 with nothing landed.
 
 import hashlib
 import importlib.util
@@ -647,3 +650,54 @@ def test_cli_publish_view_sql_loads_through_session(tmp_path, capsys, dataset):
     (root / "foundation/views/01_view.sql").write_text(out["view_sql"] + "\n", encoding="utf-8")
     with landing.session(root) as connection:
         assert connection.execute(f"SELECT * FROM {name} ORDER BY id").fetchall() == [(1, 20), (2, 40)]
+
+
+SECRETS = [
+    "GET /orders with Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjF9.sig",
+    "https://api.example.com/orders?page=2&access_token=a1b2c3d4",
+    "DRIVER=sql;SERVER=erp;UID=reader;PWD=hunter2;",
+    "https://reader:hunter2@erp.example.com/export",
+    "key AKIAIOSFODNN7EXAMPLE",
+    {"headers": {"Authorization": "Basic cmVhZGVyOmh1bnRlcjI="}},
+    [{"password": "hunter2"}],
+]
+
+
+@pytest.mark.parametrize("field", ["request", "notes"])
+@pytest.mark.parametrize("secret", SECRETS)
+def test_land_refuses_an_obvious_secret_before_fetch(tmp_path, field, secret):
+    called = []
+    values = {"request": "orders export", "notes": None, field: secret}
+    with pytest.raises(ValueError, match=f"^{field} appears to hold a secret") as error:
+        landing.land(tmp_path, "api", "batch-1", called.append, **values)
+    for fragment in ("hunter2", "a1b2c3d4", "eyJhbGci", "AKIAIOSFODNN7EXAMPLE", "cmVhZGVy"):
+        assert fragment not in str(error.value)
+    assert called == []
+    assert not (tmp_path / "data").exists()
+
+
+def test_land_records_a_request_that_names_its_variables(tmp_path):
+    request = {"url": "https://api.example.com/orders?page_token=a1b2c3d4&access_token=$ACME_TOKEN",
+               "headers": {"Authorization": "Bearer ${ACME_TOKEN}", "X-Api-Key": "<acme key>"},
+               "api_key": "ACME_API_KEY", "password": "***", "token": "",
+               "dsn": "DRIVER=sql;UID=reader;PWD=$ERP_PASSWORD;",
+               "auth": "Bearer authentication_by_header"}
+    final = landing.land(tmp_path, "api", "batch-1",
+                         lambda output: (output / "page.json").write_bytes(b"{}"),
+                         request=request, notes="token from $ACME_TOKEN")
+    provenance = json.loads((final / "provenance.json").read_text())
+    assert provenance["request"] == request
+    assert provenance["notes"] == "token from $ACME_TOKEN"
+
+
+def test_cli_land_refuses_a_secret_request_before_landing(tmp_path, capsys):
+    (tmp_path / "x.csv").write_bytes(b"1")
+    for option in ("--request", "--notes"):
+        with pytest.raises(SystemExit) as error:
+            landing.cli_land(tmp_path, ["orders", "r1", str(tmp_path / "x.csv"),
+                                        option, "pulled with password=hunter2"])
+        assert error.value.code == 2
+        message = capsys.readouterr().err
+        assert f"{option} appears to hold a secret" in message and "hunter2" not in message
+    assert not (tmp_path / "data").exists()
+
