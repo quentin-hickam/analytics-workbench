@@ -289,7 +289,7 @@ def test_label_must_be_a_simple_name_and_an_empty_one_cannot_overwrite_the_unlab
         with pytest.raises(SystemExit) as exit:
             eda.main([str(root), "shifts", f"--label={label}"])
         assert exit.value.code == 2
-        assert "--label must be a simple name: an ASCII letter or digit, then [A-Za-z0-9._-]" in capsys.readouterr().err
+        assert "--label must be a simple name: an ASCII letter or digit, then any of [A-Za-z0-9._-]" in capsys.readouterr().err
     assert saved.read_text() == '{"format": "awb-eda/1"}'
     assert [p.name for p in saved.parent.iterdir()] == ["shifts.json"]
     assert eda.parse([str(root), "shifts", "--label", "x."]).label == "x."

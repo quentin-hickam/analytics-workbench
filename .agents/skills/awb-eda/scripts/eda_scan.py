@@ -918,7 +918,7 @@ def parse(argv):
                         "and exit without scanning; see below")
     options = parser.parse_args(argv)
     if options.label is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", options.label):
-        parser.error("--label must be a simple name: an ASCII letter or digit, then [A-Za-z0-9._-]")
+        parser.error("--label must be a simple name: an ASCII letter or digit, then any of [A-Za-z0-9._-]")
     if options.top < 1 or options.min_group < 1:
         parser.error("--top and --min-group must be positive")
     return options

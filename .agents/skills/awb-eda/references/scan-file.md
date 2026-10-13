@@ -6,11 +6,11 @@ Read this for the scan file's exact name, or to name a section for `--show` beyo
 
 A scan writes `investigations/<name>/exploration/eda/<scan>.json`, or `<scan>-<label>.json` with `--label`, and replaces any file already at that path. `output_path()` and `publication_name()` in `scripts/eda_scan.py` build `<scan>` in three steps:
 
-1. **Source name.** A view gives its name as passed. A directory gives its last two path parts relative to the project root joined by `-` (`data/parquet/shifts/p1` gives `shifts-p1`), or its one part when it sits directly under the root (`data` gives `data`). A Parquet file gives its file name without `.parquet`. This is the `dataset` name recorded in the scan.
+1. **Source name.** A view gives its name as passed. A directory or Parquet file is named from its path after symlinks are resolved, which must lie inside the project. A directory gives its last two path parts relative to the project root joined by `-` (`data/parquet/shifts/p1` gives `shifts-p1`, and so does a link `data/parquet/shifts/current` to `p1`), or its one part when it sits directly under the root (`data` gives `data`). A Parquet file gives its file name without `.parquet`. This is the `dataset` name recorded in the scan.
 2. **Replace.** Each run of characters outside `[A-Za-z0-9._-]`, which holds ASCII letters and digits only, becomes one `-`: `daily sales` gives `daily-sales`, `Ünïcode_view` gives `-n-code_view`.
 3. **Trim.** Leading and trailing `-` and `.` characters are removed, and an empty result becomes `dataset`: `-n-code_view` gives `n-code_view`, `café` gives `caf`, `日本` gives `dataset`.
 
-The label is appended after these steps, unchanged; `--label` accepts only a name that starts with an ASCII letter or digit and continues with `[A-Za-z0-9._-]`.
+The label is appended after these steps, unchanged; `--label` accepts only a name that starts with an ASCII letter or digit, followed by any number of `[A-Za-z0-9._-]` (`1` is valid).
 
 Different sources or labels can give the same file name: `sales` with `--label raw` and a view named `sales-raw` both write `sales-raw.json`, and `a + b` and `a/b` both write `a-b.json`. The later scan then overwrites the earlier one.
 
