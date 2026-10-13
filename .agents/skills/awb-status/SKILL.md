@@ -56,4 +56,4 @@ Finish with up to five requests whose state applies, risk rows first, then progr
 | `upstream.probeable_files` is above zero and the probe has not run | "Check whether the landed sources changed upstream" | `awb-status` | progress |
 | `other_investigations` lists any | "Checkpoint this investigation and switch to <name>" | AGENTS.md record maintenance | progress |
 | `git.uncommitted_paths` is above zero | "Commit the current work" | explicit commit request | progress |
-| `next_steps` lists a step and no other progress row applies | "Continue: <first next step, shortened>" | analytical work under AGENTS.md | progress |
+| `next_steps` lists a step and no progress row other than the upstream check applies | "Continue: <first next step, shortened>" | analytical work under AGENTS.md | progress |
