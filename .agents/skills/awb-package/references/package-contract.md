@@ -4,7 +4,7 @@ Repository paths are relative to the project root.
 
 ## Layout and formats
 
-All revisions use `deliveries/<investigation>/<package>/draft/`. Numbered `released/001`, `released/002`, … siblings are frozen. Each draft contains:
+All revisions use `deliveries/<investigation>/<package>/draft/`. The numbered sibling directories `released/001`, `released/002`, … are frozen. Each draft contains:
 
 ```text
 findings.md                  # audience-facing deck outline; sole slide-content source
@@ -15,39 +15,52 @@ charts/                      # only when findings.md specifies charts: chart-N.c
 datasets/                    # only when datasets were selected
 ```
 
-Shared formats live in root `package-format/`: `findings-template.md`, `methodology-template.md`, `m365-assembly.md`, and `manifest-template.md`. They are shared across investigations; preserve existing files. The project's copies govern: `findings-template.md` holds the translation rule and slide rules, and `manifest-template.md` the manifest fields.
+Shared formats are in the root `package-format/` directory: `findings-template.md`, `methodology-template.md`, `m365-assembly.md`, and `manifest-template.md`. All investigations share them. Keep existing files. The project's copies are the copies that apply. `findings-template.md` holds the translation rule and slide rules. `manifest-template.md` holds the manifest fields.
 
-`methodology.md` is the complete authoritative analytical account in internal vocabulary. `findings.md` derives from it for the brief's **Audience**, states nothing it does not support, and is the slide-by-slide outline of the deck and the only source of slide content.
+`methodology.md` is the complete, authoritative analytical account, in internal vocabulary. `findings.md` comes from it and is written for the brief's **Audience**. `findings.md` states nothing that `methodology.md` does not support. It is the slide-by-slide outline of the deck and the only source of slide content.
 
-When releases exist, findings adds **What changed since the last version** against the latest release, identifying its delivery date from manifest `released_at`.
+When releases exist, findings adds **What changed since the last version**, compared with the latest release. It identifies the delivery date of that release from the manifest `released_at`.
 
-The **Answer** slide in `findings.md` is the executive summary; M365 writes none. In the Microsoft 365 Copilot app, the PowerPoint agent builds the deck from `findings.md` and draws each chart natively from its file under `m365-assembly.md`; datasets travel beside the deck. M365 consults methodology for reasoning only. Findings, methodology, chart files, and datasets stay authoritative upstream: substantive revisions return through the draft, and deck edits stay in the deck.
+The **Answer** slide in `findings.md` is the executive summary. M365 does not write an executive summary. In the Microsoft 365 Copilot app, the PowerPoint agent builds the deck from `findings.md`. It draws each chart natively from its file, as `m365-assembly.md` specifies. Datasets travel beside the deck. M365 consults methodology only for reasoning. Findings, methodology, chart files, and datasets stay authoritative upstream: substantive revisions go back through the draft, and deck edits stay in the deck.
 
 ## Structural consistency
 
-Every rule holds for the complete draft:
+Every rule applies to the complete draft:
 
-- `findings.md` stands alone for its audience: context, answer, findings with evidence and contrary results, plain-language method, limitations, and caveats need no earlier release, methodology, or M365 edits. `findings: []` is the mechanical check only.
-- `methodology.md` stands alone as the analytical account: scope, sources, method, settings, validation, findings, evidence, contrary results, limitations, and caveats need no earlier release or investigation records. Include methodological mistakes that changed understanding; execution attempts that changed no understanding stay in code history.
+- `findings.md` stands alone for its audience. Its context, answer, findings with evidence and contrary results, plain-language method, limitations, and caveats need no earlier release, no methodology, and no M365 edits. `findings: []` is only the mechanical check.
+- `methodology.md` stands alone as the analytical account. Its scope, sources, method, settings, validation, findings, evidence, contrary results, limitations, and caveats need no earlier release and no investigation records. Include the methodological mistakes that changed understanding. Execution attempts that changed no understanding stay in code history.
 - The narratives agree in claims, numbers, qualifications, and caveats. Every `###` finding heading in findings has a methodology section with identical heading text (`headings`).
-- Commands write every manifest field except the producing state of a result without evidence; in `revalidation_flags` you fill `represented_in` and the user's `disposition`. A field recorded by hand follows `package-format/manifest-template.md`.
-- The manifest `inventory` matches every draft file's byte size and SHA-256, except its own path-only row (`verify`).
-- `charts/` matches the chart specifications in `findings.md` (`charts`). Each chart file serializes a recorded result, and the manifest's `charts` and the methodology name that result.
-- `datasets/` and the manifest match the recorded audience-facing selection, including explicit `none`. Headers use glossary display names; methodology maps each to its source column. Dataset and column caveats go under findings' **Supporting datasets**, leaving values as recorded.
+- Commands write every manifest field, except the producing state of a result without evidence. In `revalidation_flags`, you fill `represented_in` and the user's `disposition`. A field that you record by hand follows `package-format/manifest-template.md`.
+- The manifest `inventory` matches each draft file in byte size and SHA-256, except the row for the manifest itself, which has only the path (`verify`).
+- `charts/` matches the chart specifications in `findings.md` (`charts`). Each chart file serializes a recorded result. The manifest's `charts` and the methodology name that result.
+- `datasets/` and the manifest match the recorded audience-facing selection. This includes an explicit `none`. Headers use glossary display names. The methodology maps each header to its source column. Dataset and column caveats go under **Supporting datasets** in findings, and the values stay as recorded.
 
 ## Revalidation caveats
 
-`check-draft` refuses drift in the rendered table and names `state render`; with no `findings.json` any row is drift; a project helper without `findings_drift` needs `awb-init` repair (`install_helpers.py --upgrade`). Flags still come from the rendered `state.md` rows.
+`check-draft` refuses drift in the rendered table and names `state render`. If there is no `findings.json`, any row is drift. If a project helper does not have `findings_drift`, it needs `awb-init` repair (`install_helpers.py --upgrade`). Flags still come from the rendered `state.md` rows.
 
-The manifest's `revalidation_flags` is `none` or one entry per finding the investigation's `state.md` currently flags (`unmatched_flags` lists the ones it lacks): `{finding, reason, represented_in, disposition}`. `finding` and `reason` are exactly as that row writes them. `represented_in` lists every place the draft represents an affected conclusion, each a short description such as `findings: <slide headline>`, `methodology: <section>`, `chart 2`, or `dataset late-closures: <column>`; or it is `none` when the draft represents none. `disposition` is one of `none`, `revalidate`, `omit`, or `release_with_caveat`: required when `represented_in` lists places, optional when it is `none`. Each represented flagged finding is listed as unresolved under findings' **Limitations and open caveats**.
+The manifest's `revalidation_flags` is `none`, or one entry for each finding that the investigation's `state.md` currently flags: `{finding, reason, represented_in, disposition}`. `unmatched_flags` lists the flagged findings that `revalidation_flags` does not have. `finding` and `reason` are exactly as that row writes them. `represented_in` lists every place where the draft represents an affected conclusion. Each place is a short description, for example `findings: <slide headline>`, `methodology: <section>`, `chart 2`, or `dataset late-closures: <column>`. If the draft represents no affected conclusion, `represented_in` is `none`. `disposition` is one of `none`, `revalidate`, `omit`, or `release_with_caveat`. If `represented_in` lists places, the entry must have a `disposition`. If `represented_in` is `none`, the `disposition` is optional. Each represented flagged finding is listed as unresolved under **Limitations and open caveats** in findings.
 
-Each represented conclusion carries a nearby caveat unless the disposition omits it: beside claims in both narratives, in a chart specification's **Caveat:** and **Alt text:** lines in findings, or in the dataset or column description under **Supporting datasets**. Findings uses the template's **Awaiting revalidation:** prefix with a plain-language reason, on every slide where the conclusion appears.
+Each represented conclusion carries a nearby caveat, unless the disposition omits it. The caveat is:
 
-A recorded disposition applies while its finding and reason match the current `state.md` row exactly; a new or changed reason reopens it. A draft holds `none` until the user chooses. Release requires `omit` or `release_with_caveat` for every represented flag; `revalidate` pauses the release for separately authorized analytical work.
+- beside claims in both narratives,
+- in the **Caveat:** and **Alt text:** lines of a chart specification in findings, or
+- in the dataset or column description under **Supporting datasets**.
+
+Findings uses the **Awaiting revalidation:** prefix of the template, with a plain-language reason, on every slide where the conclusion appears.
+
+A recorded disposition applies while its finding and reason match the current `state.md` row exactly. A new or changed reason opens it again. A draft holds `none` until the user chooses. For a release, every represented flag must have `omit` or `release_with_caveat`. `revalidate` pauses the release for analytical work that has a separate authorization.
 
 ## Commands
 
-The commands' verdicts settle every mechanical rule; report their rows verbatim. Run each from the project root; `python3 src/awb.py <command> --help` gives its arguments, output keys, and exit status. To diagnose a helper's rows, such as a name `check-draft` reports that is not internal, read [helpers](helpers.md).
+The verdicts of the commands decide every mechanical rule. Report their rows verbatim. Run each command from the project root. `python3 src/awb.py <command> --help` gives its arguments, output keys, and exit status. To diagnose the rows of a helper, read [helpers](helpers.md). An example is a name that `check-draft` reports but that is not internal.
 
-- `export <investigation> <package>` writes the chart and dataset files, `charts`, `dataset_selection`, `export_checks`, and the producing and packaging state, creating the manifest when absent; a call with only `--result` refreshes provenance and leaves exported files untouched. It serializes only when every `--chart` and `--dataset` result passes `compare_evidence`, otherwise reporting `exports_blocked`; a `--result` is recorded without that check. It writes nothing when any evidence is missing.
-- `check-draft <investigation> <package> [--verify-only]` checks the whole draft against every internal name the project defines, the chart files, the headings, the inventory (rewritten unless `--verify-only`, which writes nothing), and `state.md`'s current flags. `names_problems` means that name set is incomplete: repair the cause and rerun.
+- `export <investigation> <package>` writes the chart and dataset files, `charts`, `dataset_selection`, `export_checks`, and the producing and packaging state. If the manifest is absent, the command creates it. A call with only `--result` refreshes provenance and does not change the exported files. The command serializes only when every `--chart` and `--dataset` result passes `compare_evidence`. If not, it reports `exports_blocked`. It records a `--result` without that check. If any evidence is missing, it writes nothing.
+- `check-draft <investigation> <package> [--verify-only]` checks the whole draft against these items:
+  - Every internal name that the project defines.
+  - The chart files.
+  - The headings.
+  - The inventory. The command rewrites the inventory, unless you use `--verify-only`, which writes nothing.
+  - The current flags of `state.md`.
+
+  `names_problems` means that the name set is incomplete. Repair the cause and run the command again.

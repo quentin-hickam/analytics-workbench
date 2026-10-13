@@ -5,9 +5,16 @@ description: "Clean one analytics workbench dataset: find its data errors and co
 
 # Clean one dataset
 
-Work on one dataset at a time: a canonical view, a publication, or a landed acquisition. This skill and its references hold the data and analysis guides' cleaning rules, so a cleaning pass reads neither guide. Corrections go into view definitions or a new publication; landed originals and existing publications are never modified.
+Work on one dataset at a time: a canonical view, a publication, or a landed acquisition. This skill and its references contain the cleaning rules of the data guide and the analysis guide. For this reason, a cleaning pass does not read these two guides. Put the corrections into view definitions or into a new publication. Never change the landed originals or the existing publications.
 
-Run the bundled scripts as black boxes, by path, with the project's Python environment (the scan needs `duckdb`). A typical pass is six tool calls: scan, read the view definition and the dataset's catalog row in one call, edit the view, rescan, `stale`, record.
+Run the bundled scripts as black boxes, by path, with the Python environment of the project (the scan needs `duckdb`). A typical pass uses six tool calls:
+
+- scan
+- read the view definition and the catalog row of the dataset in one call
+- edit the view
+- rescan
+- `stale`
+- record
 
 ## 1. Scan
 
@@ -15,26 +22,50 @@ Run the bundled scripts as black boxes, by path, with the project's Python envir
 python3 <skill-directory>/scripts/scan_dataset.py <project-root> <dataset> [--key COLS] [--ref COL=TARGET.COL] [--range COL=MIN:MAX] [--columns COLS]
 ```
 
-`<dataset>` is usually the canonical view; `--help` lists the other targets. Pass the catalog's grain as `--key` when you know it; otherwise the scan proposes candidate keys. Pass the joins the question uses as `--ref`, and known valid ranges and the reporting period as `--range`; each is repeatable. For a wide dataset, `--columns` limits per-column checks to the columns in scope.
+`<dataset>` is usually the canonical view. `--help` lists the other targets. If you know the grain from the catalog, give it as `--key`. If not, the scan proposes candidate keys. Give the joins that the question uses as `--ref`. Give the known valid ranges and the reporting period as `--range`. You can repeat each of these two options. For a wide dataset, `--columns` limits the per-column checks to the columns in scope.
 
-Stdout prints the scan path (its stem is `<scan-name>` in step 6) and lists up to 25 unrecorded issues as `S<n>` with key, count, and three examples; `more_issues` counts the rest, which are in the scan file's `issues`. Open the scan file only for those, or when a decision needs more than three examples. Issues under `recorded` already have a quality row: reopen one whose status is `corrected` or whose `count` differs from its `recorded_count`; leave the rest as recorded. Read [checks.md](references/checks.md) when a likely false positive or a check's threshold bears on a decision.
+Stdout shows the scan path (the stem of this path is `<scan-name>` in step 6). Stdout also lists up to 25 unrecorded issues as `S<n>`, each with its key, count, and three examples. `more_issues` gives the number of the other issues, which are in `issues` in the scan file. Open the scan file only for these other issues, or when a decision needs more than three examples. Issues under `recorded` already have a quality row. Reopen a recorded issue if its status is `corrected`, or if its `count` is different from its `recorded_count`. Keep the other recorded issues as recorded. Read [checks.md](references/checks.md) when a decision depends on a probable false positive or on the threshold of a check.
 
 ## 2. Decide
 
-The active question bounds the work: decide issues in the columns the active investigation uses, unless the user asked for broader cleaning; the rest stay in the scan file. Put each in-scope issue in one class; the keys are the checks each class usually takes:
+The active question sets the limits of the work. Decide the issues in the columns that the active investigation uses, unless the user asked for broader cleaning. The other issues stay in the scan file. Put each in-scope issue in one class. The keys after each class name are the checks that the class usually gets:
 
-- **Shared cleaning rule** (`whitespace`, `variants`, `near-variants`, `sentinel`, `parse`, `date-formats`, `text-typed`, `duplicate-rows`, `duplicate-key`, `ancient-date`, `range` as a validity rule): an error in the data itself, wrong for every investigation, such as a placeholder meaning missing or a row landed twice.
-- **Shared limitation** (`null-key`, `orphans`, `all-null`): a real defect no rule can fix, such as orphans from a partial extract, null keys, or a column the source never fills. Record it with status `open`; the view stays as it is.
-- **Investigation-local choice** (`range` as the reporting period, `extreme`): correct data the question chooses to exclude or treat specially, such as test accounts, a period, or real outliers. Name the exclusion for that investigation's settings in the report. When the property is worth knowing project-wide, also record it with treatment "none in the foundation; investigations decide".
-- **Not an issue** (often `negative`, `future-date`, `extreme`): real values that only look odd, such as refunds or due dates. Record one only when a user decision or a non-obvious reason would otherwise be asked again.
+- **Shared cleaning rule** (`whitespace`, `variants`, `near-variants`, `sentinel`, `parse`, `date-formats`, `text-typed`, `duplicate-rows`, `duplicate-key`, `ancient-date`, `range` as a validity rule): an error in the data itself, which is wrong for every investigation. Examples are a placeholder that means missing, or a row that was landed two times.
+- **Shared limitation** (`null-key`, `orphans`, `all-null`): a real defect that no rule can fix. Examples are orphans from a partial extract, null keys, or a column that the source never fills. Record it with the status `open`. The view stays as it is.
+- **Investigation-local choice** (`range` as the reporting period, `extreme`): data that is correct, but that the question chooses to exclude or to treat in a special way. Examples are test accounts, a period, or real outliers. In the report, name the exclusion for the settings of that investigation. When the property is useful to know for all of the project, also record it with the treatment "none in the foundation; investigations decide".
+- **Not an issue** (often `negative`, `future-date`, `extreme`): real values that only look strange, such as refunds or due dates. Record one only when the record prevents a second request for a user decision or for a non-obvious reason.
 
-Decide yourself the fixes that change only representation: `whitespace`, `text-typed`, case- or punctuation-only `variants`, a clear `parse` format error, a `date-formats` mix with one reading, and `duplicate-rows` under a recorded grain — except in a code or identifier column, where case, padding, and numeric form can carry meaning. Ask when examples or source context leave meaning ambiguous. Record `all-null` as an open limitation yourself. The user decides every other issue, because each changes meaning: what a placeholder stands for (missing, zero, or real), the canonical label, whether repeated rows or keys are errors and which row wins, whether out-of-range values are wrong, a parsed value that carries meaning such as `<5`, how to treat orphans and null keys, and an ambiguous day-month order. Ask all of these in one message, as a table of issue, observation with count and examples, proposed treatment, and the alternative. Ask in sequence only when one answer changes which later questions arise, such as the grain deciding which repeated keys are issues.
+Decide yourself the fixes that change only the representation:
 
-Decide is done when every in-scope `S<n>`, including any past stdout's 25, has a class and every question asked has an answer or is recorded as `open`.
+- `whitespace`
+- `text-typed`
+- `variants` that differ only in case or punctuation
+- a clear `parse` format error
+- a `date-formats` mix that you can read in only one way
+- `duplicate-rows` under a recorded grain
+
+Exception: do not decide these fixes yourself in a code column or an identifier column, because there, case, padding, and numeric form can have a meaning. Ask when the examples or the source context do not make the meaning clear. Record `all-null` as an open limitation yourself.
+
+The user decides every other issue, because each of these issues changes meaning:
+
+- what a placeholder stands for (missing, zero, or real)
+- the canonical label
+- if repeated rows or repeated keys are errors, and which row wins
+- if out-of-range values are wrong
+- a parsed value that has a meaning, such as `<5`
+- how to treat orphans and null keys
+- an ambiguous day-month order
+
+Ask all of these questions in one message, as a table. The table has these columns: issue, observation with count and examples, proposed treatment, and the alternative. Ask the questions one after the other only when one answer changes which later questions occur. For example, the grain decides which repeated keys are issues.
+
+Decide is done when these two conditions are true:
+
+- Every in-scope `S<n>` has a class. This includes the issues from each earlier stdout (up to 25, from each).
+- Every question that you asked has an answer or is recorded as `open`.
 
 ## 3. Correct
 
-Implement accepted shared rules in the canonical view under `foundation/views/` that consumers already read. Correct values and keep rows, except rows invalid as a rule, such as exact duplicates or a decided key rule's losing rows. Read [correction-views.md](references/correction-views.md) before writing a pattern new to this project's views, or when a view cannot express the correction (the publish branch). If the pass changed no view or publication, skip steps 4 and 5.
+Put the accepted shared rules into the canonical view under `foundation/views/` that consumers already read. Correct the values and keep the rows, except the rows that are invalid as a rule. Examples are exact duplicates, or the rows that lose under a decided key rule. Read [correction-views.md](references/correction-views.md) before you write a pattern that is new to the views of this project. Also read it when a view cannot express the correction (the publish branch). If the pass changed no view and no publication, skip steps 4 and 5.
 
 ## 4. Confirm
 
@@ -42,15 +73,21 @@ Implement accepted shared rules in the canonical view under `foundation/views/` 
 python3 <skill-directory>/scripts/scan_dataset.py <project-root> <dataset> --rescan
 ```
 
-Every scan after the edit uses `--rescan`, which keeps the pre-cleaning baseline and its options; a plain scan starts a new baseline. Stdout reports each issue's before and after counts, the row count, and null-rate and type changes. Expect addressed issues resolved, rows unchanged unless duplicates were removed, and null increases that match placeholders converted to null. Explain any other change before going on. Use `python3 src/awb.py sql` on a saved query only when the delta leaves a change unexplained.
+Every scan after the edit uses `--rescan`. This option keeps the baseline from before the cleaning, and the options of that baseline. A plain scan starts a new baseline. For each issue, stdout gives the count before and the count after. Stdout also gives the row count, and the changes in null rate and in type. Expect these results:
+
+- The addressed issues are resolved.
+- The rows do not change, unless duplicates were removed.
+- The increases in nulls match the placeholders that were converted to null.
+
+Explain each other change before you continue. Use `python3 src/awb.py sql` on a saved query only when the delta does not explain a change.
 
 ## 5. Flag affected findings
 
-Run `python3 src/awb.py stale`. Flag the findings whose `stale` entry names the corrected view or publication, or a view built on it; findings `stale` lists for other reasons keep their status.
+Run `python3 src/awb.py stale`. Flag the findings whose `stale` entry names the corrected view or publication, or a view that is built on it. Findings that `stale` lists for other reasons keep their status.
 
 ## 6. Record
 
-Record decided issues, corrections, flags, and catalog changes in one call:
+Record the decided issues, corrections, flags, and catalog changes in one call:
 
 ```sh
 python3 <skill-directory>/scripts/record_cleaning.py <project-root> <scan-name> <<'EOF'
@@ -62,12 +99,30 @@ python3 <skill-directory>/scripts/record_cleaning.py <project-root> <scan-name> 
 EOF
 ```
 
-Flags go through the project's `src/provenance.py` state flag helper. A helper predating `findings.json` refuses before writes; run `awb-init` repair (`install_helpers.py --upgrade`).
+Flags go through the state flag helper in the `src/provenance.py` of the project. A helper that is older than `findings.json` refuses before it writes. In that case, run the `awb-init` repair (`install_helpers.py --upgrade`).
 
-With no affected finding, add `"findings": "none: stale listed no finding reading <view>"`. The script fills new rows' IDs, observations, counts, and markers, keeps scan links and recorded counts and dates in `foundation/quality.json`, fills flagged statuses, and turns `{S1}` into that issue's quality ID. Reopening updates judgment cells and the link; the observation stays as first written. A decision on a recorded issue the scan no longer lists uses its quality ID, such as `"Q-004"`, as the key; it revises judgment cells while keeping the observation and link. `{Q-004}` placeholders also resolve. Record shared vocabulary in the glossary yourself.
+If no finding is affected, add `"findings": "none: stale listed no finding reading <view>"`. The script does these tasks:
 
-Read the existing catalog row before setting any of its cells. A cell you set replaces the whole cell: give its complete new text, keeping what still holds and citing quality IDs for rationale.
+- It fills the IDs, observations, counts, and markers of new rows.
+- It keeps the scan links, and the recorded counts and dates, in `foundation/quality.json`.
+- It fills the flagged statuses.
+- It changes `{S1}` into the quality ID of that issue.
+
+A reopen updates the judgment cells and the link. The observation stays as it was first written. For a decision on a recorded issue that the scan no longer lists, use its quality ID as the key, such as `"Q-004"`. This decision revises the judgment cells, but it keeps the observation and the link. `{Q-004}` placeholders also resolve. Record shared vocabulary in the glossary yourself.
+
+Read the existing catalog row before you set any of its cells. A cell that you set replaces the whole cell. For this reason, give the complete new text of the cell. Keep the text that is still true, and cite quality IDs for the rationale.
 
 ## Report
 
-Report the dataset, the decided issues by class, the corrections and changed views, the rescan's delta lines verbatim, the quality IDs, each flagged finding with its reason, the in-scope issues still `open`, and any exclusion named for an investigation's settings. Say that no analysis was rerun. Commit `foundation/quality.json` with `foundation/quality.md`; the JSON holds no source values. When `foundation/sources.md` restricts copying the source's values, confirm before committing `foundation/quality.md`: its rows quote up to three example values.
+Report these items:
+
+- the dataset
+- the decided issues, by class
+- the corrections and the changed views
+- the delta lines of the rescan, verbatim
+- the quality IDs
+- each flagged finding, with its reason
+- the in-scope issues that are still `open`
+- each exclusion that you named for the settings of an investigation
+
+Say that no analysis was rerun. Commit `foundation/quality.json` together with `foundation/quality.md`. The JSON file contains no source values. When `foundation/sources.md` puts limits on copies of the source values, confirm before you commit `foundation/quality.md`. The reason is that its rows quote up to three example values.

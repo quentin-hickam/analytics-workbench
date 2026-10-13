@@ -5,47 +5,74 @@ description: "Explore one dataset (EDA) for the active analytics workbench inves
 
 # Explore a dataset for an investigation
 
-Explore one canonical view or publication at a time, within the investigation's question and scope. This skill carries the analysis rules EDA needs; load `workbench-guides/analysis.md` only to turn a pattern into a finding. EDA writes only under `investigations/<name>/exploration/` and the records in step 5.
+Explore one canonical view or publication at a time, in the limits of the question and scope of the investigation. This skill contains the analysis rules that EDA needs. Load `workbench-guides/analysis.md` only to turn a pattern into a finding. EDA writes only under `investigations/<name>/exploration/` and to the records in step 5.
 
 ## 1. Frame
 
-Use the investigation the user names, otherwise the README's active one. If its `brief.md` and `state.md` are not loaded, read them in one call. Say in a sentence or two which dataset you will explore and why it bears on the question. If several datasets fit, start with the one that holds the question's measure.
+Use the investigation that the user names. If the user names none, use the active investigation in the README. If its `brief.md` and `state.md` are not loaded, read them in one call. In one or two sentences, say which dataset you will explore and why it is related to the question. If more than one dataset fits, start with the dataset that holds the measure of the question.
 
 ## 2. Scan
 
-From the project root, with the interpreter that runs the project's analysis:
+Run this command from the project root, with the interpreter that runs the analysis of the project:
 
 ```sh
 python3 <skill-directory>/scripts/eda_scan.py <project-root> <view-or-publication> [options]
 ```
 
-Run this script unread. It reads scope, measure, and dimensions from the investigation's `settings.toml` (`[eda]`, with the period falling back to `[parameters]` `start` and `end`), writes the complete scan to `investigations/<name>/exploration/eda/<dataset>.json`, and prints a compact summary. A new investigation's settings usually name no date column, measure, or dimensions, so pass them in the first run: the brief's population as `--where`, its date column as `--date-column` (with `--start` and `--end` when settings hold no period), and the question's measure and grouping columns as `--measure` and `--dimension` (repeatable). A `not set` or `not applied` line names any option still missing. Pass exploratory choices as options; settings change only when the user settles a population or period choice. `--help` lists the other options, such as `--label` for a second scope, and the settings keys. Exit status 2 prints the fix; apply it and run again.
+Run this script, but do not read it. The script does these tasks:
 
-One scan per dataset and scope is final, and its printed summary is the result. To open one part of the saved file, print it with `--show`, such as `--show columns.<column>.top` or `--show measure.by_dimension.<dimension>.values`; read [the scan file](references/scan-file.md) to find any other section.
+- It reads the scope, measure, and dimensions from the `settings.toml` of the investigation (`[eda]`). For the period, it uses `[parameters]` `start` and `end` if `[eda]` has no period.
+- It writes the complete scan to `investigations/<name>/exploration/eda/<dataset>.json`.
+- It prints a compact summary.
+
+The settings of a new investigation usually name no date column, measure, or dimensions. For this reason, give them in the first run:
+
+- the population of the brief as `--where`
+- the date column of the brief as `--date-column` (with `--start` and `--end` when the settings hold no period)
+- the measure and grouping columns of the question as `--measure` and `--dimension` (you can repeat these options)
+
+A `not set` or `not applied` line names each option that is still missing. Give exploratory choices as options. The settings change only when the user settles a population choice or a period choice. `--help` lists the other options (such as `--label` for a second scope) and the settings keys. Exit status 2 prints the fix. Apply the fix and run the script again.
+
+One scan for each dataset and scope is final, and its printed summary is the result. To open one part of the saved file, print it with `--show`, such as `--show columns.<column>.top` or `--show measure.by_dimension.<dimension>.values`. To find a different section, read [the scan file](references/scan-file.md).
 
 ## 3. Read the scan
 
-Check in order:
+Do these checks in this order:
 
-- **Scope.** Are the rows before and after the filters plausible? Does a `not set` or `not applied` line, or an unread settings key, mean the population differs from the brief's? If so, scan again with the missing options and say so.
-- **Grain.** Do the candidate keys match the catalog's grain? Check duplicates and any declared-key violation.
-- **Anomalies.** Give every printed anomaly one disposition: a shared data problem, confirmed by a follow-up query or the source register before the step 5 hand-off; a local analytical matter; or dismissed with a reason. The `route` column is the scan's guess, not the disposition.
-- **Relationships.** Read variance explained, the trend, the measure's correlations, and **contrary** groups. Variance explained rises with group count, and a trend where a high-variance dimension's shares shift may be mix rather than change. Name candidate explanations and keep every contrary pattern.
+- **Scope.** Are the rows before and after the filters plausible? Does a `not set` or `not applied` line, or an unread settings key, show that the population is different from the population of the brief? If yes, scan again with the missing options and say so.
+- **Grain.** Do the candidate keys match the grain in the catalog? Check the duplicates and each declared-key violation.
+- **Anomalies.** Give each printed anomaly one of these dispositions:
+  - a shared data problem, which a follow-up query or the source register confirms before the hand-off in step 5
+  - a local analytical matter
+  - dismissed, with a reason
 
-Read [reading the scan](references/reading-the-scan.md) for an anomaly kind's confirmation check, or when a data problem and a real pattern are hard to tell apart. Draft the observations that bear on the question, labeled exploratory, with candidate explanations and contrary patterns, for the report.
+  The `route` column is the guess of the scan, not the disposition.
+- **Relationships.** Read the variance explained, the trend, the correlations of the measure, and the **contrary** groups. Variance explained increases with the group count. When the shares of a high-variance dimension shift, it is possible that the trend is mix and not change. Name the candidate explanations and keep every contrary pattern.
+
+Read [reading the scan](references/reading-the-scan.md) for the confirmation check of an anomaly kind. Also read it when it is difficult to see the difference between a data problem and a real pattern. For the report, write a draft of the observations that are related to the question. Label them as exploratory, and give the candidate explanations and contrary patterns.
 
 ## 4. Follow up with saved queries
 
-Run one follow-up for each anomaly you are confirming as a shared data problem and each candidate explanation the user's question turns on; leave the rest as Next steps. The step is done when every observation you report is either settled by a saved query or recorded as a Next step.
+Run one follow-up for each anomaly that you confirm as a shared data problem. Also run one follow-up for each candidate explanation that the question of the user depends on. Leave the other items as Next steps. This step is done when each observation that you report is settled by a saved query or recorded as a Next step.
 
-Write each follow-up as `investigations/<name>/exploration/<topic>.sql` and run it from the project root with `python3 src/awb.py sql <path>`. Start each file with a comment naming the question it serves and its scope, and copy every printed scope filter, period included, into its `WHERE`. Aggregate, order, and limit in SQL so the printed table stays short. To separate mix from within-group change, compute each group's share and mean per period in one query; a moving overall mean over stable group means is a mix shift. Revise and rerun the same file rather than adding variants; save even a one-off, since the report cites its path. Draw an exploratory chart only on request, saved under `exploration/`.
+Write each follow-up as `investigations/<name>/exploration/<topic>.sql`. Run it from the project root with `python3 src/awb.py sql <path>`. Start each file with a comment that names its question and its scope. Copy every printed scope filter (the period also) into the `WHERE` of the file. Aggregate, order, and limit in SQL, so that the printed table stays short.
+
+To separate mix from within-group change, calculate the share and the mean of each group for each period in one query. If the overall mean moves but the group means are stable, this is a mix shift. Revise the same file and run it again. Do not add variants of it. Save even a query that you use one time only, because the report cites its path. Draw an exploratory chart only on request, and save it under `exploration/`.
 
 ## 5. Record what was learned
 
-- **State.** Under Unresolved issues, add each confirmed shared data problem or coverage limitation, naming the scan path; under Next steps, add each consequential pattern or candidate explanation not yet tested through `run.py`, as a question for it — a pattern becomes a finding only there. Replace items they supersede, each list in one call: `python3 src/awb.py state issues --add "<text>"` and `state next --add "<text>" --drop <number>`.
-- **History.** An entry only for a limitation or decision that affects the question; a routine scan gets none.
-- **Vocabulary.** A term the data settled goes where AGENTS.md records meanings; a term still open is an unresolved issue.
-- **Shared data problems.** Except for coverage limitations recorded below, hand confirmed shared data problems to awb-clean: "Use awb-clean on <dataset> for <problem>". Leave canonical views to awb-clean. When exploration must exclude affected rows, or a question-specific exclusion stays local, do it in a saved query whose comment gives the reason, and say so; an exclusion `run.py` needs goes into settings.
-- **Coverage limitations.** Record a confirmed shared limitation in time coverage or field availability as an `open` row in `foundation/quality.md`, citing the scan; it needs no awb-clean pass.
+- **State.** Under Unresolved issues, add each confirmed shared data problem or coverage limitation, and name the scan path. Under Next steps, add each important pattern or candidate explanation that `run.py` did not test yet. Write it as a question for `run.py`, because a pattern becomes a finding only there. Replace the items that they supersede. Change each list in one call: `python3 src/awb.py state issues --add "<text>"` and `state next --add "<text>" --drop <number>`.
+- **History.** Add an entry only for a limitation or decision that affects the question. A routine scan gets no entry.
+- **Vocabulary.** Put a term that the data settled where AGENTS.md records meanings. A term that is still open is an unresolved issue.
+- **Shared data problems.** Except for the coverage limitations in the next item, hand the confirmed shared data problems to awb-clean: "Use awb-clean on <dataset> for <problem>". Leave canonical views to awb-clean. When exploration must exclude affected rows, or a question-specific exclusion stays local, do the exclusion in a saved query. Give the reason in the comment of that query, and say so. Put an exclusion that `run.py` needs into the settings.
+- **Coverage limitations.** Record a confirmed shared limitation in time coverage or field availability as an `open` row in `foundation/quality.md`. Cite the scan. This limitation needs no awb-clean pass.
 
-Report the dataset and scope, the printed tables cut to the rows that bear on the question, the observations, each anomaly's disposition, the saved query paths, the records changed, and the scan path.
+Report these items:
+
+- the dataset and the scope
+- the printed tables, cut to the rows that are related to the question
+- the observations
+- the disposition of each anomaly
+- the paths of the saved queries
+- the records that you changed
+- the scan path

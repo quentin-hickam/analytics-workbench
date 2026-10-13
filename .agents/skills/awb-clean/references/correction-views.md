@@ -1,16 +1,16 @@
 # Correction views
 
-Corrections live in the Git-managed canonical view definitions under `foundation/views/`, loaded by `session()` in filename order. A definition that reads another view must sort after it.
+Corrections are in the Git-managed canonical view definitions under `foundation/views/`. `session()` loads these definitions in filename order. A definition that reads another view must sort after that view.
 
 ## Where the correction goes
 
-Keep one definition per dataset while it stays readable. When corrections grow, split it into a source view and a corrected view under the canonical name, for example `01_orders_source.sql` reading the publication and `02_orders.sql` applying the rules. Keep the canonical name; findings and the catalog cite it.
+Keep one definition for each dataset while the definition stays easy to read. When the corrections become larger, split the definition into a source view and a corrected view under the canonical name. For example, `01_orders_source.sql` reads the publication and `02_orders.sql` applies the rules. Keep the canonical name, because findings and the catalog cite it.
 
-The originals stay readable in the publication and the landed files, so add a `_raw` copy of a corrected column only when an investigation needs both. Write fixed date bounds rather than `current_date`, so a rule gives the same result on any day.
+The originals stay readable in the publication and in the landed files. For this reason, add a `_raw` copy of a corrected column only when an investigation needs both. Write fixed date bounds instead of `current_date`, so that a rule gives the same result on any day.
 
 ## Patterns
 
-Each pattern is DuckDB SQL inside one `CREATE VIEW`. Combine them in a single `SELECT source.* REPLACE (...)` so the view keeps the publication's column order.
+Each pattern is DuckDB SQL in one `CREATE VIEW`. Combine the patterns in a single `SELECT source.* REPLACE (...)`, so that the view keeps the column order of the publication.
 
 ```sql
 CREATE VIEW orders AS
@@ -29,14 +29,16 @@ FROM source
 LEFT JOIN labels ON lower(trim(source.dept)) = labels.variant;
 ```
 
-- **Text placeholders:** `CASE WHEN lower(trim(note)) IN ('', 'n/a', 'unknown') THEN NULL ELSE note END`. Map a placeholder to a value, such as `0`, only when the user said it means that value.
-- **Typing text:** map the decided bad values first, then `CAST`. A strict `CAST` makes a new unparseable value fail the query, which is the signal to rescan; `TRY_CAST` would turn it silently into null. Use `TRY_CAST` only when the user decided that unparseable values mean missing.
-- **Mixed date formats:** `coalesce(TRY_CAST(d AS DATE), CAST(try_strptime(d, '%d/%m/%Y') AS DATE))`, listing formats in the decided order of precedence.
+- **Text placeholders:** `CASE WHEN lower(trim(note)) IN ('', 'n/a', 'unknown') THEN NULL ELSE note END`. Map a placeholder to a value, such as `0`, only when the user said that it means that value.
+- **Typing text:** first, map the decided bad values. Then use `CAST`. With a strict `CAST`, a new unparseable value makes the query fail, and this failure is the signal to rescan. `TRY_CAST` changes such a value into null and gives no signal. Use `TRY_CAST` only when the user decided that unparseable values mean missing.
+- **Mixed date formats:** `coalesce(TRY_CAST(d AS DATE), CAST(try_strptime(d, '%d/%m/%Y') AS DATE))`. List the formats in the decided order of precedence.
 - **Exact duplicate rows:** `SELECT DISTINCT * FROM source` in the source view.
-- **Repeated keys:** `QUALIFY row_number() OVER (PARTITION BY order_id ORDER BY updated_at DESC, <tie-breaker>) = 1`, with the winning-row rule the user chose and a deterministic tie-breaker.
-- **Out-of-range values:** null the value, not the row: `CASE WHEN amount < 0 THEN NULL ELSE amount END`, with the bound the user decided.
-- **Orphans:** keep the rows. Record the limitation; whether to exclude them is each investigation's choice.
+- **Repeated keys:** `QUALIFY row_number() OVER (PARTITION BY order_id ORDER BY updated_at DESC, <tie-breaker>) = 1`. Use the winning-row rule that the user chose, and a deterministic tie-breaker.
+- **Out-of-range values:** change the value to null, not the row: `CASE WHEN amount < 0 THEN NULL ELSE amount END`. Use the bound that the user decided.
+- **Orphans:** keep the rows. Record the limitation. Each investigation chooses if it excludes these rows.
 
 ## When a view cannot express it
 
-Reparsing landed files is a conversion change: malformed rows, the wrong delimiter or encoding, or a column split differently. So is a correction too expensive to repeat in every session. Publish a corrected dataset from the landed acquisitions with `python3 src/awb.py publish` (its `--help` gives the arguments), then point the canonical view at the new publication; that switch is a deliberate preparation change, so name it in the report. Leave the earlier publication in place while any reader needs it. The catalog row then names the new publication under `Definition or location` and `Inputs`, starting from the command's `catalog_row`.
+A new parse of the landed files (for malformed rows, the wrong delimiter or encoding, or a column that is split differently) is a conversion change. A correction that is too expensive to repeat in every session is also a conversion change.
+
+Publish a corrected dataset from the landed acquisitions with `python3 src/awb.py publish` (its `--help` gives the arguments). Then point the canonical view at the new publication. This switch is a deliberate preparation change, so name it in the report. Keep the earlier publication in place while any reader needs it. The catalog row then names the new publication under `Definition or location` and `Inputs`. Start this catalog row from the `catalog_row` of the command.
