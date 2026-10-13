@@ -15,7 +15,7 @@ When README's `Released packages are kept at` line is missing, blank, or `not ye
 
 ## 2. Review
 
-Run the read-only review in [awb-package's references/review.md](../awb-package/references/review.md) on the draft: rules can be added after packaging, and the reviewer did not write the draft. An `error` violation or a narrative problem stops the release; repairs are package revisions through awb-package, which reviews again. Report each `warning` violation and release only once the user accepts it. Rerun the review only when the narratives or `foundation/review-rules.md` changed since its last report.
+Run the read-only review in [awb-package's references/review.md](../awb-package/references/review.md) on the draft at the start of every release request: rules can be added after packaging, no earlier report is kept, and the reviewer did not write the draft. An `error` violation, a narrative problem, or a command problem stops the release; repairs are package revisions through awb-package, which reviews again. Report each `warning` violation and release only once the user accepts it. Within this release request, review again whenever the review goes stale as that file's **After the review** defines; recording `release_with_caveat` under **4. Resolve flags** does not make it stale.
 
 ## 3. Release
 

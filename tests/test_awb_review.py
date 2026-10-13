@@ -8,7 +8,7 @@
 # test_add_to_an_empty_rule_file_writes_the_header: add to an empty rule file writes the header before the first rule.
 # test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes or blank, an unknown severity, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
 # test_pattern_round_trips_through_backticks: a pattern holding backticks, or the word none, is written in backticks and read back as the same expression.
-# test_package_and_release_invoke_the_read_only_review: both skills link the review brief and run it before their final command; the brief limits the reviewer to read tools and the read-only command, asks one line per rule, and AGENTS.md says when to append.
+# test_package_and_release_invoke_the_read_only_review: both skills link the review brief and run it before their final command; the brief limits the reviewer to read tools and the read-only command, asks one line per rule, ends with a summary line counting violations, narrative problems, and command problems, any of which blocks, defines when a review is stale, and with AGENTS.md says which corrections become rules.
 
 import importlib.util
 import json
@@ -245,6 +245,14 @@ def test_package_and_release_invoke_the_read_only_review():
     assert "one line per rule" in brief and "In Codex" in brief
     assert "review-rules add --area" in brief
     assert "foundation/review-rules.md" in agents and "`awb-package`" in agents
+    # The last line counts every kind of problem, so it never says clean while one blocks.
+    assert "`review: clean` when there is no violation, no narrative problem, and the command exited 0" in brief
+    assert "`review: <v> violations (<e> error), <n> narrative problems, <c> command problems`" in brief
+    assert "no `error` violation, no narrative problem, and no command problem" in brief
+    assert "An `error` violation, a narrative problem, or a command problem stops the release" in release
+    assert "is passed and not stale" in package and "goes stale" in release
+    assert "whether its disposition is `omit`" in brief
+    assert "later drafts could repeat" in brief and "later drafts could repeat" in agents
 
     cli = load(SKILLS / "awb-init/assets/awb_cli.py", "awb_cli_commands")
     assert cli.COMMANDS["review-rules"][:2] == ("packaging/draft.py", "cli_review_rules")

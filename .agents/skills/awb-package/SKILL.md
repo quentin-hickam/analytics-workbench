@@ -19,7 +19,7 @@ Packaging **serializes** recorded results: it reuses recorded evidence, exports,
 
 ## 1. Establish
 
-Identify the investigation and package. When the request corrects a draft the user is reviewing, record the correction as a review rule first, as [references/review.md](references/review.md) says under **After the review**. When the request could refer to more than one investigation, ask which before changing package files. Use the package name the user gives; otherwise reuse the existing package's name, or derive a short, stable one from the investigation and a purpose word and report it. Keep one package per investigation unless another has an independent scope or delivery schedule.
+Identify the investigation and package. When the request corrects a draft the user is reviewing, record the correction as a review rule first when later drafts could repeat it, as [references/review.md](references/review.md) says under **After the review**. When the request could refer to more than one investigation, ask which before changing package files. Use the package name the user gives; otherwise reuse the existing package's name, or derive a short, stable one from the investigation and a purpose word and report it. Keep one package per investigation unless another has an independent scope or delivery schedule.
 
 From the project root, install the missing shared formats with `python3 <awb-init skill directory>/scripts/install_helpers.py . --package-formats`, which preserves existing files and records what it installs in `.awb-receipt.json`.
 
@@ -58,7 +58,7 @@ Once the narratives and flags are complete, run the review in [references/review
 
 Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it.
 
-**Done** when `check-draft` prints `passed: true` on the final files and the last review reports no violation or narrative problem left unrepaired, apart from `warning` violations the user accepted. A narrative edit after the review reruns the review; any edit after `check-draft` reruns it. Report its rows verbatim.
+**Done** when `check-draft` prints `passed: true` on the final files and the last review is passed and not stale, as [references/review.md](references/review.md) defines under **After the review**. Any edit after `check-draft` reruns it. Report its rows verbatim.
 
 ## 7. Report
 

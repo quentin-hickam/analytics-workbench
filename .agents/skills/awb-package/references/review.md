@@ -18,11 +18,13 @@ You review the package draft at `deliveries/<investigation>/<package>/draft/`. R
 4. Report, and nothing else:
    - one line per rule in the command's order: `<ID> pass`, `<ID> retired`, or `<ID> violation <file>:<line> "<short quote>"` with the rule's severity, one line per violation;
    - one line per step 3 problem: `narrative <file>:<line> "<short quote>" <what is wrong>`;
-   - the command's `problems` and `errors` verbatim; and
-   - a last line, `review: clean` or `review: <n> violations (<e> error)`.
+   - the command's `problems` and `errors` verbatim, or `command failed` with its output when it did not run; and
+   - a last line, `review: clean` when there is no violation, no narrative problem, and the command exited 0, or otherwise `review: <v> violations (<e> error), <n> narrative problems, <c> command problems`, where command problems count the `problems` and `errors` entries, or 1 when the command failed.
 
 ## After the review
 
-In `awb-package`, repair every `error` violation and every narrative problem, and repair a `warning` violation or report it for the user to accept; a repair that changes the narratives gets a fresh review. `awb-release` repairs nothing and acts as its **2. Review** says.
+A review is passed when its last line reports no `error` violation, no narrative problem, and no command problem, and the user has accepted every `warning` violation; anything else blocks completion and release.
 
-When the user corrects a draft while reviewing it, record the correction as a rule before repairing, so every later review checks it: `python3 src/awb.py review-rules add --area <area> --severity <error or warning> --rule "<what every draft must do>" --fix "<how to repair it>" [--pattern '<regex>']`. The area names what the rule governs, such as `periods` or `metric-definitions`; give a pattern when one line of text can show the violation. A correction that applies to one slide only, such as a preferred wording, is an edit, not a rule. Report the new ID.
+In `awb-package`, repair every `error` violation, every narrative problem, and every command problem, and repair a `warning` violation or report it for the user to accept. A command problem is a missing or unreadable narrative, repaired in the draft, or a malformed section of `foundation/review-rules.md`, repaired in place without changing any rule ID; ask the user when a broken rule's intent is unclear. A review is stale once, after it, the narratives or `foundation/review-rules.md` change, or a `revalidation_flags` entry in `manifest.json` is added or removed or changes its finding, reason, `represented_in`, or whether its disposition is `omit`; a stale review is run again. `awb-release` repairs nothing and acts as its **2. Review** says.
+
+When the user corrects a draft while reviewing it, decide whether later drafts could repeat the mistake. If they could, record the correction as a rule before repairing, so every later review checks it: `python3 src/awb.py review-rules add --area <area> --severity <error or warning> --rule "<what every draft must do>" --fix "<how to repair it>" [--pattern '<regex>']`. The area names what the rule governs, such as `periods` or `metric-definitions`; give a pattern when one line of text can show the violation. Report the new ID. A correction that applies to this draft only, such as a preferred wording on one slide, is an edit, not a rule.
