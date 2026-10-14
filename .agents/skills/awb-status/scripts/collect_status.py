@@ -463,21 +463,33 @@ def probe_file(recorded, opener, unresponsive):
             unresponsive.add(request.hosts[-1])
             return {"result": "unknown", "reason": f"no response from {request.hosts[-1]} within {PROBE_TIMEOUT} s"}
         return {"result": "unknown", "reason": f"{type(error).__name__}: {error}"}
-    compared = {}
+    compared, unusable = {}, []
     for name, header in (("etag", "ETag"), ("last_modified", "Last-Modified")):
         before, now = recorded.get(name), headers.get(header)
         if not isinstance(before, str) or now is None:
+            continue
+        if not now.strip():
+            # A blank header is no evidence of change; nor, below, is a date that does not parse
+            # compared with one that does.
+            unusable.append(header)
             continue
         if name == "etag":
             # An ETag is opaque, chosen by the server; compare weakly, ignoring a W/ prefix.
             same = before.strip().removeprefix("W/") == now.strip().removeprefix("W/")
         else:
-            try:
-                same = http_date(before) == http_date(now)
-            except (TypeError, ValueError, OverflowError):
-                # An out-of-range year overflows the parser; such a date is compared as text.
+            then, current = http_date(before), http_date(now)
+            if then is None and current is None:
+                # A recorded value that is not a date is compared as text with one that is not either.
                 same = before.strip() == now.strip()
+            elif then is None or current is None:
+                unusable.append(header)
+                continue
+            else:
+                same = then == current
         compared[name] = (same, before, now)
+    if not compared and unusable:
+        verb = "is not a usable validator" if len(unusable) == 1 else "are not usable validators"
+        return {"result": "unknown", "reason": f"the server's {' and '.join(unusable)} {verb}"}
     if not compared:
         return {"result": "unknown", "reason": "the server sent neither recorded validator"}
     name = "etag" if "etag" in compared else "last_modified"
@@ -492,8 +504,11 @@ def probe_file(recorded, opener, unresponsive):
 
 
 def http_date(value):
-    """Parse an HTTP date; one without a zone is read as GMT, as HTTP dates are."""
-    parsed = parsedate_to_datetime(value)
+    """Parse an HTTP date, one without a zone read as GMT as HTTP dates are, else return None."""
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 

@@ -28,7 +28,7 @@
 # test_none_chosen_is_a_recorded_decision: `none chosen`, backticked or bare `none`, reports availability none chosen, not unrecorded.
 # test_absent_storage_remains_actionable_when_acquisitions_and_releases_exist: absent lines read unrecorded alongside acquisitions and releases.
 # test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes: land()'s upstream fields drive one HEAD per probeable file; ETag wins over Last-Modified unless only the ETag changed, a weak ETag and an equal date in another form match, HTTP and network errors are unknown, and nothing is written.
-# test_out_of_range_server_date_is_compared_as_text_and_the_probe_continues: a Last-Modified the date parser overflows on falls back to text comparison, and the remaining files are still probed.
+# test_an_unusable_server_validator_is_unknown_and_the_probe_continues: a blank ETag or a Last-Modified that does not parse (including an overflowing year or offset) gives no evidence of change; the other validator decides if usable, else the file is unknown; two unparseable dates are compared as text; later files are still probed.
 # test_a_relanded_url_is_checked_only_in_its_latest_acquisition: after a changed upstream is landed again, only the newest acquisition of that source and URL is probed and the earlier one counts as superseded, even when the newer one records no validator.
 # test_the_latest_acquisition_is_ordered_by_completed_at_then_acquisition_id: completed_at instants are compared across offsets, not by ID, and acquisitions completed in the same second are ordered by acquisition ID, so exactly one stays current.
 # test_a_host_that_times_out_is_not_requested_again: after a connect or read timeout, the host's remaining files are unknown without a request, and other hosts are still probed.
@@ -575,15 +575,35 @@ def test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_w
     assert result["without_upstream"] == 1
 
 
-def test_out_of_range_server_date_is_compared_as_text_and_the_probe_continues(workbench, monkeypatch):
-    date = "Tue, 13 Oct 2026 08:00:00 GMT"
-    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://example.test/a", "last_modified": date},
-                                              "b.csv": {"url": "https://example.test/b", "last_modified": date}})
-    serve(monkeypatch, FakeServer({"https://example.test/a": {"Last-Modified": "Tue, 13 Oct 9999999999 08:00:00 GMT"},
-                                   "https://example.test/b": {"Last-Modified": date}}))
+def test_an_unusable_server_validator_is_unknown_and_the_probe_continues(workbench, monkeypatch):
+    date, url = "Wed, 21 Oct 2015 07:28:00 GMT", "https://example.test/"
+    both = {"etag": '"abc"', "last_modified": date}
+    cases = {  # path: (recorded, served, expected result, expected reason or compared)
+        "a-empty-etag.csv": (both, {"ETag": ""}, "unknown", "the server's ETag is not a usable validator"),
+        "b-garbage-date.csv": (both, {"Last-Modified": "garbage"}, "unknown",
+                               "the server's Last-Modified is not a usable validator"),
+        "c-both-unusable.csv": (both, {"ETag": " ", "Last-Modified": "garbage"}, "unknown",
+                                "the server's ETag and Last-Modified are not usable validators"),
+        "d-empty-etag-same-date.csv": (both, {"ETag": "", "Last-Modified": date}, "unchanged", "last_modified"),
+        "e-garbage-date-same-etag.csv": (both, {"ETag": '"abc"', "Last-Modified": "garbage"}, "unchanged", "etag"),
+        "f-overflowing-year.csv": ({"last_modified": date}, {"Last-Modified": "Tue, 13 Oct 9999999999 08:00:00 GMT"},
+                                   "unknown", "the server's Last-Modified is not a usable validator"),
+        "g-overflowing-offset.csv": ({"last_modified": date}, {"Last-Modified": "Tue, 13 Oct 2026 08:00:00 +99999999"},
+                                     "unknown", "the server's Last-Modified is not a usable validator"),
+        "h-text-dates-same.csv": ({"last_modified": "build 7"}, {"Last-Modified": "build 7"}, "unchanged", "last_modified"),
+        "i-text-dates-differ.csv": ({"last_modified": "build 7"}, {"Last-Modified": "build 8"}, "changed", "last_modified"),
+        "j-recorded-text-served-date.csv": ({"last_modified": "build 7"}, {"Last-Modified": date}, "unknown",
+                                            "the server's Last-Modified is not a usable validator"),
+        "k-next.csv": ({"last_modified": date}, {"Last-Modified": date}, "unchanged", "last_modified"),
+    }
+    land_with_upstream(workbench, "batch-1", {path: {"url": url + path, **recorded}
+                                              for path, (recorded, _, _, _) in cases.items()})
+    server = FakeServer({url + path: served for path, (_, served, _, _) in cases.items()})
+    serve(monkeypatch, server)
     files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
-    assert [(file["path"], file["result"], file.get("current")) for file in files] == [
-        ("a.csv", "changed", "Tue, 13 Oct 9999999999 08:00:00 GMT"), ("b.csv", "unchanged", None)]
+    assert [(file["path"], file["result"], file.get("reason") or file.get("compared")) for file in files] == [
+        (path, result, detail) for path, (_, _, result, detail) in cases.items()]
+    assert len(server.requests) == len(cases)
 
 
 def test_a_relanded_url_is_checked_only_in_its_latest_acquisition(workbench, monkeypatch):
