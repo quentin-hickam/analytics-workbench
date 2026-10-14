@@ -1629,8 +1629,9 @@ def cli_stale(root: Path, argv: list[str]) -> int:
                "result_id, evidence, failed [{name, detail}], and findings, the exact state.md rows to "
                "flag; and runtime_mismatches, one entry per result whose recorded Python, platform, or "
                "package versions differ from the interpreter running stale, or whose runtime records "
-               "requirements lines it could not read (detail '" + UNREAD.rstrip() + " <file>:<line>: "
-               "<text>'): investigation, result_id, evidence, detail, and findings. A runtime mismatch is "
+               "requirements lines it could not read: investigation, result_id, evidence, details, a list "
+               "with one string per difference or unread line (an unread line is '" + UNREAD.rstrip() +
+               " <file>:<line>: <text>', the line's text verbatim), and findings. A runtime mismatch is "
                "a warning to decide on a rerun, not stale, and flags nothing; an unread line's packages "
                "are recorded once it names them, as with #egg=NAME or NAME @ REFERENCE. Run stale with the interpreter that runs run.py: a "
                "version mismatch on every result at once usually means a different interpreter, not an "
@@ -1672,7 +1673,7 @@ def cli_stale(root: Path, argv: list[str]) -> int:
             # A runtime difference is a warning beside the comparisons, never a stale result.
             mismatches = _runtime_mismatches(content.get("runtime")) if content is not None else []
             if mismatches:
-                runtimes.append({**entry, "detail": "; ".join(mismatches) + ".", "findings": rows.get(result_id, [])})
+                runtimes.append({**entry, "details": mismatches, "findings": rows.get(result_id, [])})
     print(json.dumps({"checked": checked, "stale": len(results), "skipped": skipped, "results": results,
                       "runtime_mismatches": runtimes}))
     return 0

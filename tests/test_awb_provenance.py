@@ -729,10 +729,8 @@ def test_runtime_records_a_wheel_url_package_and_its_drift(project, capsys):
         evidence["runtime"]["packages"][name] = "0.0.1-fixture"
     path.write_text(json.dumps(evidence))
     provenance.cli_stale(project, [])
-    assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["detail"] == (
-        f"iniconfig 0.0.1-fixture recorded, {installed('iniconfig')} now; "
-        f"pluggy 0.0.1-fixture recorded, {installed('pluggy')} now; "
-        f"pytest 0.0.1-fixture recorded, {installed('pytest')} now.")
+    assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["details"] == [
+        f"{name} 0.0.1-fixture recorded, {installed(name)} now" for name in ("iniconfig", "pluggy", "pytest")]
     # Round 4's forms: a compact -e, a URL holding ";" or percent-encoding, and a quoted include.
     write(project, "requirements.txt", (
         "-egit+https://example.invalid/repo.git#egg=pytest\n"
@@ -749,9 +747,9 @@ def test_runtime_records_a_wheel_url_package_and_its_drift(project, capsys):
         evidence["runtime"]["packages"][name] = "0.0.1-fixture"
     path.write_text(json.dumps(evidence))
     provenance.cli_stale(project, [])
-    assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["detail"] == "; ".join(
+    assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["details"] == [
         f"{name} 0.0.1-fixture recorded, {installed(name)} now"
-        for name in ("iniconfig", "packaging", "pluggy", "pytest")) + "."
+        for name in ("iniconfig", "packaging", "pluggy", "pytest")]
 
 
 @pytest.mark.filterwarnings("ignore:Implicit None:DeprecationWarning")
@@ -782,24 +780,27 @@ def test_cli_stale_reports_runtime_mismatch_as_a_warning(project, capsys):
     assert out["stale"] == 0 and out["results"] == []
     assert out["runtime_mismatches"] == [{
         "investigation": "inv", "result_id": "r1", "evidence": "investigations/inv/evidence/r1.json",
-        "detail": f"duckdb 0.0.1-fixture recorded, {current or 'not installed'} now.", "findings": [row]}]
+        "details": [f"duckdb 0.0.1-fixture recorded, {current or 'not installed'} now"], "findings": [row]}]
     assert [c["outcome"] for c in provenance.compare_evidence(project, path)] == ["pass"] * 5
     evidence["runtime"]["python"] = "2.7.18"
     path.write_text(json.dumps(evidence))
     provenance.cli_stale(project, [])
-    detail = json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["detail"]
-    assert detail.startswith(f"python 2.7.18 recorded, {platform.python_version()} now; duckdb 0.0.1-fixture")
-    # A requirements line the runtime could not read is reported, never dropped.
-    write(project, "requirements.txt", b"-e .\n")
+    details = json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["details"]
+    assert details[:2] == [f"python 2.7.18 recorded, {platform.python_version()} now",
+                           f"duckdb 0.0.1-fixture recorded, {current or 'not installed'} now"]
+    # A requirements line the runtime could not read is reported verbatim, never dropped: the
+    # trailing "." of -e . and a marker's "; " stay the line's own.
+    write(project, "requirements.txt", b"-e .\n./vendor/mypkg ; sys_platform == 'linux'\n")
     path = record(project)
-    assert json.loads(path.read_text())["runtime"]["unread_requirements"] == ["requirements.txt:1: -e ."]
+    unread = ["requirements.txt:1: -e .", "requirements.txt:2: ./vendor/mypkg ; sys_platform == 'linux'"]
+    assert json.loads(path.read_text())["runtime"]["unread_requirements"] == unread
     provenance.cli_stale(project, [])
     out = json.loads(capsys.readouterr().out)
-    assert out["stale"] == 0 and out["runtime_mismatches"][0]["detail"] == (
-        "requirements not read, packages unrecorded: requirements.txt:1: -e ..")
+    assert out["stale"] == 0 and out["runtime_mismatches"][0]["details"] == [
+        "requirements not read, packages unrecorded: " + line for line in unread]
     evidence = json.loads(path.read_text())
     del evidence["runtime"]
     path.write_text(json.dumps(evidence))
     provenance.cli_stale(project, [])
     out = json.loads(capsys.readouterr().out)
-    assert out["stale"] == 0 and out["runtime_mismatches"][0]["detail"] == "evidence records no runtime."
+    assert out["stale"] == 0 and out["runtime_mismatches"][0]["details"] == ["evidence records no runtime"]

@@ -46,7 +46,7 @@ Every scan after the edit uses `--rescan`, which keeps the pre-cleaning baseline
 
 ## 5. Flag affected findings
 
-Run `python3 src/awb.py stale` with the interpreter that runs `run.py`, such as the project's virtual environment. Flag the findings whose `stale` entry names the corrected view or publication, or a view built on it; findings `stale` lists for other reasons keep their status. `runtime_mismatches` flag nothing; report them as a rerun decision for the user. A version mismatch on every result at once usually means a different interpreter, not an upgrade: rerun `stale` with the right one before reporting. A `requirements not read` detail is a line whose package version went unrecorded, not a change; report it with the line.
+Run `python3 src/awb.py stale` with the interpreter that runs `run.py`, such as the project's virtual environment. Flag the findings whose `stale` entry names the corrected view or publication, or a view built on it; findings `stale` lists for other reasons keep their status. `runtime_mismatches` flag nothing; report them as a rerun decision for the user. A version mismatch on every result at once usually means a different interpreter, not an upgrade: rerun `stale` with the right one before reporting. A `requirements not read` entry in an entry's `details` ends with a line whose package version went unrecorded, not a change; report it with that line, quoted as given.
 
 ## 6. Record
 
