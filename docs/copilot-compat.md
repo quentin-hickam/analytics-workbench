@@ -42,7 +42,7 @@ A user picks the harness from the **Session Target** control in a new chat, whic
 **VS Code Local**:
 - **Read-only tools.** A tool marked `readOnlyHint` runs without confirmation, and every other tool shows the confirmation dialog (documented, [MCP developer guide](https://code.visualstudio.com/api/extension-guides/ai/mcp)).
 - **Approval scopes.** A confirmation can approve once, for the session, for the workspace, or for all future calls. **Chat: Manage Tool Approval** can trust every tool of one server (documented, [approvals](https://code.visualstudio.com/docs/agents/run/approvals)).
-- **Sandboxed servers.** A stdio server with `"sandboxEnabled": true` (macOS and Linux only) has its tool confirmations auto-approved, and can write only to the paths its `sandbox.filesystem.allowWrite` lists (documented, [configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration); code). A workbench server sandboxed this way needs the project folder in that list.
+- **Sandboxed servers.** A stdio server with `"sandboxEnabled": true` (macOS and Linux only) has its tool confirmations auto-approved, and can write only to the paths its `sandbox.filesystem.allowWrite` lists (documented, [configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration); code). Only the VS Code-format files (`.vscode/mcp.json` and the profile `mcp.json`) support per-server sandboxing ([§3](#3-server-configuration)), so the user-level install below runs unsandboxed, and its write tools ask under the approval scopes above.
 
 Policies that change this ([manage AI settings](https://code.visualstudio.com/docs/enterprise/manage-ai-settings), [policy reference](https://code.visualstudio.com/docs/enterprise/policies)):
 
@@ -76,11 +76,13 @@ VS Code lists four places to configure a server ([MCP servers](https://code.visu
 
 - **Copilot harness.** It reads `.mcp.json` and the user-level `mcp-config.json` above directly. VS Code forwards eligible servers from other sources, except those that need interactive input (documented, same page).
 - **Trust.** Workspace servers inherit Workspace Trust. A server from any other source shows a trust dialog when it first starts and whenever its configuration changes (documented, same page).
-- **Stdio keys:** `type: "stdio"`, `command`, `args`, `env`, `envFile`, `cwd`, plus `sandboxEnabled` and `sandbox` ([§2](#2-tool-approval)) ([configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration)).
+- **Stdio keys:** `type: "stdio"`, `command`, `args` and `env` in every format, and `cwd` in every format but `.mcp.json`. `envFile`, `${input:…}` variables, and `sandboxEnabled` with `sandbox` ([§2](#2-tool-approval)) work only in the VS Code-format files, not in the user-level `mcp-config.json` (documented, [configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration)).
 - **Copilot CLI** passes only `PATH` to a server, so every other variable must be set in its configuration (documented, [adding MCP servers](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers)).
 - **Managed allowlists** match a local server by its exact command and arguments ([managed settings](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#allowedmcpservers)). An install guide should therefore produce one stable command line.
 
-**Install target:** one user-level entry in `$COPILOT_HOME/mcp-config.json`, or `~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset, which serves every workspace and both Copilot harnesses. Claude Code and Codex get their own user-level entries. The install guide requires Copilot CLI 1.0.88 or later ([§5](#5-protocol)).
+**Install target:** one user-level entry in `$COPILOT_HOME/mcp-config.json`, or `~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset, which serves every workspace and both Copilot harnesses. Claude Code and Codex get their own user-level entries. The install guide requires Copilot CLI 1.0.88 or later ([§5](#5-protocol)). The entry sets variables in `env`, since `envFile` doesn't work there.
+
+**Known limit:** the user-level entry can't be sandboxed, so VS Code Local doesn't auto-approve its write tools or restrict its writes. A sandboxed entry would need the VS Code format, which the Copilot harness gets only through forwarding, and a write list holding each project's folder, which a server shared across workspaces doesn't have.
 
 ## 4. Project root
 
