@@ -41,7 +41,7 @@ The interview is done when the question, population, supported decision or explo
 
 Adapt asset files to the target; their instructional comments and example rows are guidance, not project facts. The user-level skills serve every project, so the project holds only these files.
 
-1. Adapt the [orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [agent instructions](assets/workbench/AGENTS.md) into missing root files; merge `.gitignore` rules one by one, each negation after the rule it overrides. A repair reconciles existing ones through references/repair.md.
+1. Adapt the [orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [agent instructions](assets/workbench/AGENTS.md) into missing root files; merge `.gitignore` rules one by one, each negation after every rule it overrides. A repair reconciles existing ones through references/repair.md.
 2. When merging into an existing `AGENTS.md`, link both guides relatively and check the links resolve.
 3. Install the project helpers and workbench guides and declare their packages, with the interpreter that will run the project's analysis, such as its virtual environment. Run it as a black box; `--check` reports without writing. A repair runs it from references/repair.md instead.
 
