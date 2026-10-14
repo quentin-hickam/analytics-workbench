@@ -4,6 +4,7 @@
 # test_check_without_rules_or_draft: no rule file reports none recorded and exits 0; a missing draft narrative is an error and exits 1.
 # test_malformed_rule_file_is_reported_and_blocks_add: a bad heading, a repeated ID or field (at its line), missing fields, an unknown severity, and an unusable pattern (one overflowing included) are problems; check exits 1 with the rule unchecked; add refuses and writes nothing.
 # test_broken_rule_section_is_reported_not_dropped: a rule under a malformed heading, or field lines outside a rule section, are problems; check exits 1 and add refuses, so no ID is reused.
+# test_preamble_heading_holding_r_dash_is_not_a_rule_heading: a heading before the first rule that only contains R-, such as ## PR-12 follow-ups, is no problem.
 # test_wrapped_field_line_is_reported: a line inside a rule section that is not a field, such as a wrapped Rule, is a problem rather than lost text.
 # test_line_starting_with_hash_never_cuts_a_rule_short: after the first rule, a wrapped line starting with # or a heading that is not a rule's is a problem; check exits 1 and add refuses, so no rule is silently truncated.
 # test_rule_numbers_are_ascii_and_unique: an ID repeating another's number with more zero padding, or a number in non-ASCII digits, is a problem; add refuses.
@@ -12,10 +13,12 @@
 # test_lines_end_where_the_file_ends: a narrative has no empty line after its final \n, keeps a \r no \n follows, and reads a byte order mark as no part of line 1.
 # test_rule_file_ends_where_the_file_ends: a lone \r as the rule file's last byte is a problem at its line, and add refuses; a rule heading after a byte order mark is sound.
 # test_check_through_the_dispatcher_writes_nothing: run as a script with bytecode writes enabled, review-rules check leaves every project file, __pycache__ included, unchanged.
+# test_only_review_rules_turns_off_bytecode_writes: the dispatcher sets sys.dont_write_bytecode for review-rules alone, so other commands keep the bytecode cache of the packages they import.
+# test_rule_file_that_is_not_a_file_is_an_error: a directory or a dangling symbolic link at the rule file's path is an error, not no rules; check exits 1 and add refuses without a traceback.
 # test_add_to_an_empty_rule_file_writes_the_header: add to an empty rule file writes the header before the first rule.
 # test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes, blank, or holding bytes that are not UTF-8, an unknown severity, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
 # test_pattern_round_trips_through_backticks: a pattern holding backticks, or the word none, is written in backticks and read back as the same expression.
-# test_package_and_release_invoke_the_read_only_review: both skills link the review brief and run it before their final command; the brief has a fresh subagent review in every host with subagents, Codex included, and the writer review only where there are none; it limits the reviewer to read tools and the read-only command, asks one line per rule, ends with a summary line counting violations, narrative problems, and command problems, any of which blocks, defines when a review is stale, and with AGENTS.md says which corrections become rules.
+# test_package_and_release_invoke_the_read_only_review: both skills link the review brief and run it before their final command; the brief has a fresh subagent review in every host with subagents, Codex included, and the writer review only where there are none; it limits the reviewer to reads, shell reads included, and the read-only command, running no command that writes, asks one line per rule, ends with a summary line counting violations, narrative problems, and command problems, any of which blocks, defines when a review is stale, and with AGENTS.md says which corrections become rules.
 
 import importlib.util
 import json
@@ -199,6 +202,14 @@ def test_broken_rule_section_is_reported_not_dropped(project, capsys, text, prob
     assert code == 1 and out["added"] is None and path.read_text() == before
 
 
+def test_preamble_heading_holding_r_dash_is_not_a_rule_heading(project, capsys):
+    path = project / RULES
+    path.parent.mkdir(parents=True)
+    path.write_text("# Review rules\n\n## PR-12 follow-ups\n\nNotes.\n\n## FOR-1 notes\n\n## R-periods-001\n\n" + RULE)
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 0 and out["problems"] == [] and [r["id"] for r in out["rules"]] == ["R-periods-001"]
+    assert add(project, capsys)[1]["added"] == "R-periods-002"
+
 def test_wrapped_field_line_is_reported(project, capsys):
     path = project / RULES
     path.parent.mkdir(parents=True)
@@ -324,6 +335,30 @@ def test_check_through_the_dispatcher_writes_nothing(project, capsys):
     assert snapshot(project, caches=True) == before
 
 
+def test_only_review_rules_turns_off_bytecode_writes(project, capsys, monkeypatch):
+    # The flag is process-wide; other commands import pandas or duckdb, which keep their bytecode cache.
+    (project / "src/provenance.py").write_text("def cli_stale(root, argv):\n    return 0\n")
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    cli = load(project / "src/awb.py", "awb_cli_bytecode")
+    assert cli.main(["stale"]) == 0 and sys.dont_write_bytecode is False
+    assert cli.main(["review-rules", "check", "inv", "pkg"]) == 0 and sys.dont_write_bytecode is True
+
+
+@pytest.mark.parametrize("kind", ["directory", "dangling link"])
+def test_rule_file_that_is_not_a_file_is_an_error(project, capsys, kind):
+    path = project / RULES
+    path.parent.mkdir(parents=True)
+    if kind == "directory":
+        path.mkdir()
+    else:
+        path.symlink_to(project / "foundation/missing.md")
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 1 and out["rules_file"] == RULES and len(out["errors"]) == 1
+    assert out["errors"][0].startswith(f"{RULES}: ")
+    code, out = add(project, capsys)
+    assert code == 1 and out["added"] is None and out["refused"].startswith(f"{RULES}: ")
+    assert not (project / "foundation/missing.md").exists() and (path.is_dir() or path.is_symlink())
+
 def test_add_to_an_empty_rule_file_writes_the_header(project, capsys):
     (project / RULES).parent.mkdir(parents=True)
     (project / RULES).write_text("\n")
@@ -369,12 +404,17 @@ def test_package_and_release_invoke_the_read_only_review():
     for tool in ("`Read`", "`Grep`", "`Glob`", "`Bash`"):
         assert tool in brief
     assert "never fix them, and change no file" in brief
-    assert "Run only `python3 src/awb.py review-rules check <investigation> <package>`" in brief
+    # The boundary is no command that writes, so a host that reads files through a shell can still read.
+    assert "Run no command that writes: the only `awb.py` command you run is " \
+           "`python3 src/awb.py review-rules check <investigation> <package>`" in brief
+    assert "read-only commands such as `cat`, `sed -n`, and `rg` are reads" in brief
+    assert "run only" not in brief.lower()
     assert "one line per rule" in brief and "In Codex" in brief
     # The writer reviews its own draft only where the host has no subagents; Codex starts one too.
     assert "so the agent that wrote the draft does not review it" in brief
     assert "start a fresh subagent all the same" in brief
-    assert "Only in a host with no subagents, follow **Brief** yourself" in brief
+    assert "Only in a host with no subagents, follow **Brief** yourself, changing no file and running no "\
+           "command that writes" in brief
     assert "a fresh subagent, limited to read tools" in package and "**Launch**" in package
     assert "review-rules add --area" in brief
     assert "foundation/review-rules.md" in agents and "`awb-package`" in agents

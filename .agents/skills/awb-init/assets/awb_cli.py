@@ -76,9 +76,12 @@ def main(argv=None):
         print(f"{name} needs src/{relative}, which this project lacks; install the workbench helpers "
               "with the awb-init skill's scripts/install_helpers.py", file=sys.stderr)
         return 2
-    # Loading a helper writes no __pycache__, so a command that writes nothing, such as the read-only
-    # review's `review-rules check`, leaves the project untouched.
-    sys.dont_write_bytecode = True
+    if name == "review-rules":
+        # The read-only review's `review-rules check` must leave the project untouched, so loading its
+        # helper writes no __pycache__. The flag is process-wide, so other commands keep Python's cache
+        # (git ignores __pycache__/): turned off for them, every call would recompile pandas and duckdb
+        # wherever they were installed without bytecode.
+        sys.dont_write_bytecode = True
     # Helpers import their siblings by bare name, as the skill references show.
     sys.path.insert(0, str(path.parent))
     spec = importlib.util.spec_from_file_location(f"awb_{path.stem}", path)

@@ -1213,7 +1213,8 @@ def parse_review_rules(lines: list) -> tuple:
                            "fields": {}}
                 rules.append(current)
                 continue
-            if re.search(r"R-\w", line):
+            # Only a heading that starts like a rule ID is a broken rule heading; ## PR-12 notes is not.
+            if re.match(r"\s*#+\s*R-", line):
                 problems.append({"line": number, "problem": _BAD_HEADING})
                 current = None
                 continue
@@ -1261,8 +1262,20 @@ def parse_review_rules(lines: list) -> tuple:
 
 
 def _read_rules(root):
+    """(rules, problems), or None when the project has no rule file.
+
+    Only an absent path means no rules: a directory or other non-file there, or a symbolic link to
+    nothing, raises OSError, so check reports an error and add refuses instead of reading no rules."""
     path = Path(root) / REVIEW_RULES
-    return parse_review_rules(_read_lines(path)) if path.is_file() else None
+    try:
+        path.stat()
+    except FileNotFoundError:
+        if not path.is_symlink():
+            return None
+        raise
+    if not path.is_file():
+        raise OSError("not a regular file")
+    return parse_review_rules(_read_lines(path))
 
 
 def check_review_rules(root, investigation, package) -> dict:
