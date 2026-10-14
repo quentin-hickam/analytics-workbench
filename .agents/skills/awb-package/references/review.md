@@ -20,7 +20,7 @@ You review the package draft at `deliveries/<investigation>/<package>/draft/`. R
 2. Judge every rule the command lists that is not `retired`, against both narratives. A `matched` line is a candidate to judge, not a verdict; `no match`, `no pattern`, and `unchecked` rules are judged by reading.
 3. Check what no command checks: both narratives carry the same numbers, qualifications, and caveats; every `represented_in` place of each `revalidation_flags` entry carries its caveat, or its omission when the disposition is `omit`; every claim in `findings.md` traces to `methodology.md`.
 4. Report, and nothing else:
-   - one line per rule in the command's order: `<ID> pass`, `<ID> retired`, or `<ID> violation <file>:<line> "<short quote>"` with the rule's severity, one line per violation;
+   - one line per rule in the command's order: `<ID> pass`, `<ID> retired`, or `<ID> violation <severity> <file>:<line> "<short quote>"`, with the rule's `error` or `warning`, one line per violation;
    - one line per step 3 problem: `narrative <file>:<line> "<short quote>" <what is wrong>`;
    - the command's `problems` and `errors` verbatim, or `command failed` with its output when it did not run; and
    - a last line, `review: clean` when there is no violation, no narrative problem, and the command exited 0, or otherwise `review: <v> violations (<e> error), <n> narrative problems, <c> command problems`, where command problems count the `problems` and `errors` entries, or 1 when the command failed.
