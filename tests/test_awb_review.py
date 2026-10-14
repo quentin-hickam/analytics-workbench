@@ -5,6 +5,8 @@
 # test_malformed_rule_file_is_reported_and_blocks_add: a bad heading, a repeated ID or field, missing fields, an unknown severity, and an unusable pattern (one overflowing included) are problems; check exits 1 with the rule unchecked; add refuses and writes nothing.
 # test_broken_rule_section_is_reported_not_dropped: a rule under a malformed heading, or field lines outside a rule section, are problems; check exits 1 and add refuses, so no ID is reused.
 # test_wrapped_field_line_is_reported: a line inside a rule section that is not a field, such as a wrapped Rule, is a problem rather than lost text.
+# test_line_starting_with_hash_never_cuts_a_rule_short: after the first rule, a wrapped line starting with # or a heading that is not a rule's is a problem; check exits 1 and add refuses, so no rule is silently truncated.
+# test_match_lines_count_only_newlines: a U+2028 or form feed in a narrative does not shift the reported line numbers away from the editor's.
 # test_add_to_an_empty_rule_file_writes_the_header: add to an empty rule file writes the header before the first rule.
 # test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes or blank, an unknown severity, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
 # test_pattern_round_trips_through_backticks: a pattern holding backticks, or the word none, is written in backticks and read back as the same expression.
@@ -195,6 +197,34 @@ def test_wrapped_field_line_is_reported(project, capsys):
     code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
     assert code == 1 and out["problems"] == [
         {"rule": "R-periods-001", "line": 7, "problem": "line is not a - Severity, Rule, Pattern, Fix, or Added field"}]
+
+
+@pytest.mark.parametrize("tail, expected", [
+    ("- Fix: Replace\n#hashtags with plain words.\n",
+     [{"rule": "R-wording-001", "line": 8, "problem": "line is not a - Severity, Rule, Pattern, Fix, or Added field"}]),
+    ("- Fix: Count\n# of customers, not users.\n",
+     [{"line": 8, "problem": "heading after the first rule is not a ## R-<area>-NNN rule heading"}]),
+    ("- Fix: Rename.\n\n## Notes\n\nSee the style guide.\n",
+     [{"line": 9, "problem": "heading after the first rule is not a ## R-<area>-NNN rule heading"}])])
+def test_line_starting_with_hash_never_cuts_a_rule_short(project, capsys, tail, expected):
+    path = project / RULES
+    path.parent.mkdir(parents=True)
+    path.write_text("# Review rules\n\n## R-wording-001\n- Severity: error\n- Rule: Avoid jargon.\n"
+                    "- Pattern: none\n" + tail)
+    before = path.read_text()
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 1 and out["problems"] == expected
+    code, out = add(project, capsys, area="wording")
+    assert code == 1 and out["added"] is None and path.read_text() == before
+
+
+def test_match_lines_count_only_newlines(project, capsys):
+    findings = project / "deliveries/inv/pkg/draft/findings.md"
+    findings.write_text("# F\n\nIntro\u2028pasted from Word\x0c\n\nSales in the partial month rose\n",
+                        encoding="utf-8")
+    add(project, capsys, pattern="partial month")
+    row = run(project, capsys, "review-rules", "check", "inv", "pkg")[1]["rules"][0]
+    assert [(m["file"], m["line"]) for m in row["matches"]] == [("findings.md", 5), ("methodology.md", 3)]
 
 
 def test_add_to_an_empty_rule_file_writes_the_header(project, capsys):

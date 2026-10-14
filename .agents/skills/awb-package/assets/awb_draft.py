@@ -1138,9 +1138,11 @@ _AREA = re.compile(_AREA_TEXT)
 _RULE_HEADING = re.compile(rf"## (R-({_AREA_TEXT})-(\d{{3,}}))\s*")
 _RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Fix|Added): ?(.*)")
 _LOOSE_FIELD = re.compile(r"\s*[-*+]?\s*(?:Severity|Rule|Pattern|Fix|Added)\s*:", re.IGNORECASE)
+_MARKDOWN_HEADING = re.compile(r"\s*#{1,6}(?:\s|$)")
 _REQUIRED_FIELDS = ("Severity", "Rule", "Pattern", "Fix")
 _BAD_HEADING = ("rule heading is not ## R-<area>-NNN with a lowercase area, its last part holding a letter, "
                 "and a three-digit number")
+_STRAY_HEADING = "heading after the first rule is not a ## R-<area>-NNN rule heading"
 _REVIEWED = ("findings.md", "methodology.md")
 _MATCH_CAP = 20
 _RULES_HEADER = """# Review rules
@@ -1178,21 +1180,30 @@ def _pattern_problem(pattern):
 def parse_review_rules(text: str) -> tuple:
     """(rules, problems) from review-rules.md: each `## R-<area>-NNN` section and its `- Field:` lines.
 
-    Any heading ends a section. Inside a rule section only blank and `- Field:` lines may appear, and
-    outside one no heading may name a rule and no line may look like a field, so a rule that a hand edit
-    breaks is reported instead of silently dropped, and its ID is never handed out again by add."""
+    Any heading ends a section, and after the first rule every heading must be a rule's. Inside a rule
+    section only blank and `- Field:` lines may appear, so a wrapped line starting with `#` is reported
+    too; outside one no heading may name a rule and no line may look like a field. A rule that a hand
+    edit breaks or cuts short is reported instead of silently dropped or truncated, and its ID is never
+    handed out again by add."""
     rules, problems, current = [], [], None
     for number, line in enumerate(text.splitlines(), 1):
         if line.lstrip().startswith("#"):
             heading = _RULE_HEADING.fullmatch(line)
-            current = None
             if heading:
                 current = {"id": heading[1], "area": heading[2], "number": int(heading[3]), "line": number,
                            "fields": {}}
                 rules.append(current)
-            elif re.search(r"R-\w", line):
+                continue
+            if re.search(r"R-\w", line):
                 problems.append({"line": number, "problem": _BAD_HEADING})
-            continue
+                current = None
+                continue
+            if _MARKDOWN_HEADING.match(line):
+                if rules:
+                    problems.append({"line": number, "problem": _STRAY_HEADING})
+                current = None
+                continue
+            # Text such as `#hashtags`, not a heading: inside a rule it is a line that is not a field.
         if current is None:
             if _LOOSE_FIELD.match(line):
                 problems.append({"line": number, "problem": "rule field outside a ## R-<area>-NNN section"})
@@ -1241,7 +1252,8 @@ def check_review_rules(root, investigation, package) -> dict:
     texts = {}
     for name in _REVIEWED:
         try:
-            texts[name] = (draft / name).read_text(encoding="utf-8").splitlines()
+            # Only \n, as editors and grep -n count lines; splitlines() also breaks on U+2028 and others.
+            texts[name] = (draft / name).read_text(encoding="utf-8").split("\n")
         except (OSError, UnicodeError) as error:
             report["errors"].append(f"{_rel(root, draft / name)}: {error}")
     try:
