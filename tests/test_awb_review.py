@@ -6,6 +6,7 @@
 # test_broken_rule_section_is_reported_not_dropped: a rule under a malformed heading, or field lines outside a rule section, are problems; check exits 1 and add refuses, so no ID is reused.
 # test_wrapped_field_line_is_reported: a line inside a rule section that is not a field, such as a wrapped Rule, is a problem rather than lost text.
 # test_line_starting_with_hash_never_cuts_a_rule_short: after the first rule, a wrapped line starting with # or a heading that is not a rule's is a problem; check exits 1 and add refuses, so no rule is silently truncated.
+# test_rule_numbers_are_ascii_and_unique: an ID repeating another's number with more zero padding, or a number in non-ASCII digits, is a problem; add refuses.
 # test_rule_file_lines_count_only_newlines: a U+2028, form feed, or lone carriage return in the rule file is a problem at its grep -n line and shifts no later line; add refuses; CRLF endings are no problem.
 # test_match_lines_count_only_newlines: a U+2028, form feed, or lone carriage return in a narrative does not shift the reported line numbers away from grep -n's, and CRLF endings still match a pattern anchored with $.
 # test_check_through_the_dispatcher_writes_nothing: run as a script with bytecode writes enabled, review-rules check leaves every project file, __pycache__ included, unchanged.
@@ -223,6 +224,21 @@ def test_line_starting_with_hash_never_cuts_a_rule_short(project, capsys, tail, 
     assert code == 1 and out["problems"] == expected
     code, out = add(project, capsys, area="wording")
     assert code == 1 and out["added"] is None and path.read_text() == before
+
+
+@pytest.mark.parametrize("heading, problem", [
+    ("## R-periods-0001", "rule ID repeats the number of R-periods-001"),
+    ("## R-periods-\u0661\u0662\u0663", "rule heading is not ## R-<area>-NNN with a lowercase area, its last part "
+                                     "holding a letter, and a three-digit number")])
+def test_rule_numbers_are_ascii_and_unique(project, capsys, heading, problem):
+    add(project, capsys)
+    path = project / RULES
+    path.write_text(path.read_text() + f"\n{heading}\n\n" + RULE)
+    before = path.read_bytes()
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 1 and problem in [p["problem"] for p in out["problems"]]
+    code, out = add(project, capsys)
+    assert code == 1 and out["added"] is None and path.read_bytes() == before
 
 
 @pytest.mark.parametrize("brk", ["\u2028", "\x0c", "\r"])

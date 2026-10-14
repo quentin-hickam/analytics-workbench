@@ -1135,7 +1135,8 @@ _SEVERITIES = ("error", "warning")
 # An area's last segment holds a letter, so R-<area>-NNN never reads as another area's ID.
 _AREA_TEXT = r"(?:[a-z0-9]+-)*[a-z0-9]*[a-z][a-z0-9]*"
 _AREA = re.compile(_AREA_TEXT)
-_RULE_HEADING = re.compile(rf"## (R-({_AREA_TEXT})-(\d{{3,}}))\s*")
+# [0-9], not \d, which also takes other scripts' digits, such as Arabic-Indic ones.
+_RULE_HEADING = re.compile(rf"## (R-({_AREA_TEXT})-([0-9]{{3,}}))\s*")
 _RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Fix|Added): ?(.*)")
 _LOOSE_FIELD = re.compile(r"\s*[-*+]?\s*(?:Severity|Rule|Pattern|Fix|Added)\s*:", re.IGNORECASE)
 _MARKDOWN_HEADING = re.compile(r"\s*#{1,6}(?:\s|$)")
@@ -1231,12 +1232,14 @@ def parse_review_rules(lines: list) -> tuple:
         elif line.strip():
             problems.append({"rule": current["id"], "line": number,
                              "problem": "line is not a - Severity, Rule, Pattern, Fix, or Added field"})
-    seen = set()
+    seen = {}
     for rule in rules:
         fields = rule.pop("fields")
-        if rule["id"] in seen:
-            problems.append({"rule": rule["id"], "problem": "rule ID appears more than once"})
-        seen.add(rule["id"])
+        first = seen.setdefault((rule["area"], rule["number"]), rule)
+        if first is not rule:
+            # R-x-007 and R-x-0007 are one number written twice, so add must not treat them as two.
+            problems.append({"rule": rule["id"], "problem": "rule ID appears more than once"
+                             if first["id"] == rule["id"] else f"rule ID repeats the number of {first['id']}"})
         missing = [name for name in _REQUIRED_FIELDS if not fields.get(name)]
         if missing:
             problems.append({"rule": rule["id"], "problem": f"missing {', '.join(missing)}"})
