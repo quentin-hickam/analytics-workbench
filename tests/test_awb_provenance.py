@@ -29,7 +29,7 @@
 # test_requirement_name_reads_names_and_direct_references: every line the review rounds 1-5 probed: names with extras, versions, markers, or @ URL; wheel or sdist file names, winning over a disagreeing #egg=, and #egg= of other direct references (URL, percent-encoded or holding a ";", POSIX or Windows path), -e included, attached, quoted, or after =, with or without trailing extras, with trailing --hash or other per-requirement options and a continuation backslash ignored; options, comments, and references naming no package give none.
 # test_read_requirements_follows_includes_and_byte_order_marks: -r and --requirement includes, quoted or not, are read relative to the including file, once each; -c constraints add nothing; a UTF-8, UTF-16 or UTF-32 BOM is decoded; a URL include and a missing include are unread, an absent file is neither.
 # test_read_requirements_lists_every_line_it_cannot_read: each line naming no package, an unknown or malformed option, an unbalanced quote, an archive whose #egg= disagrees with its file name (declared by the file name), and an unreadable file are unread with file and line; recognised option lines are not; continued lines are joined.
-# test_runtime_records_a_wheel_url_package_and_its_drift: a requirements.txt wheel URL or path, hash-pinned or with extras, continued or not, percent-encoded or holding a ";", a compact -e, and a quoted include record their package's installed version, and a changed recorded version is a runtime mismatch.
+# test_runtime_records_a_wheel_url_package_and_its_drift: a requirements.txt wheel URL or path, hash-pinned or with extras, continued or not, percent-encoded or holding a ";", a compact -e, a quoted include, and a wheel whose #egg= disagrees (also unread) record their package's installed version, and a changed recorded version is a runtime mismatch.
 # test_runtime_records_missing_version_metadata_as_unknown: an installed distribution whose metadata has no Version is unknown, not null (not installed).
 # test_cli_stale_reports_runtime_mismatch_as_a_warning: a changed recorded duckdb or Python version, an unread requirements line, or no runtime block, is listed under runtime_mismatches with its findings rows, never under results, and compare_evidence still passes.
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
@@ -762,6 +762,20 @@ def test_runtime_records_a_wheel_url_package_and_its_drift(project, capsys):
     assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["details"] == [
         f"{name} 0.0.1-fixture recorded, {installed(name)} now"
         for name in ("iniconfig", "packaging", "pluggy", "pytest")]
+    # Round 5: a wheel whose #egg= names another package records the wheel's package and its drift,
+    # and its line is unread.
+    line = "https://example.invalid/pluggy-0.0.1-py3-none-any.whl#egg=iniconfig"
+    write(project, "requirements.txt", f"{line}\n".encode())
+    path = record(project)
+    evidence = json.loads(path.read_text())
+    assert set(evidence["runtime"]["packages"]) == {"duckdb", "pandas", "pluggy"}
+    evidence["runtime"]["packages"]["pluggy"] = "0.0.1-fixture"
+    path.write_text(json.dumps(evidence))
+    provenance.cli_stale(project, [])
+    assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["details"] == [
+        f"pluggy 0.0.1-fixture recorded, {installed('pluggy')} now",
+        f"requirements not read, packages unrecorded: requirements.txt:1: {line} "
+        "(#egg=iniconfig disagrees with the file name; recorded pluggy)"]
 
 
 @pytest.mark.filterwarnings("ignore:Implicit None:DeprecationWarning")
