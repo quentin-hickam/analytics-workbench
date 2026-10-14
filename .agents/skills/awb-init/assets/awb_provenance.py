@@ -525,9 +525,10 @@ def _runtime_mismatches(recorded) -> list[str]:
     return found + ([UNREAD + str(entry) for entry in unread] if isinstance(unread, list) else [])
 
 
-def result_problems(result_id: str, table, questions: set[str] | None = None) -> list[str]:
+def result_problems(result_id: str, table, questions: dict[str, str] | None = None) -> list[str]:
     """What a [results.<id>] table lacks: a one-line question, inputs, when given, as a list of names, and
-    answers, when given, as a list of ledger question IDs, each in `questions` when that set is given.
+    answers, when given, as a list of ledger question IDs. With `questions`, ledger_answerers()'s
+    mapping, each answers ID must be in the ledger with answerer data: a person answers the others.
 
     record_evidence refuses a table with problems, checking answers against the ledger; run.py checks
     every wanted result, answers against the ledger included, before running any.
@@ -552,6 +553,10 @@ def result_problems(result_id: str, table, questions: set[str] | None = None) ->
         missing = ", ".join(q for q in answers if q not in questions)
         problems.append(f"{where} answers {missing}, which questions.json does not hold; add the question "
                         "with `awb.py questions add` first")
+    elif questions is not None and any(questions[q] != "data" for q in answers):
+        people = ", ".join(f"{q} ({questions[q]})" for q in answers if questions[q] != "data")
+        problems.append(f"{where} answers {people}, which a person answers, not a result; record their answer "
+                        "with `awb.py questions answer Q-NNN --text --by` and remove it from answers")
     return problems
 
 
@@ -587,7 +592,8 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
         reason = settings["content"]["unknown"] if _is_unknown(settings["content"]) else "no such table"
         raise ValueError(f"{settings_path} must hold [results.{result_id}]: {reason}")
     table = settings["content"]["results"][result_id]
-    problems = result_problems(result_id, table, ledger_ids(root, investigation) if table.get("answers") else None)
+    problems = result_problems(result_id, table,
+                               ledger_answerers(root, investigation) if table.get("answers") else None)
     if problems:
         raise ValueError(f"{settings_path}: " + "; ".join(problems))
     queries = table.get("queries", [f"queries/{result_id}.sql"])
@@ -1371,12 +1377,12 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
             evidence_path.unlink(missing_ok=True)
         raise
     # Questions the result's settings declare: a ledger failure leaves the finding recorded and says so.
-    if _declared_answers(root, investigation, result_id):
-        try:
+    try:
+        if _declared_answers(root, investigation, result_id)[1]:
             result["questions"] = link_answers(root, investigation, result_id, today=today)
-        except StateError as error:
-            result["questions"] = {"error": f"{error}; link with `awb.py questions answer <Q-NNN> "
-                                            f"--result {result_id}`"}
+    except StateError as error:
+        result["questions"] = {"error": f"{error}; link with `awb.py questions answer <Q-NNN> "
+                                        f"--result {result_id}`"}
     return result
 
 
@@ -1666,6 +1672,8 @@ def _question_problem(entry):
     if not isinstance(entry["results"], list) or not all(isinstance(r, str) and _ID.fullmatch(r)
                                                          for r in entry["results"]):
         return "results must be a list of result IDs"
+    if entry["answerer"] != "data" and entry["results"]:
+        return "only a data question links results; a person answers the others"
     if entry["status"] == "answered" and not (entry["results"] or entry["answer"].strip() and entry["by"].strip()):
         return "an answered question needs linked results, or an answer with who gave it"
     if entry["status"] in ("parked", "declined", "superseded") and not entry["reason"].strip():
@@ -1688,18 +1696,27 @@ def _question_cells(entry):
             entry["status"], _cell(answer)]
 
 
-def ledger_ids(project_root, investigation: str) -> set[str]:
-    """Every question ID in an investigation's ledger; empty when it has none."""
-    return {e["id"] for e in _Ledger(Path(project_root).resolve(), investigation).entries}
+def ledger_answerers(project_root, investigation: str) -> dict[str, str]:
+    """Each question ID in an investigation's ledger with its answerer; empty when it has none."""
+    return {e["id"]: e["answerer"] for e in _Ledger(Path(project_root).resolve(), investigation).entries}
 
 
 def _declared_answers(root, investigation, result_id):
-    """The question IDs a result's settings table declares it answers."""
-    settings = _settings(root, f"investigations/{investigation}/settings.toml", result_id)
+    """(settings path, question IDs) for what a recorded result's settings table now declares it answers.
+
+    The path is the settings file the result's evidence records, read as it is now, since answers
+    can be added after recording. StateError when the evidence is unreadable.
+    """
+    label = f"investigations/{investigation}/evidence/{result_id}.json"
+    try:
+        path = json.loads((root / label).read_text(encoding="utf-8"))["settings"]["path"]
+        settings = _settings(root, path, result_id)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise StateError(f"{label} does not name a readable settings file: {error}") from error
     if settings.get("result") != result_id:
-        return []
+        return path, []
     answers = settings["content"]["results"][result_id].get("answers", [])
-    return answers if isinstance(answers, list) else []
+    return path, answers if isinstance(answers, list) else []
 
 
 def _finding_statuses(root, investigation):
@@ -1742,8 +1759,9 @@ def answer_question(project_root, investigation: str, question_id: str, *, text:
                     by: str | None = None, results: list[str] = (), today: str | None = None) -> dict:
     """Record a person's answer (text and who gave it) or link recorded results that declare the question.
 
-    A data question takes results only. A result must have a findings row and declare the question
-    in its settings table's `answers`. Only an open, parked, or answered question can be answered.
+    A data question takes results only, and a user or stakeholder question a person's answer only. A
+    result must have a findings row and declare the question in its recorded settings table's
+    `answers`. Only an open, parked, or answered question can be answered.
     An answered question keeps its answer: a different text or answerer is refused, so the change
     supersedes it and adds a replacement; repeating the answer or linking more results is allowed.
     """
@@ -1760,6 +1778,9 @@ def answer_question(project_root, investigation: str, question_id: str, *, text:
         raise StateError(f"{question_id} is {entry['status']}; add a new question instead")
     if entry["answerer"] == "data" and text:
         raise StateError(f"{question_id} is a data question; only a recorded result answers it (--result)")
+    if entry["answerer"] != "data" and results:
+        raise StateError(f"{question_id} is a {entry['answerer']} question; only a person's answer settles it "
+                         "(--text with --by)")
     if text and entry["status"] == "answered" and (text, by) != (entry["answer"], entry["by"]):
         raise StateError(f"{question_id} is answered and an answer is never replaced; supersede it with "
                          f"`questions status {question_id} --set superseded --reason \"<the change>\"` "
@@ -1768,8 +1789,9 @@ def answer_question(project_root, investigation: str, question_id: str, *, text:
     for result_id in results:
         if result_id not in statuses:
             raise StateError(f"{result_id} has no findings row; record it with run.py first")
-        if question_id not in _declared_answers(root, investigation, result_id):
-            raise StateError(f"[results.{result_id}] does not declare answers = [\"{question_id}\"] in settings.toml; "
+        path, declared = _declared_answers(root, investigation, result_id)
+        if question_id not in declared:
+            raise StateError(f"[results.{result_id}] does not declare answers = [\"{question_id}\"] in {path}; "
                              "add it there first")
     linked = [r for r in dict.fromkeys(results) if r not in entry["results"]]
     if not linked and (not text or (text, by) == (entry["answer"], entry["by"])) and entry["status"] == "answered":
@@ -1847,10 +1869,10 @@ def link_answers(project_root, investigation: str, result_id: str, today: str | 
     """Mark the questions a just-recorded result declares; record_finding calls this.
 
     An open or parked question becomes answered with the result linked; an answered one gains the
-    link. A declined or superseded question is left as it is and reported.
+    link. A declined or superseded question, or one a person answers, is left as it is and reported.
     """
     root = Path(project_root).resolve()
-    declared = _declared_answers(root, investigation, result_id)
+    declared = _declared_answers(root, investigation, result_id)[1]
     if not declared:
         return {"answered": [], "linked": [], "skipped": []}
     ledger = _Ledger(root, investigation)
@@ -1858,8 +1880,8 @@ def link_answers(project_root, investigation: str, result_id: str, today: str | 
     answered, linked, skipped = [], [], []
     for question_id in dict.fromkeys(declared):
         entry = ledger.get(question_id)
-        if entry["status"] in ("declined", "superseded"):
-            skipped.append(f"{question_id} ({entry['status']})")
+        if entry["status"] in ("declined", "superseded") or entry["answerer"] != "data":
+            skipped.append(f"{question_id} ({entry['status'] if entry['answerer'] == 'data' else entry['answerer']})")
             continue
         if result_id in entry["results"] and entry["status"] == "answered":
             continue
@@ -1916,7 +1938,8 @@ def cli_questions(root: Path, argv: list[str]) -> int:
         "answer": "record a person's answer, or link recorded results that declare the question",
         "status": "park, decline, supersede, or reopen questions",
         "edit": "reword or reclassify an open or parked question",
-        "render": "restore questions.md from questions.json, discarding hand edits",
+        "render": "restore questions.md from questions.json, discarding hand edits; with neither file, "
+                  "write an empty ledger",
     }
     action = argv[0] if argv and argv[0] in actions else None
     parser = argparse.ArgumentParser(
@@ -1998,10 +2021,11 @@ def cli_questions(root: Path, argv: list[str]) -> int:
             print(("edited: " if changed else "unchanged: ") + args.question_id)
         else:
             ledger = _Ledger(root, name)
-            drifted = ledger.drift()
-            if drifted or not ledger.md_path.exists():
+            drifted, created = ledger.drift(), [p.name for p in (ledger.path, ledger.md_path) if not p.exists()]
+            if drifted or created:
                 ledger.write()
-            print("questions.md restored" if drifted else "questions.md matches questions.json")
+            print("questions.md restored" if drifted else f"{' and '.join(created)} written" if created
+                  else "questions.md matches questions.json")
     except StateError as error:
         print(f"awb.py questions: {error}", file=sys.stderr)
         return 1

@@ -1,12 +1,14 @@
 # Kept cases:
-# test_add_numbers_and_renders: add allocates Q-NNN in order, renders questions.md whole from questions.json, and refuses empty text, unknown choices, and a parked or declined question without a reason.
+# test_add_numbers_and_renders: render on an investigation without a ledger writes both files and says so; add allocates Q-NNN in order, renders questions.md whole from questions.json, and refuses empty text, unknown choices, and a parked or declined question without a reason.
 # test_hand_edits_are_drift: every writer refuses a hand-edited questions.md and writes nothing; render restores it; questions.md without questions.json is refused by every command, render included, so no ID is reused.
-# test_person_answers: an answer needs text with who gave it; a data question refuses one; declined or superseded questions refuse answers; a repeated answer is unchanged; a different answer to an answered question is refused, and a result can still be linked.
+# test_person_answers: an answer needs text with who gave it; a data question refuses one; declined or superseded questions refuse answers; a repeated answer is unchanged; a different answer to an answered question is refused.
 # test_run_links_declared_answers: a result declaring answers marks open questions answered on record_finding, links an answered one again, skips declined ones, and reports them; undeclared results return the old shape.
 # test_answers_are_validated_before_evidence: answers must be Q-NNN IDs the ledger holds, refused before any evidence is written.
-# test_run_checks_answers_before_running: run.py exits 2 on an answers ID the ledger lacks, and 1 on an unreadable ledger, before opening a session or replacing evidence.
+# test_run_checks_answers_before_running: run.py exits 2 on an answers ID the ledger lacks or a person answers, and 1 on an unreadable ledger, before opening a session or replacing evidence.
 # test_answers_never_stale_a_result: adding answers to a recorded result leaves stale and the exact-rerun baseline unchanged.
 # test_answer_by_result_needs_declaration: linking an existing result needs its findings row and its settings declaration.
+# test_linking_reads_the_recorded_settings_file: a result recorded from another settings file is linked from that file, by run and by hand; unreadable evidence refuses a hand link.
+# test_results_answer_only_data_questions: answers naming a user or stakeholder question is refused before evidence, by run.py, and by a hand link; link_answers skips one; the person's answer is still taken; a ledger linking results to a person's question is malformed.
 # test_status_transitions: answered can only be superseded, keeping its answer; open reopens parked or declined and is a no-op on open; reasons are required; only open or parked questions are edited, and a data question keeps answerer data; a superseded answer stays visible in questions.md and list.
 # test_status_collector_reads_the_ledger: collect_status reports counts, open questions by answerer, and answers resting only on flagged findings; null without a ledger; a malformed one, or questions.md without questions.json, is an uncertainty.
 # test_resume_and_list_show_finding_status: state shows open questions and those answered only by flagged findings; list shows each linked finding's current status.
@@ -80,12 +82,12 @@ def settings(root, answers):
     (root / INV / "settings.toml").write_text(text)
 
 
-def produce(project, result_id, table="n\n1\n"):
+def produce(project, result_id, table="n\n1\n", settings_path=f"{INV}/settings.toml"):
     prior = provenance.prior_result(project, "churn", result_id)
     (project / INV / "evidence" / f"{result_id}.json").unlink(missing_ok=True)
     (project / INV / "results").mkdir(exist_ok=True)
     (project / INV / "results" / f"{result_id}.csv").write_text(table)
-    provenance.record_evidence(project, "churn", result_id, views=[], checks=OK, settings_path=f"{INV}/settings.toml")
+    provenance.record_evidence(project, "churn", result_id, views=[], checks=OK, settings_path=settings_path)
     return provenance.record_finding(project, "churn", result_id, OK, prior=prior, today=TODAY)
 
 
@@ -105,6 +107,8 @@ def cli(project, capsys, *argv):
 
 
 def test_add_numbers_and_renders(project, capsys):
+    assert cli(project, capsys, "render")[:2] == (0, "questions.json and questions.md written\n")
+    assert ledger(project) == {} and cli(project, capsys, "render")[1] == "questions.md matches questions.json\n"
     assert add(project, "Does  churn differ\nby region?", unblocks="the regional cut")["id"] == "Q-001"
     assert add(project, "Which churn definition does finance use?", "stakeholder", kind="context")["id"] == "Q-002"
     code, out, _ = cli(project, capsys, "add", "Is EMEA in scope?", "--kind", "decision", "--answerer", "user",
@@ -162,13 +166,12 @@ def test_person_answers(project, capsys):
             provenance.answer_question(project, "churn", "Q-001", text=text, by=by)
     code, _, err = cli(project, capsys, "answer", "Q-001", "--text", "60 days", "--by", "Analyst")
     assert code == 1 and "never replaced" in err and snapshot(project) == before
-    settings(project, {"r1": ["Q-001"]})
+    settings(project, {"r1": ["Q-002"]})
     produce(project, "r1")
-    assert ledger(project)["Q-001"]["results"] == ["r1"] and ledger(project)["Q-001"]["answer"] == "Logo churn, monthly"
     code, _, err = cli(project, capsys, "answer", "Q-002", "--text", "yes", "--by", "user")
     assert code == 1 and "data question" in err
-    provenance.set_question(project, "churn", ["Q-002"], "declined", reason="not needed")
-    with pytest.raises(provenance.StateError, match="declined"):
+    provenance.set_question(project, "churn", ["Q-002"], "superseded", reason="not needed")
+    with pytest.raises(provenance.StateError, match="superseded"):
         provenance.answer_question(project, "churn", "Q-002", results=["r1"])
 
 
@@ -224,6 +227,14 @@ def test_run_checks_answers_before_running(project):
     done = subprocess.run(run, capture_output=True, text=True)
     assert done.returncode == 1 and "questions.json" in done.stderr
     assert not (project / "opened").exists() and (project / INV / "evidence/r1.json").read_bytes() == saved
+    for name in ("questions.json", "questions.md"):
+        (project / INV / name).unlink()
+    add(project, "Does churn differ by region?")
+    add(project, "What counts as churn for finance?", "stakeholder", kind="context")
+    settings(project, {"r1": ["Q-001", "Q-002"]})
+    done = subprocess.run(run, capture_output=True, text=True)
+    assert done.returncode == 2 and "answers Q-002 (stakeholder), which a person answers" in done.stderr
+    assert not (project / "opened").exists() and (project / INV / "evidence/r1.json").read_bytes() == saved
     done = subprocess.run(run[:-1] + ["r2"], capture_output=True, text=True)
     assert done.returncode == 9 and (project / "opened").exists()  # a result declaring no answers skips the ledger
 
@@ -253,6 +264,49 @@ def test_answer_by_result_needs_declaration(project, capsys):
     code, out, _ = cli(project, capsys, "answer", "Q-001", "--result", "r1")
     assert code == 0 and "| answered | [r1](evidence/r1.json) |" in out
     assert cli(project, capsys, "answer", "Q-001", "--result", "r1")[1].startswith("unchanged: ")
+
+
+def test_linking_reads_the_recorded_settings_file(project, capsys):
+    for text in ("Does churn differ by region?", "Is churn seasonal?", "Is churn tied to price?"):
+        add(project, text)
+    analysis = project / INV / "analysis.toml"
+    analysis.write_text('[results.r2]\nquestion = "Does churn differ by region?"\nanswers = ["Q-001"]\n')
+    assert produce(project, "r2", settings_path=f"{INV}/analysis.toml")["questions"] == {
+        "answered": ["Q-001"], "linked": [], "skipped": []}
+    assert ledger(project)["Q-001"]["results"] == ["r2"]
+    analysis.write_text(analysis.read_text().replace('["Q-001"]', '["Q-001", "Q-002"]'))
+    code, out, _ = cli(project, capsys, "answer", "Q-002", "--result", "r2")
+    assert code == 0 and "| answered | [r2](evidence/r2.json) |" in out
+    code, _, err = cli(project, capsys, "answer", "Q-003", "--result", "r2")
+    assert code == 1 and f'does not declare answers = ["Q-003"] in {INV}/analysis.toml' in err
+    (project / INV / "evidence/r2.json").write_text("{}")
+    before = snapshot(project)
+    code, _, err = cli(project, capsys, "answer", "Q-003", "--result", "r2")
+    assert code == 1 and "evidence/r2.json does not name a readable settings file" in err and snapshot(project) == before
+
+
+def test_results_answer_only_data_questions(project, capsys):
+    add(project, "What counts as churn for finance?", "stakeholder", kind="context")
+    add(project, "Is EMEA in scope?", "user", kind="decision")
+    settings(project, {"r1": ["Q-001", "Q-002"]})
+    with pytest.raises(ValueError, match=r"answers Q-001 \(stakeholder\), Q-002 \(user\), which a person answers"):
+        produce(project, "r1")
+    assert not (project / INV / "evidence" / "r1.json").exists()
+    settings(project, {})
+    produce(project, "r1")
+    settings(project, {"r1": ["Q-001"]})
+    before = snapshot(project)
+    code, _, err = cli(project, capsys, "answer", "Q-001", "--result", "r1")
+    assert code == 1 and "stakeholder question; only a person's answer settles it" in err
+    assert provenance.link_answers(project, "churn", "r1") == {"answered": [], "linked": [], "skipped": ["Q-001 (stakeholder)"]}
+    assert snapshot(project) == before
+    entry = provenance.answer_question(project, "churn", "Q-001", text="No payment for 60 days", by="CFO")
+    assert entry["changed"] and entry["status"] == "answered" and entry["results"] == []
+    content = json.loads((project / INV / "questions.json").read_text())
+    content["questions"][1]["results"] = ["r1"]
+    (project / INV / "questions.json").write_text(json.dumps(content))
+    code, _, err = cli(project, capsys, "list")
+    assert code == 1 and "only a data question links results" in err
 
 
 def test_status_transitions(project):

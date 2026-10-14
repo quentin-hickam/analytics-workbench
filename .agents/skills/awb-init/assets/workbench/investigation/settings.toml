@@ -13,7 +13,7 @@
 # [results.orders-by-month]
 # question = "How many orders did we take each month this half?"
 # inputs = ["orders"]
-# answers = ["Q-004"]  # optional: ledger questions this result answers; run.py marks them answered.
+# answers = ["Q-004"]  # optional: ledger data questions this result answers; run.py marks them answered.
 #                      # Linking computes nothing, so adding or changing answers never makes the result stale.
 # queries = ["queries/orders-by-month.sql"]  # default: ["queries/<id>.sql"]; a producer may use more
 #

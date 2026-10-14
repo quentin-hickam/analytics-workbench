@@ -3,12 +3,12 @@
 
 Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With no IDs it
 produces every result in settings.toml. It refuses to run, exiting 2, while a wanted result's
-table lacks its question or declares answers the question ledger does not hold, and exits 1 when
-the ledger cannot be read. For each result it runs the result's saved queries in a fresh session
-of canonical views, validates the result, saves the table and its profile under results/,
-records evidence under evidence/, writes its state.md findings row, and prints one compact JSON
-line with the paths, failed and unassessed checks, and what it did to the row, with the row's
-status and claim strength.
+table lacks its question or declares answers the question ledger does not hold as data questions,
+and exits 1 when the ledger cannot be read. For each result it runs the result's saved queries in
+a fresh session of canonical views, validates the result, saves the table and its profile under
+results/, records evidence under evidence/, writes its state.md findings row, and prints one
+compact JSON line with the paths, failed and unassessed checks, and what it did to the row, with
+the row's status and claim strength.
 
 Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml,
 with the question it answers, and its query in queries/<id>.sql. A result whose table declares
@@ -37,7 +37,7 @@ sys.path.insert(0, str(ROOT))
 from src.exploration.validate import profile, validate  # noqa: E402
 from src.preparation.landing import session  # noqa: E402
 from src.provenance import (  # noqa: E402
-    ledger_ids, prior_result, record_evidence, record_finding, result_problems, views_read)
+    ledger_answerers, prior_result, record_evidence, record_finding, result_problems, views_read)
 
 
 def run(connection, sql, parameters):
@@ -119,7 +119,7 @@ def main(argv):
     # Check answers against the ledger now: a rerun replaces the prior evidence before recording.
     declares = any(isinstance(results[result_id], dict) and results[result_id].get("answers") for result_id in wanted)
     try:
-        questions = ledger_ids(ROOT, NAME) if declares else None
+        questions = ledger_answerers(ROOT, NAME) if declares else None
     except ValueError as error:
         print(error, file=sys.stderr)
         return 1
