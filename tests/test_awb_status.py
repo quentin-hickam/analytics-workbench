@@ -31,13 +31,13 @@
 # test_an_unusable_server_validator_is_unknown_and_the_probe_continues: a blank ETag or a Last-Modified that does not parse (including an overflowing year or offset) gives no evidence of change; the other validator decides if usable, else the file is unknown; two unparseable dates are compared as text; later files are still probed.
 # test_a_relanded_url_is_checked_only_in_its_latest_acquisition: after a changed upstream is landed again, only the newest acquisition of that source and URL is probed and the earlier one counts as superseded, even when the newer one records no validator.
 # test_the_latest_acquisition_is_ordered_by_completed_at_then_acquisition_id: completed_at instants are compared across offsets, not by ID, and acquisitions completed in the same second are ordered by acquisition ID, so exactly one stays current.
-# test_a_host_that_times_out_is_not_requested_again: after a connect or read timeout, the host's remaining files are unknown without a request, and other hosts are still probed.
+# test_a_host_that_times_out_is_not_requested_again: after a connect or read timeout, the remaining files at that host and port are unknown without a request, and other hosts, and the same host on another port, are still probed.
 # test_a_redirect_target_that_times_out_is_not_requested_again: through urllib's own redirect processing, the host that timed out after a redirect is the one suppressed, for direct and redirected requests alike, and the redirecting host is still requested.
 # test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
-# test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including any upstream field land() refuses (by land()'s own check: an invalid or credential-bearing URL among them), is named under uncertainties with or without the probe and makes probeable_files null, nothing is requested for it, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
-# test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key is valid and counts as without upstream.
+# test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including any upstream field land() refuses (by land()'s own check: an invalid, hostless, bad-port, or credential-bearing URL among them) and a repeated file path, is named under uncertainties with or without the probe and makes probeable_files null, nothing is requested for it, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
+# test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key, or an upstream with no field set ({} or all null, which land() records as null), is valid and counts as without upstream.
 # test_unreadable_acquisition_inventory_is_unknown_not_zero: an unreadable data/raw or source directory is an uncertainty and makes probeable_files null, never zero.
-# test_probe_follows_redirects_only_to_http_and_only_as_head: through urllib's own redirect processing, a redirect to ftp is refused before any FTP call and an https redirect is followed as HEAD.
+# test_probe_follows_redirects_only_to_http_and_only_as_head: through urllib's own redirect processing, a redirect to ftp or file is refused before any FTP or file access, a redirect loop, a redirect without a Location, and a redirect to an invalid port are unknown with a reason naming why, and an https redirect is followed as HEAD.
 # test_probe_upstream_flag_reaches_the_probe: the command-line flag runs the probe and prints its results.
 
 """Status observations stay read-only and conservative when records need interpretation."""
@@ -657,15 +657,19 @@ def test_a_host_that_times_out_is_not_requested_again(workbench, monkeypatch, ti
     import urllib.error
     error = urllib.error.URLError(TimeoutError("timed out")) if timeout == "connect" else TimeoutError("timed out")
     land_with_upstream(workbench, "batch-1", {name: {"url": f"https://{host}/{name}", "etag": '"v1"'} for name, host in
-                                              (("a.csv", "slow.test"), ("b.csv", "slow.test"), ("c.csv", "fast.test"))})
-    server = FakeServer({"https://slow.test/a.csv": error, "https://fast.test/c.csv": {"ETag": '"v1"'}})
+                                              (("a.csv", "slow.test:8443"), ("b.csv", "slow.test:8443"),
+                                               ("c.csv", "fast.test"), ("d.csv", "slow.test"))})
+    server = FakeServer({"https://slow.test:8443/a.csv": error, "https://fast.test/c.csv": {"ETag": '"v1"'},
+                         "https://slow.test/d.csv": {"ETag": '"v1"'}})
     serve(monkeypatch, server)
     files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
     assert [(file["path"], file["result"], file.get("reason")) for file in files] == [
-        ("a.csv", "unknown", f"no response from slow.test within {status.PROBE_TIMEOUT} s"),
-        ("b.csv", "unknown", "not requested: an earlier request to slow.test timed out"),
-        ("c.csv", "unchanged", None)]
-    assert [url for _, url, _ in server.requests] == ["https://slow.test/a.csv", "https://fast.test/c.csv"]
+        ("a.csv", "unknown", f"no response from slow.test:8443 within {status.PROBE_TIMEOUT} s"),
+        ("b.csv", "unknown", "not requested: an earlier request to slow.test:8443 timed out"),
+        ("c.csv", "unchanged", None),
+        ("d.csv", "unchanged", None)]
+    assert [url for _, url, _ in server.requests] == [
+        "https://slow.test:8443/a.csv", "https://fast.test/c.csv", "https://slow.test/d.csv"]
 
 
 def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench, monkeypatch):
@@ -703,7 +707,21 @@ def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench
            "upstream url of a.csv carries credential parameters (access_token); record it without credentials"),
           ({"url": "user:SECRET@example.test/x", "etag": '"v1"'},
            "upstream url of a.csv carries a user name or password; record it without credentials"),
+          ({"url": "https://example.test/a?user=bob&pass=SECRET", "etag": '"v1"'},
+           "upstream url of a.csv carries credential parameters (pass); record it without credentials"),
+          ({"url": "https://example.test/a?api_sig=SECRET", "etag": '"v1"'},
+           "upstream url of a.csv carries credential parameters (api_sig); record it without credentials"),
+          ({"url": "https://", "etag": '"v1"'},
+           "upstream url of a.csv is not a valid URL: an http(s) URL needs a host and no space or control character"),
+          ({"url": "https://api.test:bad/x", "etag": '"v1"'},
+           "upstream url of a.csv is not a valid URL: its port is not a number from 0 to 65535"),
       ]],
+    # A repeated path would leave an entry unchecked: the first entry's upstream is never validated.
+    *[(json.dumps({"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00",
+                   "files": [{"path": "x.csv", "upstream": first},
+                             {"path": "x.csv", "upstream": {"url": "https://example.test/x", "etag": '"v1"'}}]}),
+       "Malformed acquisition provenance: a file path is repeated")
+      for first in ["broken", {"url": "https://example.test/x?api_key=SECRET", "etag": '"v1"'}]],
     (None, "Missing acquisition provenance"),
 ])
 def test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown(workbench, monkeypatch, text, reason):
@@ -729,13 +747,22 @@ def test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown(wo
     assert "SECRET" not in json.dumps(result)
 
 
-def test_provenance_without_upstream_keys_counts_as_without_upstream(workbench, monkeypatch):
-    monkeypatch.setattr(status, "head_opener", refuse_network)
+@pytest.mark.parametrize("upstream", ["absent", {}, {"url": None, "etag": None, "last_modified": None, "version_id": None}])
+def test_provenance_without_upstream_keys_counts_as_without_upstream(workbench, monkeypatch, upstream):
+    entry = {"path": "a.csv", "bytes": 1, "sha256": "0", "records": None}
+    if upstream != "absent":
+        entry["upstream"] = upstream
     write(workbench, "data/raw/api/old/provenance.json", json.dumps(
-        {"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00",
-         "files": [{"path": "a.csv", "bytes": 1, "sha256": "0", "records": None}]}))
+        {"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [entry]}))
+    monkeypatch.setattr(status, "head_opener", refuse_network)
     result = status.collect(workbench)
     assert result["uncertainties"] == [] and result["upstream"] == {"probeable_files": 0}
+    server = FakeServer({})
+    serve(monkeypatch, server)
+    result = status.collect(workbench, probe_upstream=True)
+    assert result["upstream"] == {"probeable_files": 0, "files": [], "not_probeable": [], "superseded": 0,
+                                  "without_upstream": 1}
+    assert server.requests == []
 
 
 @pytest.mark.parametrize("blocked", ["data/raw", "data/raw/api"])
@@ -765,10 +792,14 @@ def test_probe_follows_redirects_only_to_http_and_only_as_head(workbench, monkey
     import urllib.response
     answers = {
         "https://example.test/ftp": (302, {"Location": "ftp://example.test/source.csv"}),
+        "https://example.test/file": (302, {"Location": "file:///etc/hosts"}),
+        "https://example.test/loop": (302, {"Location": "/loop"}),
+        "https://example.test/nowhere": (302, {}),
+        "https://example.test/badport": (307, {"Location": "https://example.test:bad/x"}),
         "https://example.test/old": (301, {"Location": "https://example.test/new"}),
         "https://example.test/new": (200, {"ETag": '"v1"'}),
     }
-    requests, ftp = [], []
+    requests, ftp, local = [], [], []
 
     def https_open(handler, request):
         requests.append((request.get_method(), request.full_url))
@@ -782,16 +813,24 @@ def test_probe_follows_redirects_only_to_http_and_only_as_head(workbench, monkey
 
     monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", https_open)
     monkeypatch.setattr(urllib.request.FTPHandler, "ftp_open", lambda handler, request: ftp.append(request.full_url))
-    land_with_upstream(workbench, "batch-1", {"ftp.csv": {"url": "https://example.test/ftp", "etag": '"v1"'},
-                                              "old.csv": {"url": "https://example.test/old", "etag": '"v1"'}})
+    monkeypatch.setattr(urllib.request.FileHandler, "file_open", lambda handler, request: local.append(request.full_url))
+    land_with_upstream(workbench, "batch-1", {f"{name}.csv": {"url": f"https://example.test/{name}", "etag": '"v1"'}
+                                              for name in ("badport", "file", "ftp", "loop", "nowhere", "old")})
     files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
     assert [(file["path"], file["result"], file.get("reason")) for file in files] == [
+        ("badport.csv", "unknown", "redirected to an invalid URL, not followed"),
+        ("file.csv", "unknown", "redirected to a URL other than http(s), not followed"),
         ("ftp.csv", "unknown", "redirected to a URL other than http(s), not followed"),
+        ("loop.csv", "unknown", "HTTP 302: redirected in a loop or too many times, not followed"),
+        ("nowhere.csv", "unknown", "HTTP 302: not a redirect the probe follows"),
         ("old.csv", "unchanged", None),
     ]
-    assert ftp == []
-    assert requests == [("HEAD", "https://example.test/ftp"), ("HEAD", "https://example.test/old"),
-                        ("HEAD", "https://example.test/new")]
+    assert ftp == [] and local == []
+    assert requests == [("HEAD", "https://example.test/badport"), ("HEAD", "https://example.test/file"),
+                        ("HEAD", "https://example.test/ftp"),
+                        *[("HEAD", "https://example.test/loop")] * (urllib.request.HTTPRedirectHandler.max_repeats + 1),
+                        ("HEAD", "https://example.test/nowhere"),
+                        ("HEAD", "https://example.test/old"), ("HEAD", "https://example.test/new")]
 
 
 @pytest.mark.parametrize("timeout", ["connect", "read"])
@@ -829,9 +868,9 @@ def test_a_redirect_target_that_times_out_is_not_requested_again(workbench, monk
                                               "d.csv": {"url": "https://one.test/d", "etag": '"v1"'}})
     files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
     assert [(file["path"], file["result"], file.get("reason")) for file in files] == [
-        ("a.csv", "unknown", f"no response from slow.test within {status.PROBE_TIMEOUT} s"),
-        ("b.csv", "unknown", "not requested: an earlier request to slow.test timed out"),
-        ("c.csv", "unknown", "redirected to slow.test, not followed: an earlier request to slow.test timed out"),
+        ("a.csv", "unknown", f"no response from slow.test:443 within {status.PROBE_TIMEOUT} s"),
+        ("b.csv", "unknown", "not requested: an earlier request to slow.test:443 timed out"),
+        ("c.csv", "unknown", "redirected to slow.test:443, not followed: an earlier request to slow.test:443 timed out"),
         ("d.csv", "unchanged", None),
     ]
     assert requests == [("HEAD", "https://one.test/a"), ("HEAD", "https://slow.test/a"),

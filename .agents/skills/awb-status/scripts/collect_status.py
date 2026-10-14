@@ -336,7 +336,8 @@ def upstream(root, probe, uncertain, entries):
             order = (acquisition[0], directory.name)
             for file in acquisition[1]:
                 recorded = file.get("upstream")
-                if recorded is None:
+                # land() records an upstream whose fields are all None as null.
+                if recorded is None or all(value is None for value in recorded.values()):
                     without += 1
                     continue
                 entry = {"source": source.name, "acquisition_id": directory.name, "path": file["path"]}
@@ -349,7 +350,7 @@ def upstream(root, probe, uncertain, entries):
         url = recorded.get("url")
         if url is not None and order < latest[(entry["source"], url)]:
             superseded += 1
-        elif not (isinstance(url, str) and url.split(":", 1)[0].lower() in {"http", "https"}):
+        elif url is None or urllib.parse.urlsplit(url).scheme not in {"http", "https"}:
             not_probeable.append({**entry, "reason": "no HTTP URL recorded"})
         elif not any(isinstance(recorded.get(name), str) for name in ("etag", "last_modified")):
             not_probeable.append({**entry, "reason": "no ETag or Last-Modified recorded"})
@@ -357,7 +358,7 @@ def upstream(root, probe, uncertain, entries):
             probeable.append((entry, recorded))
     report = {"probeable_files": len(probeable) if complete else None}
     if probe:
-        # One timeout per host bounds the run when a host is unreachable (VPN off, firewall).
+        # One timeout per host and port bounds the run when a host is unreachable (VPN off, firewall).
         opener, unresponsive = head_opener(), set()
         results = [{**entry, **probe_file(recorded, opener, unresponsive)} for entry, recorded in probeable]
         report.update(files=results, not_probeable=not_probeable, superseded=superseded, without_upstream=without)
@@ -388,6 +389,9 @@ def acquisition_files(path, uncertain):
         defect = "files is not a list"
     elif not all(isinstance(f, dict) and isinstance(f.get("path"), str) and f["path"] for f in files):
         defect = "a file entry has no path"
+    elif len({f["path"] for f in files}) != len(files):
+        # land() lists each file once; a repeated path would leave an entry unchecked below.
+        defect = "a file path is repeated"
     else:
         try:
             # land()'s refusals name the file and parameter, never a value.
@@ -411,28 +415,61 @@ def timestamp(value):
 
 
 class RedirectRefused(urllib.error.URLError):
-    """A redirect the probe does not follow: to a URL other than http(s), or to a host that timed out."""
+    """A redirect the probe does not follow: to a URL other than http(s), to an invalid URL, or to a
+    host and port that timed out."""
+
+
+def endpoint(url):
+    """Return an http(s) URL's host and port as host:port, the scheme's port when none is given.
+
+    Raise ValueError for any other URL, without a host, or with an invalid port; land() refuses
+    an http(s) URL without a host or with an invalid port.
+    """
+    parts = urllib.parse.urlsplit(url)
+    port, default = parts.port, {"http": 80, "https": 443}.get(parts.scheme)
+    if default is None or not parts.hostname:
+        raise ValueError("not an http(s) URL with a host")
+    host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+    return f"{host}:{default if port is None else port}"
 
 
 class HeadRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Follow a redirect only to an http(s) URL, and only as another HEAD request.
 
-    A request from probe_file carries hosts, the hosts its chain has requested in order, and
-    unresponsive, the hosts that timed out; a redirect to an unresponsive host is not followed.
+    A request from probe_file carries endpoints, the host:port endpoints its chain has requested
+    in order, and unresponsive, the endpoints that timed out; a redirect to an unresponsive
+    endpoint is not followed.
     """
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        target = urllib.parse.urlsplit(newurl)
-        if target.scheme.lower() not in {"http", "https"}:
+    # urllib raises an HTTPError with this reason, plus the last status message, on a redirect loop.
+    inf_msg = "redirect loop: "
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        # Checked before urllib's own check, which lets ftp through and names the URL it refuses.
+        location = headers.get("location", headers.get("uri"))
+        try:
+            scheme = urllib.parse.urlsplit(location).scheme if location is not None else ""
+        except ValueError:
+            raise RedirectRefused("redirected to an invalid URL, not followed") from None
+        if scheme not in {"", "http", "https"}:
             raise RedirectRefused("redirected to a URL other than http(s), not followed")
-        if target.hostname in getattr(req, "unresponsive", ()):
-            raise RedirectRefused(f"redirected to {target.hostname}, not followed: "
-                                  f"an earlier request to {target.hostname} timed out")
+        return super().http_error_302(req, fp, code, msg, headers)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            target = endpoint(newurl)
+        except ValueError:
+            raise RedirectRefused("redirected to an invalid URL, not followed") from None
+        if target in getattr(req, "unresponsive", ()):
+            raise RedirectRefused(f"redirected to {target}, not followed: an earlier request to {target} timed out")
         request = super().redirect_request(req, fp, code, msg, headers, newurl)
         if request is not None:
             request.method = "HEAD"
-            request.unresponsive, request.hosts = getattr(req, "unresponsive", set()), getattr(req, "hosts", [])
-            request.hosts.append(target.hostname)
+            request.unresponsive = getattr(req, "unresponsive", set())
+            request.endpoints = getattr(req, "endpoints", [])
+            request.endpoints.append(target)
         return request
 
 
@@ -443,25 +480,31 @@ def head_opener():
 def probe_file(recorded, opener, unresponsive):
     """HEAD the recorded URL and compare its ETag, else its Last-Modified, with the recorded value.
 
-    unresponsive holds the hosts a request timed out on, shared across a run: the host whose
-    request timed out, after any redirects, is added, and no request is sent to one already in it.
+    unresponsive holds the host:port endpoints a request timed out on, shared across a run: the
+    endpoint whose request timed out, after any redirects, is added, and no request is sent to one
+    already in it. Another port on the same host is still requested.
     """
-    host = urllib.parse.urlsplit(recorded["url"]).hostname
-    if host in unresponsive:
-        return {"result": "unknown", "reason": f"not requested: an earlier request to {host} timed out"}
+    # land() refuses an http(s) URL without a host or with an invalid port, so this cannot raise.
+    target = endpoint(recorded["url"])
+    if target in unresponsive:
+        return {"result": "unknown", "reason": f"not requested: an earlier request to {target} timed out"}
     request = urllib.request.Request(recorded["url"], method="HEAD")
-    request.unresponsive, request.hosts = unresponsive, [host]
+    request.unresponsive, request.endpoints = unresponsive, [target]
     try:
         with opener.open(request, timeout=PROBE_TIMEOUT) as response:
             headers = response.headers
     except urllib.error.HTTPError as error:
+        if 300 <= error.code < 400:
+            loop = str(error.reason).startswith(HeadRedirectHandler.inf_msg)
+            return {"result": "unknown", "reason": f"HTTP {error.code}: " + (
+                "redirected in a loop or too many times, not followed" if loop else "not a redirect the probe follows")}
         return {"result": "unknown", "reason": f"HTTP {error.code}"}
     except RedirectRefused as error:
         return {"result": "unknown", "reason": error.reason}
     except (OSError, ValueError, http.client.HTTPException) as error:
         if isinstance(error, TimeoutError) or isinstance(getattr(error, "reason", None), TimeoutError):
-            unresponsive.add(request.hosts[-1])
-            return {"result": "unknown", "reason": f"no response from {request.hosts[-1]} within {PROBE_TIMEOUT} s"}
+            unresponsive.add(request.endpoints[-1])
+            return {"result": "unknown", "reason": f"no response from {request.endpoints[-1]} within {PROBE_TIMEOUT} s"}
         return {"result": "unknown", "reason": f"{type(error).__name__}: {error}"}
     compared, unusable = {}, []
     for name, header in (("etag", "ETag"), ("last_modified", "Last-Modified")):
