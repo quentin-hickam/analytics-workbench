@@ -17,7 +17,7 @@
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
-# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by one of the two forms foundation/sources.md defines, a complete Markdown link or a backticked location with its sha256; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
+# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by one of the two forms foundation/sources.md defines, a link in its stated grammar or a backticked location with its sha256, in plain text outside code, HTML, links and brackets; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
 # test_absent_project_and_unsafe_active_pointer: a missing project is not a workbench; an unsafe pointer is an uncertainty.
 # test_standard_active_state_pointer: link, path, and backticked pointer forms resolve to the investigation.
 # test_other_state_reader_stops_before_conclusions: another investigation's state is read only up to its first section.
@@ -295,8 +295,9 @@ def test_acquisitions_and_storage_risks(workbench):
 
 SHA = "ab12" * 16
 # Notes probes for the two reference forms foundation/sources.md defines: (source ID, Notes, whether
-# it counts as a reference, where the probe came from). Every reviewer probe from PR 38 rounds 1-4
-# is a row, in both directions; rows marked "limit" pin what a syntax-only check cannot tell apart.
+# it counts as a reference, where the probe came from). Every reviewer probe from PR 38 rounds 1-5
+# is a row, in both directions; rows marked "limit" pin Markdown that renders as a reference but is
+# outside the grammar foundation/sources.md states, or what a syntax-only check cannot tell apart.
 REFERENCE_PROBES = [
     # The link form.
     ("link", "reference: [dictionary](references/link/dictionary.pdf)", True, "template example"),
@@ -306,8 +307,13 @@ REFERENCE_PROBES = [
     ("link-parens", "reference: [codebook](references/link-parens/manual(v1).pdf)", True, "worker r3"),
     ("link-parens-2", "reference: [manual](references/link-parens-2/manual(v1(2026)).pdf)", True, "Codex r4 #1"),
     ("link-parens-3", "reference: [manual](references/link-parens-3/manual(v1(2026(a))).pdf)", True, "worker r4"),
-    ("link-parens-escaped", "reference: [manual](references/link-parens-escaped/manual\\(v1.pdf)", True, "worker r4"),
-    ("link-escaped-backslash", "reference: [manual](references/link-escaped-backslash/manual(v1\\\\).pdf)", True, "worker r4"),
+    ("link-parens-escaped", "reference: [manual](references/link-parens-escaped/manual\\(v1.pdf)", False, "worker r4; limit: a bare destination has no \\"),
+    ("link-escaped-backslash", "reference: [manual](references/link-escaped-backslash/manual(v1\\\\).pdf)", False, "worker r4; limit: a bare destination has no \\"),
+    ("link-lt-in-bare", "reference: [dd](references/link-lt-in-bare/a<b.pdf)", False, "Opus r5 #1; limit: a bare destination has no <"),
+    ("link-text-brackets", "reference: [HR dictionary [2024]](references/link-text-brackets/dd.pdf)", False, "Opus r5 #1; limit: link text has no brackets"),
+    ("link-text-escaped", "reference: [dd \\[v2\\]](references/link-text-escaped/dd.pdf)", False, "Opus r5 #1; limit: link text has no brackets or \\"),
+    ("link-angle-escaped-end", "reference: [manual](<references/link-angle-escaped-end/manual.pdf\\>)", False, "Codex r5 #1"),
+    ("link-angle-escaped", "reference: [manual](<references/link-angle-escaped/manual\\>v1.pdf>)", False, "Codex r5 #1; limit: an angle destination has no \\"),
     ("link-angle", "reference: [codebook](<references/link-angle/data dictionary.pdf>)", True, "template example"),
     ("link-angle-parens-2", "reference: [manual](<references/link-angle-parens-2/manual(v1(2026)).pdf>)", True, "Codex r4 #1"),
     ("link-unclosed", "reference: [codebook](references/link-unclosed/codebook.pdf", False, "Codex r2 #1"),
@@ -321,6 +327,21 @@ REFERENCE_PROBES = [
     ("link-in-code", "reference: `[codebook](references/link-in-code/codebook.pdf)`", False, "worker r3"),
     ("link-titled", 'reference: [codebook](references/link-titled/codebook.pdf "Codebook")', False, "limit: link titles are not read"),
     ("link-placeholder", "reference: [none](none)", True, "limit: syntax only"),
+    # What the label sits in: a clause counts only in plain text, outside code, HTML, links and brackets.
+    ("code-span-after", "Owner `HR`; reference: [codebook](references/code-span-after/codebook.pdf)", True, "worker r5"),
+    ("code-span-label", "No reference kept. Attempted note: `status pending; reference: [manual](references/code-span-label/manual.pdf)`", False, "Codex r5 #2"),
+    ("code-span-double", "``draft; reference: [manual](references/code-span-double/manual.pdf)``", False, "worker r5"),
+    ("code-span-escaped", "\\`draft; reference: [manual](references/code-span-escaped/manual.pdf)", True, "worker r5: an escaped backtick opens no code span"),
+    ("code-span-after-escape", "\\`a` b; reference: [manual](references/code-span-after-escape/manual.pdf)`", False, "worker r5"),
+    ("html-attribute", "<span title='draft; reference: [manual](references/html-attribute/manual.pdf)'>x</span>", False, "worker r5"),
+    ("html-comment", "<!-- draft; reference: [manual](references/html-comment/manual.pdf) -->", False, "worker r5"),
+    ("autolink-before", "Owner <https://example.org/hr>; reference: [manual](references/autolink-before/manual.pdf)", True, "worker r5"),
+    ("entity-before", "AT&amp;T; reference: [manual](references/entity-before/manual.pdf)", True, "worker r5"),
+    ("image-alt", "![scan; reference: [manual](references/image-alt/manual.pdf)](scan.png)", False, "worker r5"),
+    ("in-destination", "[draft](notes;reference:[manual](references/in-destination/manual.pdf))", False, "worker r5"),
+    ("in-brackets", "[draft; reference: [manual](references/in-brackets/manual.pdf)]", False, "worker r5; limit: a clause inside brackets is not read"),
+    ("after-titled-link", '[owner](https://example.org "HR"); reference: [manual](references/after-titled-link/manual.pdf)', False, "worker r5; limit: a clause after a link outside form 1 is not read"),
+    ("after-other-link", "[owner [HR]](https://example.org/hr); reference: [manual](references/after-other-link/manual.pdf)", True, "worker r5"),
     # The retained-location form.
     ("kept", f"reference: `/secure/kept/manual.pdf`, sha256 {SHA}", True, "template example"),
     ("kept-spaced", f"reference: `OneDrive - Contoso/Docs/kept-spaced/manual.pdf`, sha256 {SHA}", True, "Opus r3 #1"),

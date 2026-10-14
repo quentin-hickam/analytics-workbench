@@ -188,47 +188,98 @@ def collect(root):
             uncertain(sources_path, f"Source {row['Source ID']}: Relevance and fitness does not begin with its basis")
         return basis is not None and basis.group(1).lower() == "documentation"
 
-    # The two reference forms foundation/sources.md defines, and nothing else. A complete Markdown link:
-    # bracketed text without brackets, then a destination in angle brackets, or one without spaces or
-    # `<` whose unescaped parentheses balance at any depth, as CommonMark allows. Or a backticked
-    # retained location, a comma, then `sha256` (also `SHA-256`, `sha256:`) and exactly 64 hex digits.
-    label = re.compile(r"(?:^|[;,.]|<br\s*/?>)\s*reference:\s*", re.I)
-    link_text = re.compile(r"\[[^\[\]]*\]\(")
-    angle_destination = re.compile(r"<[^<>\n]+>\)")
+    # The two reference forms foundation/sources.md defines, exactly as it states them; any other
+    # spelling, valid Markdown or not, counts as no reference. Form 1 is `[text](destination)`: text
+    # without `[`, `]`, `\`, `<` or a backtick, then a destination in angle brackets without `<`, `>`,
+    # `\` or a line break, or a bare one without whitespace, control characters, `<` or `\` whose
+    # parentheses balance at any depth. Form 2 is a location in single backticks, a comma, then
+    # `sha256` (also `SHA-256`, `sha256:`) and exactly 64 hex digits.
+    link_text = re.compile(r"\[[^\[\]\\<`]*\]\(")
+    angle_destination = re.compile(r"<[^<>\\\n]+>\)")
     retained = re.compile(r"`[^`\n]*[^`\s][^`\n]*`,\s*sha-?256:?\s*[0-9a-f]{64}(?![0-9a-f])", re.I)
+    label = re.compile(r"\s*reference:\s*", re.I)
+    line_break = re.compile(r"<br\s*/?>", re.I)
+    entity = re.compile(r"&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
+    # Raw HTML and autolinks, which CommonMark reads before code spans and links and whose contents are
+    # not Markdown. These patterns are looser than CommonMark's and markdown-it's, and the longest match
+    # is taken, so a construct is never read shorter than a renderer reads it.
+    attribute = r"""\s+[\w:.-]+(?:\s*=\s*(?:[^"'=<>`\x00-\x20]+|'[^']*'|"[^"]*"))?"""
+    angle_constructs = [re.compile(pattern, re.S) for pattern in (
+        rf"</?\w[\w-]*(?:{attribute})*\s*/?>", r"<!---?>", r"<!--.*?-->", r"<!--(?:[^-]|-[^-]|--[^>])*-->",
+        r"<\?.*?\?>", r"<!\[CDATA\[.*?\]\]>", r"<![A-Za-z][^>]*>", r"<[^<>\x00-\x20]*[:@][^<>\x00-\x20]*>")]
 
     def bare_destination(notes, start):
-        """Whether a non-empty destination without spaces or `<` starts at `start` and the link's `)` closes it."""
+        """Where the link's `)` closes a bare destination starting at `start`, or None."""
         depth = 0
-        position = start
-        while position < len(notes):
+        for position in range(start, len(notes)):
             char = notes[position]
-            if char.isspace() or char == "<":
-                return False
-            if char == "\\" and len(notes) > position + 1 and notes[position + 1] in string.punctuation:
-                position += 1  # A backslash escape, such as `\(`, is part of the destination.
-            elif char == "(":
+            if char.isspace() or char in "<\\\x7f" or char < " ":
+                return None
+            if char == "(":
                 depth += 1
             elif char == ")":
                 if depth == 0:
-                    return position > start
+                    return position + 1 if position > start else None
                 depth -= 1
-            position += 1
-        return False
+        return None
 
-    def reference_form(notes, start):
-        """Whether one of the two reference forms starts at `start`."""
-        if retained.match(notes, start):
-            return True
+    def destination(notes, start):
+        """Where `)` closes an angle or bare destination starting at `start`, or None."""
+        angled = angle_destination.match(notes, start)
+        return angled.end() if angled else bare_destination(notes, start)
+
+    def link(notes, start):
+        """Where a form-1 link starting at `start` ends, or None."""
         opened = link_text.match(notes, start)
-        return opened is not None and (angle_destination.match(notes, opened.end()) is not None
-                                       or bare_destination(notes, opened.end()))
+        return opened and destination(notes, opened.end())
 
     def referenced(notes):
-        """Whether a Notes clause opens with `reference:` directly followed by one of the two reference forms."""
-        # A clause opens the cell or follows `;`, `,`, `.`, or a `<br>` line break. Only what directly
-        # follows the label counts, so `reference: pending. See [x](y)` records no reference.
-        return any(reference_form(notes, found.end()) for found in label.finditer(notes))
+        """Whether a Notes clause in plain text opens with `reference:` directly followed by one of the two forms."""
+        # Read left to right as CommonMark does. A clause opens the cell or follows `;`, `,`, `.` or a
+        # `<br>`, outside code spans, raw HTML, autolinks, links and brackets; only what directly
+        # follows the label counts, so `reference: pending. See [x](y)` records no reference. Where
+        # the reading is uncertain (a backtick, bracket or `<` inside raw HTML or an autolink, or a link
+        # whose destination this does not read), the rest of the cell counts as no reference.
+        position, clause, brackets = 0, True, 0
+        while position < len(notes):
+            labelled = clause and not brackets and label.match(notes, position)
+            if labelled and (retained.match(notes, labelled.end()) or link(notes, labelled.end())):
+                return True
+            clause = False
+            char = notes[position]
+            if char == "\\" and notes[position + 1:position + 2] in tuple(string.punctuation):
+                position += 2
+            elif char == "`":
+                run = re.match(r"`+", notes[position:]).group()
+                closer = re.compile(rf"(?<!`){run}(?!`)").search(notes, position + len(run))
+                position = closer.end() if closer else position + len(run)
+            elif char == "<":
+                broken = line_break.match(notes, position)
+                end = broken.end() if broken else max(
+                    (found.end() for pattern in angle_constructs if (found := pattern.match(notes, position))), default=None)
+                if end and any(inner in "`[]<" for inner in notes[position + 1:end]):
+                    return False  # Renderers may split this construct differently.
+                position = end or position + 1
+                clause = bool(broken)
+            elif char == "[":
+                closed = link(notes, position)
+                brackets += closed is None
+                position = closed or position + 1
+            elif char == "]" and brackets:
+                brackets -= 1
+                if notes.startswith("(", position + 1):
+                    closed = destination(notes, position + 2)
+                    if closed is None:
+                        return False
+                    position = closed
+                else:
+                    position += 1
+            elif entity.match(notes, position):
+                position = entity.match(notes, position).end()  # Its `;` ends the entity, not a clause.
+            else:
+                clause = char in ";,."
+                position += 1
+        return False
 
     # foundation/sources.md states the basis and reference forms these read.
     result["sources"] = None if registered is None else {"count": len(registered), "documentation_without_reference": [
