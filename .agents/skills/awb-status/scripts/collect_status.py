@@ -92,6 +92,8 @@ def collect(root, *, probe_upstream=False):
         """
         path = investigation / "questions.json"
         if not path.exists():
+            if (investigation / "questions.md").exists():
+                uncertain(path, "questions.md exists without questions.json; restore questions.json from Git")
             return None
         try:
             content = json.loads(path.read_text(encoding="utf-8"))

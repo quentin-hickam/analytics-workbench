@@ -530,7 +530,7 @@ def result_problems(result_id: str, table, questions: set[str] | None = None) ->
     answers, when given, as a list of ledger question IDs, each in `questions` when that set is given.
 
     record_evidence refuses a table with problems, checking answers against the ledger; run.py checks
-    every wanted result before running any.
+    every wanted result, answers against the ledger included, before running any.
     """
     where = f"[results.{result_id}]"
     if not isinstance(table, dict):
@@ -1583,7 +1583,7 @@ _LEDGER_COLUMNS = ["ID", "Question", "Kind", "Answerer", "Unblocks", "Status", "
 
 
 class _Ledger:
-    def __init__(self, root, investigation, *, render=False):
+    def __init__(self, root, investigation):
         base = root / "investigations" / investigation
         if not base.is_dir():
             raise StateError(f"investigations/{investigation} does not exist")
@@ -1592,7 +1592,8 @@ class _Ledger:
         self.label = f"investigations/{investigation}/questions.json"
         self.md_label = f"investigations/{investigation}/questions.md"
         if not self.path.exists():
-            if self.md_path.exists() and not render:
+            # Even render refuses: an empty ledger would overwrite the surviving rows and reuse their IDs.
+            if self.md_path.exists():
                 raise StateError(f"{self.md_label} exists without {self.label}; restore questions.json from Git")
             self.entries = []
             return
@@ -1673,13 +1674,16 @@ def _question_problem(entry):
 
 
 def _question_cells(entry):
+    parts = [f"[{r}](evidence/{r}.json)" for r in entry["results"]]
     if entry["status"] == "answered":
-        parts = [f"[{r}](evidence/{r}.json)" for r in entry["results"]]
         if entry["answer"]:
             parts.append(f"{entry['answer']} ({entry['by']}, {entry['updated']})")
         answer = "; ".join(parts)
     else:
-        answer = entry["reason"]
+        # A superseded question keeps its answer; show it beside the reason.
+        if entry["answer"]:
+            parts.append(f"{entry['answer']} ({entry['by']})")
+        answer = entry["reason"] + (f"; was answered: {'; '.join(parts)}" if parts else "")
     return [entry["id"], _cell(entry["text"]), entry["kind"], entry["answerer"], _cell(entry["unblocks"]),
             entry["status"], _cell(answer)]
 
@@ -1740,6 +1744,8 @@ def answer_question(project_root, investigation: str, question_id: str, *, text:
 
     A data question takes results only. A result must have a findings row and declare the question
     in its settings table's `answers`. Only an open, parked, or answered question can be answered.
+    An answered question keeps its answer: a different text or answerer is refused, so the change
+    supersedes it and adds a replacement; repeating the answer or linking more results is allowed.
     """
     root = Path(project_root).resolve()
     text, by = " ".join((text or "").split()), " ".join((by or "").split())
@@ -1754,6 +1760,10 @@ def answer_question(project_root, investigation: str, question_id: str, *, text:
         raise StateError(f"{question_id} is {entry['status']}; add a new question instead")
     if entry["answerer"] == "data" and text:
         raise StateError(f"{question_id} is a data question; only a recorded result answers it (--result)")
+    if text and entry["status"] == "answered" and (text, by) != (entry["answer"], entry["by"]):
+        raise StateError(f"{question_id} is answered and an answer is never replaced; supersede it with "
+                         f"`questions status {question_id} --set superseded --reason \"<the change>\"` "
+                         "and add a new question")
     statuses = _finding_statuses(root, investigation)
     for result_id in results:
         if result_id not in statuses:
@@ -1807,7 +1817,8 @@ def set_question(project_root, investigation: str, question_ids: list[str], stat
 def edit_question(project_root, investigation: str, question_id: str, *, text: str | None = None,
                   kind: str | None = None, answerer: str | None = None, unblocks: str | None = None,
                   today: str | None = None) -> bool:
-    """Reword or reclassify an open or parked question. Returns whether it changed."""
+    """Reword or reclassify an open or parked question; a data question keeps answerer data. Returns
+    whether it changed."""
     root = Path(project_root).resolve()
     if text is not None and not text.strip():
         raise ValueError("the question text is empty")
@@ -1820,6 +1831,9 @@ def edit_question(project_root, investigation: str, question_id: str, *, text: s
     entry = ledger.get(question_id)
     if entry["status"] not in ("open", "parked"):
         raise StateError(f"{question_id} is {entry['status']}; only an open or parked question is edited")
+    if entry["answerer"] == "data" and answerer not in (None, "data"):
+        raise StateError(f"{question_id} is a data question, answered only by a recorded result; to have a person "
+                         "answer it instead, supersede it and add a new question")
     new = {k: " ".join(v.split()) for k, v in (("text", text), ("kind", kind), ("answerer", answerer),
                                                 ("unblocks", unblocks)) if v is not None}
     if all(entry[k] == v for k, v in new.items()):
@@ -1867,11 +1881,12 @@ def question_lines(project_root, investigation: str, statuses=("open",)) -> list
         if entry["status"] not in statuses:
             continue
         line = f"{entry['id']} {entry['status']} [{entry['answerer']}, {entry['kind']}] {entry['text']}"
+        answer = "; ".join([f"{r} ({findings.get(r, 'no findings row')})" for r in entry["results"]]
+                           + ([f"{entry['answer']} ({entry['by']})"] if entry["answer"] else []))
         if entry["status"] == "answered":
-            line += " -> " + "; ".join([f"{r} ({findings.get(r, 'no findings row')})" for r in entry["results"]]
-                                       + ([f"{entry['answer']} ({entry['by']})"] if entry["answer"] else []))
+            line += " -> " + answer
         elif entry["reason"]:
-            line += f" -- {entry['reason']}"
+            line += f" -- {entry['reason']}" + (f"; was answered: {answer}" if answer else "")
         lines.append(line)
     return lines
 
@@ -1982,7 +1997,7 @@ def cli_questions(root: Path, argv: list[str]) -> int:
                                     answerer=args.answerer, unblocks=args.unblocks)
             print(("edited: " if changed else "unchanged: ") + args.question_id)
         else:
-            ledger = _Ledger(root, name, render=True)
+            ledger = _Ledger(root, name)
             drifted = ledger.drift()
             if drifted or not ledger.md_path.exists():
                 ledger.write()

@@ -3,7 +3,8 @@
 
 Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With no IDs it
 produces every result in settings.toml. It refuses to run, exiting 2, while a wanted result's
-table lacks its question. For each result it runs the result's saved queries in a fresh session
+table lacks its question or declares answers the question ledger does not hold, and exits 1 when
+the ledger cannot be read. For each result it runs the result's saved queries in a fresh session
 of canonical views, validates the result, saves the table and its profile under results/,
 records evidence under evidence/, writes its state.md findings row, and prints one compact JSON
 line with the paths, failed and unassessed checks, and what it did to the row, with the row's
@@ -36,7 +37,7 @@ sys.path.insert(0, str(ROOT))
 from src.exploration.validate import profile, validate  # noqa: E402
 from src.preparation.landing import session  # noqa: E402
 from src.provenance import (  # noqa: E402
-    prior_result, record_evidence, record_finding, result_problems, views_read)
+    ledger_ids, prior_result, record_evidence, record_finding, result_problems, views_read)
 
 
 def run(connection, sql, parameters):
@@ -115,7 +116,15 @@ def main(argv):
         print(f"settings.toml defines no result {', '.join(unknown)}" if unknown else
               "settings.toml defines no [results.<id>] tables", file=sys.stderr)
         return 2
-    problems = [problem for result_id in wanted for problem in result_problems(result_id, results[result_id])]
+    # Check answers against the ledger now: a rerun replaces the prior evidence before recording.
+    declares = any(isinstance(results[result_id], dict) and results[result_id].get("answers") for result_id in wanted)
+    try:
+        questions = ledger_ids(ROOT, NAME) if declares else None
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 1
+    problems = [problem for result_id in wanted
+                for problem in result_problems(result_id, results[result_id], questions)]
     if problems:
         print("\n".join(f"settings.toml: {problem}" for problem in problems), file=sys.stderr)
         return 2

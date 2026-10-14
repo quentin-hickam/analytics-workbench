@@ -1,13 +1,14 @@
 # Kept cases:
 # test_add_numbers_and_renders: add allocates Q-NNN in order, renders questions.md whole from questions.json, and refuses empty text, unknown choices, and a parked or declined question without a reason.
-# test_hand_edits_are_drift: every writer refuses a hand-edited questions.md and writes nothing; render restores it; questions.md without questions.json is refused.
-# test_person_answers: an answer needs text with who gave it; a data question refuses one; declined or superseded questions refuse answers; a repeated answer is unchanged.
+# test_hand_edits_are_drift: every writer refuses a hand-edited questions.md and writes nothing; render restores it; questions.md without questions.json is refused by every command, render included, so no ID is reused.
+# test_person_answers: an answer needs text with who gave it; a data question refuses one; declined or superseded questions refuse answers; a repeated answer is unchanged; a different answer to an answered question is refused, and a result can still be linked.
 # test_run_links_declared_answers: a result declaring answers marks open questions answered on record_finding, links an answered one again, skips declined ones, and reports them; undeclared results return the old shape.
 # test_answers_are_validated_before_evidence: answers must be Q-NNN IDs the ledger holds, refused before any evidence is written.
+# test_run_checks_answers_before_running: run.py exits 2 on an answers ID the ledger lacks, and 1 on an unreadable ledger, before opening a session or replacing evidence.
 # test_answers_never_stale_a_result: adding answers to a recorded result leaves stale and the exact-rerun baseline unchanged.
 # test_answer_by_result_needs_declaration: linking an existing result needs its findings row and its settings declaration.
-# test_status_transitions: answered can only be superseded, keeping its answer; open reopens parked or declined and is a no-op on open; reasons are required; only open or parked questions are edited.
-# test_status_collector_reads_the_ledger: collect_status reports counts, open questions by answerer, and answers resting only on flagged findings; null without a ledger; a malformed one is an uncertainty.
+# test_status_transitions: answered can only be superseded, keeping its answer; open reopens parked or declined and is a no-op on open; reasons are required; only open or parked questions are edited, and a data question keeps answerer data; a superseded answer stays visible in questions.md and list.
+# test_status_collector_reads_the_ledger: collect_status reports counts, open questions by answerer, and answers resting only on flagged findings; null without a ledger; a malformed one, or questions.md without questions.json, is an uncertainty.
 # test_resume_and_list_show_finding_status: state shows open questions and those answered only by flagged findings; list shows each linked finding's current status.
 
 from datetime import date
@@ -16,6 +17,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -138,8 +140,11 @@ def test_hand_edits_are_drift(project, capsys):
     assert code == 0 and out == "questions.md restored\n" and "| open |" in md.read_text()
     assert cli(project, capsys, "render")[1] == "questions.md matches questions.json\n"
     (project / INV / "questions.json").unlink()
-    code, _, err = cli(project, capsys, "list")
-    assert code == 1 and "exists without" in err
+    before = snapshot(project)
+    for argv in (["list"], ["render"], ["add", "Another?", "--kind", "context", "--answerer", "user", "--origin", "scope"]):
+        code, _, err = cli(project, capsys, *argv)
+        assert code == 1 and "exists without" in err
+    assert snapshot(project) == before and "| Q-001 |" in md.read_text()
 
 
 def test_person_answers(project, capsys):
@@ -151,6 +156,15 @@ def test_person_answers(project, capsys):
     assert entry["changed"] and entry["status"] == "answered"
     assert f"| answered | Logo churn, monthly (CFO, {TODAY}) |" in (project / INV / "questions.md").read_text()
     assert not provenance.answer_question(project, "churn", "Q-001", text="Logo churn, monthly", by="CFO")["changed"]
+    before = snapshot(project)
+    for text, by in (("Revenue churn", "CFO"), ("Logo churn, monthly", "Analyst")):
+        with pytest.raises(provenance.StateError, match="never replaced.*superseded"):
+            provenance.answer_question(project, "churn", "Q-001", text=text, by=by)
+    code, _, err = cli(project, capsys, "answer", "Q-001", "--text", "60 days", "--by", "Analyst")
+    assert code == 1 and "never replaced" in err and snapshot(project) == before
+    settings(project, {"r1": ["Q-001"]})
+    produce(project, "r1")
+    assert ledger(project)["Q-001"]["results"] == ["r1"] and ledger(project)["Q-001"]["answer"] == "Logo churn, monthly"
     code, _, err = cli(project, capsys, "answer", "Q-002", "--text", "yes", "--by", "user")
     assert code == 1 and "data question" in err
     provenance.set_question(project, "churn", ["Q-002"], "declined", reason="not needed")
@@ -187,6 +201,31 @@ def test_answers_are_validated_before_evidence(project):
     with pytest.raises(ValueError, match="answers must be a list"):
         produce(project, "r1")
     assert not (project / INV / "evidence" / "r1.json").exists()
+
+
+def test_run_checks_answers_before_running(project):
+    assets = ROOT / ".agents/skills/awb-init/assets"
+    (project / "src/exploration").mkdir(parents=True)
+    (project / "src/preparation").mkdir()
+    shutil.copyfile(assets / "awb_provenance.py", project / "src/provenance.py")
+    # Stand-ins for the duckdb and pandas helpers: opening a session would leave a marker.
+    (project / "src/exploration/validate.py").write_text("profile = validate = None\n")
+    (project / "src/preparation/landing.py").write_text(
+        "from pathlib import Path\n\ndef session(root):\n    Path(root, 'opened').touch()\n    raise SystemExit(9)\n")
+    shutil.copyfile(TEMPLATES / "investigation/run.py", project / INV / "run.py")
+    add(project, "Does churn differ by region?")
+    produce(project, "r1")
+    saved = (project / INV / "evidence/r1.json").read_bytes()
+    settings(project, {"r1": ["Q-001", "Q-999"]})
+    run = [sys.executable, str(project / INV / "run.py"), "r1"]
+    done = subprocess.run(run, capture_output=True, text=True)
+    assert (done.returncode, done.stdout) == (2, "") and "answers Q-999, which questions.json does not hold" in done.stderr
+    (project / INV / "questions.json").write_text("{}")
+    done = subprocess.run(run, capture_output=True, text=True)
+    assert done.returncode == 1 and "questions.json" in done.stderr
+    assert not (project / "opened").exists() and (project / INV / "evidence/r1.json").read_bytes() == saved
+    done = subprocess.run(run[:-1] + ["r2"], capture_output=True, text=True)
+    assert done.returncode == 9 and (project / "opened").exists()  # a result declaring no answers skips the ledger
 
 
 def test_answers_never_stale_a_result(project):
@@ -227,6 +266,10 @@ def test_status_transitions(project):
         provenance.set_question(project, "churn", ["Q-001"], "superseded")
     assert provenance.set_question(project, "churn", ["Q-001"], "superseded", reason="scope widened") == ["Q-001"]
     assert ledger(project)["Q-001"]["answer"] == "Logo churn"
+    assert "| superseded | scope widened; was answered: Logo churn (user) |" in (project / INV / "questions.md").read_text()
+    assert provenance.question_lines(project, "churn", ("superseded",)) == [
+        "Q-001 superseded [user, context] Which churn definition does finance use? -- scope widened; "
+        "was answered: Logo churn (user)"]
     with pytest.raises(provenance.StateError):
         provenance.set_question(project, "churn", ["Q-001"], "open")
     assert provenance.set_question(project, "churn", ["Q-002"], "open") == []
@@ -236,6 +279,11 @@ def test_status_transitions(project):
     assert provenance.edit_question(project, "churn", "Q-002", text="Is churn seasonal by quarter?")
     with pytest.raises(provenance.StateError, match="only an open or parked"):
         provenance.edit_question(project, "churn", "Q-001", text="x")
+    add(project, "Did churn rise?")
+    with pytest.raises(provenance.StateError, match="data question"):
+        provenance.edit_question(project, "churn", "Q-003", answerer="user")
+    assert provenance.edit_question(project, "churn", "Q-003", text="Did churn rise in Q3?", answerer="data")
+    assert provenance.edit_question(project, "churn", "Q-002", answerer="data")
 
 
 def test_resume_and_list_show_finding_status(project, capsys):
@@ -271,3 +319,7 @@ def test_status_collector_reads_the_ledger(project):
     result = status.collect(project)
     assert result["active"]["questions"] is None
     assert any("question ledger" in item["reason"] for item in result["uncertainties"])
+    (project / INV / "questions.json").unlink()
+    result = status.collect(project)
+    assert result["active"]["questions"] is None
+    assert any("without questions.json" in item["reason"] for item in result["uncertainties"])
