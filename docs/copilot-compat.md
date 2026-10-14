@@ -18,7 +18,7 @@ Researched 2026-10-14, against VS Code 1.142 and the MCP specification revision 
 | The server speaks the legacy `2025-11-25` protocol, and answers any other method, including `server/discover`, with an immediate `-32601` error. | VS Code Local negotiates `2025-11-25`. The spec requires dual-era clients to fall back to `initialize` on any non-modern error, but Copilot CLI builds before 1.0.88 treated some `server/discover` errors as fatal ([§5](#5-protocol)). |
 | The project root comes from an explicit argument, then from MCP roots, then from the working directory. It is validated as a workbench before anything is written. | Roots are deprecated in the spec. A user-level server's working directory isn't documented, and a plugin server's is its install folder. |
 | Tool results are bounded text, with no `structuredContent`. | VS Code Local passes `structuredContent` to the model *instead of* the text when both are present. Copilot CLI moves a result over 20 KiB to a file and shows the model a preview. |
-| Skills install to `~/.agents/skills` (VS Code and Codex) or `~/.claude/skills` (Claude Code). | Discovery locations below. |
+| Skills install once, to `~/.agents/skills`, which VS Code and Codex read. For Claude Code, each `~/.claude/skills/awb-*` entry is a symlink to that copy. | VS Code also reads `~/.claude/skills`, and loads one skill per name, from `~/.agents/skills` first, so a separate copy there would be shadowed or go stale ([§7](#7-skills)). |
 | The package reviewer is a custom agent whose `tools` list holds only read tools and the server's read-only tools. | VS Code custom agents restrict tools by `server/tool` name, and a subagent run under a named custom agent takes that agent's tools. |
 
 ## 1. Harnesses
@@ -126,6 +126,8 @@ Each candidate is accepted only if it holds `src/awb.py`, except for the tool th
 
 Sources: [VS Code skills](https://code.visualstudio.com/docs/agent-customization/agent-skills), [GitHub skills](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/add-skills).
 
+- **Same name in two locations.** VS Code Local searches `.agents/skills`, `.github/skills`, `.claude/skills`, then `~/.agents/skills`, `~/.copilot/skills`, `~/.claude/skills`, and skips any later skill whose name it has already loaded, so each name appears once ([`promptFileLocations.ts`](https://github.com/microsoft/vscode/blob/a4d6dc1d9dc15c3c92f26e94c025a93699334fa5/src/vs/workbench/contrib/chat/common/promptSyntax/config/promptFileLocations.ts#L172-L179), [`promptsServiceImpl.ts`](https://github.com/microsoft/vscode/blob/a4d6dc1d9dc15c3c92f26e94c025a93699334fa5/src/vs/workbench/contrib/chat/common/promptSyntax/service/promptsServiceImpl.ts#L1510-L1560); code). A copy in `~/.claude/skills` is therefore never what VS Code runs, and updating only that copy leaves VS Code on the old one. The Copilot harness's handling of duplicates is not established.
+- **Symlinks.** A Claude Code skill entry can be a symlink to a directory elsewhere, and Claude Code loads it once (documented, [Claude Code skills](https://code.claude.com/docs/en/skills)). Per-skill links leave the user's other `~/.claude/skills` entries alone. Where symlinks aren't available, the guide copies to both locations and updates both together.
 - **Enabled by default.** Skills are generally available and on by default from VS Code 1.109 (`chat.useAgentSkills`) (documented, [1.109](https://code.visualstudio.com/updates/v1_109)).
 - **Names.** A skill's name must match its folder, use lowercase letters, digits and hyphens, and fit in 64 characters. "Names with invalid characters cause the skill to silently fail to load." Descriptions fit in 1,024 characters (documented, VS Code skills). Every `awb-*` name complies.
 - **Frontmatter.** VS Code honors `name`, `description`, `argument-hint`, `user-invocable` (default true) and `disable-model-invocation` (default false). It does not list `allowed-tools`. Skills appear as `/name` commands (documented, VS Code skills).
@@ -165,7 +167,8 @@ There's no Copilot host here, so the first real run is a field test in VS Code. 
 6. Each write tool asks once, and "Allow in this Workspace" holds across a new chat in the same workspace.
 7. The server finds the project with no argument, and a deliberately wrong `project` argument is refused.
 8. The reviewer runs as a subagent, cannot edit files, and returns its report.
-9. Optional: in a Copilot-harness session, the server's tools load, steps 5 and 6 show what it asks, and step 7 shows whether it finds the project with no argument.
+9. With the `awb-*` skills in `~/.agents/skills` and linked from `~/.claude/skills`, each appears once in the `/` menu.
+10. Optional: in a Copilot-harness session, the server's tools load, steps 5 and 6 show what it asks, and step 7 shows whether it finds the project with no argument.
 
 ## Open uncertainties
 
