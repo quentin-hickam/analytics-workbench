@@ -16,7 +16,7 @@ Every skill name carries the `awb-` prefix, so typing `awb-` in a host that list
 ## Requirements
 
 - For package chart files, the chart helper that `awb-package` ships needs Python 3.10 or later and pandas.
-- The project helpers need Python 3.10 or later (3.11 or later, or `tomli`, for TOML settings). `awb-init`'s installer declares and checks their packages: pandas for validation and charts, and `duckdb` for sessions, queries, and publication. `land()`, `publish()`, and `retain()` themselves use only the standard library.
+- The project helpers need Python 3.10 or later (3.11 or later, or `tomli`, for TOML settings). `awb-init`'s installer declares and checks their packages: pandas for validation and charts, and `duckdb` for sessions, queries, and publication. `land()`, `publish()`, and `retain()` themselves use only the standard library, except that `publish()` needs `duckdb` to run a dataset's declared checks and, on Python 3.10, `tomli` to read an existing `foundation/datasets.toml`.
 - For result validation under the project `AGENTS.md`, the analysis project's Python environment needs Python 3.10 or later and pandas. The shared validation file was tested with pandas 2.2.
 - The `awb-clean` and `awb-eda` scans need Python 3.10 or later and the `duckdb` package in the project's interpreter (TOML settings need 3.11 or later, or `tomli`); the `awb-clean` record script needs only the standard library.
 - The read-only status collector needs Python 3.10 or later and the standard library; unsupported project record formats use targeted manual reads.

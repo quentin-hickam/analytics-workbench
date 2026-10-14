@@ -1,0 +1,41 @@
+# Declared checks for each published dataset. publish() and `python3 src/awb.py publish` run a
+# dataset's checks in DuckDB against every new publication of it, before any --check query or
+# validate callable, and record each as {name, outcome, detail} under checks in publication.json.
+# Any failure refuses the publication. Checks name columns, never publications: a new publication
+# of the dataset meets the same checks. Details carry counts, never source values. The checks read
+# the publication's Parquet files as one table; columns and types must hold in every file, because
+# a reader takes the table's schema from the first. A hive partition column (a key=value directory),
+# which no file stores, is checked once, as the files read together type it. Dates and date-times
+# compare in UTC.
+#
+# [datasets.<dataset>.checks], each key optional; quote a dataset name containing a dot, as in
+# [datasets."orders.v1".checks]. publication.json records the checks in this key order, under the
+# names on the right, and no two checks may share a name:
+#   columns = [names that must exist]                          # columns
+#   types = { column = "DuckDB type" }                         # types:<column>; aliases such as
+#       TEXT or INT compare as DuckDB's own names (VARCHAR, INTEGER); give DECIMAL its precision
+#       and scale, since a bare DECIMAL means DECIMAL(18,3)
+#   not_null = [columns with no nulls]                         # not_null:<column>
+#   key = [columns]                                            # key:<col>,<col>; the grain: no null
+#       in any key column and no repeated key; name each column once
+#   unique = ["column", ["column", "column"]]                  # unique:<col>,<col>; rows with a
+#       null in the columns are not compared; name each column once, and each set of columns once
+#   accepted_values = { column = [values] }                    # accepted_values:<column>; nulls pass
+#   range = { column = { min = 0, max = 100 } }                # range:<column>; inclusive, either
+#       bound optional, both numbers, both TOML dates or both date-times, min <= max; nulls pass.
+#       A date-time may be local or carry an offset; a local one is a UTC time, also in min <= max.
+#       A date compares with a TIMESTAMP as its midnight, so bound a TIMESTAMP column with date-times.
+#       A date or local date-time bounds a TIMESTAMP WITH TIME ZONE column in UTC, and a date-time
+#       with an offset bounds a TIMESTAMP column as a UTC time
+#   row_count = { min = 1, max = 1000000 }                     # row_count; either bound optional,
+#       min (default 0) <= max
+# A foundation/quality.md row cites a check by name and publication; see awb-clean's record step.
+#
+# [datasets.orders.checks]
+# columns = ["order_id", "customer_id", "order_day", "status", "amount"]
+# types = { order_id = "BIGINT", order_day = "DATE" }
+# not_null = ["customer_id"]
+# key = ["order_id"]
+# accepted_values = { status = ["open", "shipped", "returned"] }
+# range = { amount = { min = 0 }, order_day = { min = 2024-01-01, max = 2026-06-30 } }
+# row_count = { min = 1 }
