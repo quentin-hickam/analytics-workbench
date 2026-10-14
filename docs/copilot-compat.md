@@ -1,6 +1,6 @@
 # GitHub Copilot compatibility
 
-Researched 2026-10-14, against VS Code 1.142 and the MCP specification revision `2026-07-28`. No Copilot host was run. Every claim below comes from primary sources: VS Code and GitHub documentation and release notes, the `microsoft/vscode` and `github/copilot-cli` repositories, and the MCP specification. Two independent research passes, by Claude Opus and by Codex, were cross-checked. The claims the design depends on were then re-read at the source. **Documented** means a primary source states the claim. **Code** means it was read from public source on `main` and is not a release guarantee. **Inferred** means neither of those settles it.
+Researched 2026-10-14, against VS Code 1.142 and the MCP specification revision `2026-07-28`. No Copilot host was run. Every claim below comes from primary sources: VS Code and GitHub documentation and release notes, the `microsoft/vscode` and `github/copilot-cli` repositories, and the MCP specification. Two independent research passes, by Claude Opus and by Codex, were cross-checked. The claims the design depends on were then re-read at the source. **Documented** means a primary source states the claim. **Code** means it was read from public source on `main` and is not a release guarantee. **Inferred** means neither of those settles it. **Reported** means it rests on an issue's reports and maintainer replies, not on documentation.
 
 ## Target tiers
 
@@ -14,8 +14,8 @@ Researched 2026-10-14, against VS Code 1.142 and the MCP specification revision 
 | --- | --- |
 | Helpers are exposed as MCP tools over stdio. The CLI stays as a fallback and for tests. | Hosts can confirm every terminal command. MCP tools have their own approval scopes in VS Code (below). |
 | Every read-only tool carries `readOnlyHint: true`. No tool both reads and writes. | VS Code Local runs read-only tools without confirmation. |
-| Write tools are few and coarse. | Each tool needs its own approval, and in the Copilot harness that approval lasts only one session. |
-| The server speaks the legacy `2025-11-25` protocol, and answers any other method, including `server/discover`, with an immediate `-32601` error. | VS Code Local negotiates `2025-11-25`. Dual-era clients fall back to `initialize` on any non-modern error. |
+| Write tools are few and coarse. | Each tool asks on first use unless the user trusts the whole server, and in the Copilot harness an approval lasts only one session. |
+| The server speaks the legacy `2025-11-25` protocol, and answers any other method, including `server/discover`, with an immediate `-32601` error. | VS Code Local negotiates `2025-11-25`. The spec requires dual-era clients to fall back to `initialize` on any non-modern error, but Copilot CLI builds before 1.0.88 treated some `server/discover` errors as fatal ([§5](#5-protocol)). |
 | The project root comes from an explicit argument, then from MCP roots, then from the working directory. It is validated as a workbench before anything is written. | Roots are deprecated in the spec. A user-level server's working directory isn't documented, and a plugin server's is its install folder. |
 | Tool results are bounded text, with no `structuredContent`. | VS Code Local passes `structuredContent` to the model *instead of* the text when both are present. Large results spill to disk or are truncated. |
 | Skills install to `~/.agents/skills` (VS Code and Codex) or `~/.claude/skills` (Claude Code). | Discovery locations below. |
@@ -100,7 +100,11 @@ Each candidate is accepted only if it holds `src/awb.py`, except for the tool th
 
 - **VS Code Local** advertises `LATEST_PROTOCOL_VERSION = "2025-11-25"` (code).
 - **Revision `2026-07-28`** has no handshake: every request carries its version in `_meta`, and servers must implement `server/discover`. A dual-era client probes with `server/discover` on stdio, and falls back to `initialize` on any error that is not a recognized modern error ([versioning](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)).
-- **Copilot CLI** has sent modern requests since 1.0.93 ([copilot-cli#5079](https://github.com/github/copilot-cli/issues/5079)).
+- **Copilot CLI** is dual-era: it probes with `server/discover`, then falls back to `initialize` (reported). Some builds broke that fallback (reported):
+  - 1.0.79-1 aborted initialization when a server answered the probe with `-32602`. A bot closed the issue as resolved in 1.0.88 ([copilot-cli#4370](https://github.com/github/copilot-cli/issues/4370)).
+  - 1.0.85 and 1.0.86 recorded a `-32601` answer as a fatal server failure over HTTP, although the follow-up `initialize` succeeded. Reporters confirmed the fix in 1.0.87 ([copilot-cli#4870](https://github.com/github/copilot-cli/issues/4870)).
+
+  The 1.0.88 minimum in the install guide follows from these two issues (inferred). The Copilot harness runs the same engine ([§1](#1-harnesses)), so a similar regression could reach it.
 
 **Implementation scope:** `initialize`, `notifications/initialized`, `ping`, `tools/list` and `tools/call`, with an immediate JSON-RPC error for every other request, so dual-era clients fall back rather than hang. Supporting the modern era is a later hedge, not a gate.
 
@@ -157,7 +161,7 @@ There's no Copilot host here, so the first real run is a field test in VS Code. 
 6. Each write tool asks once, and "Allow in this Workspace" holds across a new chat in the same workspace.
 7. The server finds the project with no argument, and a deliberately wrong `project` argument is refused.
 8. The reviewer runs as a subagent, cannot edit files, and returns its report.
-9. Optional: steps 5 and 6 repeated in a Copilot-harness session, to see what it asks.
+9. Optional: in a Copilot-harness session, the server's tools load, steps 5 and 6 show what it asks, and step 7 shows whether it finds the project with no argument.
 
 ## Open uncertainties
 
