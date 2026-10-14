@@ -76,6 +76,9 @@ The condition of every release: its files, results, and provenance stay exactly 
 **Disposition**:
 The user's choice for a flagged finding that a draft represents: revalidate it, omit it, or release it with its caveat. A new or changed flag reopens the choice. A release proceeds only when every place the finding appears is omitted or released with its caveat; revalidation pauses it for separate analytical work.
 
+**Review rule**:
+A numbered rule, `R-<area>-NNN`, recorded from a correction the user made while reviewing a package draft, which every later review of a draft checks. Its ID is never renumbered or reused.
+
 **Investigation state**:
 The current understanding of an investigation, including its active question, findings, unresolved issues, and next steps.
 
@@ -83,4 +86,4 @@ The current understanding of an investigation, including its active question, fi
 The record of meaningful findings, analytical decisions, and relevant data limitations accumulated during an investigation, including superseded conclusions. It retains methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, and excludes routine debugging, coding mistakes, and abandoned attempts that changed no understanding.
 
 **Result evidence**:
-The per-result record of what produced a finding: the producing commit or `uncommitted` state with checksums, the inputs with the checksums their provenance or publication files record, the view definitions read, the resolved settings, and the validation checks. It is written to `investigations/<name>/evidence/<result-id>.json` and linked from the finding's row in `state.md`. It records provenance for one result; the investigation history records how understanding changed.
+The per-result record of what produced a finding and why: the question it answers in the user's words, the producing commit or `uncommitted` state with checksums, the inputs with the checksums their provenance or publication files record, the view definitions read, the resolved settings, and the validation checks. It is written to `investigations/<name>/evidence/<result-id>.json` and linked from the finding's row in `state.md`. It records provenance for one result; the investigation history records how understanding changed.

@@ -12,7 +12,7 @@ Released packages are kept at: not yet recorded
 
 ## Where work belongs
 
-- `foundation/` records sources, canonical datasets and views, shared data quality, and common vocabulary. `foundation/references/` keeps the third-party documentation those records rely on.
+- `foundation/` records sources, canonical datasets and views, shared data quality, common vocabulary, and the review rules every package review checks. `foundation/references/` keeps the third-party documentation those records rely on.
 - `investigations/` keeps each question's brief, current state, meaningful history, settings, `run.py`, and local exploration.
 - `src/awb.py` runs the workbench helpers under `src/` as commands: `python3 src/awb.py --help` lists them. `requirements.txt` names the packages they need unless the project declares dependencies elsewhere. `.awb-receipt.json` records the shipped files the installer wrote, so an upgrade can tell them from customized copies.
 - `src/preparation/` holds acquisition, landing, conversion, session-loading, and reusable normalization and correction code when such code exists.
