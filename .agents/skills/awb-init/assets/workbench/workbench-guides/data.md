@@ -1,6 +1,6 @@
 # Data acquisition, retention, and preparation
 
-`references/` and `assets/` paths below are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (Codex).
+Paths below that begin with `references/` or `assets/` are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (Codex).
 
 Existing project layouts remain authoritative. Read `references/landing.md` only to write a `fetch` callable for `land()` or a `convert` callable for `publish()`.
 
