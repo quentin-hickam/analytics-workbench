@@ -19,7 +19,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -68,141 +67,6 @@ def _check_name(value):
         raise ValueError(f"Invalid directory name: {value!r}")
 
 
-# Obvious credential shapes, refused in the request and notes that provenance.json and the
-# Acquisitions row keep. The refusal names the field and the kind of secret, never the value or key.
-#
-# Names. A name is secret-named when, with separators and case dropped, it contains a secret word
-# anywhere (aws_secret_access_key, X-Api-Key, refresh_token, clientSecret). Exempt: a cursor
-# (page_token, next-token, nextPageToken), a token count or tokenizer (max_tokens, tokenizer), and a
-# name whose last word describes the secret rather than holding it (secret_name, token_url,
-# aws_access_key_id, secret_names; see _DESCRIPTOR).
-# Values. A secret-named dict key (or a list under one), name= assignment, or Name: header (also
-# "name": in JSON text) holds a literal when its value is not empty and not wholly a reference:
-# $NAME, ${NAME}, <name>, *** or ALL_CAPS_NAME, optionally after an auth scheme (Bearer ${NAME}).
-# A quoted value is read through its closing quote. Text joined to the value with nothing between,
-# bare or as a quoted fragment ('$NAME''hunter2', $NAME'hunter2'), makes it a literal; a closing
-# bracket does not ("token": "$NAME"}). A Name: value that is not quoted is read only when it ends
-# the text, a line or a quoted string, as a header does, so prose such as "token: from $ACME_TOKEN"
-# passes. Every other pattern (a bearer or basic credential, a URL's password, a private-key header,
-# a known key format) refuses a match unless it is wholly a reference or lies inside a $NAME,
-# ${NAME} or <name> one (<sk-key-from-vault>).
-#
-# Limits: this is a guard against obvious secrets, not a scanner. These are recorded as given:
-# - A literal typed onto a $NAME with no delimiter, which is a whole reference to another variable:
-#   password=$ERP_PASSWORDhunter2, Bearer $ACME_TOKENabcdefghijklmnop1.
-# - A joined quoted fragment holding whitespace or & ; , because without parsing the outer quoting
-#   it reads the same as the close of one string and the start of the next, which must pass. Each
-#   miss below cannot be refused without refusing the allowed form under it:
-#     password=$ERP_PASSWORD'hunter 2'
-#     curl -d "token=$ACME_TOKEN" "https://api.example.com/orders"
-#     password=$ERP_PASSWORD'&hunter2'
-#     ["token=$ACME_TOKEN","page=2"]
-# - A secret in prose (password: hunter2 until May), a number under a secret-named key ({"token":
-#   12345}; numbers there are usually lifetimes, as in token_expires_in), and a secret with neither
-#   a known key format nor a secret-named label.
-_SECRET_WORD = re.compile(r"password|passwd|passphrase|pwd|secret|token|apikey|privatekey"
-                          r"|accesskey|credential|authorization")
-_CURSOR_NAME = re.compile(r"(?:page|next|prev|previous|continuation|sync|pagination|cursor|resume)+token")
-_DESCRIPTOR = {"name", "id", "type", "url", "uri", "endpoint", "path", "file", "arn"}
-_TOKEN_COUNT = {"max", "min", "num", "total", "prompt", "completion", "input", "output", "new",
-                "context"}
-_ASSIGNMENT = re.compile(  # the value is a lookahead, so a nested assignment is read too
-    r"(?<![\w-])(?P<name>[\w-]+)['\"]?\s*(?P<separator>=|:(?!//))"
-    r"(?=\s*(?:(?P<quote>['\"])(?P<quoted>[^\n]*?)(?P=quote)"
-    r"|['\"]?(?P<bare>(?:(?i:basic|bearer|digest|token|bot)\s+)?(?:<[\w .-]+>|[^\s&;,'\"]+)))"
-    r"(?P<tail>(?:[^\s&;,'\")\]}]|(?P<joined>['\"])[^\s&;,'\"]+(?P=joined))*))")
-_HEADER_END = {"", "\n", "\r", "'", '"', ";", ",", "&"}
-_SECRET_PATTERNS = [
-    ("a bearer or basic credential", re.compile(
-        r"\b(?:bearer|basic)\s+(?P<value>(?=(?:<[\w .-]+>|[A-Za-z._~+/=${}-])*\d)"
-        r"(?:<[\w .-]+>|[A-Za-z0-9._~+/=${}-]){16,})", re.I)),
-    ("credentials in a URL", re.compile(r"://[^/\s:@?#]+:(?P<value>[^/\s@?#]+)@")),
-    ("a private key", re.compile(r"(?P<value>-----BEGIN [A-Z ]*PRIVATE KEY-----)")),
-    ("a known key format", re.compile(
-        r"\b(?P<value>AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{36,}"
-        r"|github_pat_[A-Za-z0-9_]{22,}|xox[abprs]-[A-Za-z0-9-]{10,}"
-        r"|sk-(?=[\w-]*[A-Z])(?=[\w-]*\d)[\w-]{20,})")),
-]
-_REFERENCE = r"\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})|<[\w .-]+>|\*{3,}|[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+"
-_VARIABLE = re.compile(_REFERENCE)
-_DELIMITED_VARIABLE = re.compile(r"\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})|<[\w .-]+>")
-_SCHEMED_VARIABLE = re.compile(rf"(?:(?i:basic|bearer|digest|token|bot)\s+)?(?:{_REFERENCE})")
-
-
-def _secret_name(name):
-    joined = re.sub(r"tokeni[sz]", "", re.sub(r"[\W_]", "", name).lower())
-    if not _SECRET_WORD.search(joined) or _CURSOR_NAME.fullmatch(joined):
-        return False
-    words = [word.lower() for word in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", name)]
-    last = words[-1]
-    if last in _DESCRIPTOR or (last.endswith("s") and last[:-1] in _DESCRIPTOR):
-        return False
-    return not (last == "tokens" and len(words) > 1 and words[-2] in _TOKEN_COUNT)
-
-
-def _holds_literal(value):
-    """Whether a secret-named key's or assignment's value is a literal, not a reference."""
-    if isinstance(value, (list, tuple)):
-        return any(_holds_literal(item) for item in value)
-    if not isinstance(value, str):
-        return False
-    value = value.strip()
-    return bool(value) and not _SCHEMED_VARIABLE.fullmatch(value)
-
-
-def _assigns_literal(match):
-    if not _secret_name(match["name"]):
-        return False
-    if match["quote"] is not None:
-        return bool(match["tail"]) or _holds_literal(match["quoted"])
-    end = match.end("tail")
-    if match["separator"] == ":" and match.string[end:end + 1] not in _HEADER_END:
-        return False
-    return _holds_literal(match["bare"] + match["tail"])
-
-
-def _inside_reference(text, match):
-    return any(reference.start() <= match.start("value") and match.end("value") <= reference.end()
-               for reference in _DELIMITED_VARIABLE.finditer(text))
-
-
-def _secret_kind(value):
-    """Name the first obvious secret in a JSON-like value, else return None."""
-    if isinstance(value, str):
-        if any(_assigns_literal(match) for match in _ASSIGNMENT.finditer(value)):
-            return "a credential assignment"
-        for kind, pattern in _SECRET_PATTERNS:
-            if any(not _VARIABLE.fullmatch(match["value"]) and not _inside_reference(value, match)
-                   for match in pattern.finditer(value)):
-                return kind
-    elif isinstance(value, dict):
-        for key, item in value.items():
-            if isinstance(key, str) and _secret_name(key):
-                if _holds_literal(item):
-                    return "a literal value under a credential-named key"
-                # A reference that passed is not rescanned: <sk-key-from-vault> stays a reference.
-                kind = _secret_kind(key) or (None if isinstance(item, str) else _secret_kind(item))
-            else:
-                kind = _secret_kind(key) or _secret_kind(item)
-            if kind:
-                return kind
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            kind = _secret_kind(item)
-            if kind:
-                return kind
-    return None
-
-
-def _refuse_secrets(**fields):
-    """Raise ValueError naming a field that holds an obvious secret, without echoing it."""
-    for name, value in fields.items():
-        kind = _secret_kind(value)
-        if kind:
-            raise ValueError(f"{name} appears to hold a secret ({kind}); record the environment "
-                             "variable's name, such as $NAME, instead")
-
-
 def _complete_provenance(directory):
     """Return the provenance of a completed acquisition directory, else raise ValueError."""
     metadata = directory / "provenance.json"
@@ -236,7 +100,6 @@ def land(project_root: str | Path, source: str, acquisition_id: str,
     """Fetch original files into a partial directory, then write provenance and rename it."""
     _check_name(source)
     _check_name(acquisition_id)
-    _refuse_secrets(request=request, notes=notes)
     final = Path(project_root) / "data/raw" / source / acquisition_id
     partial = final.with_name(final.name + ".partial")
     _refuse_existing(final, partial)
@@ -660,10 +523,6 @@ def cli_land(root: Path, argv: list[str]) -> int:
                 shutil.copyfile(path, output / path.name)
 
     request = args.request or "copied from " + ", ".join(map(str, inputs))
-    try:
-        _refuse_secrets(**{"--request": request, "--notes": args.notes})
-    except ValueError as error:
-        parser.error(str(error))
     try:
         directory = land(root, args.source, args.acquisition_id, fetch, request=request,
                          records=records or None, notes=args.notes)

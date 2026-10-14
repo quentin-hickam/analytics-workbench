@@ -16,7 +16,7 @@ python3 src/awb.py land <source> <acquisition-id> <file-or-directory>... [--requ
 
 For an API or other fetched source, save the fetch as `src/preparation/fetch_<source>.py`, calling `land()` from `src/preparation/landing.py` with a `fetch` callable; run it by path, then run `python3 src/awb.py retain`.
 
-Fetch scripts read credentials from environment variables; local values may sit in the gitignored `.env`, loaded by the shell or a loader the project declares. List each variable's name, without its value, in a tracked `.env.example`, created with the first one. Secrets never go in `settings.toml`, saved SQL, `request` or `notes` text, or foundation ledger rows: record the variable's name instead, as `$NAME`. `land` and `land()` refuse a `request` or `notes` value holding an obvious secret.
+Fetch scripts read credentials from environment variables; local values may sit in the gitignored `.env`, loaded by the shell or a loader the project declares. List each variable's name, without its value, in a tracked `.env.example`, created with the first one. Secrets never go in `settings.toml`, saved SQL, `request` or `notes` text, or foundation ledger rows: record the variable's name instead, as `$NAME`.
 
 ## Retain originals
 
