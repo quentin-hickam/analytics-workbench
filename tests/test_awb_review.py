@@ -6,7 +6,8 @@
 # test_broken_rule_section_is_reported_not_dropped: a rule under a malformed heading, or field lines outside a rule section, are problems; check exits 1 and add refuses, so no ID is reused.
 # test_wrapped_field_line_is_reported: a line inside a rule section that is not a field, such as a wrapped Rule, is a problem rather than lost text.
 # test_line_starting_with_hash_never_cuts_a_rule_short: after the first rule, a wrapped line starting with # or a heading that is not a rule's is a problem; check exits 1 and add refuses, so no rule is silently truncated.
-# test_match_lines_count_only_newlines: a U+2028 or form feed in a narrative does not shift the reported line numbers away from the editor's.
+# test_rule_file_lines_count_only_newlines: a U+2028, form feed, or lone carriage return in the rule file is a problem at its grep -n line and shifts no later line; add refuses; CRLF endings are no problem.
+# test_match_lines_count_only_newlines: a U+2028, form feed, or lone carriage return in a narrative does not shift the reported line numbers away from grep -n's, and CRLF endings still match a pattern anchored with $.
 # test_check_through_the_dispatcher_writes_nothing: run as a script with bytecode writes enabled, review-rules check leaves every project file, __pycache__ included, unchanged.
 # test_add_to_an_empty_rule_file_writes_the_header: add to an empty rule file writes the header before the first rule.
 # test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes or blank, an unknown severity, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
@@ -224,13 +225,40 @@ def test_line_starting_with_hash_never_cuts_a_rule_short(project, capsys, tail, 
     assert code == 1 and out["added"] is None and path.read_text() == before
 
 
-def test_match_lines_count_only_newlines(project, capsys):
+@pytest.mark.parametrize("brk", ["\u2028", "\x0c", "\r"])
+def test_rule_file_lines_count_only_newlines(project, capsys, brk):
+    path = project / RULES
+    path.parent.mkdir(parents=True)
+    path.write_bytes(("# Review rules\n\n## R-periods-001\n\n- Severity: error\n"
+                      f"- Rule: Never compare{brk}partial months.\n- Pattern: none\n- Fix: Drop it.\n\n"
+                      "# Notes\n").encode())
+    before = path.read_bytes()
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 1 and out["problems"] == [  # grep -n: the Rule line is 6 and # Notes is 10
+        {"line": 6, "problem": f"line holds U+{ord(brk):04X}, a line break other than \\n; replace it with a space "
+                               "or a newline"},
+        {"line": 10, "problem": "heading after the first rule is not a ## R-<area>-NNN rule heading"}]
+    code, out = add(project, capsys)
+    assert code == 1 and out["added"] is None and path.read_bytes() == before
+
+    path.write_bytes(b"# Review rules\r\n\r\n## R-periods-001\r\n\r\n" + RULE.replace("\n", "\r\n").encode())
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 0 and out["problems"] == [] and out["rules"][0]["id"] == "R-periods-001"
+
+
+@pytest.mark.parametrize("brk", ["\u2028", "\x0c", "\r"])
+def test_match_lines_count_only_newlines(project, capsys, brk):
     findings = project / "deliveries/inv/pkg/draft/findings.md"
-    findings.write_text("# F\n\nIntro\u2028pasted from Word\x0c\n\nSales in the partial month rose\n",
-                        encoding="utf-8")
+    findings.write_bytes(f"# F\n\nIntro{brk}pasted from Word\n\nSales in the partial month rose\n".encode())
     add(project, capsys, pattern="partial month")
     row = run(project, capsys, "review-rules", "check", "inv", "pkg")[1]["rules"][0]
     assert [(m["file"], m["line"]) for m in row["matches"]] == [("findings.md", 5), ("methodology.md", 3)]
+
+    findings.write_bytes(b"# F\r\n\r\nSales in the partial month\r\n")
+    add(project, capsys, pattern="partial month$")
+    row = run(project, capsys, "review-rules", "check", "inv", "pkg")[1]["rules"][1]
+    assert [(m["file"], m["line"], m["text"]) for m in row["matches"]] == [
+        ("findings.md", 3, "Sales in the partial month")]
 
 
 def test_check_through_the_dispatcher_writes_nothing(project, capsys):

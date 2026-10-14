@@ -1143,6 +1143,8 @@ _REQUIRED_FIELDS = ("Severity", "Rule", "Pattern", "Fix")
 _BAD_HEADING = ("rule heading is not ## R-<area>-NNN with a lowercase area, its last part holding a letter, "
                 "and a three-digit number")
 _STRAY_HEADING = "heading after the first rule is not a ## R-<area>-NNN rule heading"
+# Every line break str.splitlines() recognizes but \n; grep -n counts only \n.
+_OTHER_BREAK = re.compile("[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 _REVIEWED = ("findings.md", "methodology.md")
 _MATCH_CAP = 20
 _RULES_HEADER = """# Review rules
@@ -1177,16 +1179,29 @@ def _pattern_problem(pattern):
     return None
 
 
-def parse_review_rules(text: str) -> tuple:
+def _read_lines(path):
+    r"""A file's lines split on \n only, as grep -n counts them, each without a CRLF ending's \r.
+
+    Read as bytes: text mode would turn a lone \r into \n and shift every later line number."""
+    return [line.removesuffix("\r") for line in Path(path).read_bytes().decode("utf-8").split("\n")]
+
+
+def parse_review_rules(lines: list) -> tuple:
     """(rules, problems) from review-rules.md: each `## R-<area>-NNN` section and its `- Field:` lines.
 
     Any heading ends a section, and after the first rule every heading must be a rule's. Inside a rule
     section only blank and `- Field:` lines may appear, so a wrapped line starting with `#` is reported
     too; outside one no heading may name a rule and no line may look like a field. A rule that a hand
     edit breaks or cuts short is reported instead of silently dropped or truncated, and its ID is never
-    handed out again by add."""
+    handed out again by add. Lines are numbered as _read_lines splits them, so each problem's line is the
+    one grep -n shows; a line holding another line break (U+2028, form feed, a lone carriage return) is a
+    problem, since an editor may show it as two lines."""
     rules, problems, current = [], [], None
-    for number, line in enumerate(text.splitlines(), 1):
+    for number, line in enumerate(lines, 1):
+        other = _OTHER_BREAK.search(line)
+        if other:
+            problems.append({"line": number, "problem": f"line holds U+{ord(other[0]):04X}, a line break other "
+                                                        "than \\n; replace it with a space or a newline"})
         if line.lstrip().startswith("#"):
             heading = _RULE_HEADING.fullmatch(line)
             if heading:
@@ -1241,7 +1256,7 @@ def parse_review_rules(text: str) -> tuple:
 
 def _read_rules(root):
     path = Path(root) / REVIEW_RULES
-    return parse_review_rules(path.read_text(encoding="utf-8")) if path.is_file() else None
+    return parse_review_rules(_read_lines(path)) if path.is_file() else None
 
 
 def check_review_rules(root, investigation, package) -> dict:
@@ -1252,8 +1267,7 @@ def check_review_rules(root, investigation, package) -> dict:
     texts = {}
     for name in _REVIEWED:
         try:
-            # Only \n, as editors and grep -n count lines; splitlines() also breaks on U+2028 and others.
-            texts[name] = (draft / name).read_text(encoding="utf-8").split("\n")
+            texts[name] = _read_lines(draft / name)
         except (OSError, UnicodeError) as error:
             report["errors"].append(f"{_rel(root, draft / name)}: {error}")
     try:
