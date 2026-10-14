@@ -4,16 +4,20 @@
 
 ## Launch
 
-Start a fresh subagent with only read tools: `Read`, `Grep`, `Glob`, and `Bash` for the one command below. In Claude Code, use a subagent type without edit tools, such as the built-in `Plan`, or a custom one whose `tools` are `Read, Grep, Glob, Bash`; a skill's `allowed-tools` only pre-approves tools and restricts nothing. Bash can still write, so this is a convention plus tool scoping, not isolation. Give it the investigation, the package, the project root, and the path of this file, and tell it to follow **Brief**.
+Start a fresh subagent, so the agent that wrote the draft does not review it. Give it the investigation, the package, the project root, and the path of this file, and tell it to follow **Brief**. Limit it to read tools where the host can: `Read`, `Grep`, `Glob`, and `Bash` for the one command below.
 
-In Codex, whose subagents inherit the session's sandbox and tools, or in any host without a read-only subagent, follow **Brief** yourself: edit nothing and run only the command below until the report is complete, then repair.
+- In Claude Code, use a subagent type without edit tools, such as the built-in `Plan`, or a custom one whose `tools` are `Read, Grep, Glob, Bash`; a skill's `allowed-tools` only pre-approves tools and restricts nothing.
+- In Codex, whose subagents inherit the session's sandbox and tools, start a fresh subagent all the same; the limit to read tools is then the brief's instruction alone.
+- Only in a host with no subagents, follow **Brief** yourself: edit nothing and run only the command below until the report is complete, then act on it as **After the review** says. In `awb-package` that is a self-review by the agent that wrote the draft.
+
+Bash can still write, so the limit is a convention plus tool scoping where the host has it, not isolation.
 
 ## Brief
 
 You review the package draft at `deliveries/<investigation>/<package>/draft/`. Report findings; never fix them, and change no file. Run only `python3 src/awb.py review-rules check <investigation> <package>`, which writes nothing.
 
 1. Run that command. Read `foundation/review-rules.md` when its `rules_file` is not `none recorded`, then the draft's `findings.md`, `methodology.md`, and the `revalidation_flags` in `manifest.json`.
-2. Judge every rule the command lists that is not `retired`, against both narratives. A `matched` line is a candidate to judge, not a verdict; `no match` and `no pattern` rules are judged by reading.
+2. Judge every rule the command lists that is not `retired`, against both narratives. A `matched` line is a candidate to judge, not a verdict; `no match`, `no pattern`, and `unchecked` rules are judged by reading.
 3. Check what no command checks: both narratives carry the same numbers, qualifications, and caveats; every `represented_in` place of each `revalidation_flags` entry carries its caveat, or its omission when the disposition is `omit`; every claim in `findings.md` traces to `methodology.md`.
 4. Report, and nothing else:
    - one line per rule in the command's order: `<ID> pass`, `<ID> retired`, or `<ID> violation <file>:<line> "<short quote>"` with the rule's severity, one line per violation;

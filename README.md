@@ -62,7 +62,7 @@ When a package is needed:
 
 > Use awb-package to prepare a draft for the active investigation.
 
-The skill asks which datasets to include. Subsequent requests revise the same draft. Drafting never releases it. Before the draft's final check, and again before a release, a reviewer subagent that cannot edit checks the narratives and every rule in `foundation/review-rules.md` and reports without fixing anything. Each correction you make while reviewing a draft that later drafts could repeat is appended there as a numbered rule, `R-<area>-NNN`, that every later review checks; a one-off edit, such as a preferred wording on one slide, is not. When it is ready:
+The skill asks which datasets to include. Subsequent requests revise the same draft. Drafting never releases it. Before the draft's final check, and again before a release, a fresh reviewer subagent limited to read tools checks the narratives and every rule in `foundation/review-rules.md` and reports without fixing anything; only an agent host with no subagents has the drafting agent follow the same read-only review itself. Each correction you make while reviewing a draft that later drafts could repeat is appended there as a numbered rule, `R-<area>-NNN`, that every later review checks; a one-off edit, such as a preferred wording on one slide, is not. When it is ready:
 
 > Use awb-release — mark the package delivered.
 

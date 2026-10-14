@@ -11,7 +11,7 @@
 # test_add_to_an_empty_rule_file_writes_the_header: add to an empty rule file writes the header before the first rule.
 # test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes or blank, an unknown severity, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
 # test_pattern_round_trips_through_backticks: a pattern holding backticks, or the word none, is written in backticks and read back as the same expression.
-# test_package_and_release_invoke_the_read_only_review: both skills link the review brief and run it before their final command; the brief limits the reviewer to read tools and the read-only command, asks one line per rule, ends with a summary line counting violations, narrative problems, and command problems, any of which blocks, defines when a review is stale, and with AGENTS.md says which corrections become rules.
+# test_package_and_release_invoke_the_read_only_review: both skills link the review brief and run it before their final command; the brief has a fresh subagent review in every host with subagents, Codex included, and the writer review only where there are none; it limits the reviewer to read tools and the read-only command, asks one line per rule, ends with a summary line counting violations, narrative problems, and command problems, any of which blocks, defines when a review is stale, and with AGENTS.md says which corrections become rules.
 
 import importlib.util
 import json
@@ -290,6 +290,11 @@ def test_package_and_release_invoke_the_read_only_review():
     assert "never fix them, and change no file" in brief
     assert "Run only `python3 src/awb.py review-rules check <investigation> <package>`" in brief
     assert "one line per rule" in brief and "In Codex" in brief
+    # The writer reviews its own draft only where the host has no subagents; Codex starts one too.
+    assert "so the agent that wrote the draft does not review it" in brief
+    assert "start a fresh subagent all the same" in brief
+    assert "Only in a host with no subagents, follow **Brief** yourself" in brief
+    assert "a fresh subagent, limited to read tools" in package and "**Launch**" in package
     assert "review-rules add --area" in brief
     assert "foundation/review-rules.md" in agents and "`awb-package`" in agents
     # The last line counts every kind of problem, so it never says clean while one blocks.

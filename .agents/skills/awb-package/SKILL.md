@@ -52,7 +52,7 @@ Run `python3 src/awb.py export <investigation> <package> --chart <result>[:<colu
 
 ## 5. Review
 
-Once the narratives and flags are complete, run the review in [references/review.md](references/review.md): a subagent that cannot edit checks the draft against every rule in `foundation/review-rules.md` and what `check-draft` cannot check, and reports without fixing. Act on its report as that file's **After the review** says.
+Once the narratives and flags are complete, run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against every rule in `foundation/review-rules.md` and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it. Act on its report as that file's **After the review** says.
 
 ## 6. Check
 
