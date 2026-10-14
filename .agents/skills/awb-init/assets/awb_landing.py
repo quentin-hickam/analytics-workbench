@@ -153,10 +153,96 @@ def _duckdb():
     return duckdb
 
 
+def _toml_key(name):
+    """name as a TOML key: bare when it can be, else quoted."""
+    return name if name and all(c.isascii() and (c.isalnum() or c in "_-") for c in name) else json.dumps(name)
+
+
+def _nested_checks(value, path=()):
+    """The key path to the first checks table nested in value, or None."""
+    if not isinstance(value, dict):
+        return None
+    if "checks" in value:
+        return path
+    for key, inner in value.items():
+        found = _nested_checks(inner, path + (key,))
+        if found is not None:
+            return found
+    return None
+
+
+SHAPES = {
+    "columns": lambda v: _names(v) and v,
+    "types": lambda v: isinstance(v, dict) and all(isinstance(t, str) and t.strip() and ";" not in t
+                                                   for t in v.values()),
+    "not_null": _names,
+    "key": lambda v: _names(v) and v,
+    "unique": lambda v: isinstance(v, list) and all(
+        (isinstance(item, str) and item) or (_names(item) and item) for item in v),
+    "accepted_values": lambda v: isinstance(v, dict) and all(
+        isinstance(values, list) and values for values in v.values()),
+    "range": lambda v: isinstance(v, dict) and all(_bounds(bounds, _number_or_date) for bounds in v.values()),
+    "row_count": lambda v: _bounds(v, lambda bound: type(bound) is int and bound >= 0),
+}
+
+
+def _planned(spec):
+    """[(name, kind, arguments)] for each check spec declares, in CHECK_KEYS order."""
+    planned = []
+    for key in CHECK_KEYS:
+        value = spec.get(key)
+        if value is None:
+            continue
+        if key == "columns":
+            planned.append(("columns", key, (value,)))
+        elif key == "types":
+            planned += [(f"types:{column}", key, (column, declared)) for column, declared in value.items()]
+        elif key == "not_null":
+            planned += [(f"not_null:{column}", key, (column,)) for column in value]
+        elif key == "key":
+            planned.append((f"key:{','.join(value)}", key, (value,)))
+        elif key == "unique":
+            for item in value:
+                columns = [item] if isinstance(item, str) else item
+                planned.append((f"unique:{','.join(columns)}", key, (columns,)))
+        elif key == "accepted_values":
+            planned += [(f"accepted_values:{column}", key, (column, accepted)) for column, accepted in value.items()]
+        elif key == "range":
+            planned += [(f"range:{column}", key, (column, bounds)) for column, bounds in value.items()]
+        else:
+            planned.append(("row_count", key, (value,)))
+    return planned
+
+
+def _validated(name, entry):
+    """[datasets.<name>]'s checks table, else ValueError naming the key at fault."""
+    where = f"{DATASETS} [datasets.{_toml_key(name)}]"
+    if not isinstance(entry, dict) or set(entry) - {"checks"} or not isinstance(entry.get("checks", {}), dict):
+        nested = _nested_checks({key: value for key, value in entry.items() if key != "checks"}) \
+            if isinstance(entry, dict) else None
+        if nested:  # [datasets.orders.v1.checks] nests v1 under orders; it declares nothing for orders.v1
+            dotted = ".".join((name,) + nested)
+            raise ValueError(f"{where} holds only a checks table; to declare checks for the dataset {dotted}, "
+                             f"quote its name: [datasets.{json.dumps(dotted)}.checks]")
+        raise ValueError(f"{where} holds only a checks table")
+    spec = entry.get("checks", {})
+    for key, value in spec.items():
+        if key not in SHAPES:
+            raise ValueError(f"{where}: unknown check {key}; use {', '.join(CHECK_KEYS)}")
+        if not SHAPES[key](value):
+            raise ValueError(f"{where}: checks.{key} is malformed; see the comments in the shipped {DATASETS}")
+    names = [check for check, _, _ in _planned(spec)]
+    repeated = sorted({check for check in names if names.count(check) > 1})
+    if repeated:  # such as unique = ["a,b", ["a", "b"]]; a name must identify one check
+        raise ValueError(f"{where}: more than one declared check is named {', '.join(repeated)}; "
+                         "declare each check once (a check's name joins its columns with commas)")
+    return spec
+
+
 def declared_checks(project_root: str | Path, dataset: str) -> dict:
     """Return [datasets.<dataset>.checks] from foundation/datasets.toml, {} when none are declared.
 
-    Raises ValueError for a malformed declaration, naming the key at fault.
+    Raises ValueError when any dataset's declaration is malformed, naming the key at fault.
     """
     path = Path(project_root) / DATASETS
     if not path.is_file():
@@ -175,30 +261,9 @@ def declared_checks(project_root: str | Path, dataset: str) -> dict:
     datasets = document.get("datasets", {})
     if not isinstance(datasets, dict):
         raise ValueError(f"{DATASETS}: datasets must be a table of [datasets.<name>] tables")
-    where = f"{DATASETS} [datasets.{dataset}]"
-    entry = datasets.get(dataset, {})
-    if not isinstance(entry, dict) or set(entry) - {"checks"} or not isinstance(entry.get("checks", {}), dict):
-        raise ValueError(f"{where} holds only a checks table")
-    spec = entry.get("checks", {})
-    shapes = {
-        "columns": _names,
-        "types": lambda v: isinstance(v, dict) and all(isinstance(t, str) and t.strip() and ";" not in t
-                                                       for t in v.values()),
-        "not_null": _names,
-        "key": lambda v: _names(v) and v,
-        "unique": lambda v: isinstance(v, list) and all(
-            (isinstance(item, str) and item) or (_names(item) and item) for item in v),
-        "accepted_values": lambda v: isinstance(v, dict) and all(
-            isinstance(values, list) and values for values in v.values()),
-        "range": lambda v: isinstance(v, dict) and all(_bounds(bounds, _number_or_date) for bounds in v.values()),
-        "row_count": lambda v: _bounds(v, lambda bound: type(bound) is int and bound >= 0),
-    }
-    for key, value in spec.items():
-        if key not in shapes:
-            raise ValueError(f"{where}: unknown check {key}; use {', '.join(CHECK_KEYS)}")
-        if not shapes[key](value):
-            raise ValueError(f"{where}: checks.{key} is malformed; see the comments in the shipped {DATASETS}")
-    return spec
+    # Validate every entry: a mistyped one may be meant for this dataset, such as an unquoted dotted name.
+    specs = {name: _validated(name, entry) for name, entry in datasets.items()}
+    return specs.get(dataset, {})
 
 
 def _quote(name):
@@ -301,37 +366,17 @@ def _run_checks(directory, spec):
                 f"No value outside {_span(bounds)} in {rows} rows.")
 
         def measure_rows(bounds):
-            inside = bounds.get("min", 0) <= rows <= bounds.get("max", rows)
+            bounds = {"min": 0, **bounds}  # a row count's floor is 0
+            inside = bounds["min"] <= rows <= bounds.get("max", rows)
             return (None if inside else f"{rows} rows, outside {_span(bounds)}."), f"{rows} rows, within {_span(bounds)}."
 
-        planned = []
-        for key in CHECK_KEYS:
-            value = spec.get(key)
-            if value is None:
-                continue
-            if key == "columns":
-                planned.append(("columns", measure_columns, (value,)))
-            elif key == "types":
-                planned += [(f"types:{column}", measure_type, (column, declared)) for column, declared in value.items()]
-            elif key == "not_null":
-                planned += [(f"not_null:{column}", measure_not_null, (column,)) for column in value]
-            elif key == "key":
-                planned.append((f"key:{','.join(value)}", measure_key, (value,)))
-            elif key == "unique":
-                for item in value:
-                    columns = [item] if isinstance(item, str) else item
-                    planned.append((f"unique:{','.join(columns)}", measure_unique, (columns,)))
-            elif key == "accepted_values":
-                planned += [(f"accepted_values:{column}", measure_accepted, (column, accepted))
-                            for column, accepted in value.items()]
-            elif key == "range":
-                planned += [(f"range:{column}", measure_range, (column, bounds)) for column, bounds in value.items()]
-            else:
-                planned.append(("row_count", measure_rows, (value,)))
+        measures = {"columns": measure_columns, "types": measure_type, "not_null": measure_not_null,
+                    "key": measure_key, "unique": measure_unique, "accepted_values": measure_accepted,
+                    "range": measure_range, "row_count": measure_rows}
         checks = []
-        for name, measure, arguments in planned:
+        for name, kind, arguments in _planned(spec):
             try:
-                failure, detail = measure(*arguments)
+                failure, detail = measures[kind](*arguments)
             except duckdb.Error as error:
                 # DuckDB's message can quote a source value; name only the error's kind.
                 failure = f"The check could not run ({type(error).__name__})"

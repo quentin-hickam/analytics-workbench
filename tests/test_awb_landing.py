@@ -30,12 +30,14 @@
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
 # test_publish_records_validate_detail_and_no_checks_by_default: without declared checks publication.json records no declared check; a string validate returns is its check's detail; another dataset's declaration does not apply.
-# test_declared_checks_refuse_a_malformed_declaration_before_conversion: unknown and malformed keys, range bounds other than numbers or dates, a min above its max, a non-checks key, an unknown top-level table, and invalid TOML refuse before any partial directory exists.
+# test_declared_checks_refuse_a_malformed_declaration_before_conversion: unknown and malformed keys, an empty columns list, range bounds other than numbers or dates, a min above its max, two checks sharing a name, a non-checks key, an unknown top-level table, another dataset's malformed entry, and invalid TOML refuse before any partial directory exists.
+# test_a_dotted_dataset_name_is_declared_quoted_and_refused_unquoted: [datasets.orders.v1.checks] refuses publishing orders.v1, naming the quoted spelling, before conversion; [datasets."orders.v1".checks] declares its checks.
 # test_declared_checks_accept_the_shipped_template_and_its_example: the shipped commented template declares nothing, and its example, uncommented, is a valid declaration.
 # test_publish_refuses_declared_checks_without_duckdb_before_conversion: declared checks without the duckdb package refuse before any partial directory exists.
 # test_publish_runs_declared_checks_and_records_them: every declared check kind runs in DuckDB over the partial Parquet and is recorded by name, in the documented key order whatever the declaration order, before validate's check.
 # test_publish_keeps_a_failing_declared_check_unpublished: a failing declared check raises ChecksFailed listing every check, skips validate, and leaves the partial unpublished.
-# test_declared_check_failures_report_counts_not_values: each failing kind reports counts; a check that cannot compare its declared values fails without quoting DuckDB's message.
+# test_declared_check_failures_report_counts_not_values: each failing kind reports counts, a row count with no min from 0; a check that cannot compare its declared values fails without quoting DuckDB's message.
+# test_a_timestamp_column_takes_date_time_range_bounds: date-time bounds keep a TIMESTAMP's last day inside the range, where a date max ends at its midnight.
 # test_a_check_that_declares_no_values_fails_to_run_without_the_values_hint: a check that cannot run for another reason names the error's kind without pointing at declared values.
 # test_cli_publish_records_declared_checks: the publish command records declared checks with its --check outcome, counts them in its output and catalog_row, and prints failed_checks on refusal.
 
@@ -698,6 +700,11 @@ def test_publish_records_validate_detail_and_no_checks_by_default(tmp_path):
     ('[dataset.events.checks]\nnot_null = ["id"]\n', "unknown table dataset"),
     ('[datasets.events.checks]\ntypes = { id = "INT; DROP" }\n', "checks.types is malformed"),
     ('[datasets.events]\ncheck = { key = ["id"] }\n', "holds only a checks table"),
+    ('[datasets.events.checks]\ncolumns = []\n', "checks.columns is malformed"),
+    ('[datasets.events.checks]\nunique = ["a,b", ["a", "b"]]\n', "more than one declared check is named unique:a,b"),
+    ('[datasets.events.checks]\nnot_null = ["id", "id"]\n', "more than one declared check is named not_null:id"),
+    ('[datasets.orders.v1.checks]\nnot_null = ["id"]\n', r'quote its name: \[datasets."orders.v1".checks\]'),
+    ('[datasets.other.checks]\nnulls = ["id"]\n', r'\[datasets.other\]: unknown check nulls'),
     ('[datasets.events.checks\n', "foundation/datasets.toml"),
 ])
 def test_declared_checks_refuse_a_malformed_declaration_before_conversion(tmp_path, text, message):
@@ -709,6 +716,21 @@ def test_declared_checks_refuse_a_malformed_declaration_before_conversion(tmp_pa
         landing.publish(tmp_path, "events", "v1", lambda path: called.append(path), acquisitions=[original])
     assert called == []
     assert not (tmp_path / "data/parquet").exists()
+
+
+def test_a_dotted_dataset_name_is_declared_quoted_and_refused_unquoted(tmp_path):
+    pytest.importorskip("tomllib")
+    original = acquisition(tmp_path)
+    declare(tmp_path, '[datasets.orders.v1.checks]\nnot_null = ["id"]\n')
+    called = []
+    with pytest.raises(ValueError, match=r'\[datasets.orders\] holds only a checks table; to declare checks for '
+                                         r'the dataset orders.v1, quote its name: \[datasets."orders.v1".checks\]'):
+        landing.publish(tmp_path, "orders.v1", "p1", called.append, acquisitions=[original])
+    assert called == []
+    assert not (tmp_path / "data/parquet").exists()
+    declare(tmp_path, '[datasets."orders.v1".checks]\nnot_null = ["id"]\n')
+    assert landing.declared_checks(tmp_path, "orders.v1") == {"not_null": ["id"]}
+    assert landing.declared_checks(tmp_path, "orders") == {}
 
 
 def test_declared_checks_accept_the_shipped_template_and_its_example(tmp_path):
@@ -822,10 +844,25 @@ row_count = { max = 2 }
                                        "values with the column's type."),
         "range:amount": ("fail", "1 of 3 rows fall outside [-inf, 1]."),
         "range:status": details["range:status"],
-        "row_count": ("fail", "3 rows, outside [-inf, 2]."),
+        "row_count": ("fail", "3 rows, outside [0, 2]."),
     }
     assert details["range:status"][0] == "fail" and "shipped" not in details["range:status"][1]
     assert "secret-value" not in str(error.value) and "shipped" not in str(error.value)
+
+
+def test_a_timestamp_column_takes_date_time_range_bounds(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    rows = "SELECT * FROM (VALUES (TIMESTAMP '2024-01-01 00:00'), (TIMESTAMP '2024-06-30 23:00')) AS t(ts)"
+    declare(tmp_path, "[datasets.events.checks]\n"
+                      "range = { ts = { min = 2024-01-01T00:00:00, max = 2024-06-30T23:59:59 } }\n")
+    original = acquisition(tmp_path)
+    final = landing.publish(tmp_path, "events", "v1", parquet_convert(duckdb, rows), acquisitions=[original])
+    [check] = json.loads((final / "publication.json").read_text())["checks"]
+    assert check == {"name": "range:ts", "outcome": "pass",
+                     "detail": "No value outside [2024-01-01 00:00:00, 2024-06-30 23:59:59] in 2 rows."}
+    declare(tmp_path, "[datasets.events.checks]\nrange = { ts = { min = 2024-01-01, max = 2024-06-30 } }\n")
+    with pytest.raises(landing.ChecksFailed, match=r"range:ts \(1 of 2 rows fall outside"):
+        landing.publish(tmp_path, "events", "v2", parquet_convert(duckdb, rows), acquisitions=[original])
 
 
 def test_a_check_that_declares_no_values_fails_to_run_without_the_values_hint(tmp_path):
