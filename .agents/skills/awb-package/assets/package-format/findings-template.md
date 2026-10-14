@@ -4,7 +4,7 @@ Everything above **## Answer** is drafting guidance: omit it from findings.md, w
 
 Write this file for the audience recorded in the investigation brief's **Audience** section: use the terms they use, assume what they already know and nothing more, and address the decision they own. It is the slide-by-slide outline of the delivered deck and the only source of its content, so reading its headings in order is reading the deck's storyline, and the user can check that storyline here before M365 builds anything. It stands alone for that reader, with no earlier version, internal record, or follow-up conversation needed to understand it.
 
-Write every section in the audience's words: the glossary's business terms for names, a source by its owner, content, and period ("the billing team's monthly invoice extract, January to June 2026"), a filter or choice by its effect ("excluded test accounts, about 3% of volume"), and a coded value by its display name. Every name spelled the way the workbench spells it stays in `methodology.md`; `check-draft` flags any left here.
+Write every section in the audience's words: the glossary's business terms for names, a source by its owner, content, and period ("the billing team's monthly invoice extract, January to June 2026"), a filter or choice by its effect, with any count or share a result records ("excluded test accounts, about 3% of volume"), and a coded value by its display name. Every name spelled the way the workbench spells it stays in `methodology.md`; `check-draft` flags any left here.
 
 ## Slide rules
 

@@ -14,6 +14,7 @@ are CSV; review rules live in `foundation/review-rules.md`. Standard library onl
 """
 
 import argparse
+import bisect
 import csv
 import hashlib
 import importlib.util
@@ -23,7 +24,7 @@ import re
 import shutil
 import subprocess
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, ROUND_HALF_UP, Context, Decimal, InvalidOperation, localcontext
 from pathlib import Path
 
 MANIFEST = "manifest.json"
@@ -232,18 +233,10 @@ def _scan_line(number, line, roots, pattern):
     return [{"line": number, "kind": kind, "text": text} for _, kind, text in sorted(found)]
 
 
-def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]:
-    """List code, paths, file names, identifiers, SHAs, and given names, by line then column.
-
-    A slash token with any of `names` or `roots` as a segment is a path; `roots` may be plain words,
-    which never match alone.
-    """
+def _unfenced(path):
+    """Yield (line number, line, opens a fence) for each line outside fenced code and HTML comments."""
     text = Path(path).read_text(encoding="utf-8")
     text = _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
-    pattern = _name_pattern(names)
-    roots = set(names) | set(roots)
-
-    rows = []
     fence = None
     for number, line in enumerate(text.splitlines(), start=1):
         if fence is not None:
@@ -255,9 +248,25 @@ def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]
         opening = _FENCE.match(line)
         if opening and not (opening.group(1)[0] == "`" and "`" in line[opening.end():]):
             fence = opening.group(1)
-            rows.append({"line": number, "kind": "code", "text": line.strip()})
+            yield number, line, True
             continue
-        rows.extend(_scan_line(number, line, roots, pattern))
+        yield number, line, False
+
+
+def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]:
+    """List code, paths, file names, identifiers, SHAs, and given names, by line then column.
+
+    A slash token with any of `names` or `roots` as a segment is a path; `roots` may be plain words,
+    which never match alone.
+    """
+    pattern = _name_pattern(names)
+    roots = set(names) | set(roots)
+    rows = []
+    for number, line, opens in _unfenced(path):
+        if opens:
+            rows.append({"line": number, "kind": "code", "text": line.strip()})
+        else:
+            rows.extend(_scan_line(number, line, roots, pattern))
     return rows
 
 
@@ -520,6 +529,340 @@ def heading_problems(draft) -> list[dict]:
             for heading in _headings(Path(draft) / "findings.md") if heading not in methodology]
 
 
+# ---------------------------------------------------------------- numbers in the narratives
+
+NARRATIVES = ("findings.md", "methodology.md")
+# Reading fails safe: a number is skipped only in one of the contexts below, each of which marks it as no
+# quantity; every other number is read, so a doubtful one becomes a row the author clears by rewording or
+# by allowing it. references/helpers.md states the same list.
+_MONTH = (r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
+          r"|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?")
+_DAY = r"(?:3[01]|[12][0-9]|0?[1-9])"
+_DAYS = rf"{_DAY}(?:\s*(?:[-–—]|to|through)\s*{_DAY})?"
+_YEAR = r"(?:19|20)[0-9]{2}"
+# Not glued to a word or to digits joined by a dot, comma, slash, or colon.
+_ALONE = r"(?![\w%]|[.,/:][0-9])"
+# Where a period or a date ends: punctuation, a dash before a space, or the end of its paragraph. A word
+# after it could make its last number a count ("in 2000 orders"), so it is no period there.
+_ENDS = r"(?=\s*(?:[,.;:!?()\[\]{}|*_\"'“”‘’…]|[-–—]\s|\Z))"
+
+
+def _listed(item):
+    """A range or a list closed by and or or, after a first item: 2023-2024, 2023 to 2025, 1, 2, and 3."""
+    return rf"(?:\s*(?:[-–—]|to|through|vs\.?)\s*{item}|(?:\s*,\s*{item})*,?\s+(?:and|or)\s+{item})"
+
+
+_DATE = rf"(?:{_MONTH}\s+{_DAY}|{_DAY}\s+{_MONTH})"
+_DATE_ENDS = rf"(?:{_ENDS}|(?=\s+(?:to|through|until|till|and|or|[-–—])\s+{_DATE}))"
+# A year after one of these words, a month name, or a quarter or half, where the period ends.
+_IN = (rf"(?:(?i:\b(?:in|from|since|during|until|till|through|before|after|between|year|FY|CY|fiscal|calendar)\s+"
+       rf"|\b(?:early|mid|late)[\s-]+)|{_MONTH}\s+|\b[QH][1-4]\s+)")
+_NOT_QUANTITY = re.compile(
+    rf"(?<![\w.])(?:{_YEAR}-(?:1[0-2]|0?[1-9])(?:-{_DAY})?(?:T[0-9:.]+(?:Z|[+-][0-9:]+)?)?{_ALONE}"
+    rf"|[0-9]{{1,2}}/[0-9]{{1,2}}/{_YEAR}{_ALONE}"
+    r"|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?\s?(?i:[ap]\.?m\.?|UTC|GMT)(?!\w)"
+    rf"|[0-9]{{1,2}}:[0-9]{{2}}:[0-9]{{2}}{_ALONE}"
+    rf"|{_MONTH}\s+{_DAYS}(?:,?\s+{_YEAR}{_ALONE}{_DATE_ENDS}|{_ALONE}{_DATE_ENDS})"
+    rf"|{_DAYS}\s+{_MONTH}(?:,?\s+{_YEAR}{_ALONE})?{_DATE_ENDS}"
+    rf"|{_IN}{_YEAR}(?:{_listed(_YEAR)})?{_ALONE}{_ENDS}"
+    rf"|[Cc]harts\s+[0-9]+{_listed('[0-9]+')}{_ALONE}{_ENDS}|[Cc]harts?\s+[0-9]+{_ALONE})"
+    r"|^[ \t]*#{1,6}[ \t]+[0-9]+[.)](?=\s)|\[\^[^\]\n]*\]", re.MULTILINE)
+_LIST_MARKER = re.compile(r"[ \t]*([0-9]{1,9})[.)](?=\s|$)")
+_CURRENCY = re.compile(r"\b(?:USD|EUR|GBP|JPY|CHF|CAD|AUD|CNY|INR)(?=[0-9])")
+# Paths and names are blanked whole, so no digit inside them is read (results/r-001-77.csv, ORD-123-45).
+_PATH_CANDIDATE = re.compile(
+    r"(?<![^\s(\[<\"'*_])(?:[A-Za-z_~][^\s,;|()\[\]<>\"']*|\.{1,2})[/\\][^\s,;|()\[\]<>\"']*")
+_EXTENSIONS = "md|py|csv|tsv|parquet|jsonl?|sql|png|svg|jpe?g|pdf|html?|duckdb|db|xlsx?|docx|pptx|ya?ml|toml|txt|log|ipynb"
+_FILE = re.compile(rf"(?<![\w.,/\\-])[\w-]*\w\.(?:{_EXTENSIONS})(?![\w/\\])")
+_HYPHENATED = re.compile(r"(?<![\w.-])([A-Za-z_]\w*)(?:-\w+)+")
+
+
+def _path(token):
+    token = token.rstrip(".:!?*_~")
+    segments = re.split(r"[/\\]", token)
+    return (token.startswith(("./", "../", ".\\", "..\\", "~")) or len(segments) >= 3
+            or segments[0] in _PATH_ROOTS or bool(_FILE.fullmatch(segments[-1])))
+
+
+def _identifier(first):
+    # ORD-123-45, COVID-19, Q-3, r-001, and the chart file stem chart-1; top-10 and mid-2025 stay words.
+    return (len(first) == 1 or first.lower() == "chart" or bool(re.search(r"[0-9_]", first))
+            or bool(re.search(r"[A-Z]", first[1:])))
+
+
+def _blank_names(text):
+    blanks = [match.span() for match in _PATH_CANDIDATE.finditer(text) if _path(match.group(0))]
+    blanks += [match.span() for match in _FILE.finditer(text)]
+    blanks += [match.span() for match in _HYPHENATED.finditer(text) if _identifier(match.group(1))]
+    for start, end in blanks:
+        text = _blank(text, start, end)
+    return text
+
+
+# A number not glued to a word or a path, with its unit. A word unit or % may stand after any whitespace,
+# a line wrap included; a letter scale (k, M, b) or x is written against its number. Letters written against
+# a number are shown with it (5GB, 30d, 95th). Digits joined by dots, commas, slashes, colons, or spaces between
+# three-digit groups are read as one number: a version or address (3.12.1, 10.0.0.1) is no quantity, and any
+# other join but thousands grouping or one decimal point never traces (1,2,3, 21,3, 3/4, 14:05, 1.234.567, 1 000).
+_NUMBER = re.compile(
+    r"(?<![^\W_])(?<![^\W_]_)(?<![0-9][.,/:])"
+    r"((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)[eE][-+]?[0-9]+|[0-9]{1,3}(?:[ \u00a0\u202f][0-9]{3})+(?:\.[0-9]+)?"
+    r"|[0-9]+(?:[.,/:][0-9]+)*|\.[0-9]+)"
+    r"(\s*%|\s*(?:per\s*cent|percentage\s+points?|pp|thousand|million|billion|trillion|mn|bn|tn)(?!\w)"
+    r"|(?:[kKmMbB]|[x×])(?!\w))?"
+    r"((?<=[0-9])[^\W\d_]+)?"
+    r"(?![^\W_]|_[^\W_]|[.,/:][0-9])")
+_GROUPED = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?"
+                      r"|[0-9]+\.[eE][-+]?[0-9]+")
+_VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){2,}")
+_RANGE = re.compile(r"\s*(?:[-–—]|to|and)\s*")
+_SCALES = {"k": 3, "thousand": 3, "m": 6, "mn": 6, "million": 6, "b": 9, "bn": 9, "billion": 9,
+           "tn": 12, "trillion": 12}
+
+
+def _quantities(line, before="", after="", *, marker=True):
+    """Yield (text, body, unit, start, end) for each number a line states, after the skips check_numbers names.
+
+    `before` and `after` are the lines of the same paragraph around `line`, read only so that a context or a
+    unit a line wrap splits from its number is still seen. `marker` is false where a leading number cannot
+    be a list marker. Every skip blanks with spaces, so `start` and `end` index the line as written; `end`
+    passes the line's length when a unit stands after the wrap.
+    """
+    offset = len(before) + 1 if before else 0
+    if marker and (found := _LIST_MARKER.match(line)):
+        line = _blank(line, 0, found.end())
+    text = (before + "\n" if before else "") + line + ("\n" + after if after else "")
+    for pattern in (_CODE_SPAN, _CURRENCY):
+        text = pattern.sub(lambda match: " " * len(match.group(0)), text)
+    text = _NOT_QUANTITY.sub(lambda match: " " * len(match.group(0)), _blank_names(text))
+    text = re.sub(r"\]\([^)\n]*\)", lambda match: "]" + " " * (len(match.group(0)) - 1), text)
+    matches = list(_NUMBER.finditer(text))
+    for index, match in enumerate(matches):
+        if not offset <= match.start() < offset + len(line):
+            continue
+        body, unit, letters = match.group(1), match.group(2) or "", match.group(3) or ""
+        if not unit and not letters and index + 1 < len(matches) and _RANGE.fullmatch(
+                text[match.end():matches[index + 1].start()]):
+            unit = matches[index + 1].group(2) or ""  # 10-15%: the lower bound takes the upper's unit
+        if re.fullmatch(r"0[0-9]+", body) or _VERSION.fullmatch(body) and not re.fullmatch(
+                r"[0-9]{1,3}(?:\.[0-9]{3})+", body):
+            continue  # a zero-padded code such as release 002, or a version; 1.234.567 is read
+        if letters and not letters.isalpha():
+            body += letters  # 5½ has no one value
+        yield (" ".join(match.group(0).split()), body, " ".join(unit.lower().split()), match.start() - offset,
+               match.end() - offset)
+
+
+# Arithmetic on written numbers never rounds: every digit a narrative or a record writes is kept.
+_EXACT = Context(prec=MAX_PREC, Emax=MAX_EMAX, Emin=MIN_EMIN)
+
+
+def _value(body):
+    """Return a number's value and half a unit of its last written place, both exact.
+
+    Raises ValueError or ArithmeticError for an exponent too large to hold.
+    """
+    mantissa, _, exponent = body.replace(",", "").lower().partition("e")
+    exponent = int(exponent or 0)
+    with localcontext(_EXACT):
+        return (Decimal(mantissa).scaleb(exponent),
+                Decimal(5).scaleb(exponent - len(mantissa.partition(".")[2]) - 1))
+
+
+def _magnitudes(value, into, *, text=True):
+    """Add the absolute value of every finite number in a JSON or CSV value; text only when `text`.
+
+    A string that is not a number whole is read the way check_numbers reads a narrative line, adding
+    each number and, with a scale such as M, its scaled value.
+    """
+    if isinstance(value, bool):
+        return
+    if isinstance(value, (int, float, Decimal)):
+        value = str(value)  # recorded JSON is read with exact decimals, so str keeps every written digit
+    elif isinstance(value, dict):
+        for item in value.values():
+            _magnitudes(item, into, text=text)
+        return
+    elif isinstance(value, list):
+        for item in value:
+            _magnitudes(item, into, text=text)
+        return
+    elif not (isinstance(value, str) and text):
+        return
+    try:
+        number = Decimal(value.strip())
+        found = [number] if number.is_finite() else []
+    except InvalidOperation:
+        found = []
+        for line in value.splitlines():
+            for _, body, unit, _, _ in _quantities(line):
+                if not _GROUPED.fullmatch(body):
+                    continue
+                try:
+                    number = _value(body)[0]
+                    found.append(number)
+                    if unit in _SCALES:
+                        found.append(number.scaleb(_SCALES[unit], _EXACT))
+                except (ValueError, ArithmeticError):
+                    continue  # an exponent too large to hold records nothing
+    into.update(number.copy_abs() for number in found)  # copy_abs never rounds, so 4e1234567 cannot overflow
+
+
+def _evidence_numbers(record):
+    """The parts of an evidence record that hold result values: check details and settings content."""
+    checks, settings = record.get("checks"), record.get("settings")
+    return [[check.get("detail") for check in checks if isinstance(check, dict)] if isinstance(checks, list) else [],
+            settings.get("content") if isinstance(settings, dict) else None]
+
+
+def _read_exact_json(path):
+    """Read a JSON object with every fraction as an exact Decimal, so no recorded digit is lost."""
+    record = json.loads(Path(path).read_text(encoding="utf-8"), parse_float=Decimal)
+    if not isinstance(record, dict):
+        raise ValueError(f"{Path(path).name} is not a JSON object")
+    return record
+
+
+def recorded_values(root, investigation, results) -> tuple[list, list[str]]:
+    """Return the sorted magnitudes the manifest's represented results record, and the problems.
+
+    Each result contributes every cell of results/<id>.csv, the numbers in results/<id>.profile.json,
+    and the numbers in its evidence's check details and settings. JSON numbers are read exactly as written.
+    """
+    if not isinstance(results, list) or not all(
+            isinstance(entry, dict) and isinstance(entry.get("result_id"), str)
+            and _SIMPLE.fullmatch(entry["result_id"]) for entry in results):
+        return [], [f"{MANIFEST} results is not a list of result_id entries; rerun export"]
+    base = Path(root) / "investigations" / investigation
+    values, problems = set(), []
+    for result_id in dict.fromkeys(entry["result_id"] for entry in results):
+        table = base / "results" / f"{result_id}.csv"
+        try:
+            with table.open(newline="", encoding="utf-8") as stream:
+                cells = {cell for row in csv.reader(stream) for cell in row}
+            for cell in cells:  # each distinct cell is read once
+                _magnitudes(cell, values)
+        except FileNotFoundError:
+            problems.append(f"{_rel(root, table)} is missing; numbers from {result_id} cannot be traced")
+        except (OSError, UnicodeError, csv.Error) as error:
+            problems.append(f"{_rel(root, table)}: unreadable ({error})")
+        # The table holds the result; a profile or evidence, when present, adds its counts and settings.
+        for path in (base / "results" / f"{result_id}.profile.json", base / "evidence" / f"{result_id}.json"):
+            try:
+                record = _read_exact_json(path)
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError) as error:
+                problems.append(f"{_rel(root, path)}: unreadable ({error})")
+                continue
+            if path.parent.name == "results":
+                _magnitudes(record, values, text=False)  # dtype names such as float64 are not values
+            else:
+                _magnitudes(_evidence_numbers(record), values)
+    return sorted(values), problems
+
+
+def allowed_numbers(record: dict) -> tuple[set, list[str]]:
+    """Return the texts the manifest's allowed_numbers accepts untraced, and its malformed entries."""
+    entries = record.get("allowed_numbers", "none")
+    if entries == "none":
+        return set(), []
+    if not isinstance(entries, list):
+        return set(), ["allowed_numbers is not none or a list of {text, reason}"]
+    texts, problems = set(), []
+    for index, entry in enumerate(entries, start=1):
+        if isinstance(entry, dict) and all(isinstance(entry.get(key), str) and entry[key].strip()
+                                           for key in ("text", "reason")):
+            texts.add(entry["text"].strip())
+        else:
+            problems.append(f"allowed_numbers entry {index} is not {{text, reason}} with both filled in")
+    return texts, problems
+
+
+def _within(values, low, high):
+    index = bisect.bisect_left(values, low)
+    return index < len(values) and values[index] <= high
+
+
+def _traces(body, unit, values):
+    # Written to d places, the number stands for any value within half a unit of its last place.
+    if not _GROUPED.fullmatch(body):
+        return False  # 1,2,3, the decimal comma 21,3, 3/4, 14:05, and 1.234.567 have no one value
+    try:
+        number, half = _value(body)
+        with localcontext(_EXACT):
+            low, high = number - half, number + half
+            windows = [(low, high)]
+            if unit.startswith(("%", "per", "pp")):
+                windows.append((low.scaleb(-2), high.scaleb(-2)))
+            elif unit in _SCALES:
+                windows.append((low.scaleb(_SCALES[unit]), high.scaleb(_SCALES[unit])))
+    except (ValueError, ArithmeticError):
+        return False  # an exponent too large to hold traces to nothing
+    return any(_within(values, low, high) for low, high in windows)
+
+
+# A line that opens a block (a heading, a bullet, a quote, a table row, or a fence) starts no wrap.
+_OPENS_BLOCK = re.compile(r"\s*(?:$|#{1,6}(?:\s|$)|[-*+](?:\s|$)|>|\||`{3,}|~{3,})")
+_QUOTE = re.compile(r"[ \t]*(?:>[ \t]?)+")
+
+
+def _unquoted(line):
+    """The line with its blockquote markers blanked, so a quoted paragraph reads like any other."""
+    return _QUOTE.sub(lambda match: " " * len(match.group(0)), line, count=1) if _QUOTE.match(line) else line
+
+
+def _continues(previous, line):
+    """Whether `line` wraps the paragraph `previous` ends, so a context or a unit may span the two.
+
+    A numbered line continues paragraph text unless it numbers 1, the only number that starts a list
+    there; so "rose to\\n77. Orders" reads 77. An unindented one also starts a list after a list item or an
+    indented line; an indented one only after a list item at its own indentation, so "- rose to\\n  77. Orders",
+    where 77 wraps the item's text, reads 77. Two quoted lines are compared inside the quote.
+    """
+    if _QUOTE.match(previous) and _QUOTE.match(line):
+        previous, line = _QUOTE.sub("", previous, count=1), _QUOTE.sub("", line, count=1)
+    if _OPENS_BLOCK.match(previous) and not re.match(r"\s*[-*+>]\s", previous) or _OPENS_BLOCK.match(line):
+        return False
+    numbered = _LIST_MARKER.match(line)
+    if not numbered:
+        return True
+    indent = line[:len(line) - len(line.lstrip(" \t"))]
+    starts = r"\s|[-*+>]\s|[0-9]+[.)]\s" if not indent else re.escape(indent) + r"(?:[-*+]|[0-9]+[.)])\s"
+    return int(numbered.group(1)) != 1 and not re.match(starts, previous)
+
+
+def check_numbers(path: str | os.PathLike, values, *, allowed=()) -> list[dict]:
+    """List each number in a narrative file that no recorded value rounds to and `allowed` does not cover.
+
+    `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
+    text is written around it, matched on the text the number is read from, so any whitespace or a line
+    wrap matches a space: a bare `40` covers every 40, and `Week 23` only that 23. A number is skipped
+    only in a context references/helpers.md lists; every other number is read.
+    """
+    patterns = [re.compile(r"\s+".join(map(re.escape, text.split()))) for text in allowed if text.strip()]
+    rows, lines = [], list(_unfenced(path))
+    for index, (number, line, opens) in enumerate(lines):
+        if opens:
+            continue
+        previous = lines[index - 1] if index and lines[index - 1][0] == number - 1 else None
+        following = lines[index + 1] if index + 1 < len(lines) and lines[index + 1][0] == number + 1 else None
+        wraps = previous is not None and not previous[2] and _continues(previous[1], line)
+        before = previous[1] if wraps else ""
+        after = following[1] if following is not None and not following[2] and _continues(line, following[1]) \
+            else ""
+        before, line, after = _unquoted(before), _unquoted(line), _unquoted(after)
+        # The text _quantities reads, so an allowed text and a row's text match across the same wrap.
+        offset = len(before) + 1 if before else 0
+        joined = (before + "\n" if before else "") + line + ("\n" + after if after else "")
+        spans = [found.span() for pattern in patterns for found in pattern.finditer(joined)]
+        for text, body, unit, start, end in _quantities(line, before, after, marker=not wraps):
+            covered = any(low <= offset + start and offset + end <= high for low, high in spans)
+            if not covered and not _traces(body, unit, values):
+                rows.append({"file": Path(path).name, "line": number, "text": text})
+    return rows
+
+
 # ---------------------------------------------------------------- inventory and tree comparison
 
 _CHUNK_BYTES = 1024 * 1024  # 1 MiB reads keep memory flat on large datasets
@@ -692,8 +1035,8 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
             and report["charts"] == [] and report["headings"] == [] and report["questions"] == []
-            and report["verify"] == []
-            and report["flag_entries"] == [])
+            and report["verify"] == [] and report["flag_entries"] == [] and report["numbers"] == []
+            and not report["numbers_problems"])
 
 
 def check_draft(root, investigation, package, *, verify_only=False) -> dict:
@@ -701,8 +1044,9 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
-              "charts": None, "headings": None, "questions": None, "inventory": None, "verify": None,
-              "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
+              "charts": None, "headings": None, "questions": None, "numbers": None, "numbers_problems": [],
+              "inventory": None, "verify": None, "flag_entries": None, "unmatched_flags": None, "errors": [],
+              "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
         return report
@@ -741,6 +1085,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         flags = None
         report["errors"].append(f"flags: {error}")
 
+    record = None
     try:
         path = draft / MANIFEST
         if not path.is_file():
@@ -766,6 +1111,17 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     except (OSError, ValueError) as error:
         report["errors"].append(f"manifest: {error}")
 
+    # Every number in either narrative traces to a represented result or is allowed with a reason.
+    if record is not None:
+        allowed, problems = allowed_numbers(record)
+        values, more = recorded_values(root, investigation, record.get("results"))
+        report["numbers_problems"], report["numbers"] = problems + more, []
+        for name in NARRATIVES:
+            try:
+                report["numbers"] += check_numbers(draft / name, values, allowed=allowed)
+            except (OSError, UnicodeError) as error:
+                report["errors"].append(f"numbers check: {error}")
+
     report["passed"] = _structure_passed(report) and report["unmatched_flags"] == []
     return report
 
@@ -781,16 +1137,21 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
         prog="awb.py check-draft", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Run every mechanical draft check (internal names in findings.md, chart files, "
                     "matching finding headings, each represented result's question in methodology.md, "
-                    "the manifest inventory, and state.md's current flags) "
-                    "and rewrite the manifest inventory, stamping revised_at when it changes; "
-                    "--verify-only checks a release candidate and writes nothing.",
-        epilog="Prints one JSON line.\nunmatched_flags lists each finding state.md flags whose exact finding "
-               "and reason the manifest's revalidation_flags does not record.\nflag_entries lists a missing or "
-               "malformed revalidation_flags, an entry without text finding and reason, represented_in that is "
-               "neither none nor a list of places, and an unknown disposition.\nquestions lists each manifest "
-               "results entry without a question, or whose question methodology.md does not repeat verbatim.\n"
-               "Exit 0 only when names_problems, findings, charts, headings, questions, verify, flag_entries, "
-               "unmatched_flags, and errors are all empty.")
+                    "numbers in both narratives, the manifest inventory, and state.md's current flags) and "
+                    "rewrite the manifest inventory, stamping revised_at when it changes; --verify-only checks a "
+                    "release candidate and writes nothing.",
+        epilog="Prints one JSON line.\nnumbers lists, as file, line, and text, each number in findings.md or "
+               "methodology.md that no represented result's table, profile, check details, or settings round to "
+               "and the manifest's allowed_numbers does not cover by its text or a phrase around it; "
+               "numbers_problems names a missing table, an unreadable table, profile, or evidence file, or a "
+               "malformed results or allowed_numbers.\n"
+               "unmatched_flags lists each finding state.md flags whose exact finding and reason the manifest's "
+               "revalidation_flags does not record.\nflag_entries lists a "
+               "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
+               "that is neither none nor a list of places, and an unknown disposition.\nquestions lists each "
+               "manifest results entry without a question, or whose question methodology.md does not repeat "
+               "verbatim.\nExit 0 only when names_problems, findings, charts, headings, questions, numbers, "
+               "numbers_problems, verify, flag_entries, unmatched_flags, and errors are all empty.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
                         help="verify against the recorded inventory without rewriting it (the release gate)")
@@ -1527,7 +1888,7 @@ def provenance_gaps(record: dict) -> list[dict]:
                 walk(item, f"{path}[{index}]")
 
     for key, value in record.items():
-        if key not in {"inventory", "export_checks", "revalidation_flags"}:
+        if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers"}:
             walk(value, key)
     return gaps
 

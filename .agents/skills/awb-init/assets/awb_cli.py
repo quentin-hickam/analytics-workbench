@@ -42,8 +42,9 @@ COMMANDS = {
                      "check: list each review rule with the draft lines its pattern matches, writing nothing; "
                      "add: append the next numbered rule from a user's correction"),
     "check-draft": ("packaging/draft.py", "cli_check_draft",
-                    "run every mechanical draft check, including state.md's current flags, and rewrite the "
-                    "manifest inventory; --verify-only checks a release candidate"),
+                    "run every mechanical draft check, including narrative numbers against recorded results "
+                    "and state.md's current flags, and rewrite the manifest inventory; --verify-only checks a "
+                    "release candidate"),
     "release": ("packaging/draft.py", "cli_release",
                 "copy the verified draft to the next numbered release and to release storage"),
     "copy-releases": ("packaging/draft.py", "cli_copy_releases",
