@@ -1,5 +1,8 @@
 # Kept cases:
 # test_land_writes_complete_provenance_and_publishes_directory: provenance schema/key order, metadata-relative paths, checksums and partial rename.
+# test_land_records_upstream_validators_the_fetch_supplies: upstream fields filled during fetch are recorded per file in fixed key order, with null for absent fields and files.
+# test_land_refuses_malformed_upstream_unpublished: unknown fields, blank or non-string values, unlanded files, an invalid url or an http(s) url without a host, with an invalid port, or with a space or control character, and a url with userinfo (with or without //) or credential-named query, fragment, or path parameters (each split on & or ;, names percent-decoded), session IDs, pass, and api_sig among them, keep the acquisition partial, and the refusal echoes no secret.
+# test_land_records_a_url_whose_parameters_name_no_credential: an @ outside the host, path and query parameters split on & or ;, names that merely contain a credential word, an IPv6 host with a port, and an s3 URL are recorded as given.
 # test_land_keeps_failed_fetch_unpublished: fetch failure keeps partial files and writes no provenance.
 # test_publish_records_inputs_and_uncommitted_conversion: publication schema/key order, path bases, copied input checksums, no-commit state and partial rename.
 # test_publish_records_resolved_head: publication conversion_commit records the producing Git HEAD.
@@ -98,9 +101,9 @@ def test_land_writes_complete_provenance_and_publishes_directory(tmp_path):
     assert provenance["notes"] == "café"
     assert provenance["files"] == [
         {"path": "empty.csv", "bytes": 0, "sha256": hashlib.sha256(b"").hexdigest(),
-         "records": None},
+         "records": None, "upstream": None},
         {"path": "nested/page.json", "bytes": 3, "sha256": hashlib.sha256(b"abc").hexdigest(),
-         "records": 3},
+         "records": 3, "upstream": None},
     ]
     for name in ("started_at", "completed_at"):
         timestamp = datetime.fromisoformat(provenance[name])
@@ -108,6 +111,108 @@ def test_land_writes_complete_provenance_and_publishes_directory(tmp_path):
         assert timestamp.microsecond == 0
     assert raw.endswith("\n")
     assert raw.startswith('{\n  "source": "api",\n')
+
+
+def test_land_records_upstream_validators_the_fetch_supplies(tmp_path):
+    upstream = {}
+
+    def fetch(directory):
+        (directory / "a.csv").write_bytes(b"a")
+        (directory / "b.csv").write_bytes(b"b")
+        (directory / "c.csv").write_bytes(b"c")
+        upstream["a.csv"] = {"url": "https://example.test/v;rev=2/a.csv?format=csv;page=2", "etag": '"v1"',
+                             "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"}
+        upstream["b.csv"] = {"url": "s3://bucket/b.csv", "version_id": "3HL4kqtJ"}
+        upstream["c.csv"] = {"etag": None}
+
+    final = landing.land(tmp_path, "api", "batch-1", fetch, request="query", upstream=upstream)
+    files = json.loads((final / "provenance.json").read_text(encoding="utf-8"))["files"]
+    assert [list(file) for file in files] == [["path", "bytes", "sha256", "records", "upstream"]] * 3
+    assert list(files[0]["upstream"]) == ["url", "etag", "last_modified", "version_id"]
+    assert [file["upstream"] for file in files] == [
+        {"url": "https://example.test/v;rev=2/a.csv?format=csv;page=2", "etag": '"v1"',
+         "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT", "version_id": None},
+        {"url": "s3://bucket/b.csv", "etag": None, "last_modified": None, "version_id": "3HL4kqtJ"},
+        None,
+    ]
+
+
+@pytest.mark.parametrize("upstream, message", [
+    ({"page.json": {"url": "https://example.test", "md5": "x"}}, "upstream fields of page.json"),
+    ({"page.json": {"etag": " "}}, "nonblank strings"),
+    ({"page.json": {"etag": 7}}, "nonblank strings"),
+    ({"page.json": "https://example.test"}, "upstream fields of page.json"),
+    ({"other.json": {"etag": '"v1"'}}, "not landed"),
+    (["page.json"], "dictionary of per-file"),
+    ({"page.json": {"url": "https://user:SECRET@api.example.test/x"}}, "user name or password"),
+    ({"page.json": {"url": "https://SECRET@api.example.test/x"}}, "user name or password"),
+    ({"page.json": {"url": "https://api.example.test/x?page=2&api_key=SECRET"}}, r"parameters \(api_key\)"),
+    ({"page.json": {"url": "https://b.s3.example.test/x?X-Amz-Credential=SECRET&X-Amz-Signature=SECRET"}},
+     r"parameters \(X-Amz-Credential, X-Amz-Signature\)"),
+    ({"page.json": {"url": "https://a.blob.example.test/x?sv=2024&sig=SECRET"}}, r"parameters \(sig\)"),
+    ({"page.json": {"url": "https://api.example.test/x#access_token=SECRET"}}, r"parameters \(access_token\)"),
+    ({"page.json": {"url": "https://api.example.test/x?a=1;api_key=SECRET"}}, r"parameters \(api_key\)"),
+    ({"page.json": {"url": "https://api.example.test/x;token=SECRET/page"}}, r"parameters \(token\)"),
+    ({"page.json": {"url": "https://api.example.test/x#a=1;access_token=SECRET"}}, r"parameters \(access_token\)"),
+    ({"page.json": {"url": "user:SECRET@api.example.test/x"}}, "user name or password"),
+    ({"page.json": {"url": "https:user:SECRET@api.example.test/x"}}, "user name or password"),
+    ({"page.json": {"url": "https://user:pw@api.example.test/x?api_key=SECRET"}}, "user name or password"),
+    ({"page.json": {"url": "https://api.example.test/x;format=csv&access_token=SECRET"}}, r"parameters \(access_token\)"),
+    ({"page.json": {"url": "https://api.example.test/x;a=1;token=SECRET"}}, r"parameters \(token\)"),
+    ({"page.json": {"url": "https://api.example.test/x;jsessionid=SECRET"}}, r"parameters \(jsessionid\)"),
+    ({"page.json": {"url": "https://api.example.test/x?sessionid=SECRET"}}, r"parameters \(sessionid\)"),
+    ({"page.json": {"url": "https://api.example.test/x?PHPSESSID=SECRET"}}, r"parameters \(PHPSESSID\)"),
+    ({"page.json": {"url": "https://api.example.test/x?sid=SECRET"}}, r"parameters \(sid\)"),
+    ({"page.json": {"url": "https://api.example.test/x?jwt=SECRET"}}, r"parameters \(jwt\)"),
+    ({"page.json": {"url": "https://api.example.test/x?%61pi_key=SECRET"}}, r"parameters \(api_key\)"),
+    ({"page.json": {"url": "https://api.example.test/x?api%5Fkey=SECRET"}}, r"parameters \(api_key\)"),
+    ({"page.json": {"url": "https://cdn.example.test/x?Expires=1&Signature=SECRET"}}, r"parameters \(Signature\)"),
+    ({"page.json": {"url": "https://storage.example.test/x?X-Goog-Credential=SECRET"}}, r"parameters \(X-Goog-Credential\)"),
+    ({"page.json": {"url": "https://api.example.test/x?auth_token=SECRET"}}, r"parameters \(auth_token\)"),
+    # The check goes by name alone, so content parameters with credential-like names are refused too (landing.md).
+    ({"page.json": {"url": "https://api.example.test/x?sortkey=date"}}, r"parameters \(sortkey\)"),
+    ({"page.json": {"url": "https://api.example.test/x?primary_key=id"}}, r"parameters \(primary_key\)"),
+    ({"page.json": {"url": "https://x.test/a?user=bob&pass=SECRET"}}, r"parameters \(pass\)"),
+    ({"page.json": {"url": "https://x.test/a?api_sig=SECRET"}}, r"parameters \(api_sig\)"),
+    ({"page.json": {"url": "https://x.test/a?apisig=SECRET"}}, r"parameters \(apisig\)"),
+    ({"page.json": {"url": "https://[", "etag": '"v1"'}}, "is not a valid URL"),
+    # An http(s) URL a request cannot be sent to as recorded.
+    ({"page.json": {"url": "https://", "etag": '"v1"'}}, "is not a valid URL: an http.s. URL needs a host"),
+    ({"page.json": {"url": "http:/nohost", "etag": '"v1"'}}, "is not a valid URL: an http.s. URL needs a host"),
+    ({"page.json": {"url": "https://:443/x", "etag": '"v1"'}}, "is not a valid URL: an http.s. URL needs a host"),
+    ({"page.json": {"url": "https://api.test:bad/x", "etag": '"v1"'}}, "is not a valid URL: its port"),
+    ({"page.json": {"url": "https://api.test:99999/x", "etag": '"v1"'}}, "is not a valid URL: its port"),
+    ({"page.json": {"url": "https://api.test/a b.csv", "etag": '"v1"'}}, "no space or control character"),
+    ({"page.json": {"url": "https://api.test/a.csv\n", "etag": '"v1"'}}, "no space or control character"),
+])
+def test_land_refuses_malformed_upstream_unpublished(tmp_path, upstream, message):
+    with pytest.raises(ValueError, match=message) as refused:
+        landing.land(tmp_path, "api", "batch-1",
+                     lambda directory: (directory / "page.json").write_bytes(b"abc"),
+                     request="query", upstream=upstream)
+    assert "SECRET" not in str(refused.value)
+    assert not tmp_path.joinpath("data/raw/api/batch-1").exists()
+    assert not (tmp_path / "data/raw/api/batch-1.partial/provenance.json").exists()
+
+
+@pytest.mark.parametrize("url", [
+    "https://registry.example.test/@scope/pkg",
+    "https://api.example.test/x?q=a@b",
+    "https://api.example.test/x?code=abc",
+    "https://api.example.test/x;format=csv&page=2",
+    "https://api.example.test/v;rev=2/x?format=csv;page=2#section=3",
+    "https://api.example.test/x?monkeys=3&tokenize=yes&keyword=sky",
+    "https://api.example.test/x?compass=north&passage=2&signal=1",
+    "https://[::1]:8443/x",
+    "s3://bucket/x.csv",
+    # Only a name=value piece is a parameter (landing.md), so an anchor named like a credential is recorded.
+    "https://api.example.test/x#session",
+    "https://api.example.test/x?page=2#token",
+])
+def test_land_records_a_url_whose_parameters_name_no_credential(tmp_path, url):
+    final = landing.land(tmp_path, "api", "batch-1", lambda directory: (directory / "page.json").write_bytes(b"abc"),
+                         request="query", upstream={"page.json": {"url": url}})
+    assert json.loads((final / "provenance.json").read_text(encoding="utf-8"))["files"][0]["upstream"]["url"] == url
 
 
 def test_land_keeps_failed_fetch_unpublished(tmp_path):

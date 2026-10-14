@@ -1,12 +1,15 @@
 """Read-only status facts for standard workbench Markdown records and manifest.json files.
 
-Run with Python 3.10+: collect_status.py [PROJECT_ROOT]. Emits compact JSON;
-uncertainties identify records requiring targeted agent interpretation.
+Run with Python 3.10+: collect_status.py [PROJECT_ROOT] [--probe-upstream]. Emits compact JSON;
+uncertainties identify records requiring targeted agent interpretation. Only --probe-upstream
+touches the network: HEAD requests for the landed files upstream() selects, comparing their recorded
+validators, and a redirect is followed only to an http(s) URL and only as another HEAD request.
+It writes nothing.
 """
 
 import argparse
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -14,12 +17,27 @@ import re
 import string
 import subprocess
 import unicodedata
+from email.utils import parsedate_to_datetime
+import http.client
+import importlib.util
+import urllib.error
+import urllib.parse
+import urllib.request
 
 DISPOSITIONS = {"none", "revalidate", "omit", "release_with_caveat"}
 BLOCKING = {"none", "revalidate"}
 
 
-def collect(root):
+PROBE_TIMEOUT = 10
+# land()'s own module from the awb-init skill beside this one: an upstream field it refuses to
+# record is malformed provenance here, by the same check.
+_LANDING = importlib.util.spec_from_file_location(
+    "awb_status_landing", Path(__file__).resolve().parents[2] / "awb-init/assets/awb_landing.py")
+landing = importlib.util.module_from_spec(_LANDING)
+_LANDING.loader.exec_module(landing)
+
+
+def collect(root, *, probe_upstream=False):
     root = Path(root).resolve()
     uncertainties = []
 
@@ -328,6 +346,7 @@ def collect(root):
         row["Source ID"] for row in registered if documentation_basis(row) and not referenced(row["Notes"])]}
     result["landed_data_storage"] = storage(field(readme, "Landed data is kept at", readme_path, optional=True))
     result["release_storage"] = storage(field(readme, "Released packages are kept at", readme_path, optional=True))
+    result["upstream"] = upstream(root, probe_upstream, uncertain, entries)
 
     def manifest(directory, *, release=False):
         """Read manifest.json, recording an uncertainty when it is absent, unreadable, or not a JSON object."""
@@ -435,6 +454,292 @@ def collect(root):
     return result
 
 
+def upstream(root, probe, uncertain, entries):
+    """Count landed files a HEAD request can check; with probe, check each and report the rest.
+
+    Only the latest acquisition of a source to record a URL is checked, by completed_at and then,
+    for acquisitions completed in the same second, by the greater acquisition ID: a file of an
+    earlier acquisition of the same source and URL counts as superseded, since landing again is how
+    a changed upstream is taken up. probeable_files is null when an acquisition directory or
+    provenance.json could not be read; an uncertainty names each one, and the files that were read
+    are still counted and probed. entries is collect()'s directory listing, None when unreadable.
+    """
+    recorded_files, latest, without, complete = [], {}, 0, True
+
+    def directories(path):
+        nonlocal complete
+        found = entries(path, directories=True)
+        complete = complete and found is not None
+        return found or []
+
+    for source in directories(root / "data/raw"):
+        for directory in directories(source):
+            if directory.name.endswith(".partial"):
+                continue
+            acquisition = acquisition_files(directory / "provenance.json", uncertain)
+            if acquisition is None:
+                complete = False
+                continue
+            # land() records completed_at to the second; the acquisition ID orders a tie.
+            order = (acquisition[0], directory.name)
+            for file in acquisition[1]:
+                recorded = file.get("upstream")
+                # land() records an upstream whose fields are all None as null.
+                if recorded is None or all(value is None for value in recorded.values()):
+                    without += 1
+                    continue
+                entry = {"source": source.name, "acquisition_id": directory.name, "path": file["path"]}
+                recorded_files.append((entry, recorded, order))
+                if recorded.get("url") is not None:
+                    key = (source.name, recorded["url"])
+                    latest[key] = max(latest.get(key, order), order)
+    probeable, not_probeable, superseded = [], [], 0
+    for entry, recorded, order in recorded_files:
+        url = recorded.get("url")
+        if url is not None and order < latest[(entry["source"], url)]:
+            superseded += 1
+        elif url is None or urllib.parse.urlsplit(url).scheme not in {"http", "https"}:
+            not_probeable.append({**entry, "reason": "no HTTP URL recorded"})
+        elif not any(isinstance(recorded.get(name), str) for name in ("etag", "last_modified")):
+            not_probeable.append({**entry, "reason": "no ETag or Last-Modified recorded"})
+        else:
+            probeable.append((entry, recorded))
+    report = {"probeable_files": len(probeable) if complete else None}
+    if probe:
+        # One timeout per host and port bounds the run when a host is unreachable (VPN off, firewall).
+        opener, unresponsive = head_opener(), set()
+        results = [{**entry, **probe_file(recorded, opener, unresponsive)} for entry, recorded in probeable]
+        report.update(files=results, not_probeable=not_probeable, superseded=superseded, without_upstream=without)
+    return report
+
+
+def acquisition_files(path, uncertain):
+    """Return a completed acquisition's completed_at and its file entries sorted by path,
+    else record an uncertainty and return None. An upstream field is checked by land()'s own
+    check, so what land() refuses to record is malformed here."""
+    try:
+        provenance = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        uncertain(path, "Missing acquisition provenance")
+        return None
+    except (OSError, UnicodeError, ValueError) as error:
+        uncertain(path, f"Cannot read acquisition provenance: {type(error).__name__}")
+        return None
+    files = provenance.get("files") if isinstance(provenance, dict) else None
+    completed_at = timestamp(provenance.get("completed_at")) if isinstance(provenance, dict) else None
+    if not isinstance(provenance, dict):
+        defect = "not a JSON object"
+    elif provenance.get("status") != "complete":
+        defect = "status is not complete"
+    elif completed_at is None:
+        defect = "completed_at is not an ISO timestamp with a UTC offset"
+    elif not isinstance(files, list):
+        defect = "files is not a list"
+    elif not all(isinstance(f, dict) and isinstance(f.get("path"), str) and f["path"] for f in files):
+        defect = "a file entry has no path"
+    elif len({f["path"] for f in files}) != len(files):
+        # land() lists each file once; a repeated path would leave an entry unchecked below.
+        defect = "a file path is repeated"
+    else:
+        try:
+            # land()'s refusals name the file and parameter, never a value.
+            landing._upstream({f["path"]: f["upstream"] for f in files if f.get("upstream") is not None},
+                              [f["path"] for f in files])
+        except ValueError as error:
+            defect = str(error)
+        else:
+            return completed_at, sorted(files, key=lambda f: f["path"])
+    uncertain(path, f"Malformed acquisition provenance: {defect}")
+    return None
+
+
+def timestamp(value):
+    """Parse land()'s completed_at, an ISO timestamp with a UTC offset, else return None."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else None
+
+
+class RedirectRefused(urllib.error.URLError):
+    """A redirect the probe does not follow: to a URL other than http(s), to an invalid URL, or to a
+    host and port that timed out."""
+
+
+def endpoint(url):
+    """Return the host and port an http(s) URL is requested from as host:port, the scheme's port
+    when none is given. The host is the one urllib connects to: percent-decoded, lowercased, and
+    IDNA-encoded, so each spelling of one host gives one endpoint.
+
+    Raise ValueError for any other URL, without a host, with an invalid port, or with a host IDNA
+    cannot encode; land() refuses an http(s) URL without a host or with an invalid port.
+    """
+    parts = urllib.parse.urlsplit(url)
+    default = {"http": 80, "https": 443}.get(parts.scheme)
+    # urllib percent-decodes the host and port before it connects.
+    decoded = urllib.parse.urlsplit("//" + urllib.parse.unquote(parts.netloc))
+    host, port = decoded.hostname, decoded.port
+    if default is None or not host:
+        raise ValueError("not an http(s) URL with a host")
+    if not host.isascii():
+        host = host.encode("idna").decode("ascii")
+    host = f"[{host}]" if ":" in host else host
+    return f"{host}:{default if port is None else port}"
+
+
+def sendable(url):
+    """Return url as a request can send it: a non-ASCII host IDNA-encoded, and non-ASCII characters
+    in the path, query, and fragment percent-encoded as UTF-8. An ASCII url is returned as recorded.
+
+    Raise ValueError for a host IDNA cannot encode.
+    """
+    if url.isascii():
+        return url
+    parts = urllib.parse.urlsplit(url)
+    netloc = parts.netloc
+    if not netloc.isascii():
+        host = parts.hostname.encode("idna").decode("ascii")
+        netloc = host if parts.port is None else f"{host}:{parts.port}"
+    return urllib.parse.urlunsplit((parts.scheme, netloc, *(urllib.parse.quote(part, safe=string.punctuation)
+                                                            for part in (parts.path, parts.query, parts.fragment))))
+
+
+class HeadRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only to an http(s) URL, and only as another HEAD request.
+
+    A request from probe_file carries endpoints, the host:port endpoints its chain has requested
+    in order, and unresponsive, the endpoints that timed out; a redirect to an unresponsive
+    endpoint is not followed.
+    """
+
+    # urllib raises an HTTPError with this reason, plus the last status message, on a redirect loop.
+    inf_msg = "redirect loop: "
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        # Checked before urllib's own check, which lets ftp through and names the URL it refuses.
+        location = headers.get("location", headers.get("uri"))
+        try:
+            scheme = urllib.parse.urlsplit(location).scheme if location is not None else ""
+        except ValueError:
+            raise RedirectRefused("redirected to an invalid URL, not followed") from None
+        if scheme not in {"", "http", "https"}:
+            raise RedirectRefused("redirected to a URL other than http(s), not followed")
+        return super().http_error_302(req, fp, code, msg, headers)
+
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            target = endpoint(newurl)
+        except ValueError:
+            raise RedirectRefused("redirected to an invalid URL, not followed") from None
+        if target in getattr(req, "unresponsive", ()):
+            raise RedirectRefused(f"redirected to {target}, not followed: an earlier request to {target} timed out")
+        request = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if request is not None:
+            request.method = "HEAD"
+            request.unresponsive = getattr(req, "unresponsive", set())
+            request.endpoints = getattr(req, "endpoints", [])
+            request.endpoints.append(target)
+        return request
+
+
+def head_opener():
+    return urllib.request.build_opener(HeadRedirectHandler)
+
+
+def probe_file(recorded, opener, unresponsive):
+    """HEAD the recorded URL and compare its ETag, else its Last-Modified, with the recorded value.
+
+    unresponsive holds the host:port endpoints a request timed out on, shared across a run: the
+    endpoint whose request timed out, after any redirects, is added, and no request is sent to one
+    already in it. Another port on the same host is still requested.
+    """
+    # land() refuses an http(s) URL without a host or with an invalid port; what is left to raise
+    # is a host IDNA cannot encode, or one whose percent-encoding decodes to an invalid port.
+    try:
+        url = sendable(recorded["url"])
+        target = endpoint(url)
+    except ValueError as error:
+        return {"result": "unknown", "reason": f"not a URL a request can be sent to: {error}"}
+    if target in unresponsive:
+        return {"result": "unknown", "reason": f"not requested: an earlier request to {target} timed out"}
+    request = urllib.request.Request(url, method="HEAD")
+    request.unresponsive, request.endpoints = unresponsive, [target]
+    try:
+        with opener.open(request, timeout=PROBE_TIMEOUT) as response:
+            headers = response.headers
+    except urllib.error.HTTPError as error:
+        if 300 <= error.code < 400:
+            loop = str(error.reason).startswith(HeadRedirectHandler.inf_msg)
+            return {"result": "unknown", "reason": f"HTTP {error.code}: " + (
+                "redirected in a loop or too many times, not followed" if loop else "not a redirect the probe follows")}
+        return {"result": "unknown", "reason": f"HTTP {error.code}"}
+    except RedirectRefused as error:
+        return {"result": "unknown", "reason": error.reason}
+    except (OSError, ValueError, http.client.HTTPException) as error:
+        if isinstance(error, TimeoutError) or isinstance(getattr(error, "reason", None), TimeoutError):
+            unresponsive.add(request.endpoints[-1])
+            return {"result": "unknown", "reason": f"no response from {request.endpoints[-1]} within {PROBE_TIMEOUT} s"}
+        return {"result": "unknown", "reason": f"{type(error).__name__}: {error}"}
+    compared, unusable, recorded_undated = {}, [], False
+    for name, header in (("etag", "ETag"), ("last_modified", "Last-Modified")):
+        before, now = recorded.get(name), headers.get(header)
+        if not isinstance(before, str) or now is None:
+            continue
+        if not now.strip():
+            # A blank header is no evidence of change; nor, below, is a date that does not parse
+            # compared with one that does.
+            unusable.append(header)
+            continue
+        if name == "etag":
+            # An ETag is opaque, chosen by the server; compare weakly, ignoring a W/ prefix.
+            same = before.strip().removeprefix("W/") == now.strip().removeprefix("W/")
+        else:
+            then, current = http_date(before), http_date(now)
+            if then is None and current is None:
+                # A recorded value that is not a date is compared as text with one that is not either.
+                same = before.strip() == now.strip()
+            elif then is None:
+                recorded_undated = True
+                continue
+            elif current is None:
+                unusable.append(header)
+                continue
+            else:
+                same = then == current
+        compared[name] = (same, before, now)
+    if not compared and (unusable or recorded_undated):
+        reasons = []
+        if unusable:
+            verb = "is not a usable validator" if len(unusable) == 1 else "are not usable validators"
+            reasons.append(f"the server's {' and '.join(unusable)} {verb}")
+        if recorded_undated:
+            reasons.append("the recorded Last-Modified is not a date to compare with the server's")
+        return {"result": "unknown", "reason": ", and ".join(reasons)}
+    if not compared:
+        return {"result": "unknown", "reason": "the server sent neither recorded validator"}
+    name = "etag" if "etag" in compared else "last_modified"
+    same, before, now = compared[name]
+    if same:
+        return {"result": "unchanged", "compared": name}
+    if name == "etag" and compared.get("last_modified", (False,))[0]:
+        # Servers vary an ETag by content encoding (Apache appends -gzip), so an ETag change
+        # with an unchanged Last-Modified does not establish a content change.
+        return {"result": "unknown", "reason": "the ETag differs but Last-Modified is unchanged"}
+    return {"result": "changed", "compared": name, "recorded": before, "current": now}
+
+
+def http_date(value):
+    """Parse an HTTP date, one without a zone read as GMT as HTTP dates are, else return None."""
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def git_status(root, slug, state_date, uncertain):
     env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
     git_root = root
@@ -512,8 +817,9 @@ def git_status(root, slug, state_date, uncertain):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", nargs="?", default=".", help="Workbench root (default: current directory)")
+    parser.add_argument("--probe-upstream", action="store_true", help="HEAD the latest landed file of each recorded HTTP URL with recorded validators and report it changed, unchanged, or unknown")
     args = parser.parse_args()
-    print(json.dumps(collect(args.root), ensure_ascii=False, separators=(",", ":")))
+    print(json.dumps(collect(args.root, probe_upstream=args.probe_upstream), ensure_ascii=False, separators=(",", ":")))
 
 
 if __name__ == "__main__":

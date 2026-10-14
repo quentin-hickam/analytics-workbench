@@ -7,9 +7,11 @@
 # test_receipt_alone_decides_earlier: a file matching its receipt entry is earlier; a file whose entry differs, or without an entry such as one installed before receipts, is customized.
 # test_package_formats_install_on_request: --package-formats installs missing formats into the receipt; without it present formats go unreported.
 # test_check_writes_nothing: --check reports missing helpers and the absent requirements file without writing.
-# test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited.
+# test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited; a wheel URL declares its package, not its scheme; a UTF-16 file and its quoted -r include are read, and a wheel path with extras declares its package; lines and includes the reader cannot read are listed as unread beside the status.
+# test_unreadable_requirements_are_unchecked: a requirements.txt that exists but cannot be read is unchecked, not incomplete with every package missing.
+# test_unchecked_requirements_keep_unread: when pyproject.toml cannot be parsed, for want of tomllib or as malformed TOML, the unchecked status still lists the requirements.txt lines the reader could not read.
 # test_missing_packages_get_an_install_command: a package that fails to import is reported with a pip command for this interpreter.
-# test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks.
+# test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks; without the provenance asset an existing requirements.txt is reported unchecked, not a crash.
 # test_refuses_non_workbench_old_python_and_unreadable_receipt: none of these writes anything.
 # test_refuses_readme_only_directory: README.md is not a marker; reports missing markers and initialization guidance with exit 1, without writing.
 # test_upgrade_check_classifies_without_writing: current, earlier, customized copies and retired files, the merged packaging helpers included, are reported; nothing changes.
@@ -21,7 +23,9 @@ import ast
 import hashlib
 import importlib.util
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -199,11 +203,23 @@ def test_check_writes_nothing(project, imports_ok):
 
 
 def test_existing_dependency_files_are_only_reported(project, imports_ok):
-    (project / "requirements.txt").write_text("# pinned\nPandas>=2.0  # frames\ntomli>=2\n-r more.txt\n")
+    (project / "requirements.txt").write_text("# pinned\nPandas>=2.0  # frames\ntomli>=2\n-r more.txt\n"
+                                              "https://example.invalid/duckdb-1.0-py3-none-any.whl\n")
     before = snapshot(project)
     result = installer.install(project)
     assert (project / "requirements.txt").read_bytes() == before[project / "requirements.txt"]
-    assert result["requirements"] == {"path": "requirements.txt", "status": "incomplete", "missing": ["duckdb"]}
+    assert result["requirements"] == {"path": "requirements.txt", "status": "declared",
+                                      "unread": ["requirements.txt:4: -r more.txt (No such file or directory)"]}
+    (project / "requirements.txt").write_bytes("Pandas>=2.0\n-r \"deps/more reqs.txt\"\n".encode("utf-16"))
+    (project / "deps").mkdir()
+    (project / "deps/more reqs.txt").write_text("tomli>=2\n./wheels/duckdb-1.0-py3-none-any.whl[all]\n")
+    assert installer.install(project)["requirements"] == {"path": "requirements.txt", "status": "declared"}
+    shutil.rmtree(project / "deps")
+    (project / "requirements.txt").write_text("Pandas>=2.0\ntomli>=2\n-e .\n-r deps/gone.txt\n")
+    result = installer.install(project)
+    assert result["requirements"] == {
+        "path": "requirements.txt", "status": "incomplete", "missing": ["duckdb"],
+        "unread": ["requirements.txt:3: -e .", "requirements.txt:4: -r deps/gone.txt (No such file or directory)"]}
     (project / "requirements.txt").unlink()
     (project / "pyproject.toml").write_text(
         '[project]\nname = "x"\ndependencies = ["pandas[parquet]>=2"]\n'
@@ -212,6 +228,30 @@ def test_existing_dependency_files_are_only_reported(project, imports_ok):
     assert result["requirements"] == {"path": "pyproject.toml", "status": "incomplete",
                                       "missing": ['tomli; python_version < "3.11"']}
     assert not (project / "requirements.txt").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32" or getattr(os, "geteuid", lambda: 1)() == 0,
+                    reason="file modes do not stop this user reading")
+def test_unreadable_requirements_are_unchecked(project, imports_ok):
+    (project / "requirements.txt").write_text('duckdb\npandas\ntomli; python_version < "3.11"\n')
+    (project / "requirements.txt").chmod(0)
+    try:
+        result = installer.install(project, check=True)
+    finally:
+        (project / "requirements.txt").chmod(0o644)
+    assert result["requirements"] == {"path": "requirements.txt", "status": "unchecked", "packages": PACKAGES}
+
+
+def test_unchecked_requirements_keep_unread(project, imports_ok, monkeypatch):
+    (project / "requirements.txt").write_text("duckdb\n-e .\n-r missing.txt\n")
+    (project / "pyproject.toml").write_text('[project]\nname = "x"\ndependencies = ["pandas"]\n')
+    expected = {"path": "requirements.txt, pyproject.toml", "status": "unchecked", "packages": PACKAGES,
+                "unread": ["requirements.txt:2: -e .", "requirements.txt:3: -r missing.txt (No such file or directory)"]}
+    with monkeypatch.context() as patch:
+        patch.setitem(sys.modules, "tomllib", None)  # As on Python 3.10.
+        assert installer.install(project, check=True)["requirements"] == expected
+    (project / "pyproject.toml").write_text("[project\n")
+    assert installer.install(project, check=True)["requirements"] == expected
 
 
 def test_missing_packages_get_an_install_command(project, monkeypatch):
@@ -228,6 +268,8 @@ def test_absent_mapped_asset_is_skipped(project, monkeypatch, imports_ok):
     monkeypatch.setattr(installer, "COPIED", {"src/awb.py": "awb-init/assets/awb_cli.py",
                                               "src/packaging/later.py": "awb-package/assets/awb_not_shipped.py"})
     assert installer.install(project, upgrade=True)["files"] == {"src/awb.py": "installed"}
+    assert installer.install(project, check=True)["requirements"] == {
+        "path": "requirements.txt", "status": "unchecked", "packages": PACKAGES}
 
 
 def test_refuses_non_workbench_old_python_and_unreadable_receipt(tmp_path, project, monkeypatch):

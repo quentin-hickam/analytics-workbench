@@ -53,6 +53,8 @@ The default flow is landed originals in `data/raw/`, validated Parquet represent
 
 `data/raw/` is excluded from Git by the generated ignore rules, and a landed original often cannot be fetched again, such as a point-in-time API response or an extract from a system that has since changed. Before the first acquisition is landed, the agent asks where landed originals are retained outside the checkout and records the answer in the project README on a line reading `Landed data is kept at: <location>`. A declined answer is recorded as `none chosen`, a decision whose only-copy warning is repeated after each landing. After each completed landing, the agent copies the landed artifact and its provenance to the same relative path under `<location>/data/raw/` when the location is a reachable filesystem path, never overwriting an existing destination; otherwise it states exactly what to copy and where. The source register records each acquisition's retained copy, as the verified destination path or `this checkout only`, and the status skill reports acquisitions held only in this checkout.
 
+An acquisition's provenance records, per file, the upstream URL and validators the fetch received (ETag, Last-Modified, object-store version ID) when it has them. The URL carries no credentials: provenance file entries are copied into committed result evidence, so landing refuses a URL with a user name, password, or credential-named parameter (the `awb-init` landing reference lists them). On request, the status skill checks those validators with read-only HEAD requests (its skill file says which files) and reports each checked file as changed, unchanged, or unknown since its acquisition; an ETag is opaque and only as reliable as the server. A changed upstream is landed again as a new acquisition only on explicit request, never as a side effect of rerunning analysis.
+
 Acquisition credentials come from environment variables, with local values in a Git-ignored `.env`. They never enter settings, provenance requests or notes, foundation records, or saved SQL. Saved SQL names no credential at all; the others name the variable instead. A tracked `.env.example` lists the variable names without values, created when a fetch first needs one.
 
 Each analytical process owns its DuckDB session and loads shared SQL definitions from Git. Published Parquet inputs remain stable during analysis; conversion writes to an unpublished location and completes validation before publication. Refresh and cleanup must not overwrite or remove files in use by readers. The default batch workflow does not require a shared writable DuckDB database or a full dataset-version management system.
@@ -86,7 +88,7 @@ The workbench must use consistent logical locations across projects. It must not
 
 Canonical, reusable views are preferred. DuckDB querying external Parquet datasets is the default. A project may select a different backend for a concrete need, including incremental workloads, while retaining independent source landing and the preparation/EDA boundary. Source conversion to Parquet is a deliberate storage boundary, not a requirement to materialize every transformation. Accumulating materialized results without an explicit reason violates the workflow.
 
-All analytical code is tracked in Git. Delivery packages are not part of the code history under the current convention; each package manifest identifies the Git commit that produced the represented results. A commit identifies code, not input data, so the manifest also records input provenance and analytical settings. Each result's evidence is a JSON file in the investigation's `evidence/` directory, written and compared by a shipped provenance helper copied into `src/`; `state.md` links to it. It records, verbatim, the question the result answers as the user framed it, which the methodology reference repeats.
+All analytical code is tracked in Git. Delivery packages are not part of the code history under the current convention; each package manifest identifies the Git commit that produced the represented results. A commit identifies code, not input data, so the manifest also records input provenance, analytical settings, and the runtime (Python, platform, and package versions) each represented result was produced under. Each result's evidence is a JSON file in the investigation's `evidence/` directory, written and compared by a shipped provenance helper copied into `src/`; `state.md` links to it. It records, verbatim, the question the result answers as the user framed it, which the methodology reference repeats.
 
 ## Records and vocabulary
 
@@ -208,7 +210,7 @@ Every release is self-contained and includes:
 - a brief description of changes since the previous release, when applicable, in both documents;
 - one CSV per chart `findings.md` specifies, each serializing a recorded result that is not stale, as datasets do, and any user-selected datasets;
 - M365 assembly instructions, under which M365 Copilot builds the PowerPoint deck and draws its charts; and
-- a manifest containing the producing Git commit (or `uncommitted` with checksums of the producing files when no commit existed), input provenance, analytical settings, dataset selection, and unresolved caveats.
+- a manifest containing the producing Git commit (or `uncommitted` with checksums of the producing files when no commit existed), input provenance, analytical settings, the runtime of each represented result, dataset selection, and unresolved caveats.
 
 The package narrative is authoritative upstream. The approved flow is workbench to M365. In the Microsoft 365 Copilot app, the PowerPoint agent builds a deck from `findings.md`, one slide per outline slide with headlines, bullets, caveats, and numbers as written and notes as speaker notes, and draws each chart as a native chart from its chart file under the chart rules in the assembly instructions; the datasets are delivered beside the deck. Visual style, chart forms, and honest-display rules live only in those instructions; the workbench ships no figure style. It asks the requester before building when the audience or decision differs, a slide will not fit, a chart cannot be drawn as specified, or the effect of a caveat is unclear. It does not supply substantive revisions back to the workbench; a document that needs something only `methodology.md` holds is raised with the requester as an upstream gap. Reverse synchronization is out of scope.
 
@@ -274,7 +276,7 @@ Expected behavior:
 - inherit the selected datasets on revision unless scope makes them unsuitable;
 - create release `001` only when the user explicitly marks the first draft delivered;
 - create release `002` only at the next explicit delivery milestone;
-- record Git commit, input provenance, settings, and dataset selection in each manifest; and
+- record Git commit, input provenance, settings, runtime, and dataset selection in each manifest; and
 - if a finding is flagged, allow a caveated draft but require an explicit revalidate, omit, or release-with-caveat disposition before release.
 
 ### 5. Irrelevant candidate data

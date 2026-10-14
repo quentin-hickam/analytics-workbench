@@ -28,12 +28,25 @@
 # test_unreadable_enumeration_is_unknown_not_empty: an unreadable directory yields unknown, never an empty inventory.
 # test_none_chosen_is_a_recorded_decision: `none chosen`, backticked or bare `none`, reports availability none chosen, not unrecorded.
 # test_absent_storage_remains_actionable_when_acquisitions_and_releases_exist: absent lines read unrecorded alongside acquisitions and releases.
+# test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes: land()'s upstream fields drive one HEAD per probeable file; ETag wins over Last-Modified unless only the ETag changed, a weak ETag and an equal date in another form match, HTTP and network errors are unknown, and nothing is written.
+# test_an_unusable_server_validator_is_unknown_and_the_probe_continues: a blank ETag or a Last-Modified that does not parse (including an overflowing year or offset) gives no evidence of change; the other validator decides if usable, else the file is unknown; two unparseable dates are compared as text; later files are still probed.
+# test_a_relanded_url_is_checked_only_in_its_latest_acquisition: after a changed upstream is landed again, only the newest acquisition of that source and URL is probed and the earlier one counts as superseded, even when the newer one records no validator.
+# test_the_latest_acquisition_is_ordered_by_completed_at_then_acquisition_id: completed_at instants are compared across offsets, not by ID, and acquisitions completed in the same second are ordered by acquisition ID, so exactly one stays current.
+# test_a_host_that_times_out_is_not_requested_again: after a connect or read timeout, the remaining files at that host and port are unknown without a request, and other hosts, and the same host on another port, are still probed.
+# test_a_redirect_target_that_times_out_is_not_requested_again: through urllib's own redirect processing, the host that timed out after a redirect is the one suppressed, for direct and redirected requests alike, and the redirecting host is still requested.
+# test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
+# test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including any upstream field land() refuses (by land()'s own check: an invalid, hostless, bad-port, or credential-bearing URL among them) and a repeated file path, is named under uncertainties with or without the probe and makes probeable_files null, nothing is requested for it, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
+# test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key, or an upstream with no field set ({} or all null, which land() records as null), is valid and counts as without upstream.
+# test_unreadable_acquisition_inventory_is_unknown_not_zero: an unreadable data/raw or source directory is an uncertainty and makes probeable_files null, never zero.
+# test_probe_follows_redirects_only_to_http_and_only_as_head: through urllib's own redirect processing, a redirect to ftp or file is refused before any FTP or file access, a redirect loop, a redirect without a Location, and a redirect to an invalid port are unknown with a reason naming why, and an https redirect is followed as HEAD.
+# test_probe_upstream_flag_reaches_the_probe: the command-line flag runs the probe and prints its results.
 
 """Status observations stay read-only and conservative when records need interpretation."""
 import importlib.util
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 
 import pytest
@@ -584,3 +597,456 @@ def test_status_reads_rendered_table_with_json_present(workbench):
     assert {"finding": "Renewal lag", "status": "revalidation-needed",
             "reason": "Q-004 correction"} in result["active"]["findings"]
     assert before == {p: p.read_bytes() for p in workbench.rglob("*") if p.is_file()}
+
+
+LANDING = ROOT / ".agents/skills/awb-init/assets/awb_landing.py"
+landing_spec = importlib.util.spec_from_file_location("awb_landing_for_status", LANDING)
+landing = importlib.util.module_from_spec(landing_spec)
+landing_spec.loader.exec_module(landing)
+
+
+def land_with_upstream(root, acquisition_id, upstream, source="api"):
+    def fetch(directory):
+        for name in upstream:
+            (directory / name).write_bytes(name.encode())
+    return landing.land(root, source, acquisition_id, fetch, request="query",
+                        upstream={name: fields for name, fields in upstream.items() if fields})
+
+
+class FakeServer:
+    """Answers HEAD requests from a table of URL to headers or exception; records each request."""
+
+    def __init__(self, answers):
+        self.answers, self.requests = answers, []
+
+    def __call__(self, request, timeout):
+        import email.message
+        self.requests.append((request.get_method(), request.full_url, timeout))
+        answer = self.answers[request.full_url]
+        if isinstance(answer, Exception):
+            raise answer
+        headers = email.message.Message()
+        for name, value in answer.items():
+            headers[name] = value
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+        response = Response()
+        response.headers = headers
+        return response
+
+
+def serve(monkeypatch, server):
+    """Replace the probe's opener with server, which answers request and timeout."""
+    monkeypatch.setattr(status, "head_opener", lambda: SimpleNamespace(open=server))
+
+
+def refuse_network():
+    raise AssertionError("status built an opener without --probe-upstream")
+
+
+def test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes(workbench, monkeypatch):
+    import urllib.error
+    url = "https://example.test/"
+    land_with_upstream(workbench, "batch-1", {
+        "same.csv": {"url": url + "same", "etag": '"v1"'},
+        "weak.csv": {"url": url + "weak", "etag": 'W/"v1"'},
+        "moved.csv": {"url": url + "moved", "etag": '"v1"', "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
+        "dated.csv": {"url": url + "dated", "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
+        "fallback.csv": {"url": url + "fallback", "etag": '"v1"', "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
+        "regzipped.csv": {"url": url + "regzipped", "etag": '"v1-gzip"', "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
+        "silent.csv": {"url": url + "silent", "etag": '"v1"'},
+        "gone.csv": {"url": url + "gone", "etag": '"v1"'},
+        "down.csv": {"url": url + "down", "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
+        "s3.csv": {"url": "s3://bucket/s3.csv", "version_id": "3HL4kqtJ"},
+        "bare.csv": {"url": url + "bare"},
+        "local.csv": None,
+    })
+    write(workbench, "data/raw/api/batch-2.partial/provenance.json", "not read")
+    server = FakeServer({
+        url + "same": {"ETag": '"v1"'},
+        url + "weak": {"ETag": '"v1"'},
+        url + "moved": {"ETag": '"v2"', "Last-Modified": "Tue, 13 Oct 2026 09:00:00 GMT"},
+        url + "regzipped": {"ETag": '"v1"', "Last-Modified": "Tue, 13 Oct 2026 08:00:00 GMT"},
+        url + "dated": {"Last-Modified": "Tuesday, 13-Oct-26 08:00:00 GMT"},
+        url + "fallback": {"Last-Modified": "Wed, 14 Oct 2026 09:30:00 GMT"},
+        url + "silent": {},
+        url + "gone": urllib.error.HTTPError(url + "gone", 404, "Not Found", None, None),
+        url + "down": urllib.error.URLError("connection refused"),
+    })
+    serve(monkeypatch, server)
+    before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in workbench.rglob("*") if p.is_file()}
+    result = status.collect(workbench, probe_upstream=True)["upstream"]
+    assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in workbench.rglob("*") if p.is_file()}
+    assert sorted(server.requests) == sorted(("HEAD", url + name, status.PROBE_TIMEOUT) for name in
+                                             ("same", "weak", "moved", "regzipped", "dated", "fallback", "silent", "gone", "down"))
+    assert result["probeable_files"] == 9
+    file = {"source": "api", "acquisition_id": "batch-1"}
+    assert result["files"] == [
+        {**file, "path": "dated.csv", "result": "unchanged", "compared": "last_modified"},
+        {**file, "path": "down.csv", "result": "unknown", "reason": "URLError: <urlopen error connection refused>"},
+        {**file, "path": "fallback.csv", "result": "changed", "compared": "last_modified",
+         "recorded": "Tue, 13 Oct 2026 08:00:00 GMT", "current": "Wed, 14 Oct 2026 09:30:00 GMT"},
+        {**file, "path": "gone.csv", "result": "unknown", "reason": "HTTP 404"},
+        {**file, "path": "moved.csv", "result": "changed", "compared": "etag", "recorded": '"v1"', "current": '"v2"'},
+        {**file, "path": "regzipped.csv", "result": "unknown", "reason": "the ETag differs but Last-Modified is unchanged"},
+        {**file, "path": "same.csv", "result": "unchanged", "compared": "etag"},
+        {**file, "path": "silent.csv", "result": "unknown", "reason": "the server sent neither recorded validator"},
+        {**file, "path": "weak.csv", "result": "unchanged", "compared": "etag"},
+    ]
+    assert result["not_probeable"] == [
+        {**file, "path": "bare.csv", "reason": "no ETag or Last-Modified recorded"},
+        {**file, "path": "s3.csv", "reason": "no HTTP URL recorded"},
+    ]
+    assert result["superseded"] == 0
+    assert result["without_upstream"] == 1
+
+
+def test_an_unusable_server_validator_is_unknown_and_the_probe_continues(workbench, monkeypatch):
+    date, url = "Wed, 21 Oct 2015 07:28:00 GMT", "https://example.test/"
+    both = {"etag": '"abc"', "last_modified": date}
+    cases = {  # path: (recorded, served, expected result, expected reason or compared)
+        "a-empty-etag.csv": (both, {"ETag": ""}, "unknown", "the server's ETag is not a usable validator"),
+        "b-garbage-date.csv": (both, {"Last-Modified": "garbage"}, "unknown",
+                               "the server's Last-Modified is not a usable validator"),
+        "c-both-unusable.csv": (both, {"ETag": " ", "Last-Modified": "garbage"}, "unknown",
+                                "the server's ETag and Last-Modified are not usable validators"),
+        "d-empty-etag-same-date.csv": (both, {"ETag": "", "Last-Modified": date}, "unchanged", "last_modified"),
+        "e-garbage-date-same-etag.csv": (both, {"ETag": '"abc"', "Last-Modified": "garbage"}, "unchanged", "etag"),
+        "f-overflowing-year.csv": ({"last_modified": date}, {"Last-Modified": "Tue, 13 Oct 9999999999 08:00:00 GMT"},
+                                   "unknown", "the server's Last-Modified is not a usable validator"),
+        "g-overflowing-offset.csv": ({"last_modified": date}, {"Last-Modified": "Tue, 13 Oct 2026 08:00:00 +99999999"},
+                                     "unknown", "the server's Last-Modified is not a usable validator"),
+        "h-text-dates-same.csv": ({"last_modified": "build 7"}, {"Last-Modified": "build 7"}, "unchanged", "last_modified"),
+        "i-text-dates-differ.csv": ({"last_modified": "build 7"}, {"Last-Modified": "build 8"}, "changed", "last_modified"),
+        "j-recorded-text-served-date.csv": ({"last_modified": "build 7"}, {"Last-Modified": date}, "unknown",
+                                            "the recorded Last-Modified is not a date to compare with the server's"),
+        "j2-recorded-text-blank-etag.csv": ({"etag": '"abc"', "last_modified": "build 7"},
+                                            {"ETag": "", "Last-Modified": date}, "unknown",
+                                            "the server's ETag is not a usable validator, and "
+                                            "the recorded Last-Modified is not a date to compare with the server's"),
+        "k-next.csv": ({"last_modified": date}, {"Last-Modified": date}, "unchanged", "last_modified"),
+    }
+    land_with_upstream(workbench, "batch-1", {path: {"url": url + path, **recorded}
+                                              for path, (recorded, _, _, _) in cases.items()})
+    server = FakeServer({url + path: served for path, (_, served, _, _) in cases.items()})
+    serve(monkeypatch, server)
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["result"], file.get("reason") or file.get("compared")) for file in files] == [
+        (path, result, detail) for path, (_, _, result, detail) in cases.items()]
+    assert len(server.requests) == len(cases)
+
+
+def test_a_relanded_url_is_checked_only_in_its_latest_acquisition(workbench, monkeypatch):
+    times = iter(f"2026-10-13T08:00:0{second}+02:00" for second in range(10))
+    monkeypatch.setattr(landing, "_timestamp", lambda: next(times))
+    url = "https://example.test/"
+    land_with_upstream(workbench, "batch-1", {"data.csv": {"url": url + "data", "etag": '"v1"'},
+                                              "page.csv": {"url": url + "page", "etag": '"p1"'}})
+    land_with_upstream(workbench, "batch-1", {"data.csv": {"url": url + "data", "etag": '"v1"'}}, source="mirror")
+    server = FakeServer({url + "data": {"ETag": '"v2"'}, url + "page": {"ETag": '"p2"'}})
+    serve(monkeypatch, server)
+    changed = status.collect(workbench, probe_upstream=True)["upstream"]
+    assert [(f["source"], f["path"], f["result"]) for f in changed["files"]] == [
+        ("api", "data.csv", "changed"), ("api", "page.csv", "changed"), ("mirror", "data.csv", "changed")]
+    # Land again as the re-land request row says; page.csv is now recorded without a validator.
+    land_with_upstream(workbench, "batch-2", {"data.csv": {"url": url + "data", "etag": '"v2"'},
+                                              "page.csv": {"url": url + "page"}})
+    server.requests.clear()
+    result = status.collect(workbench, probe_upstream=True)["upstream"]
+    assert result["probeable_files"] == 2
+    assert [(f["source"], f["acquisition_id"], f["path"], f["result"]) for f in result["files"]] == [
+        ("api", "batch-2", "data.csv", "unchanged"), ("mirror", "batch-1", "data.csv", "changed")]
+    assert result["not_probeable"] == [{"source": "api", "acquisition_id": "batch-2", "path": "page.csv",
+                                        "reason": "no ETag or Last-Modified recorded"}]
+    assert result["superseded"] == 2
+    assert sorted(url for _, url, _ in server.requests) == [url + "data", url + "data"]
+
+
+@pytest.mark.parametrize("completed, checked", [
+    ({"batch-1": "2026-10-13T08:00:00+00:00", "batch-2": "2026-10-13T09:00:00+00:00"}, "batch-2"),
+    ({"z-old": "2026-10-13T10:00:00+02:00", "a-new": "2026-10-13T08:30:00+00:00"}, "a-new"),
+    ({"a1": "2026-10-13T08:00:00+00:00", "a2": "2026-10-13T08:00:00+00:00"}, "a2"),
+    ({"a2": "2026-10-13T08:00:00+00:00", "a1": "2026-10-13T10:00:00+02:00"}, "a2"),
+])
+def test_the_latest_acquisition_is_ordered_by_completed_at_then_acquisition_id(workbench, monkeypatch, completed, checked):
+    url = "https://example.test/data"
+    for etag, (acquisition_id, at) in enumerate(completed.items(), start=1):
+        monkeypatch.setattr(landing, "_timestamp", lambda at=at: at)
+        land_with_upstream(workbench, acquisition_id, {"data.csv": {"url": url, "etag": f'"v{etag}"'}})
+    server = FakeServer({url: {"ETag": '"v2"'}})
+    serve(monkeypatch, server)
+    result = status.collect(workbench, probe_upstream=True)["upstream"]
+    assert (result["probeable_files"], result["superseded"]) == (1, 1)
+    assert [(file["acquisition_id"], file["result"]) for file in result["files"]] == [
+        (checked, "unchanged" if list(completed).index(checked) == 1 else "changed")]
+    assert [request_url for _, request_url, _ in server.requests] == [url]
+
+
+@pytest.mark.parametrize("timeout", ["connect", "read"])
+def test_a_host_that_times_out_is_not_requested_again(workbench, monkeypatch, timeout):
+    import urllib.error
+    error = urllib.error.URLError(TimeoutError("timed out")) if timeout == "connect" else TimeoutError("timed out")
+    land_with_upstream(workbench, "batch-1", {name: {"url": f"https://{host}/{name}", "etag": '"v1"'} for name, host in
+                                              (("a.csv", "slow.test:8443"), ("b.csv", "slow.test:8443"),
+                                               ("c.csv", "fast.test"), ("d.csv", "slow.test"))})
+    server = FakeServer({"https://slow.test:8443/a.csv": error, "https://fast.test/c.csv": {"ETag": '"v1"'},
+                         "https://slow.test/d.csv": {"ETag": '"v1"'}})
+    serve(monkeypatch, server)
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["result"], file.get("reason")) for file in files] == [
+        ("a.csv", "unknown", f"no response from slow.test:8443 within {status.PROBE_TIMEOUT} s"),
+        ("b.csv", "unknown", "not requested: an earlier request to slow.test:8443 timed out"),
+        ("c.csv", "unchanged", None),
+        ("d.csv", "unchanged", None)]
+    assert [url for _, url, _ in server.requests] == [
+        "https://slow.test:8443/a.csv", "https://fast.test/c.csv", "https://slow.test/d.csv"]
+
+
+def test_each_spelling_of_a_timed_out_host_is_not_requested_again(workbench, monkeypatch):
+    import urllib.error
+    land_with_upstream(workbench, "batch-1", {name: {"url": url, "etag": '"v1"'} for name, url in (
+        ("a.csv", "https://%73low.test/a"), ("b.csv", "https://SLOW.test/b"), ("c.csv", "https://slow.test:443/c"),
+        ("d.csv", "https://bücher.test/d"), ("e.csv", "https://xn--bcher-kva.test/e"))})
+    timed_out = urllib.error.URLError(TimeoutError("timed out"))
+    server = FakeServer({"https://%73low.test/a": timed_out, "https://xn--bcher-kva.test/d": timed_out})
+    serve(monkeypatch, server)
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["reason"]) for file in files] == [
+        ("a.csv", f"no response from slow.test:443 within {status.PROBE_TIMEOUT} s"),
+        ("b.csv", "not requested: an earlier request to slow.test:443 timed out"),
+        ("c.csv", "not requested: an earlier request to slow.test:443 timed out"),
+        ("d.csv", f"no response from xn--bcher-kva.test:443 within {status.PROBE_TIMEOUT} s"),
+        ("e.csv", "not requested: an earlier request to xn--bcher-kva.test:443 timed out")]
+    assert [url for _, url, _ in server.requests] == ["https://%73low.test/a", "https://xn--bcher-kva.test/d"]
+
+
+def test_a_non_ascii_url_is_requested_percent_encoded(workbench, monkeypatch):
+    land_with_upstream(workbench, "batch-1", {
+        "a.csv": {"url": "https://example.test/données/a.csv?q=café", "etag": '"v1"'},
+        "b.csv": {"url": "https://example.test/x?q=caf%C3%A9", "etag": '"v1"'}})
+    server = FakeServer({"https://example.test/donn%C3%A9es/a.csv?q=caf%C3%A9": {"ETag": '"v1"'},
+                         "https://example.test/x?q=caf%C3%A9": {"ETag": '"v1"'}})
+    serve(monkeypatch, server)
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["result"]) for file in files] == [("a.csv", "unchanged"), ("b.csv", "unchanged")]
+    assert [url for _, url, _ in server.requests] == [
+        "https://example.test/donn%C3%A9es/a.csv?q=caf%C3%A9", "https://example.test/x?q=caf%C3%A9"]
+
+
+def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench, monkeypatch):
+    monkeypatch.setattr(status, "head_opener", refuse_network)
+    assert status.collect(workbench)["upstream"] == {"probeable_files": 0}
+    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://example.test/a", "etag": '"v1"'},
+                                              "b.csv": {"url": "s3://bucket/b", "version_id": "1"}})
+    assert status.collect(workbench)["upstream"] == {"probeable_files": 1}
+
+
+@pytest.mark.parametrize("text, reason", [
+    ("[1, 2]", "Malformed acquisition provenance: not a JSON object"),
+    ("{", "Cannot read acquisition provenance: JSONDecodeError"),
+    ("{}", "Malformed acquisition provenance: status is not complete"),
+    ('{"status": "complete", "files": []}',
+     "Malformed acquisition provenance: completed_at is not an ISO timestamp with a UTC offset"),
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00", "files": []}',
+     "Malformed acquisition provenance: completed_at is not an ISO timestamp with a UTC offset"),
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": {}}', "Malformed acquisition provenance: files is not a list"),
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [{"path": 7, "upstream": null}]}',
+     "Malformed acquisition provenance: a file entry has no path"),
+    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": ["a.csv"]}', "Malformed acquisition provenance: a file entry has no path"),
+    *[(json.dumps({"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00",
+                   "files": [{"path": "a.csv", "upstream": upstream}]}), "Malformed acquisition provenance: " + reason)
+      for upstream, reason in [
+          ("https://example.test/a", "upstream fields of a.csv must be a dictionary of url, etag, last_modified, version_id"),
+          ({"url": "https://example.test/a", "lastModified": "x"},
+           "upstream fields of a.csv must be a dictionary of url, etag, last_modified, version_id"),
+          ({"url": "https://example.test/a", "etag": 7}, "upstream fields of a.csv must be nonblank strings or None"),
+          ({"url": "https://example.test/a", "etag": " "}, "upstream fields of a.csv must be nonblank strings or None"),
+          ({"url": "https://[", "etag": '"v1"'}, "upstream url of a.csv is not a valid URL"),
+          ({"url": "https://example.test/d?api_key=SECRET", "etag": '"v1"'},
+           "upstream url of a.csv carries credential parameters (api_key); record it without credentials"),
+          ({"url": "https://example.test/x;format=csv&access_token=SECRET", "etag": '"v1"'},
+           "upstream url of a.csv carries credential parameters (access_token); record it without credentials"),
+          ({"url": "user:SECRET@example.test/x", "etag": '"v1"'},
+           "upstream url of a.csv carries a user name or password; record it without credentials"),
+          ({"url": "https://example.test/a?user=bob&pass=SECRET", "etag": '"v1"'},
+           "upstream url of a.csv carries credential parameters (pass); record it without credentials"),
+          ({"url": "https://example.test/a?api_sig=SECRET", "etag": '"v1"'},
+           "upstream url of a.csv carries credential parameters (api_sig); record it without credentials"),
+          ({"url": "https://", "etag": '"v1"'},
+           "upstream url of a.csv is not a valid URL: an http(s) URL needs a host and no space or control character"),
+          ({"url": "https://api.test:bad/x", "etag": '"v1"'},
+           "upstream url of a.csv is not a valid URL: its port is not a number from 0 to 65535"),
+      ]],
+    # A repeated path would leave an entry unchecked: the first entry's upstream is never validated.
+    *[(json.dumps({"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00",
+                   "files": [{"path": "x.csv", "upstream": first},
+                             {"path": "x.csv", "upstream": {"url": "https://example.test/x", "etag": '"v1"'}}]}),
+       "Malformed acquisition provenance: a file path is repeated")
+      for first in ["broken", {"url": "https://example.test/x?api_key=SECRET", "etag": '"v1"'}]],
+    (None, "Missing acquisition provenance"),
+])
+def test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown(workbench, monkeypatch, text, reason):
+    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://example.test/a", "etag": '"v1"'}})
+    if text is None:
+        write(workbench, "data/raw/api/broken/a.csv", "a")
+    else:
+        write(workbench, "data/raw/api/broken/provenance.json", text)
+    write(workbench, "data/raw/api/batch-2.partial/provenance.json", "{")
+    write(workbench, "data/raw/api/notes.txt", "not an acquisition")
+    server = FakeServer({"https://example.test/a": {"ETag": '"v1"'}})
+    serve(monkeypatch, server)
+    uncertainties = [{"path": "data/raw/api/broken/provenance.json", "reason": reason}]
+    default = status.collect(workbench)
+    assert (default["uncertainties"], default["upstream"]) == (uncertainties, {"probeable_files": None})
+    result = status.collect(workbench, probe_upstream=True)
+    assert result["uncertainties"] == uncertainties
+    assert result["upstream"] == {
+        "probeable_files": None,
+        "files": [{"source": "api", "acquisition_id": "batch-1", "path": "a.csv", "result": "unchanged", "compared": "etag"}],
+        "not_probeable": [], "superseded": 0, "without_upstream": 0}
+    assert [url for _, url, _ in server.requests] == ["https://example.test/a"]
+    assert "SECRET" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("upstream", ["absent", {}, {"url": None, "etag": None, "last_modified": None, "version_id": None}])
+def test_provenance_without_upstream_keys_counts_as_without_upstream(workbench, monkeypatch, upstream):
+    entry = {"path": "a.csv", "bytes": 1, "sha256": "0", "records": None}
+    if upstream != "absent":
+        entry["upstream"] = upstream
+    write(workbench, "data/raw/api/old/provenance.json", json.dumps(
+        {"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [entry]}))
+    monkeypatch.setattr(status, "head_opener", refuse_network)
+    result = status.collect(workbench)
+    assert result["uncertainties"] == [] and result["upstream"] == {"probeable_files": 0}
+    server = FakeServer({})
+    serve(monkeypatch, server)
+    result = status.collect(workbench, probe_upstream=True)
+    assert result["upstream"] == {"probeable_files": 0, "files": [], "not_probeable": [], "superseded": 0,
+                                  "without_upstream": 1}
+    assert server.requests == []
+
+
+@pytest.mark.parametrize("blocked", ["data/raw", "data/raw/api"])
+def test_unreadable_acquisition_inventory_is_unknown_not_zero(workbench, monkeypatch, blocked):
+    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://example.test/a", "etag": '"v1"'}})
+    land_with_upstream(workbench, "batch-1", {"w.csv": {"url": "https://example.test/w", "etag": '"v1"'}}, source="web")
+    original_iterdir = Path.iterdir
+
+    def checked_iterdir(path):
+        if path == workbench / blocked:
+            raise PermissionError("fixture directory unreadable")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", checked_iterdir)
+    serve(monkeypatch, FakeServer({"https://example.test/w": {"ETag": '"v1"'}}))
+    result = status.collect(workbench, probe_upstream=True)
+    assert {"path": blocked, "reason": "Cannot enumerate directory: PermissionError"} in result["uncertainties"]
+    assert result["upstream"]["probeable_files"] is None
+    assert [file["path"] for file in result["upstream"]["files"]] == ([] if blocked == "data/raw" else ["w.csv"])
+
+
+def test_probe_follows_redirects_only_to_http_and_only_as_head(workbench, monkeypatch):
+    """Runs urllib's own redirect processing; only the HTTPS and FTP connections are replaced."""
+    import email.message
+    import io
+    import urllib.request
+    import urllib.response
+    answers = {
+        "https://example.test/ftp": (302, {"Location": "ftp://example.test/source.csv"}),
+        "https://example.test/file": (302, {"Location": "file:///etc/hosts"}),
+        "https://example.test/loop": (302, {"Location": "/loop"}),
+        "https://example.test/nowhere": (302, {}),
+        "https://example.test/badport": (307, {"Location": "https://example.test:bad/x"}),
+        "https://example.test/old": (301, {"Location": "https://example.test/new"}),
+        "https://example.test/new": (200, {"ETag": '"v1"'}),
+    }
+    requests, ftp, local = [], [], []
+
+    def https_open(handler, request):
+        requests.append((request.get_method(), request.full_url))
+        code, fields = answers[request.full_url]
+        headers = email.message.Message()
+        for name, value in fields.items():
+            headers[name] = value
+        response = urllib.response.addinfourl(io.BytesIO(b""), headers, request.full_url, code)
+        response.msg = "Redirect" if code != 200 else "OK"
+        return response
+
+    monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", https_open)
+    monkeypatch.setattr(urllib.request.FTPHandler, "ftp_open", lambda handler, request: ftp.append(request.full_url))
+    monkeypatch.setattr(urllib.request.FileHandler, "file_open", lambda handler, request: local.append(request.full_url))
+    land_with_upstream(workbench, "batch-1", {f"{name}.csv": {"url": f"https://example.test/{name}", "etag": '"v1"'}
+                                              for name in ("badport", "file", "ftp", "loop", "nowhere", "old")})
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["result"], file.get("reason")) for file in files] == [
+        ("badport.csv", "unknown", "redirected to an invalid URL, not followed"),
+        ("file.csv", "unknown", "redirected to a URL other than http(s), not followed"),
+        ("ftp.csv", "unknown", "redirected to a URL other than http(s), not followed"),
+        ("loop.csv", "unknown", "HTTP 302: redirected in a loop or too many times, not followed"),
+        ("nowhere.csv", "unknown", "HTTP 302: not a redirect the probe follows"),
+        ("old.csv", "unchanged", None),
+    ]
+    assert ftp == [] and local == []
+    assert requests == [("HEAD", "https://example.test/badport"), ("HEAD", "https://example.test/file"),
+                        ("HEAD", "https://example.test/ftp"),
+                        *[("HEAD", "https://example.test/loop")] * (urllib.request.HTTPRedirectHandler.max_repeats + 1),
+                        ("HEAD", "https://example.test/nowhere"),
+                        ("HEAD", "https://example.test/old"), ("HEAD", "https://example.test/new")]
+
+
+@pytest.mark.parametrize("timeout", ["connect", "read"])
+def test_a_redirect_target_that_times_out_is_not_requested_again(workbench, monkeypatch, timeout):
+    """Runs urllib's own redirect processing; only the HTTPS connections are replaced."""
+    import email.message
+    import io
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    import urllib.response
+    answers = {
+        "https://one.test/a": (302, {"Location": "https://slow.test/a"}),
+        "https://two.test/c": (307, {"Location": "https://slow.test/c"}),
+        "https://one.test/d": (200, {"ETag": '"v1"'}),
+    }
+    requests = []
+
+    def https_open(handler, request):
+        requests.append((request.get_method(), request.full_url))
+        if urllib.parse.urlsplit(request.full_url).hostname == "slow.test":
+            raise urllib.error.URLError(TimeoutError("timed out")) if timeout == "connect" else TimeoutError("timed out")
+        code, fields = answers[request.full_url]
+        headers = email.message.Message()
+        for name, value in fields.items():
+            headers[name] = value
+        response = urllib.response.addinfourl(io.BytesIO(b""), headers, request.full_url, code)
+        response.msg = "Redirect" if code != 200 else "OK"
+        return response
+
+    monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", https_open)
+    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://one.test/a", "etag": '"v1"'},
+                                              "b.csv": {"url": "https://slow.test/b", "etag": '"v1"'},
+                                              "c.csv": {"url": "https://two.test/c", "etag": '"v1"'},
+                                              "d.csv": {"url": "https://one.test/d", "etag": '"v1"'}})
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["result"], file.get("reason")) for file in files] == [
+        ("a.csv", "unknown", f"no response from slow.test:443 within {status.PROBE_TIMEOUT} s"),
+        ("b.csv", "unknown", "not requested: an earlier request to slow.test:443 timed out"),
+        ("c.csv", "unknown", "redirected to slow.test:443, not followed: an earlier request to slow.test:443 timed out"),
+        ("d.csv", "unchanged", None),
+    ]
+    assert requests == [("HEAD", "https://one.test/a"), ("HEAD", "https://slow.test/a"),
+                        ("HEAD", "https://two.test/c"), ("HEAD", "https://one.test/d")]
+
+
+def test_probe_upstream_flag_reaches_the_probe(workbench, monkeypatch, capsys):
+    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://example.test/a", "etag": '"v1"'}})
+    serve(monkeypatch, FakeServer({"https://example.test/a": {"ETag": '"v2"'}}))
+    monkeypatch.setattr("sys.argv", ["collect_status.py", str(workbench), "--probe-upstream"])
+    status.main()
+    files = json.loads(capsys.readouterr().out)["upstream"]["files"]
+    assert [(file["path"], file["result"]) for file in files] == [("a.csv", "changed")]

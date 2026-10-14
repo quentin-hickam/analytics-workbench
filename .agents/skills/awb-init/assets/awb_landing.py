@@ -5,8 +5,10 @@ its cli_* functions as the land, retain, publish, and sql commands.
 
 data/raw/<source>/<acquisition-id>/provenance.json:
     {source, acquisition_id, request, started_at, completed_at, status,
-     files: [{path, bytes, sha256, records}], notes}
-    status is "complete"; records is an integer or null.
+     files: [{path, bytes, sha256, records, upstream}], notes}
+    status is "complete"; records is an integer or null; upstream is null or
+    {url, etag, last_modified, version_id}, each a string or null, as the fetch received them;
+    url carries no credentials, and an http(s) url has a host, a valid port, and no space or control character.
 data/parquet/<dataset>/<publication-id>/publication.json:
     {dataset, publication_id,
      inputs: [{source, acquisition_id, files: [{path, sha256}]}],
@@ -23,9 +25,11 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from collections.abc import Callable, Sequence
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -80,6 +84,67 @@ def _complete_provenance(directory):
     if not isinstance(provenance, dict) or provenance.get("status") != "complete":
         raise ValueError(f"Not a completed acquisition: {directory}")
     return provenance
+
+
+UPSTREAM_FIELDS = ("url", "etag", "last_modified", "version_id")
+# Matched against a query, fragment, or path parameter name, lowercased with non-alphanumerics removed:
+# api_key, access_token, client_secret, X-Amz-Signature, X-Amz-Credential, sig (Azure SAS), api_sig, jsessionid, pass, ...
+CREDENTIAL_PARAMETER = re.compile(r"(key|token|secret|sig|signature|password|passwd|credentials?|session|sessionid|sessid)$"
+                                  r"|^(pass|pwd|auth|authorization|sid|jwt)$")
+
+
+def _check_url(path, url):
+    """Refuse a URL carrying credentials, since provenance files are copied into committed evidence,
+    and an http(s) URL a request cannot be sent to as recorded."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        raise ValueError(f"upstream url of {path} is not a valid URL") from None
+    # Without "//" (user:pw@host/x), urlsplit leaves the user name and password in the path.
+    if "@" in (parts.netloc or parts.path.split("/", 1)[0]):
+        raise ValueError(f"upstream url of {path} carries a user name or password; "
+                         "record it without credentials")
+    # Query and fragment parameters, and the path parameters after the first ; in a segment,
+    # are each split on & or ;. Only a name=value piece is a parameter, so a #section anchor is not.
+    pieces = [piece for part in (parts.query, parts.fragment) for piece in re.split(r"[&;]", part)]
+    pieces += [piece for segment in parts.path.split("/") if ";" in segment
+               for piece in re.split(r"[&;]", segment.split(";", 1)[1])]
+    names = sorted({name for name in (urllib.parse.unquote_plus(piece.split("=", 1)[0])
+                                      for piece in pieces if "=" in piece)
+                    if CREDENTIAL_PARAMETER.search(re.sub(r"[^a-z0-9]", "", name.lower()))})
+    if names:
+        raise ValueError(f"upstream url of {path} carries credential parameters ({', '.join(names)}); "
+                         "record it without credentials")
+    try:
+        parts.port  # raises ValueError for a port that is not a number from 0 to 65535
+    except ValueError:
+        raise ValueError(f"upstream url of {path} is not a valid URL: "
+                         "its port is not a number from 0 to 65535") from None
+    if parts.scheme in {"http", "https"} and (not parts.hostname or re.search(r"[\x00-\x20\x7f]", url)):
+        raise ValueError(f"upstream url of {path} is not a valid URL: an http(s) URL needs a host "
+                         "and no space or control character")
+
+
+def _upstream(upstream, paths):
+    """Return {path: {url, etag, last_modified, version_id}} from land()'s upstream, else raise ValueError."""
+    if upstream is None:
+        return {}
+    if not isinstance(upstream, dict):
+        raise ValueError("upstream must be a dictionary of per-file dictionaries")
+    if set(upstream) - set(paths):
+        raise ValueError("Upstream fields name files that were not landed")
+    entries = {}
+    for path, fields in upstream.items():
+        if not isinstance(fields, dict) or set(fields) - set(UPSTREAM_FIELDS):
+            raise ValueError(f"upstream fields of {path} must be a dictionary of {', '.join(UPSTREAM_FIELDS)}")
+        if any(value is not None and (not isinstance(value, str) or not value.strip())
+               for value in fields.values()):
+            raise ValueError(f"upstream fields of {path} must be nonblank strings or None")
+        if fields.get("url") is not None:
+            _check_url(path, fields["url"])
+        if any(value is not None for value in fields.values()):
+            entries[path] = {name: fields.get(name) for name in UPSTREAM_FIELDS}
+    return entries
 
 
 def _finish(partial, final, name, value):
@@ -438,8 +503,12 @@ def _run_checks(directory, spec):
 
 def land(project_root: str | Path, source: str, acquisition_id: str,
          fetch: Callable[[Path], object], *, request: Any,
-         records: dict[str, int] | None = None, notes: Any = None) -> Path:
-    """Fetch original files into a partial directory, then write provenance and rename it."""
+         records: dict[str, int] | None = None,
+         upstream: dict[str, dict[str, str | None]] | None = None, notes: Any = None) -> Path:
+    """Fetch original files into a partial directory, then write provenance and rename it.
+
+    records and upstream are read after fetch returns, so fetch may fill them as it writes files.
+    """
     _check_name(source)
     _check_name(acquisition_id)
     final = Path(project_root) / "data/raw" / source / acquisition_id
@@ -458,7 +527,9 @@ def land(project_root: str | Path, source: str, acquisition_id: str,
             raise ValueError("records must be a dictionary of integer counts")
         if set(records) - set(paths):
             raise ValueError("Record counts name files that were not landed")
-    files = [{**entry, "records": (records or {}).get(entry["path"])}
+    validators = _upstream(upstream, paths)
+    files = [{**entry, "records": (records or {}).get(entry["path"]),
+              "upstream": validators.get(entry["path"])}
              for entry in _file_entries(partial, paths)]
     return _finish(partial, final, "provenance.json", {
         "source": source,
