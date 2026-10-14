@@ -1,7 +1,8 @@
 # Kept cases:
 # test_land_writes_complete_provenance_and_publishes_directory: provenance schema/key order, metadata-relative paths, checksums and partial rename.
 # test_land_records_upstream_validators_the_fetch_supplies: upstream fields filled during fetch are recorded per file in fixed key order, with null for absent fields and files.
-# test_land_refuses_malformed_upstream_unpublished: unknown fields, blank or non-string values, unlanded files, and a url with userinfo (with or without //) or credential query, fragment, or path parameters (split on & or ;) keep the acquisition partial, and the refusal echoes no secret.
+# test_land_refuses_malformed_upstream_unpublished: unknown fields, blank or non-string values, unlanded files, an invalid url, and a url with userinfo (with or without //) or credential-named query, fragment, or path parameters (each split on & or ;, names percent-decoded), session IDs among them, keep the acquisition partial, and the refusal echoes no secret.
+# test_land_records_a_url_whose_parameters_name_no_credential: an @ outside the host, path and query parameters split on & or ;, and names that merely contain a credential word are recorded as given.
 # test_land_keeps_failed_fetch_unpublished: fetch failure keeps partial files and writes no provenance.
 # test_publish_records_inputs_and_uncommitted_conversion: publication schema/key order, path bases, copied input checksums, no-commit state and partial rename.
 # test_publish_records_resolved_head: publication conversion_commit records the producing Git HEAD.
@@ -129,6 +130,23 @@ def test_land_records_upstream_validators_the_fetch_supplies(tmp_path):
     ({"page.json": {"url": "https://api.example.test/x#a=1;access_token=SECRET"}}, r"parameters \(access_token\)"),
     ({"page.json": {"url": "user:SECRET@api.example.test/x"}}, "user name or password"),
     ({"page.json": {"url": "https:user:SECRET@api.example.test/x"}}, "user name or password"),
+    ({"page.json": {"url": "https://user:pw@api.example.test/x?api_key=SECRET"}}, "user name or password"),
+    ({"page.json": {"url": "https://api.example.test/x;format=csv&access_token=SECRET"}}, r"parameters \(access_token\)"),
+    ({"page.json": {"url": "https://api.example.test/x;a=1;token=SECRET"}}, r"parameters \(token\)"),
+    ({"page.json": {"url": "https://api.example.test/x;jsessionid=SECRET"}}, r"parameters \(jsessionid\)"),
+    ({"page.json": {"url": "https://api.example.test/x?sessionid=SECRET"}}, r"parameters \(sessionid\)"),
+    ({"page.json": {"url": "https://api.example.test/x?PHPSESSID=SECRET"}}, r"parameters \(PHPSESSID\)"),
+    ({"page.json": {"url": "https://api.example.test/x?sid=SECRET"}}, r"parameters \(sid\)"),
+    ({"page.json": {"url": "https://api.example.test/x?jwt=SECRET"}}, r"parameters \(jwt\)"),
+    ({"page.json": {"url": "https://api.example.test/x?%61pi_key=SECRET"}}, r"parameters \(api_key\)"),
+    ({"page.json": {"url": "https://api.example.test/x?api%5Fkey=SECRET"}}, r"parameters \(api_key\)"),
+    ({"page.json": {"url": "https://cdn.example.test/x?Expires=1&Signature=SECRET"}}, r"parameters \(Signature\)"),
+    ({"page.json": {"url": "https://storage.example.test/x?X-Goog-Credential=SECRET"}}, r"parameters \(X-Goog-Credential\)"),
+    ({"page.json": {"url": "https://api.example.test/x?auth_token=SECRET"}}, r"parameters \(auth_token\)"),
+    # The check goes by name alone, so content parameters with credential-like names are refused too (landing.md).
+    ({"page.json": {"url": "https://api.example.test/x?sortkey=date"}}, r"parameters \(sortkey\)"),
+    ({"page.json": {"url": "https://api.example.test/x?primary_key=id"}}, r"parameters \(primary_key\)"),
+    ({"page.json": {"url": "https://[", "etag": '"v1"'}}, "is not a valid URL"),
 ])
 def test_land_refuses_malformed_upstream_unpublished(tmp_path, upstream, message):
     with pytest.raises(ValueError, match=message) as refused:
@@ -138,6 +156,20 @@ def test_land_refuses_malformed_upstream_unpublished(tmp_path, upstream, message
     assert "SECRET" not in str(refused.value)
     assert not tmp_path.joinpath("data/raw/api/batch-1").exists()
     assert not (tmp_path / "data/raw/api/batch-1.partial/provenance.json").exists()
+
+
+@pytest.mark.parametrize("url", [
+    "https://registry.example.test/@scope/pkg",
+    "https://api.example.test/x?q=a@b",
+    "https://api.example.test/x?code=abc",
+    "https://api.example.test/x;format=csv&page=2",
+    "https://api.example.test/v;rev=2/x?format=csv;page=2#section=3",
+    "https://api.example.test/x?monkeys=3&tokenize=yes&keyword=sky",
+])
+def test_land_records_a_url_whose_parameters_name_no_credential(tmp_path, url):
+    final = landing.land(tmp_path, "api", "batch-1", lambda directory: (directory / "page.json").write_bytes(b"abc"),
+                         request="query", upstream={"page.json": {"url": url}})
+    assert json.loads((final / "provenance.json").read_text(encoding="utf-8"))["files"][0]["upstream"]["url"] == url
 
 
 def test_land_keeps_failed_fetch_unpublished(tmp_path):

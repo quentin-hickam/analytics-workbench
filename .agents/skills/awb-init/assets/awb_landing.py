@@ -84,9 +84,9 @@ def _complete_provenance(directory):
 
 UPSTREAM_FIELDS = ("url", "etag", "last_modified", "version_id")
 # Matched against a query, fragment, or path parameter name, lowercased with non-alphanumerics removed:
-# api_key, access_token, client_secret, X-Amz-Signature, X-Amz-Credential, sig (Azure SAS), ...
-CREDENTIAL_PARAMETER = re.compile(r"(key|token|secret|signature|password|passwd|credentials?)$"
-                                  r"|^(sig|pwd|auth|authorization)$")
+# api_key, access_token, client_secret, X-Amz-Signature, X-Amz-Credential, sig (Azure SAS), jsessionid, ...
+CREDENTIAL_PARAMETER = re.compile(r"(key|token|secret|signature|password|passwd|credentials?|session|sessionid|sessid)$"
+                                  r"|^(sig|pwd|auth|authorization|sid|jwt)$")
 
 
 def _check_url(path, url):
@@ -99,9 +99,11 @@ def _check_url(path, url):
     if "@" in (parts.netloc or parts.path.split("/", 1)[0]):
         raise ValueError(f"upstream url of {path} carries a user name or password; "
                          "record it without credentials")
-    # Query and fragment parameters split on & or ;, and path parameters follow ; in a segment.
+    # Query and fragment parameters, and the path parameters after the first ; in a segment,
+    # are each split on & or ;.
     pieces = [piece for part in (parts.query, parts.fragment) for piece in re.split(r"[&;]", part)]
-    pieces += [piece for segment in parts.path.split("/") for piece in segment.split(";")[1:]]
+    pieces += [piece for segment in parts.path.split("/") if ";" in segment
+               for piece in re.split(r"[&;]", segment.split(";", 1)[1])]
     names = sorted({name for name in (urllib.parse.unquote_plus(piece.split("=", 1)[0]) for piece in pieces)
                     if CREDENTIAL_PARAMETER.search(re.sub(r"[^a-z0-9]", "", name.lower()))})
     if names:
