@@ -5,25 +5,33 @@ its cli_* functions as the land, retain, publish, and sql commands.
 
 data/raw/<source>/<acquisition-id>/provenance.json:
     {source, acquisition_id, request, started_at, completed_at, status,
-     files: [{path, bytes, sha256, records}], notes}
-    status is "complete"; records is an integer or null.
+     files: [{path, bytes, sha256, records, upstream}], notes}
+    status is "complete"; records is an integer or null; upstream is null or
+    {url, etag, last_modified, version_id}, each a string or null, as the fetch received them;
+    url carries no credentials, and an http(s) url has a host, a valid port, and no space or control character.
 data/parquet/<dataset>/<publication-id>/publication.json:
     {dataset, publication_id,
      inputs: [{source, acquisition_id, files: [{path, sha256}]}],
-     conversion_commit, converted_at, files: [{path, bytes, sha256}], notes}
-    conversion_commit is git HEAD or "uncommitted".
+     conversion_commit, converted_at, files: [{path, bytes, sha256}],
+     checks: [{name, outcome, detail}], notes}
+    conversion_commit is git HEAD or "uncommitted". checks lists the dataset's declared checks
+    from foundation/datasets.toml, then `validate` when a validate callable ran; every outcome
+    is "pass", because a failure refuses publication.
 Paths are sorted POSIX paths relative to their acquisition or publication.
 """
 
 import argparse
 import hashlib
 import json
+import math
 import os
+import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +86,67 @@ def _complete_provenance(directory):
     return provenance
 
 
+UPSTREAM_FIELDS = ("url", "etag", "last_modified", "version_id")
+# Matched against a query, fragment, or path parameter name, lowercased with non-alphanumerics removed:
+# api_key, access_token, client_secret, X-Amz-Signature, X-Amz-Credential, sig (Azure SAS), api_sig, jsessionid, pass, ...
+CREDENTIAL_PARAMETER = re.compile(r"(key|token|secret|sig|signature|password|passwd|credentials?|session|sessionid|sessid)$"
+                                  r"|^(pass|pwd|auth|authorization|sid|jwt)$")
+
+
+def _check_url(path, url):
+    """Refuse a URL carrying credentials, since provenance files are copied into committed evidence,
+    and an http(s) URL a request cannot be sent to as recorded."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        raise ValueError(f"upstream url of {path} is not a valid URL") from None
+    # Without "//" (user:pw@host/x), urlsplit leaves the user name and password in the path.
+    if "@" in (parts.netloc or parts.path.split("/", 1)[0]):
+        raise ValueError(f"upstream url of {path} carries a user name or password; "
+                         "record it without credentials")
+    # Query and fragment parameters, and the path parameters after the first ; in a segment,
+    # are each split on & or ;. Only a name=value piece is a parameter, so a #section anchor is not.
+    pieces = [piece for part in (parts.query, parts.fragment) for piece in re.split(r"[&;]", part)]
+    pieces += [piece for segment in parts.path.split("/") if ";" in segment
+               for piece in re.split(r"[&;]", segment.split(";", 1)[1])]
+    names = sorted({name for name in (urllib.parse.unquote_plus(piece.split("=", 1)[0])
+                                      for piece in pieces if "=" in piece)
+                    if CREDENTIAL_PARAMETER.search(re.sub(r"[^a-z0-9]", "", name.lower()))})
+    if names:
+        raise ValueError(f"upstream url of {path} carries credential parameters ({', '.join(names)}); "
+                         "record it without credentials")
+    try:
+        parts.port  # raises ValueError for a port that is not a number from 0 to 65535
+    except ValueError:
+        raise ValueError(f"upstream url of {path} is not a valid URL: "
+                         "its port is not a number from 0 to 65535") from None
+    if parts.scheme in {"http", "https"} and (not parts.hostname or re.search(r"[\x00-\x20\x7f]", url)):
+        raise ValueError(f"upstream url of {path} is not a valid URL: an http(s) URL needs a host "
+                         "and no space or control character")
+
+
+def _upstream(upstream, paths):
+    """Return {path: {url, etag, last_modified, version_id}} from land()'s upstream, else raise ValueError."""
+    if upstream is None:
+        return {}
+    if not isinstance(upstream, dict):
+        raise ValueError("upstream must be a dictionary of per-file dictionaries")
+    if set(upstream) - set(paths):
+        raise ValueError("Upstream fields name files that were not landed")
+    entries = {}
+    for path, fields in upstream.items():
+        if not isinstance(fields, dict) or set(fields) - set(UPSTREAM_FIELDS):
+            raise ValueError(f"upstream fields of {path} must be a dictionary of {', '.join(UPSTREAM_FIELDS)}")
+        if any(value is not None and (not isinstance(value, str) or not value.strip())
+               for value in fields.values()):
+            raise ValueError(f"upstream fields of {path} must be nonblank strings or None")
+        if fields.get("url") is not None:
+            _check_url(path, fields["url"])
+        if any(value is not None for value in fields.values()):
+            entries[path] = {name: fields.get(name) for name in UPSTREAM_FIELDS}
+    return entries
+
+
 def _finish(partial, final, name, value):
     """Write the metadata file, then rename partial to final; on failure leave no metadata."""
     # Serialize before opening so a serialization error leaves no metadata file.
@@ -94,10 +163,352 @@ def _finish(partial, final, name, value):
     return final
 
 
+# Declared dataset checks: [datasets.<name>.checks] in foundation/datasets.toml, run by publish()
+# against every publication of that dataset. The shipped foundation/datasets.toml documents the keys.
+
+DATASETS = "foundation/datasets.toml"
+CHECK_KEYS = ("columns", "types", "not_null", "key", "unique", "accepted_values", "range", "row_count")
+
+
+class ChecksFailed(ValueError):
+    """A declared check failed; checks holds every declared check's {name, outcome, detail}."""
+
+    def __init__(self, checks):
+        self.checks = checks
+        failed = [f"{check['name']} ({check['detail'].rstrip('.')})"
+                  for check in checks if check["outcome"] == "fail"]
+        super().__init__("Declared checks failed: " + "; ".join(failed))
+
+
+def _toml():
+    try:
+        import tomllib
+    except ImportError:  # Python 3.10
+        import tomli as tomllib
+    return tomllib
+
+
+def _names(value):
+    return isinstance(value, list) and all(isinstance(name, str) and name for name in value)
+
+
+def _number_or_date(bound):
+    """A range bound: a number other than NaN, or a TOML date or date-time."""
+    if isinstance(bound, float):
+        return not math.isnan(bound)
+    return isinstance(bound, (int, date)) and not isinstance(bound, bool)
+
+
+def _in_utc(bound):
+    """bound, a local date-time taken as UTC, as the checks' UTC connection compares it."""
+    return bound.replace(tzinfo=timezone.utc) if isinstance(bound, datetime) and bound.tzinfo is None else bound
+
+
+def _bounds(value, accepts):
+    """{min, max}, either optional, each accepted, with min no greater than max."""
+    if not (isinstance(value, dict) and value and set(value) <= {"min", "max"}
+            and all(accepts(bound) for bound in value.values())):
+        return False
+    try:
+        return "min" not in value or "max" not in value or _in_utc(value["min"]) <= _in_utc(value["max"])
+    except TypeError:  # bounds of different kinds, such as a number and a date
+        return False
+
+
+def _by_column(value, accepts):
+    """{column: entry}, each column named and each entry accepted."""
+    return isinstance(value, dict) and all(column and accepts(entry) for column, entry in value.items())
+
+
+def _duckdb():
+    try:
+        import duckdb
+    except ImportError as error:
+        raise ImportError("declared checks need the duckdb package") from error
+    return duckdb
+
+
+def _toml_key(name):
+    """name as a TOML key: bare when it can be, else quoted."""
+    return name if name and all(c.isascii() and (c.isalnum() or c in "_-") for c in name) else json.dumps(name)
+
+
+def _nested_checks(value, path=()):
+    """The key path to the first checks table nested in value, or None."""
+    if not isinstance(value, dict):
+        return None
+    if "checks" in value:
+        return path
+    for key, inner in value.items():
+        found = _nested_checks(inner, path + (key,))
+        if found is not None:
+            return found
+    return None
+
+
+SHAPES = {
+    "columns": lambda v: _names(v) and v,
+    "types": lambda v: _by_column(v, lambda t: isinstance(t, str) and t.strip() and ";" not in t),
+    "not_null": _names,
+    "key": lambda v: _names(v) and v and len(set(v)) == len(v),
+    "unique": lambda v: isinstance(v, list) and all(
+        (isinstance(item, str) and item) or (_names(item) and item and len(set(item)) == len(item))
+        for item in v),
+    "accepted_values": lambda v: _by_column(v, lambda values: isinstance(values, list) and values),
+    "range": lambda v: _by_column(v, lambda bounds: _bounds(bounds, _number_or_date)),
+    "row_count": lambda v: _bounds(v, lambda bound: type(bound) is int and bound >= 0),
+}
+
+
+def _planned(spec):
+    """[(name, kind, arguments)] for each check spec declares, in CHECK_KEYS order."""
+    planned = []
+    for key in CHECK_KEYS:
+        value = spec.get(key)
+        if value is None:
+            continue
+        if key == "columns":
+            planned.append(("columns", key, (value,)))
+        elif key == "types":
+            planned += [(f"types:{column}", key, (column, declared)) for column, declared in value.items()]
+        elif key == "not_null":
+            planned += [(f"not_null:{column}", key, (column,)) for column in value]
+        elif key == "key":
+            planned.append((f"key:{','.join(value)}", key, (value,)))
+        elif key == "unique":
+            for item in value:
+                columns = [item] if isinstance(item, str) else item
+                planned.append((f"unique:{','.join(columns)}", key, (columns,)))
+        elif key == "accepted_values":
+            planned += [(f"accepted_values:{column}", key, (column, accepted)) for column, accepted in value.items()]
+        elif key == "range":
+            planned += [(f"range:{column}", key, (column, bounds)) for column, bounds in value.items()]
+        else:
+            planned.append(("row_count", key, (value,)))
+    return planned
+
+
+def _validated(name, entry):
+    """[datasets.<name>]'s checks table, else ValueError naming the key at fault."""
+    where = f"{DATASETS} [datasets.{_toml_key(name)}]"
+    if not isinstance(entry, dict) or set(entry) - {"checks"} or not isinstance(entry.get("checks", {}), dict):
+        nested = _nested_checks({key: value for key, value in entry.items() if key != "checks"}) \
+            if isinstance(entry, dict) else None
+        if nested:  # [datasets.orders.v1.checks] nests v1 under orders; it declares nothing for orders.v1
+            dotted = ".".join((name,) + nested)
+            raise ValueError(f"{where} holds only a checks table; to declare checks for the dataset {dotted}, "
+                             f"quote its name: [datasets.{json.dumps(dotted)}.checks]")
+        raise ValueError(f"{where} holds only a checks table")
+    spec = entry.get("checks", {})
+    for key, value in spec.items():
+        if key not in SHAPES:
+            raise ValueError(f"{where}: unknown check {key}; use {', '.join(CHECK_KEYS)}")
+        if not SHAPES[key](value):
+            raise ValueError(f"{where}: checks.{key} is malformed; see the comments in the shipped {DATASETS}")
+    names = [check for check, _, _ in _planned(spec)]
+    repeated = sorted({check for check in names if names.count(check) > 1})
+    if repeated:  # such as unique = ["a,b", ["a", "b"]]; a name must identify one check
+        raise ValueError(f"{where}: more than one declared check is named {', '.join(repeated)}; "
+                         "declare each check once (a check's name joins its columns with commas)")
+    column_sets = [frozenset(arguments[0]) for _, kind, arguments in _planned(spec) if kind == "unique"]
+    repeated = sorted({",".join(sorted(columns)) for columns in column_sets if column_sets.count(columns) > 1})
+    if repeated:  # unique = [["a", "b"], ["b", "a"]] declares one check under two names
+        raise ValueError(f"{where}: checks.unique declares the columns {'; '.join(repeated)} more than once, "
+                         "in different orders; declare each check once")
+    return spec
+
+
+def declared_checks(project_root: str | Path, dataset: str) -> dict:
+    """Return [datasets.<dataset>.checks] from foundation/datasets.toml, {} when none are declared.
+
+    Raises ValueError when any dataset's declaration is malformed, naming the key at fault.
+    """
+    path = Path(project_root) / DATASETS
+    if not path.is_file():
+        return {}
+    try:
+        tomllib = _toml()
+    except ImportError as error:
+        raise ImportError(f"reading {DATASETS} needs Python 3.11 or the tomli package") from error
+    try:
+        document = tomllib.loads(path.read_text(encoding="utf-8"))
+    except ValueError as error:
+        raise ValueError(f"{DATASETS}: {error}") from error
+    if set(document) - {"datasets"}:  # such as [dataset.<name>.checks], which would declare nothing
+        raise ValueError(f"{DATASETS}: unknown table {', '.join(sorted(set(document) - {'datasets'}))}; "
+                         "declare checks under [datasets.<name>.checks]")
+    datasets = document.get("datasets", {})
+    if not isinstance(datasets, dict):
+        raise ValueError(f"{DATASETS}: datasets must be a table of [datasets.<name>] tables")
+    # Validate every entry: a mistyped one may be meant for this dataset, such as an unquoted dotted name.
+    specs = {name: _validated(name, entry) for name, entry in datasets.items()}
+    return specs.get(dataset, {})
+
+
+def _quote(name):
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _literal(value):
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _span(bounds):
+    return f"[{bounds.get('min', '-inf')}, {bounds.get('max', 'inf')}]"
+
+
+def _run_checks(directory, spec):
+    """Run spec's checks over the Parquet files under directory; return [{name, outcome, detail}].
+
+    columns and types hold in every Parquet file, since a reader takes the first file's schema; a hive
+    partition column, which no file stores, holds in the files read together (foundation/datasets.toml).
+    Temporal values compare in UTC. When the files cannot be read, every check fails.
+    """
+    duckdb = _duckdb()
+    planned = _planned(spec)
+
+    def unread(detail):
+        return [{"name": name, "outcome": "fail", "detail": detail} for name, _, _ in planned]
+
+    paths = [path for path in _files(directory) if path.endswith(".parquet")]
+    if not paths:
+        return unread("The publication holds no Parquet file.")
+    connection = duckdb.connect()
+    try:
+        # DuckDB takes its zone from the host; a date or date-time compared with the other kind of
+        # timestamp casts through it, so pin it for an outcome that is the same on every machine.
+        connection.execute("SET TimeZone = 'UTC'")
+        schemas = []
+        for path in paths:
+            try:
+                # The file's stored columns: read alone, a partition column would take its type from one path.
+                schemas.append(dict(connection.execute(
+                    "SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_parquet("
+                    + _literal(directory / path) + ", hive_partitioning = false))").fetchall()))
+            except duckdb.Error as error:  # name the file and the error's kind, never DuckDB's message
+                return unread(f"{path} could not be read as Parquet ({type(error).__name__}).")
+        try:
+            connection.execute("CREATE VIEW awb_publication AS SELECT * FROM read_parquet(["
+                               + ", ".join(_literal(directory / path) for path in paths) + "])")
+            rows = connection.execute("SELECT count(*) FROM awb_publication").fetchone()[0]
+            combined = connection.execute("SELECT column_name, column_type FROM (DESCRIBE awb_publication)").fetchall()
+        except duckdb.Error as error:
+            return unread(f"The Parquet files could not be read together ({type(error).__name__}).")
+        # A hive partition column lives in the paths, so its type is the one inferred from all of them.
+        partitions = {column: kind for column, kind in combined if not any(column in schema for schema in schemas)}
+
+        def count(condition, parameters=()):
+            return connection.execute(f"SELECT count(*) FROM awb_publication WHERE {condition}",
+                                      list(parameters)).fetchone()[0]
+
+        def repeats(columns, where="true"):
+            listed = ", ".join(map(_quote, columns))
+            return connection.execute(f"SELECT coalesce(sum(n - 1), 0) FROM (SELECT count(*) AS n "
+                                      f"FROM awb_publication WHERE {where} GROUP BY {listed})").fetchone()[0]
+
+        def columns_present(columns):
+            lacking = {column: 0 if column in partitions else sum(column not in schema for schema in schemas)
+                       for column in columns}
+            missing = [column if files == len(schemas) else f"{column} (from {files} of {len(schemas)} Parquet files)"
+                       for column, files in lacking.items() if files]
+            return f"Missing column{'s' * (len(missing) > 1)}: {', '.join(missing)}." if missing else None
+
+        # Each measure returns (failure or None, pass detail); every detail is counts, never values.
+        def measure_columns(columns):
+            return columns_present(columns), f"All {len(columns)} declared columns present."
+
+        def measure_type(column, declared):
+            missing = columns_present([column])
+            if missing:
+                return missing, ""
+            try:
+                expected = connection.execute(f"SELECT typeof(CAST(NULL AS {declared}))").fetchone()[0]
+            except duckdb.Error:
+                return f"Declared type {declared} is not a DuckDB type.", ""
+            held = [partitions] if column in partitions else schemas
+            wrong = [schema[column] for schema in held if schema[column] != expected]
+            if not wrong:
+                return None, f"{column} is {expected}."
+            files = "" if len(wrong) == len(held) else f" in {len(wrong)} of {len(held)} Parquet files"
+            return f"{column} is {' or '.join(sorted(set(wrong)))}{files}, declared {expected}.", ""
+
+        def measure_not_null(column):
+            missing = columns_present([column])
+            if missing:
+                return missing, ""
+            nulls = count(f"{_quote(column)} IS NULL")
+            return (f"{nulls} of {rows} rows are null." if nulls else None), f"No nulls in {rows} rows."
+
+        def measure_key(columns):
+            missing = columns_present(columns)
+            if missing:
+                return missing, ""
+            nulls = count(" OR ".join(f"{_quote(column)} IS NULL" for column in columns))
+            repeated = repeats(columns, " AND ".join(f"{_quote(column)} IS NOT NULL" for column in columns))
+            failures = ([f"{nulls} of {rows} rows have a null key column"] if nulls else []) + (
+                [f"{repeated} of {rows} rows repeat a key"] if repeated else [])
+            return ("; ".join(failures) + "." if failures else None), f"{rows} rows, each key complete and unique."
+
+        def measure_unique(columns):
+            missing = columns_present(columns)
+            if missing:
+                return missing, ""
+            repeated = repeats(columns, " AND ".join(f"{_quote(column)} IS NOT NULL" for column in columns))
+            return (f"{repeated} of {rows} rows repeat a value." if repeated else None), (
+                f"No repeated values in {rows} rows; nulls are not compared.")
+
+        def measure_accepted(column, accepted):
+            missing = columns_present([column])
+            if missing:
+                return missing, ""
+            outside = count(f"{_quote(column)} IS NOT NULL AND NOT list_contains(?, {_quote(column)})",
+                            [accepted])
+            return (f"{outside} of {rows} rows hold a value outside the {len(accepted)} accepted."
+                    if outside else None), f"Every non-null value is one of the {len(accepted)} accepted."
+
+        def measure_range(column, bounds):
+            missing = columns_present([column])
+            if missing:
+                return missing, ""
+            tests = [(f"{_quote(column)} < ?", bounds["min"])] if "min" in bounds else []
+            tests += [(f"{_quote(column)} > ?", bounds["max"])] if "max" in bounds else []
+            outside = count(" OR ".join(test for test, _ in tests), [bound for _, bound in tests])
+            return (f"{outside} of {rows} rows fall outside {_span(bounds)}." if outside else None), (
+                f"No value outside {_span(bounds)} in {rows} rows.")
+
+        def measure_rows(bounds):
+            bounds = {"min": 0, **bounds}  # a row count's floor is 0
+            inside = bounds["min"] <= rows <= bounds.get("max", rows)
+            return (None if inside else f"{rows} rows, outside {_span(bounds)}."), f"{rows} rows, within {_span(bounds)}."
+
+        measures = {"columns": measure_columns, "types": measure_type, "not_null": measure_not_null,
+                    "key": measure_key, "unique": measure_unique, "accepted_values": measure_accepted,
+                    "range": measure_range, "row_count": measure_rows}
+        checks = []
+        for name, kind, arguments in planned:
+            try:
+                failure, detail = measures[kind](*arguments)
+            except duckdb.Error as error:
+                # DuckDB's message can quote a source value; name only the error's kind.
+                failure = f"The check could not run ({type(error).__name__})"
+                if name.startswith(("accepted_values:", "range:")):  # declared values the column can't compare with
+                    failure += "; compare its declared values with the column's type"
+                failure += "."
+            checks.append({"name": name, "outcome": "fail" if failure else "pass",
+                           "detail": failure or detail})
+        return checks
+    finally:
+        connection.close()
+
+
 def land(project_root: str | Path, source: str, acquisition_id: str,
          fetch: Callable[[Path], object], *, request: Any,
-         records: dict[str, int] | None = None, notes: Any = None) -> Path:
-    """Fetch original files into a partial directory, then write provenance and rename it."""
+         records: dict[str, int] | None = None,
+         upstream: dict[str, dict[str, str | None]] | None = None, notes: Any = None) -> Path:
+    """Fetch original files into a partial directory, then write provenance and rename it.
+
+    records and upstream are read after fetch returns, so fetch may fill them as it writes files.
+    """
     _check_name(source)
     _check_name(acquisition_id)
     final = Path(project_root) / "data/raw" / source / acquisition_id
@@ -116,7 +527,9 @@ def land(project_root: str | Path, source: str, acquisition_id: str,
             raise ValueError("records must be a dictionary of integer counts")
         if set(records) - set(paths):
             raise ValueError("Record counts name files that were not landed")
-    files = [{**entry, "records": (records or {}).get(entry["path"])}
+    validators = _upstream(upstream, paths)
+    files = [{**entry, "records": (records or {}).get(entry["path"]),
+              "upstream": validators.get(entry["path"])}
              for entry in _file_entries(partial, paths)]
     return _finish(partial, final, "provenance.json", {
         "source": source,
@@ -133,10 +546,14 @@ def land(project_root: str | Path, source: str, acquisition_id: str,
 def publish(project_root: str | Path, dataset: str, publication_id: str,
             convert: Callable[[Path], object], *, acquisitions: Sequence[str | Path],
             validate: Callable[[Path], object] | None = None, notes: Any = None) -> Path:
-    """Convert completed acquisitions, validate the output, then write publication.json and rename it."""
+    """Convert completed acquisitions, check and validate the output, then write publication.json
+    and rename it. The dataset's declared checks run first; any failure raises ChecksFailed."""
     _check_name(dataset)
     _check_name(publication_id)
     root = Path(project_root)
+    spec = declared_checks(root, dataset)  # a malformed declaration refuses before any output
+    if _planned(spec):
+        _duckdb()  # and so does a missing duckdb
     if not acquisitions:
         raise ValueError("At least one completed acquisition is required")
     inputs = []
@@ -153,8 +570,16 @@ def publish(project_root: str | Path, dataset: str, publication_id: str,
     _refuse_existing(final, partial)
     partial.mkdir(parents=True)
     convert(partial)
-    if validate is not None and validate(partial) is False:
-        raise ValueError("Publication validation returned False")
+    checks = _run_checks(partial, spec) if _planned(spec) else []
+    if any(check["outcome"] == "fail" for check in checks):
+        raise ChecksFailed(checks)
+    if validate is not None:
+        outcome = validate(partial)
+        if outcome is False:
+            raise ValueError("Publication validation returned False")
+        detail = " ".join(outcome.split()) if isinstance(outcome, str) else ""
+        checks.append({"name": "validate", "outcome": "pass",
+                       "detail": detail or "The validate callable passed."})
     try:
         result = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
                                 check=False, capture_output=True, text=True)
@@ -173,6 +598,7 @@ def publish(project_root: str | Path, dataset: str, publication_id: str,
         "conversion_commit": conversion_commit,
         "converted_at": _timestamp(),
         "files": _file_entries(partial, paths),
+        "checks": checks,
         "notes": notes,
     })
 
@@ -237,6 +663,13 @@ Status is one of:
 - `candidate`: identified as possibly relevant; no acquisition has completed.
 - `acquired`: at least one acquisition has completed and the source has not been rejected.
 - `rejected`: assessed as irrelevant or unfit; give the reason under Relevance and fitness and stop preparing it.
+
+Begin Relevance and fitness with the assessment's basis: `from documentation` when documentation or a schema settled it, otherwise `from landed records`. In Notes, record each reference it relied on as a clause in plain text, not inside code, HTML, emphasis, strikethrough, a link or brackets, that opens the cell or follows `;`, `,`, `.` or `<br>`, and that begins `reference:` followed directly by one of two forms:
+
+- A link to the copy, `[text](destination)`, such as `reference: [codebook](references/<source-id>/codebook.pdf)`. The text is not empty and has no `[`, `]`, `\\`, `<` or backtick. The destination is either in angle brackets with no `<`, `>` or `\\` inside, which allows spaces, such as `[codebook](<references/hr/data dictionary.pdf>)`, or bare, with no spaces, `<` or `\\`, and with its parentheses balanced.
+- For material kept out of Git, the retained location in single backticks, a comma, and `sha256` with the full 64-digit checksum and no letter, digit, `_`, `\\` or `&` directly after it, such as ``reference: `/secure/<source-id>/manual.pdf`, sha256 <checksum>``. `SHA-256` and `sha256:` are also read.
+
+`awb-status` reads exactly these two forms, ignoring letter case, and lists every other spelling as no reference, including Markdown that renders as a link, such as a link with a title or with brackets in its text. It also stops reading a cell at a link with a title or with a destination neither form allows, at any raw HTML other than `<br>`, at an autolink containing a backtick, bracket or `<`, and at a `*`, `_` or `~` that opens emphasis or strikethrough when a backtick, bracket, `<` or an opening `*`, `_` or `~` of another kind comes before the cell's last `*`, `_` or `~` of that kind that could close it, so put reference clauses before them. To fix a listed entry, rewrite it in one of the forms: drop brackets and backslashes from the link text, write paths with `/`, and put a path with spaces or unbalanced parentheses in angle brackets. An entry such as `reference: not yet retained` counts as no reference.
 
 Note failed acquisition attempts in the source's Notes. Use stable source IDs in the catalog, quality record, and investigation records.
 
@@ -494,11 +927,12 @@ def cli_land(root: Path, argv: list[str]) -> int:
                         help="new acquisition directory name under data/raw/<source>/")
     parser.add_argument("files", nargs="+", metavar="file",
                         help="file or directory to copy under its own name; relative to the current directory")
-    parser.add_argument("--request", help="source version, query, or request (default: the copied paths)")
+    parser.add_argument("--request", help="source version, query, or request (default: the copied paths); "
+                                          "name a credential's variable, never its value")
     parser.add_argument("--records", action="append", default=[], metavar="NAME=COUNT",
                         help="record count of a landed file, by its path inside the acquisition; "
                              "repeat the flag for each file")
-    parser.add_argument("--notes", help="note recorded in the Acquisitions row")
+    parser.add_argument("--notes", help="note recorded in the Acquisitions row; never a secret")
     args = parser.parse_args(argv)
     records = {}
     for item in args.records:
@@ -586,12 +1020,15 @@ def cli_publish(root: Path, argv: list[str]) -> int:
         prog="awb.py publish",
         description="Write a SQL select over landed files as data/parquet/<dataset>/<publication-id>/"
                     "<dataset>.parquet, check it, and publish it with publication.json.",
-        epilog="Commit the SQL first so conversion_commit holds it; otherwise the output carries a "
-               "warning. Prints one JSON line. On success: published, rows, bytes, inputs, "
-               "conversion_commit, view_sql, a canonical view definition for foundation/views/, and "
+        epilog="The dataset's checks declared in foundation/datasets.toml run first, then --check; "
+               "publication.json records each outcome under checks. Commit the SQL first so "
+               "conversion_commit holds it; otherwise the output carries a warning. Prints one JSON line. "
+               "On success: published, rows, bytes, inputs, conversion_commit, checks (the number "
+               "recorded, all passed), view_sql, a canonical view definition for foundation/views/, and "
                "catalog_row, a foundation/catalog.md row to complete with grain and availability. On "
-               "refusal (exit 1): published false, error, failing_rows with up to 20 under first, and "
-               "the partial directory left behind. A select returning no rows is refused. Needs duckdb.")
+               "refusal (exit 1): published false, error, failed_checks with each failing declared "
+               "check's name and detail, or failing_rows with up to 20 under first, and the partial "
+               "directory left behind. A select returning no rows is refused. Needs duckdb.")
     parser.add_argument("dataset", help="dataset directory name under data/parquet/")
     parser.add_argument("publication_id", metavar="publication-id",
                         help="new publication directory name under data/parquet/<dataset>/")
@@ -654,7 +1091,7 @@ def cli_publish(root: Path, argv: list[str]) -> int:
         if not notes["rows"]:
             raise ValueError("The select returned no rows")
         if "check" not in queries:
-            return
+            return f"The select returned {notes['rows']} rows."
         connection.execute("CREATE VIEW publication AS SELECT * FROM read_parquet("
                            f"{literal(directory / f'{args.dataset}.parquet')})")
         result = connection.execute(queries["check"][1])
@@ -665,12 +1102,16 @@ def cli_publish(root: Path, argv: list[str]) -> int:
         if rows:
             failures.update(failing_rows=len(rows), first=[dict(zip(columns, row)) for row in rows[:20]])
             raise ValueError(f"The check returned {len(rows)} failing rows")
+        return f"The select returned {notes['rows']} rows; {notes['check']} returned none."
 
     try:
         connection.execute("SET file_search_path = ?", [str(root.resolve())])
         final = publish(root, args.dataset, args.publication_id, convert,
                         acquisitions=args.acquisitions, validate=validate, notes=notes)
-    except (duckdb.Error, OSError, ValueError) as error:
+    except (duckdb.Error, OSError, ValueError, ImportError) as error:
+        if isinstance(error, ChecksFailed):
+            failures["failed_checks"] = [{"name": check["name"], "detail": check["detail"]}
+                                         for check in error.checks if check["outcome"] == "fail"]
         partial = root / "data/parquet" / args.dataset / f"{args.publication_id}.partial"
         _print({"published": False, "error": f"{type(error).__name__}: {error}", **failures,
                 "partial": _relative(root, partial) if partial.is_dir() else None})
@@ -681,10 +1122,15 @@ def cli_publish(root: Path, argv: list[str]) -> int:
     location = _relative(root, final) + "/"
     view_name = '"' + args.dataset.replace('"', '""') + '"'
     quality = f"`{notes['check']}` returns no rows" if notes["check"] else "nonzero row count"
+    declared = len(publication["checks"]) - 1  # the last check is the validate callable's
+    if declared:
+        verb = "pass" if declared > 1 else "passes"
+        quality = f"{declared} declared check{'s' * (declared > 1)} in `{DATASETS}` {verb}; {quality}"
     result = {
         "published": location, "rows": notes["rows"],
         "bytes": sum(file["bytes"] for file in publication["files"]),
         "inputs": sorted(named), "conversion_commit": publication["conversion_commit"],
+        "checks": len(publication["checks"]),
         "view_sql": (f"CREATE VIEW {view_name} AS SELECT * FROM "
                      f"read_parquet({literal(location + args.dataset + '.parquet')});"),
         # Grain and availability need judgment; the agent completes and places the row.

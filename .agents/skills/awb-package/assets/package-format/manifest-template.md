@@ -18,6 +18,8 @@ The analytical results this package represents.
 - `inputs`: the inputs actually used: source and acquisition or publication identifiers with the checksums their provenance or publication files record, and the view definitions read with their checksums; and
 - `analytical_settings`: the analytical settings represented by the results.
 
+Each result's runtime is recorded beside it under `results`, in **Packaging state**.
+
 `python3 src/awb.py export` writes these fields from the represented results' evidence files. When every result records the same value, the field holds it; when results differ, it holds each distinct value with the results that recorded it, under `value` and `results`. `inputs` holds `publications`, `acquisitions`, and `views` lists copied from the evidence; list entries name the results that recorded them under `results`. An unknown is `{"unknown": "<reason>"}`. For an `uncommitted` state, `producing_uncommitted_changes` holds the checksum of every producing file.
 
 ## Packaging state
@@ -27,7 +29,7 @@ The operation that assembled this package, recorded separately from the producin
 - `packaging_commit`: the packaging checkout commit;
 - `packaging_uncommitted_changes`: `none`, or the relevant uncommitted package-source paths;
 - `export_checks`: each serialized result's `compare_evidence` output, or `none` without exports; and
-- `results`: every represented result, serialized or not, as `result_id` and `evidence` path.
+- `results`: every represented result, serialized or not, as `result_id`, `evidence` path, `question`, copied verbatim from the evidence, and `runtime`, the Python version, platform, package versions, and `unread_requirements` (requirements lines it could not read, each a provenance gap) its evidence recorded, or `unknown` with the reason when it recorded none.
 
 `export` writes `packaging_commit` and `packaging_uncommitted_changes` (paths under `src/` and `package-format/`), and `export_checks` as one entry per result, each with `result_id`, `evidence`, and the unchanged `comparisons`: a serialized result's entry is replaced, a represented result not serialized keeps its entry, and an entry outside the represented set is dropped.
 
@@ -39,3 +41,12 @@ The operation that assembled this package, recorded separately from the producin
 `export` writes both, and each `revalidation_flags` entry's finding and reason, one per flagged finding; you fill `represented_in` and the user's `disposition`, required when `represented_in` lists places. The package contract's **Revalidation caveats** defines the field.
 
 Say the provenance locates the producing state; never call a package reproducible. Record an undeterminable field as `unknown` with the reason.
+
+## Numbers
+
+- `allowed_numbers`: `none`, or each narrative number that no represented result records as `{text, reason}`. An absent field is `none`.
+  - `text` is the row's `text` exactly as `check-draft` reports it, or a phrase around it, such as `Week 23` or `over 2025`; a space in it matches any whitespace or line wrap the narrative has there. Prefer the phrase: a bare text is accepted wherever it is written in either narrative, a phrase only where that phrase is.
+  - `reason` is one of two kinds. For a number the records support from elsewhere, name the record, such as the earlier release it comes from or the `history.md` entry recording the fact the user supplied. For a text that is not a quantity, say what it is: a comparison year, a tool version, a week or section number, or an identifier.
+  - Never for a number from a recorded result the draft relies on: pass that result to `export` instead, so `results` and the producing state record it. Never for a number computed from results that none records.
+
+You record it and `export` keeps it.

@@ -1,6 +1,6 @@
 # Analytics workbench
 
-One data foundation serves every investigation here. Source knowledge, quality records, vocabulary, the catalog, and canonical SQL views belong in `foundation/`; reusable operations in `src/`; each question's scope, settings, exploration, findings, and history in `investigations/<name>/`.
+One data foundation serves every investigation here. Source knowledge and references, quality records, vocabulary, the catalog, and canonical SQL views belong in `foundation/`; reusable operations in `src/`; each question's scope, settings, exploration, findings, and history in `investigations/<name>/`.
 
 ## Start or resume
 
@@ -35,4 +35,4 @@ Settle ambiguous terms with concrete examples and the data. Record shared meanin
 
 Commit when the user asks; suggest one when analytical code is uncommitted, so evidence carries a SHA.
 
-Answer in chat. Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen.
+Answer in chat. Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen. When the user corrects a package draft while reviewing it, take the correction through `awb-package`, which first appends a correction later drafts could repeat to `foundation/review-rules.md` as a numbered rule that every later review checks.

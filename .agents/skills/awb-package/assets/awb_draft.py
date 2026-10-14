@@ -1,17 +1,20 @@
-"""Export, check, and release an analytics workbench package draft.
+"""Export, review, check, and release an analytics workbench package draft.
 
 awb-init's installer places this file at `src/packaging/draft.py`. `src/awb.py` runs its commands:
 
     python3 src/awb.py export <investigation> <package> [--chart RESULT[:COLUMNS]]... [--dataset NAME=RESULT[:COLUMNS]]... [--no-datasets] [--result RESULT]...
+    python3 src/awb.py review-rules check <investigation> <package>
+    python3 src/awb.py review-rules add --area AREA --severity error|warning --rule TEXT --fix TEXT [--pattern REGEX]
     python3 src/awb.py check-draft <investigation> <package> [--verify-only]
     python3 src/awb.py release <investigation> <package>
     python3 src/awb.py copy-releases <investigation> [<package>]
 
 Each prints one line of JSON. The manifest is the draft's `manifest.json`; chart and dataset files
-are CSV. Standard library only; `export` also needs the project's `src/provenance.py`.
+are CSV; review rules live in `foundation/review-rules.md`. Standard library only; `export` also needs the project's `src/provenance.py`.
 """
 
 import argparse
+import bisect
 import csv
 import hashlib
 import html
@@ -24,7 +27,7 @@ import subprocess
 import unicodedata
 from collections import Counter, namedtuple
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, ROUND_HALF_UP, Context, Decimal, InvalidOperation, localcontext
 from pathlib import Path
 
 MANIFEST = "manifest.json"
@@ -77,15 +80,19 @@ def _read_json(path):
     return record
 
 
-def _write_json(path, record):
-    # Atomic, so an interrupted write never leaves a half manifest in the draft.
+def _write_text(path, text):
+    # Atomic, so an interrupted write never leaves a half manifest or rule file.
     path = Path(path)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
-        temporary.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        temporary.write_text(text, encoding="utf-8")
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _write_json(path, record):
+    _write_text(path, json.dumps(record, indent=2) + "\n")
 
 
 def _now():
@@ -563,6 +570,30 @@ def _scan_line(number, line, roots, pattern, found):
     return [{"line": number, "kind": kind, "text": text} for _, kind, text in sorted(found)]
 
 
+# The numbers check reads source lines, not the rendered view: it drops comments and fenced code only.
+_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def _unfenced(path):
+    """Yield (line number, line, opens a fence) for each line outside fenced code and HTML comments."""
+    text = Path(path).read_text(encoding="utf-8")
+    text = _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
+    fence = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        if fence is not None:
+            closing = _FENCE.match(line)
+            if (closing and closing.group(2)[0] == fence[0] and len(closing.group(2)) >= len(fence)
+                    and not line[closing.end():].strip()):
+                fence = None
+            continue
+        opening = _FENCE.match(line)
+        if opening and not (opening.group(2)[0] == "`" and "`" in line[opening.end():]):
+            fence = opening.group(2)
+            yield number, line, True
+            continue
+        yield number, line, False
+
+
 def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]:
     """List code, paths, file names, identifiers, SHAs, and given names, by line then column.
 
@@ -571,7 +602,6 @@ def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]
     """
     pattern = _name_pattern(names)
     roots = set(names) | set(roots)
-
     rows, paragraphs = [], {}
     for line in _read_view(path)[0]:
         if line.kind == "fence":
@@ -821,6 +851,28 @@ def _regions(view):
     return regions
 
 
+def question_problems(draft, record: dict) -> list[dict]:
+    """List each manifest `results` entry whose question methodology.md does not repeat verbatim.
+
+    Runs of whitespace compare equal, so a wrapped line still matches.
+    """
+    methodology = " ".join((Path(draft) / "methodology.md").read_text(encoding="utf-8").split())
+    entries = record.get("results")
+    if not isinstance(entries, list):
+        return [{"result_id": None, "problem": "the manifest records no results list; run export"}]
+    problems = []
+    for entry in entries:
+        result_id = entry.get("result_id") if isinstance(entry, dict) else None
+        question = entry.get("question") if isinstance(entry, dict) else None
+        if not isinstance(question, str) or not question.strip():
+            problems.append({"result_id": result_id, "problem": "the manifest records no question for this "
+                             "result; run export, or copy its question from settings into a hand-added entry"})
+        elif " ".join(question.split()) not in methodology:
+            problems.append({"result_id": result_id, "question": question,
+                             "problem": "methodology.md does not repeat this question verbatim"})
+    return problems
+
+
 def heading_problems(draft) -> list[dict]:
     """List each `###` finding heading in findings.md that not exactly one methodology.md section repeats,
     or that findings.md repeats."""
@@ -997,6 +1049,340 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
                          "problem": f"causal wording above the {ceiling} claim strength; reword it, since only "
                                     "an experiment or an identified natural experiment supports a causal claim"
                                     + ("; reword the methodology.md heading to match" if in_heading else "")})
+    return rows
+
+
+# ---------------------------------------------------------------- numbers in the narratives
+
+NARRATIVES = ("findings.md", "methodology.md")
+# Reading fails safe: a number is skipped only in one of the contexts below, each of which marks it as no
+# quantity; every other number is read, so a doubtful one becomes a row the author clears by rewording or
+# by allowing it. references/helpers.md states the same list.
+_MONTH = (r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
+          r"|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?")
+_DAY = r"(?:3[01]|[12][0-9]|0?[1-9])"
+_DAYS = rf"{_DAY}(?:\s*(?:[-–—]|to|through)\s*{_DAY})?"
+_YEAR = r"(?:19|20)[0-9]{2}"
+# Not glued to a word or to digits joined by a dot, comma, slash, or colon.
+_ALONE = r"(?![\w%]|[.,/:][0-9])"
+# Where a period or a date ends: punctuation, a dash before a space, or the end of its paragraph. A word
+# after it could make its last number a count ("in 2000 orders"), so it is no period there.
+_ENDS = r"(?=\s*(?:[,.;:!?()\[\]{}|*_\"'“”‘’…]|[-–—]\s|\Z))"
+
+
+def _listed(item):
+    """A range or a list closed by and or or, after a first item: 2023-2024, 2023 to 2025, 1, 2, and 3."""
+    return rf"(?:\s*(?:[-–—]|to|through|vs\.?)\s*{item}|(?:\s*,\s*{item})*,?\s+(?:and|or)\s+{item})"
+
+
+_DATE = rf"(?:{_MONTH}\s+{_DAY}|{_DAY}\s+{_MONTH})"
+_DATE_ENDS = rf"(?:{_ENDS}|(?=\s+(?:to|through|until|till|and|or|[-–—])\s+{_DATE}))"
+# A year after one of these words, a month name, or a quarter or half, where the period ends.
+_IN = (rf"(?:(?i:\b(?:in|from|since|during|until|till|through|before|after|between|year|FY|CY|fiscal|calendar)\s+"
+       rf"|\b(?:early|mid|late)[\s-]+)|{_MONTH}\s+|\b[QH][1-4]\s+)")
+_NOT_QUANTITY = re.compile(
+    rf"(?<![\w.])(?:{_YEAR}-(?:1[0-2]|0?[1-9])(?:-{_DAY})?(?:T[0-9:.]+(?:Z|[+-][0-9:]+)?)?{_ALONE}"
+    rf"|[0-9]{{1,2}}/[0-9]{{1,2}}/{_YEAR}{_ALONE}"
+    r"|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?\s?(?i:[ap]\.?m\.?|UTC|GMT)(?!\w)"
+    rf"|[0-9]{{1,2}}:[0-9]{{2}}:[0-9]{{2}}{_ALONE}"
+    rf"|{_MONTH}\s+{_DAYS}(?:,?\s+{_YEAR}{_ALONE}{_DATE_ENDS}|{_ALONE}{_DATE_ENDS})"
+    rf"|{_DAYS}\s+{_MONTH}(?:,?\s+{_YEAR}{_ALONE})?{_DATE_ENDS}"
+    rf"|{_IN}{_YEAR}(?:{_listed(_YEAR)})?{_ALONE}{_ENDS}"
+    rf"|[Cc]harts\s+[0-9]+{_listed('[0-9]+')}{_ALONE}{_ENDS}|[Cc]harts?\s+[0-9]+{_ALONE})"
+    r"|^[ \t]*#{1,6}[ \t]+[0-9]+[.)](?=\s)|\[\^[^\]\n]*\]", re.MULTILINE)
+_LIST_MARKER = re.compile(r"[ \t]*([0-9]{1,9})[.)](?=\s|$)")
+_CURRENCY = re.compile(r"\b(?:USD|EUR|GBP|JPY|CHF|CAD|AUD|CNY|INR)(?=[0-9])")
+# Paths and names are blanked whole, so no digit inside them is read (results/r-001-77.csv, ORD-123-45).
+_PATH_CANDIDATE = re.compile(
+    r"(?<![^\s(\[<\"'*_])(?:[A-Za-z_~][^\s,;|()\[\]<>\"']*|\.{1,2})[/\\][^\s,;|()\[\]<>\"']*")
+_EXTENSIONS = "md|py|csv|tsv|parquet|jsonl?|sql|png|svg|jpe?g|pdf|html?|duckdb|db|xlsx?|docx|pptx|ya?ml|toml|txt|log|ipynb"
+_FILE = re.compile(rf"(?<![\w.,/\\-])[\w-]*\w\.(?:{_EXTENSIONS})(?![\w/\\])")
+_HYPHENATED = re.compile(r"(?<![\w.-])([A-Za-z_]\w*)(?:-\w+)+")
+
+
+def _path(token):
+    token = token.rstrip(".:!?*_~")
+    segments = re.split(r"[/\\]", token)
+    return (token.startswith(("./", "../", ".\\", "..\\", "~")) or len(segments) >= 3
+            or segments[0] in _PATH_ROOTS or bool(_FILE.fullmatch(segments[-1])))
+
+
+def _identifier(first):
+    # ORD-123-45, COVID-19, Q-3, r-001, and the chart file stem chart-1; top-10 and mid-2025 stay words.
+    return (len(first) == 1 or first.lower() == "chart" or bool(re.search(r"[0-9_]", first))
+            or bool(re.search(r"[A-Z]", first[1:])))
+
+
+def _blank_names(text):
+    blanks = [match.span() for match in _PATH_CANDIDATE.finditer(text) if _path(match.group(0))]
+    blanks += [match.span() for match in _FILE.finditer(text)]
+    blanks += [match.span() for match in _HYPHENATED.finditer(text) if _identifier(match.group(1))]
+    for start, end in blanks:
+        text = _blank(text, start, end)
+    return text
+
+
+# A number not glued to a word or a path, with its unit. A word unit or % may stand after any whitespace,
+# a line wrap included; a letter scale (k, M, b) or x is written against its number. Letters written against
+# a number are shown with it (5GB, 30d, 95th). Digits joined by dots, commas, slashes, colons, or spaces between
+# three-digit groups are read as one number: a version or address (3.12.1, 10.0.0.1) is no quantity, and any
+# other join but thousands grouping or one decimal point never traces (1,2,3, 21,3, 3/4, 14:05, 1.234.567, 1 000).
+_NUMBER = re.compile(
+    r"(?<![^\W_])(?<![^\W_]_)(?<![0-9][.,/:])"
+    r"((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)[eE][-+]?[0-9]+|[0-9]{1,3}(?:[ \u00a0\u202f][0-9]{3})+(?:\.[0-9]+)?"
+    r"|[0-9]+(?:[.,/:][0-9]+)*|\.[0-9]+)"
+    r"(\s*%|\s*(?:per\s*cent|percentage\s+points?|pp|thousand|million|billion|trillion|mn|bn|tn)(?!\w)"
+    r"|(?:[kKmMbB]|[x×])(?!\w))?"
+    r"((?<=[0-9])[^\W\d_]+)?"
+    r"(?![^\W_]|_[^\W_]|[.,/:][0-9])")
+_GROUPED = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?"
+                      r"|[0-9]+\.[eE][-+]?[0-9]+")
+_VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){2,}")
+_RANGE = re.compile(r"\s*(?:[-–—]|to|and)\s*")
+_SCALES = {"k": 3, "thousand": 3, "m": 6, "mn": 6, "million": 6, "b": 9, "bn": 9, "billion": 9,
+           "tn": 12, "trillion": 12}
+
+
+def _quantities(line, before="", after="", *, marker=True):
+    """Yield (text, body, unit, start, end) for each number a line states, after the skips check_numbers names.
+
+    `before` and `after` are the lines of the same paragraph around `line`, read only so that a context or a
+    unit a line wrap splits from its number is still seen. `marker` is false where a leading number cannot
+    be a list marker. Every skip blanks with spaces, so `start` and `end` index the line as written; `end`
+    passes the line's length when a unit stands after the wrap.
+    """
+    offset = len(before) + 1 if before else 0
+    if marker and (found := _LIST_MARKER.match(line)):
+        line = _blank(line, 0, found.end())
+    text = (before + "\n" if before else "") + line + ("\n" + after if after else "")
+    for pattern in (_CODE_SPAN, _CURRENCY):
+        text = pattern.sub(lambda match: " " * len(match.group(0)), text)
+    text = _NOT_QUANTITY.sub(lambda match: " " * len(match.group(0)), _blank_names(text))
+    text = re.sub(r"\]\([^)\n]*\)", lambda match: "]" + " " * (len(match.group(0)) - 1), text)
+    matches = list(_NUMBER.finditer(text))
+    for index, match in enumerate(matches):
+        if not offset <= match.start() < offset + len(line):
+            continue
+        body, unit, letters = match.group(1), match.group(2) or "", match.group(3) or ""
+        if not unit and not letters and index + 1 < len(matches) and _RANGE.fullmatch(
+                text[match.end():matches[index + 1].start()]):
+            unit = matches[index + 1].group(2) or ""  # 10-15%: the lower bound takes the upper's unit
+        if re.fullmatch(r"0[0-9]+", body) or _VERSION.fullmatch(body) and not re.fullmatch(
+                r"[0-9]{1,3}(?:\.[0-9]{3})+", body):
+            continue  # a zero-padded code such as release 002, or a version; 1.234.567 is read
+        if letters and not letters.isalpha():
+            body += letters  # 5½ has no one value
+        yield (" ".join(match.group(0).split()), body, " ".join(unit.lower().split()), match.start() - offset,
+               match.end() - offset)
+
+
+# Arithmetic on written numbers never rounds: every digit a narrative or a record writes is kept.
+_EXACT = Context(prec=MAX_PREC, Emax=MAX_EMAX, Emin=MIN_EMIN)
+
+
+def _value(body):
+    """Return a number's value and half a unit of its last written place, both exact.
+
+    Raises ValueError or ArithmeticError for an exponent too large to hold.
+    """
+    mantissa, _, exponent = body.replace(",", "").lower().partition("e")
+    exponent = int(exponent or 0)
+    with localcontext(_EXACT):
+        return (Decimal(mantissa).scaleb(exponent),
+                Decimal(5).scaleb(exponent - len(mantissa.partition(".")[2]) - 1))
+
+
+def _magnitudes(value, into, *, text=True):
+    """Add the absolute value of every finite number in a JSON or CSV value; text only when `text`.
+
+    A string that is not a number whole is read the way check_numbers reads a narrative line, adding
+    each number and, with a scale such as M, its scaled value.
+    """
+    if isinstance(value, bool):
+        return
+    if isinstance(value, (int, float, Decimal)):
+        value = str(value)  # recorded JSON is read with exact decimals, so str keeps every written digit
+    elif isinstance(value, dict):
+        for item in value.values():
+            _magnitudes(item, into, text=text)
+        return
+    elif isinstance(value, list):
+        for item in value:
+            _magnitudes(item, into, text=text)
+        return
+    elif not (isinstance(value, str) and text):
+        return
+    try:
+        number = Decimal(value.strip())
+        found = [number] if number.is_finite() else []
+    except InvalidOperation:
+        found = []
+        for line in value.splitlines():
+            for _, body, unit, _, _ in _quantities(line):
+                if not _GROUPED.fullmatch(body):
+                    continue
+                try:
+                    number = _value(body)[0]
+                    found.append(number)
+                    if unit in _SCALES:
+                        found.append(number.scaleb(_SCALES[unit], _EXACT))
+                except (ValueError, ArithmeticError):
+                    continue  # an exponent too large to hold records nothing
+    into.update(number.copy_abs() for number in found)  # copy_abs never rounds, so 4e1234567 cannot overflow
+
+
+def _evidence_numbers(record):
+    """The parts of an evidence record that hold result values: check details and settings content."""
+    checks, settings = record.get("checks"), record.get("settings")
+    return [[check.get("detail") for check in checks if isinstance(check, dict)] if isinstance(checks, list) else [],
+            settings.get("content") if isinstance(settings, dict) else None]
+
+
+def _read_exact_json(path):
+    """Read a JSON object with every fraction as an exact Decimal, so no recorded digit is lost."""
+    record = json.loads(Path(path).read_text(encoding="utf-8"), parse_float=Decimal)
+    if not isinstance(record, dict):
+        raise ValueError(f"{Path(path).name} is not a JSON object")
+    return record
+
+
+def recorded_values(root, investigation, results) -> tuple[list, list[str]]:
+    """Return the sorted magnitudes the manifest's represented results record, and the problems.
+
+    Each result contributes every cell of results/<id>.csv, the numbers in results/<id>.profile.json,
+    and the numbers in its evidence's check details and settings. JSON numbers are read exactly as written.
+    """
+    if not isinstance(results, list) or not all(
+            isinstance(entry, dict) and isinstance(entry.get("result_id"), str)
+            and _SIMPLE.fullmatch(entry["result_id"]) for entry in results):
+        return [], [f"{MANIFEST} results is not a list of result_id entries; rerun export"]
+    base = Path(root) / "investigations" / investigation
+    values, problems = set(), []
+    for result_id in dict.fromkeys(entry["result_id"] for entry in results):
+        table = base / "results" / f"{result_id}.csv"
+        try:
+            with table.open(newline="", encoding="utf-8") as stream:
+                cells = {cell for row in csv.reader(stream) for cell in row}
+            for cell in cells:  # each distinct cell is read once
+                _magnitudes(cell, values)
+        except FileNotFoundError:
+            problems.append(f"{_rel(root, table)} is missing; numbers from {result_id} cannot be traced")
+        except (OSError, UnicodeError, csv.Error) as error:
+            problems.append(f"{_rel(root, table)}: unreadable ({error})")
+        # The table holds the result; a profile or evidence, when present, adds its counts and settings.
+        for path in (base / "results" / f"{result_id}.profile.json", base / "evidence" / f"{result_id}.json"):
+            try:
+                record = _read_exact_json(path)
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError) as error:
+                problems.append(f"{_rel(root, path)}: unreadable ({error})")
+                continue
+            if path.parent.name == "results":
+                _magnitudes(record, values, text=False)  # dtype names such as float64 are not values
+            else:
+                _magnitudes(_evidence_numbers(record), values)
+    return sorted(values), problems
+
+
+def allowed_numbers(record: dict) -> tuple[set, list[str]]:
+    """Return the texts the manifest's allowed_numbers accepts untraced, and its malformed entries."""
+    entries = record.get("allowed_numbers", "none")
+    if entries == "none":
+        return set(), []
+    if not isinstance(entries, list):
+        return set(), ["allowed_numbers is not none or a list of {text, reason}"]
+    texts, problems = set(), []
+    for index, entry in enumerate(entries, start=1):
+        if isinstance(entry, dict) and all(isinstance(entry.get(key), str) and entry[key].strip()
+                                           for key in ("text", "reason")):
+            texts.add(entry["text"].strip())
+        else:
+            problems.append(f"allowed_numbers entry {index} is not {{text, reason}} with both filled in")
+    return texts, problems
+
+
+def _within(values, low, high):
+    index = bisect.bisect_left(values, low)
+    return index < len(values) and values[index] <= high
+
+
+def _traces(body, unit, values):
+    # Written to d places, the number stands for any value within half a unit of its last place.
+    if not _GROUPED.fullmatch(body):
+        return False  # 1,2,3, the decimal comma 21,3, 3/4, 14:05, and 1.234.567 have no one value
+    try:
+        number, half = _value(body)
+        with localcontext(_EXACT):
+            low, high = number - half, number + half
+            windows = [(low, high)]
+            if unit.startswith(("%", "per", "pp")):
+                windows.append((low.scaleb(-2), high.scaleb(-2)))
+            elif unit in _SCALES:
+                windows.append((low.scaleb(_SCALES[unit]), high.scaleb(_SCALES[unit])))
+    except (ValueError, ArithmeticError):
+        return False  # an exponent too large to hold traces to nothing
+    return any(_within(values, low, high) for low, high in windows)
+
+
+# A line that opens a block (a heading, a bullet, a quote, a table row, or a fence) starts no wrap.
+_OPENS_BLOCK = re.compile(r"\s*(?:$|#{1,6}(?:\s|$)|[-*+](?:\s|$)|>|\||`{3,}|~{3,})")
+_QUOTE_MARKERS = re.compile(r"[ \t]*(?:>[ \t]?)+")
+
+
+def _unquoted(line):
+    """The line with its blockquote markers blanked, so a quoted paragraph reads like any other."""
+    return _QUOTE_MARKERS.sub(lambda match: " " * len(match.group(0)), line, count=1) if _QUOTE_MARKERS.match(line) else line
+
+
+def _continues(previous, line):
+    """Whether `line` wraps the paragraph `previous` ends, so a context or a unit may span the two.
+
+    A numbered line continues paragraph text unless it numbers 1, the only number that starts a list
+    there; so "rose to\\n77. Orders" reads 77. An unindented one also starts a list after a list item or an
+    indented line; an indented one only after a list item at its own indentation, so "- rose to\\n  77. Orders",
+    where 77 wraps the item's text, reads 77. Two quoted lines are compared inside the quote.
+    """
+    if _QUOTE_MARKERS.match(previous) and _QUOTE_MARKERS.match(line):
+        previous, line = _QUOTE_MARKERS.sub("", previous, count=1), _QUOTE_MARKERS.sub("", line, count=1)
+    if _OPENS_BLOCK.match(previous) and not re.match(r"\s*[-*+>]\s", previous) or _OPENS_BLOCK.match(line):
+        return False
+    numbered = _LIST_MARKER.match(line)
+    if not numbered:
+        return True
+    indent = line[:len(line) - len(line.lstrip(" \t"))]
+    starts = r"\s|[-*+>]\s|[0-9]+[.)]\s" if not indent else re.escape(indent) + r"(?:[-*+]|[0-9]+[.)])\s"
+    return int(numbered.group(1)) != 1 and not re.match(starts, previous)
+
+
+def check_numbers(path: str | os.PathLike, values, *, allowed=()) -> list[dict]:
+    """List each number in a narrative file that no recorded value rounds to and `allowed` does not cover.
+
+    `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
+    text is written around it, matched on the text the number is read from, so any whitespace or a line
+    wrap matches a space: a bare `40` covers every 40, and `Week 23` only that 23. A number is skipped
+    only in a context references/helpers.md lists; every other number is read.
+    """
+    patterns = [re.compile(r"\s+".join(map(re.escape, text.split()))) for text in allowed if text.strip()]
+    rows, lines = [], list(_unfenced(path))
+    for index, (number, line, opens) in enumerate(lines):
+        if opens:
+            continue
+        previous = lines[index - 1] if index and lines[index - 1][0] == number - 1 else None
+        following = lines[index + 1] if index + 1 < len(lines) and lines[index + 1][0] == number + 1 else None
+        wraps = previous is not None and not previous[2] and _continues(previous[1], line)
+        before = previous[1] if wraps else ""
+        after = following[1] if following is not None and not following[2] and _continues(line, following[1]) \
+            else ""
+        before, line, after = _unquoted(before), _unquoted(line), _unquoted(after)
+        # The text _quantities reads, so an allowed text and a row's text match across the same wrap.
+        offset = len(before) + 1 if before else 0
+        joined = (before + "\n" if before else "") + line + ("\n" + after if after else "")
+        spans = [found.span() for pattern in patterns for found in pattern.finditer(joined)]
+        for text, body, unit, start, end in _quantities(line, before, after, marker=not wraps):
+            covered = any(low <= offset + start and offset + end <= high for low, high in spans)
+            if not covered and not _traces(body, unit, values):
+                rows.append({"file": Path(path).name, "line": number, "text": text})
     return rows
 
 
@@ -1178,8 +1564,9 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
             and report["charts"] == [] and report["headings"] == [] and report["markdown"] == []
-            and report["claims"] == []
-            and report["verify"] == [] and report["flag_entries"] == [])
+            and report["claims"] == [] and report["questions"] == []
+            and report["verify"] == [] and report["flag_entries"] == [] and report["numbers"] == []
+            and not report["numbers_problems"])
 
 
 def check_draft(root, investigation, package, *, verify_only=False) -> dict:
@@ -1187,7 +1574,8 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
-              "charts": None, "headings": None, "markdown": None, "claims": None, "inventory": None, "verify": None,
+              "charts": None, "headings": None, "markdown": None, "claims": None, "questions": None,
+              "numbers": None, "numbers_problems": [], "inventory": None, "verify": None,
               "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
@@ -1236,12 +1624,17 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         claims = None
         report["errors"].append(f"claims: {error}")
 
+    record = None
     try:
         path = draft / MANIFEST
         if not path.is_file():
             raise ValueError(f"no manifest at {_rel(root, path)}; run export first")
         record = _read_json(path)
         report["flag_entries"] = flag_entry_problems(record)
+        try:
+            report["questions"] = question_problems(draft, record)
+        except (OSError, UnicodeError) as error:
+            report["errors"].append(f"questions check: {error}")
         represented = record.get("results")
         if not isinstance(represented, list) or not all(
                 isinstance(r, dict) and isinstance(r.get("result_id"), str) for r in represented):
@@ -1266,6 +1659,17 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     except (OSError, ValueError) as error:
         report["errors"].append(f"manifest: {error}")
 
+    # Every number in either narrative traces to a represented result or is allowed with a reason.
+    if record is not None:
+        allowed, problems = allowed_numbers(record)
+        values, more = recorded_values(root, investigation, record.get("results"))
+        report["numbers_problems"], report["numbers"] = problems + more, []
+        for name in NARRATIVES:
+            try:
+                report["numbers"] += check_numbers(draft / name, values, allowed=allowed)
+            except (OSError, UnicodeError) as error:
+                report["errors"].append(f"numbers check: {error}")
+
     report["passed"] = _structure_passed(report) and report["unmatched_flags"] == []
     return report
 
@@ -1280,10 +1684,11 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py check-draft", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Run every mechanical draft check (internal names in findings.md, chart files, "
-                    "matching finding headings, the Markdown subset, causal wording against claim strength, the manifest "
-                    "inventory, and state.md's current flags) "
-                    "and rewrite the manifest inventory, stamping revised_at when it changes; "
-                    "--verify-only checks a release candidate and writes nothing.",
+                    "matching finding headings, the Markdown subset, causal wording against claim strength, "
+                    "each represented result's question in methodology.md, numbers in both narratives, the "
+                    "manifest inventory, and state.md's current flags) and rewrite the manifest inventory, "
+                    "stamping revised_at when it changes; --verify-only checks a release candidate and writes "
+                    "nothing.",
         epilog="Prints one JSON line.\nclaims lists each causal phrase (line, section, phrase, claim, results) "
                "in a findings.md slide, heading included, above its claim strength: a ### finding slide is held to the weakest "
                "Claim in state.md among the results its methodology.md section cites (all represented results "
@@ -1296,12 +1701,21 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "lists each form outside the Markdown subset the checks read, which could hide text or move "
                "it between slides: a heading, fence, comment, or **Claim strength:** line inside a list or quote; "
                "an indented fence or comment; a setext heading; indented code; an HTML block or inline tag; a link "
-               "reference definition; an unclosed fence or comment. Every check reads both files as they render."
-               "\nunmatched_flags lists each finding state.md flags whose exact finding "
-               "and reason the manifest's revalidation_flags does not record.\nflag_entries lists a missing or "
-               "malformed revalidation_flags, an entry without text finding and reason, represented_in that is "
-               "neither none nor a list of places, and an unknown disposition.\nExit 0 only when names_problems, "
-               "findings, charts, headings, markdown, claims, verify, flag_entries, unmatched_flags, and errors are all empty.")
+               "reference definition; an unclosed fence or comment. Every check but numbers and questions reads "
+               "both files as they render."
+               "\nnumbers lists, as file, line, and text, each number in findings.md or "
+               "methodology.md that no represented result's table, profile, check details, or settings round to "
+               "and the manifest's allowed_numbers does not cover by its text or a phrase around it; "
+               "numbers_problems names a missing table, an unreadable table, profile, or evidence file, or a "
+               "malformed results or allowed_numbers.\n"
+               "unmatched_flags lists each finding state.md flags whose exact finding and reason the manifest's "
+               "revalidation_flags does not record.\nflag_entries lists a "
+               "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
+               "that is neither none nor a list of places, and an unknown disposition.\nquestions lists each "
+               "manifest results entry without a question, or whose question methodology.md does not repeat "
+               "verbatim.\nExit 0 only when names_problems, findings, charts, headings, markdown, claims, "
+               "questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
+               "are all empty.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
                         help="verify against the recorded inventory without rewriting it (the release gate)")
@@ -1591,8 +2005,12 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     kept = {c.get("result_id"): c for c in previous if isinstance(c, dict)}
     entries = [checks.get(r) or kept.get(r) for r in represented]
     record["export_checks"] = [e for e in entries if e] or "none"
-    # Every represented result with its evidence, serialized or not, so status can see a later rerun.
-    record["results"] = [{"result_id": r, "evidence": evidence_paths[r]} for r in represented]
+    # Every represented result with its evidence, serialized or not, so status can see a later rerun,
+    # the question it answers, which methodology.md repeats verbatim, and the runtime that evidence recorded.
+    questions = {r: evidence[r].get("question", {"unknown": "evidence lacks question"}) for r in represented}
+    record["results"] = [{"result_id": r, "evidence": evidence_paths[r], "question": questions[r],
+                          "runtime": _runtime(evidence[r])}
+                         for r in represented]
     fields = producing_state(evidence)
     fields["packaging_commit"], fields["packaging_uncommitted_changes"] = packaging_state(root)
     record.update(fields)
@@ -1603,6 +2021,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     report["written"] = True
     commits, changes = fields["producing_commit"], fields["producing_uncommitted_changes"]
     report["results"] = represented
+    report["questions"] = questions
     report["producing_commit"] = "differs by result" if isinstance(commits, list) else commits
     report["producing_uncommitted_changes"] = len(changes) if isinstance(changes, list) else 0
     report["packaging_commit"] = fields["packaging_commit"]
@@ -1629,7 +2048,9 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "state.md's flags (none when it flags nothing), keeping an entry whose finding and reason match "
                "exactly and adding others with represented_in [] and disposition none; flags_pending lists "
                "each entry that needs represented_in or, once represented, a disposition. When state.md "
-               "cannot be read, flags_error says why and revalidation_flags is left as it was.\nExit 0 only "
+               "cannot be read, flags_error says why and revalidation_flags is left as it was.\nquestions maps "
+               "each represented result to the question its evidence records, for methodology.md to repeat "
+               "verbatim; the manifest's results entries record it.\nExit 0 only "
                "when written and check_charts is empty.")
     _package_arguments(parser)
     parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS]",
@@ -1667,6 +2088,288 @@ def cli_export(root: Path, argv: list[str]) -> int:
                     rounding=rounding)
     _print(report)
     return 0 if report["written"] and not report.get("check_charts") else 1
+
+
+# ---------------------------------------------------------------- review rules
+
+REVIEW_RULES = "foundation/review-rules.md"
+_SEVERITIES = ("error", "warning")
+# An area's last segment holds a letter, so R-<area>-NNN never reads as another area's ID.
+_AREA_TEXT = r"(?:[a-z0-9]+-)*[a-z0-9]*[a-z][a-z0-9]*"
+_AREA = re.compile(_AREA_TEXT)
+# [0-9], not \d, which also takes other scripts' digits, such as Arabic-Indic ones.
+_RULE_HEADING = re.compile(rf"## (R-({_AREA_TEXT})-([0-9]{{3,}}))\s*")
+_RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Fix|Added): ?(.*)")
+_LOOSE_FIELD = re.compile(r"\s*[-*+]?\s*(?:Severity|Rule|Pattern|Fix|Added)\s*:", re.IGNORECASE)
+_MARKDOWN_HEADING = re.compile(r"\s*#{1,6}(?:\s|$)")
+_REQUIRED_FIELDS = ("Severity", "Rule", "Pattern", "Fix")
+_BAD_HEADING = ("rule heading is not ## R-<area>-NNN with a lowercase area, its last part holding a letter, "
+                "and a three-digit number")
+_STRAY_HEADING = "heading after the first rule is not a ## R-<area>-NNN rule heading"
+# Every line break str.splitlines() recognizes but \n; grep -n counts only \n.
+_OTHER_BREAK = re.compile("[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
+_REVIEWED = ("findings.md", "methodology.md")
+_MATCH_CAP = 20
+_RULES_HEADER = """# Review rules
+
+Rules from the user's corrections to package drafts. The read-only package review checks every rule on \
+every draft; `python3 src/awb.py review-rules check <investigation> <package>` lists each rule with the \
+narrative lines its pattern matches.
+
+Add a rule only with `python3 src/awb.py review-rules add`. A rule ID, `R-<area>-NNN`, is never \
+renumbered, reused, or deleted: edit a rule's other fields in place, and retire a rule by setting its \
+severity to `retired`. A pattern is a Python regular expression in backticks, matched against each line \
+of the draft's `findings.md` and `methodology.md`, or `none` when no pattern can find the problem.
+"""
+
+
+def _parse_pattern(value):
+    """(pattern text or None, problem or None) from a Pattern field: `regex` in backticks, or none."""
+    if value == "none":
+        return None, None
+    if len(value) < 3 or not (value.startswith("`") and value.endswith("`")):
+        return None, "Pattern is neither none nor a regular expression in backticks"
+    problem = _pattern_problem(value[1:-1])
+    return (None, f"Pattern {problem}") if problem else (value[1:-1], None)
+
+
+def _pattern_problem(pattern):
+    """Why a regular expression is unusable, or None; Python raises more than re.error on some."""
+    try:
+        re.compile(pattern)
+    except (re.error, OverflowError, RecursionError, ValueError) as error:
+        return f"does not compile: {error}"
+    return None
+
+
+def _read_lines(path):
+    r"""A file's lines as grep -n numbers them: split on \n only, with no empty line after a final \n.
+
+    Read as bytes: text mode would turn a lone \r into \n and shift every later line number. A \r is
+    dropped only where a \n follows it, as a CRLF ending; any other \r, one at the end of the file
+    included, stays in its line. A UTF-8 byte order mark is not part of line 1."""
+    *ended, last = Path(path).read_bytes().decode("utf-8-sig").split("\n")
+    return [line.removesuffix("\r") for line in ended] + ([last] if last else [])
+
+
+def parse_review_rules(lines: list) -> tuple:
+    """(rules, problems) from review-rules.md: each `## R-<area>-NNN` section and its `- Field:` lines.
+
+    Any heading ends a section, and after the first rule every heading must be a rule's. Inside a rule
+    section only blank and `- Field:` lines may appear, so a wrapped line starting with `#` is reported
+    too; outside one no heading may name a rule and no line may look like a field. A rule that a hand
+    edit breaks or cuts short is reported instead of silently dropped or truncated, and its ID is never
+    handed out again by add. Lines are numbered as _read_lines splits them, so each problem's line is the
+    one grep -n shows; a line holding another line break (U+2028, form feed, a lone carriage return) is a
+    problem, since an editor may show it as two lines."""
+    rules, problems, current = [], [], None
+    for number, line in enumerate(lines, 1):
+        other = _OTHER_BREAK.search(line)
+        if other:
+            problems.append({"line": number, "problem": f"line holds U+{ord(other[0]):04X}, a line break other "
+                                                        "than \\n; replace it with a space or a newline"})
+        if line.lstrip().startswith("#"):
+            heading = _RULE_HEADING.fullmatch(line)
+            if heading:
+                current = {"id": heading[1], "area": heading[2], "number": int(heading[3]), "line": number,
+                           "fields": {}}
+                rules.append(current)
+                continue
+            # Only a heading that starts like a rule ID is a broken rule heading; ## PR-12 notes is not.
+            if re.match(r"\s*#+\s*R-", line):
+                problems.append({"line": number, "problem": _BAD_HEADING})
+                current = None
+                continue
+            if _MARKDOWN_HEADING.match(line):
+                if rules:
+                    problems.append({"line": number, "problem": _STRAY_HEADING})
+                current = None
+                continue
+            # Text such as `#hashtags`, not a heading: inside a rule it is a line that is not a field.
+        if current is None:
+            if _LOOSE_FIELD.match(line):
+                problems.append({"line": number, "problem": "rule field outside a ## R-<area>-NNN section"})
+            continue
+        field = _RULE_FIELD.fullmatch(line.rstrip())
+        if field:
+            if field[1] in current["fields"]:
+                problems.append({"rule": current["id"], "line": number, "problem": f"repeated {field[1]} line"})
+            current["fields"][field[1]] = field[2].strip()
+        elif line.strip():
+            problems.append({"rule": current["id"], "line": number,
+                             "problem": "line is not a - Severity, Rule, Pattern, Fix, or Added field"})
+    seen = {}
+    for rule in rules:
+        fields = rule.pop("fields")
+        first = seen.setdefault((rule["area"], rule["number"]), rule)
+        if first is not rule:
+            # R-x-007 and R-x-0007 are one number written twice, so add must not treat them as two.
+            problems.append({"rule": rule["id"], "problem": "rule ID appears more than once"
+                             if first["id"] == rule["id"] else f"rule ID repeats the number of {first['id']}"})
+        missing = [name for name in _REQUIRED_FIELDS if not fields.get(name)]
+        if missing:
+            problems.append({"rule": rule["id"], "problem": f"missing {', '.join(missing)}"})
+        severity = fields.get("Severity", "")
+        if severity and severity not in (*_SEVERITIES, "retired"):
+            problems.append({"rule": rule["id"], "problem": f"unknown severity {severity!r}; use error, "
+                                                            "warning, or retired"})
+        rule.update(severity=severity, rule=fields.get("Rule", ""), fix=fields.get("Fix", ""),
+                    pattern=None, usable=True)
+        if fields.get("Pattern"):
+            rule["pattern"], problem = _parse_pattern(fields["Pattern"])
+            if problem:
+                rule["usable"] = False
+                problems.append({"rule": rule["id"], "problem": problem})
+    return rules, problems
+
+
+def _read_rules(root):
+    """(rules, problems), or None when the project has no rule file.
+
+    Only an absent path means no rules: a directory or other non-file there, or a symbolic link to
+    nothing, raises OSError, so check reports an error and add refuses instead of reading no rules."""
+    path = Path(root) / REVIEW_RULES
+    try:
+        path.stat()
+    except FileNotFoundError:
+        if not path.is_symlink():
+            return None
+        raise
+    if not path.is_file():
+        raise OSError("not a regular file")
+    return parse_review_rules(_read_lines(path))
+
+
+def check_review_rules(root, investigation, package) -> dict:
+    """List every review rule with the draft narrative lines its pattern matches; writes nothing."""
+    root = Path(root)
+    draft = _package_dir(root, investigation, package) / "draft"
+    report = {"rules_file": REVIEW_RULES, "draft": _rel(root, draft), "rules": [], "problems": [], "errors": []}
+    texts = {}
+    for name in _REVIEWED:
+        try:
+            texts[name] = _read_lines(draft / name)
+        except (OSError, UnicodeError) as error:
+            report["errors"].append(f"{_rel(root, draft / name)}: {error}")
+    try:
+        parsed = _read_rules(root)
+    except (OSError, UnicodeError) as error:
+        report["errors"].append(f"{REVIEW_RULES}: {error}")
+        return report
+    if parsed is None:
+        report["rules_file"] = "none recorded"
+        return report
+    rules, report["problems"] = parsed
+    for rule in rules:
+        row = {"id": rule["id"], "severity": rule["severity"]}
+        if rule["severity"] == "retired":
+            row["status"] = "retired"
+        elif not rule["usable"]:
+            row["status"] = "unchecked"
+        elif rule["pattern"] is None:
+            row["status"] = "no pattern"
+        else:
+            pattern = re.compile(rule["pattern"])
+            matches = [{"file": name, "line": number, "text": line.strip()[:160]}
+                       for name, lines in texts.items()
+                       for number, line in enumerate(lines, 1) if pattern.search(line)]
+            row["status"] = "matched" if matches else "no match"
+            if matches:
+                row["matches"] = matches[:_MATCH_CAP]
+                if len(matches) > _MATCH_CAP:
+                    row["more_matches"] = len(matches) - _MATCH_CAP
+        report["rules"].append(row)
+    return report
+
+
+def add_review_rule(root, area, severity, rule, fix, pattern=None, *, today=None) -> dict:
+    """Append rule R-<area>-NNN, numbered after every ID the area has used, creating the file if absent."""
+    root = Path(root)
+    path = root / REVIEW_RULES
+    try:
+        parsed = _read_rules(root)
+    except (OSError, UnicodeError) as error:
+        return {"added": None, "refused": f"{REVIEW_RULES}: {error}"}
+    rules, problems = parsed if parsed is not None else ([], [])
+    if problems:
+        return {"added": None, "refused": f"repair {REVIEW_RULES} first; numbering needs a sound file",
+                "problems": problems}
+    number = max((r["number"] for r in rules if r["area"] == area), default=0) + 1
+    rule_id = f"R-{area}-{number:03d}"
+    day = today or datetime.now().astimezone().date().isoformat()
+    entry = (f"## {rule_id}\n\n- Severity: {severity}\n- Rule: {rule}\n"
+             f"- Pattern: {f'`{pattern}`' if pattern else 'none'}\n- Fix: {fix}\n- Added: {day}\n")
+    existing = path.read_text(encoding="utf-8-sig") if parsed is not None else ""
+    if not existing.strip():
+        existing = _RULES_HEADER
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_text(path, existing.rstrip("\n") + "\n\n" + entry)
+    return {"added": rule_id, "rules_file": REVIEW_RULES, "created": parsed is None,
+            "rules": len(rules) + 1}
+
+
+def cli_review_rules(root: Path, argv: list[str]) -> int:
+    raw = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(
+        prog="awb.py review-rules", formatter_class=raw,
+        description=f"Check a draft against the review rules in {REVIEW_RULES}, or append a rule from a "
+                    "user's correction.",
+        epilog="Run `awb.py review-rules <subcommand> --help` for its arguments, output, and exit status.")
+    actions = parser.add_subparsers(dest="action", required=True, metavar="{check,add}")
+    check = actions.add_parser(
+        "check", formatter_class=raw, help="list every rule with the draft lines its pattern matches",
+        description="List every review rule with the lines of the draft's findings.md and methodology.md "
+                    "its pattern matches. Writes nothing.",
+        epilog="Prints one JSON line.\nEach rules row has id, severity, and status: matched (with matches, "
+               "each file, line, and text, at most 20, and more_matches beyond), no match, no pattern (judge "
+               "the rule by reading), retired, or unchecked (its problem is listed).\nA match is a candidate "
+               "for the reviewer to judge, and no match does not prove the rule holds.\nrules_file is none "
+               "recorded when the project has no rules.\nExit 0 when problems and errors are empty, matches "
+               "or not; 1 otherwise.")
+    _package_arguments(check)
+    add = actions.add_parser(
+        "add", formatter_class=raw, help="append the next numbered rule",
+        description=f"Append a rule to {REVIEW_RULES}, creating the file when absent, as R-<area>-NNN: the "
+                    "number after every one the area has used, retired rules included.",
+        epilog="Prints one JSON line: added (the new ID), rules_file, created, and rules (the count).\nRefuses, "
+               "writing nothing, when the rule file has problems that `review-rules check` lists.\nExit 0 "
+               "added; 1 refused; 2 unusable arguments.")
+    add.add_argument("--area", required=True, help="what the rule governs, lowercase words joined by '-', "
+                                                   "the last not all digits, such as periods or "
+                                                   "metric-definitions")
+    add.add_argument("--severity", required=True, choices=_SEVERITIES,
+                     help="error: a violation must be repaired; warning: repaired or accepted by the user")
+    add.add_argument("--rule", required=True, help="what every draft must do, in one line")
+    add.add_argument("--fix", required=True, help="how to repair a violation, in one line")
+    add.add_argument("--pattern", help="a Python regular expression matching a likely violation on one line "
+                                       "(default: none, judged by reading)")
+    args = parser.parse_args(argv)
+    if args.action == "check":
+        report = check_review_rules(Path(root), _simple(args.investigation, "investigation"),
+                                    _simple(args.package, "package"))
+        _print(report)
+        return 1 if report["problems"] or report["errors"] else 0
+    if not _AREA.fullmatch(args.area):
+        add.error(f"--area must be lowercase letters and digits joined by '-', the last part holding a "
+                  f"letter: {args.area!r}")
+    for name in ("rule", "fix", "pattern"):
+        value = getattr(args, name)
+        if value is None:
+            continue
+        # \n and every other break the parser reports (_OTHER_BREAK), or the file add writes would fail
+        # its own check and block the next add.
+        if not value.strip() or value.splitlines() != [value]:
+            add.error(f"--{name} must be one non-blank line")
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:  # bytes that are not UTF-8 reach argv as lone surrogates
+            add.error(f"--{name} is not valid UTF-8")
+    if args.pattern is not None and (problem := _pattern_problem(args.pattern)):
+        add.error(f"--pattern {problem}")
+    report = add_review_rule(Path(root), args.area, args.severity, args.rule.strip(), args.fix.strip(),
+                             args.pattern)
+    _print(report)
+    return 0 if report["added"] else 1
 
 
 # ---------------------------------------------------------------- release
@@ -1717,8 +2420,17 @@ def release_dispositions(record: dict, prior) -> list[dict]:
     return rows
 
 
+def _runtime(evidence):
+    """The evidence's runtime block, or unknown when it records none; stale tests the same shape."""
+    runtime = evidence.get("runtime")
+    if isinstance(runtime, dict) and isinstance(runtime.get("packages"), dict):
+        return runtime
+    return {"unknown": "evidence lacks runtime"}
+
+
 def provenance_gaps(record: dict) -> list[dict]:
-    """Each manifest value recorded as unknown, by its dotted field path, with the reason."""
+    """Each manifest value recorded as unknown, by its dotted field path, with the reason, and each
+    requirements line a result's runtime could not read, whose packages' versions went unrecorded."""
     gaps = []
 
     def walk(value, path):
@@ -1728,13 +2440,19 @@ def provenance_gaps(record: dict) -> list[dict]:
             gaps.append({"field": path, "reason": value})
         elif isinstance(value, dict):
             for key, item in value.items():
-                walk(item, f"{path}.{key}")
+                if key == "unread_requirements" and isinstance(item, list):
+                    # The reason's prefix is UNREAD in awb_provenance.py, which stale reports; keep the two equal.
+                    gaps.extend({"field": f"{path}.{key}[{index}]",
+                                 "reason": f"requirements not read, packages unrecorded: {entry}"}
+                                for index, entry in enumerate(item))
+                else:
+                    walk(item, f"{path}.{key}")
         elif isinstance(value, list):
             for index, item in enumerate(value):
                 walk(item, f"{path}[{index}]")
 
     for key, value in record.items():
-        if key not in {"inventory", "export_checks", "revalidation_flags"}:
+        if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers"}:
             walk(value, key)
     return gaps
 

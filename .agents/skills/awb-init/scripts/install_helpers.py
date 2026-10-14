@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
-"""Install the workbench helpers and guides, declare the packages they need, and upgrade shipped copies.
+"""Install the workbench helpers, guides, and references README; declare their packages; upgrade shipped copies.
 
 Run with the interpreter that will run the project's analysis:
-    install_helpers.py [PROJECT_ROOT]                    install missing helpers and workbench guides;
-                                                         write requirements.txt if absent
+    install_helpers.py [PROJECT_ROOT]                    install missing helpers, workbench guides, and the
+                                                         foundation/references/ README; write requirements.txt
+                                                         if absent
     install_helpers.py [PROJECT_ROOT] --package-formats  also install missing package formats
     install_helpers.py [PROJECT_ROOT] --upgrade          also replace unmodified earlier copies of helpers,
-                                                         package formats, and workbench guides
+                                                         package formats, workbench guides, and that README
     install_helpers.py [PROJECT_ROOT] --upgrade --replace PATH [--replace PATH]... [--remove-retired]
     install_helpers.py [PROJECT_ROOT] --check ...        report the same without writing
 
 Prints one line of JSON:
   project, workbench  the project root and whether workbench markers exist; when absent, missing lists
                      the markers and hint explains how to initialize the root or choose another
-  files              every src/ helper and workbench guide, and with --upgrade or --package-formats every
-                     shipped package format the project holds: installed, missing (--check), current,
-                     earlier (an unmodified older copy; --upgrade replaces it), replaced, or customized
-                     (differs from the asset and has no matching receipt entry; kept unless named by --replace)
+  files              every src/ helper, workbench guide, and the references README, and with --upgrade or
+                     --package-formats every shipped package format the project holds: installed, missing
+                     (--check), current, earlier (an unmodified older copy; --upgrade replaces it), replaced,
+                     or customized (differs from the asset and has no matching receipt entry; kept unless
+                     named by --replace)
   customized         each customized file -> the installed asset to compare it with
   retired            (--upgrade) files the skills no longer ship: unmodified, removed, or customized (kept)
   requirements, python, packages, install   the third-party packages the helpers and the run.py
-                     template need, where they are declared, and whether this interpreter imports them
+                     template need, where they are declared, and whether this interpreter imports them;
+                     requirements.unread lists the requirements.txt lines and includes the provenance
+                     helper's reader could not read, which may declare a package listed as missing
 Package formats stay absent until awb-package copies them with --package-formats.
 The project's install receipt, .awb-receipt.json, maps each file this script installed or replaced to
 its SHA-256: a file matching its entry is unmodified. A file without an entry is customized unless
@@ -32,6 +36,7 @@ workbench, Python too old, or an unreadable receipt, nothing written; 2 unusable
 import argparse
 import hashlib
 import importlib
+import importlib.util
 import json
 import re
 import shutil
@@ -42,6 +47,7 @@ SKILLS = Path(__file__).resolve().parents[2]
 RECEIPT = ".awb-receipt.json"
 PYTHON = (3, 10)
 # Project path -> asset under the skills directory, for every file the skills copy into a project.
+# Every path outside package-format/ is installed into each workbench; package formats wait for awb-package.
 COPIED = {
     "src/awb.py": "awb-init/assets/awb_cli.py",
     "src/provenance.py": "awb-init/assets/awb_provenance.py",
@@ -50,6 +56,7 @@ COPIED = {
     "src/packaging/draft.py": "awb-package/assets/awb_draft.py",
     "workbench-guides/data.md": "awb-init/assets/workbench/workbench-guides/data.md",
     "workbench-guides/analysis.md": "awb-init/assets/workbench/workbench-guides/analysis.md",
+    "foundation/references/README.md": "awb-init/assets/workbench/foundation/references/README.md",
     "package-format/findings-template.md": "awb-package/assets/package-format/findings-template.md",
     "package-format/methodology-template.md": "awb-package/assets/package-format/methodology-template.md",
     "package-format/m365-assembly.md": "awb-package/assets/package-format/m365-assembly.md",
@@ -77,21 +84,39 @@ def _distribution(requirement):
     return requirement.split(";")[0].strip()
 
 
+def _requirements_reader():
+    """The provenance helper's requirements file reader, so runtime records and this check agree;
+    None when the skills directory lacks that asset."""
+    asset = COPIED.get("src/provenance.py")
+    if asset is None or not (SKILLS / asset).is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("awb_asset_provenance", SKILLS / asset)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.read_requirements
+
+
 def _copies():
     """(project path, asset path) for every copy the installed skills ship."""
     return [(path, SKILLS / asset) for path, asset in COPIED.items() if (SKILLS / asset).is_file()]
 
 
 def _declared(root):
-    """(dependency files present, normalized names they declare, or None when unreadable)."""
-    files, names = [], set()
+    """(dependency files present, normalized names they declare or None when a file is unreadable
+    or the requirements.txt reader is missing, requirements lines or includes that reader could not read)."""
+    files, names, unread = [], set(), []
     requirements = root / "requirements.txt"
     if requirements.is_file():
         files.append("requirements.txt")
-        for line in requirements.read_text(encoding="utf-8", errors="replace").splitlines():
-            match = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", line.split("#")[0])
-            if match and not line.lstrip().startswith("-"):
-                names.add(_normalize(match.group(1)))
+        read = _requirements_reader()
+        try:
+            requirements.read_bytes()
+        except OSError:
+            read = None
+        if read is None:
+            return files, None, unread
+        found, unread = read(requirements)
+        names |= set(found)
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
         files.append("pyproject.toml")
@@ -99,7 +124,7 @@ def _declared(root):
             import tomllib
             data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
         except (ImportError, ValueError):
-            return files, None
+            return files, None, unread
         project = data.get("project", {})
         specs = list(project.get("dependencies", []))
         for group in [*project.get("optional-dependencies", {}).values(), *data.get("dependency-groups", {}).values()]:
@@ -109,7 +134,7 @@ def _declared(root):
         for group in poetry.get("group", {}).values():
             specs += list(group.get("dependencies", {}))
         names |= {_normalize(re.match(r"\s*([A-Za-z0-9._-]*)", spec).group(1)) for spec in specs}
-    return files, names
+    return files, names, unread
 
 
 def _copy(asset, target):
@@ -147,7 +172,7 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
     files, customized, written = {}, {}, dict(receipt)
     for path, asset in copies:
         target = root / path
-        reported = path.startswith(("src/", "workbench-guides/")) or package_formats
+        reported = not path.startswith("package-format/") or package_formats
         if not target.is_file():
             if reported:
                 if not check:
@@ -192,7 +217,7 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
         (root / RECEIPT).write_text(json.dumps(dict(sorted(written.items())), indent=2) + "\n")
 
     requirements = sorted(REQUIREMENTS.values(), key=str.lower)
-    declared_in, declared = _declared(root)
+    declared_in, declared, unread = _declared(root)
     declared_in = ", ".join(declared_in)
     if not declared_in:
         if not check:
@@ -202,11 +227,13 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
         result["requirements"] = {"path": "requirements.txt", "status": "absent" if check else "written",
                                   "packages": requirements}
     elif declared is None:
-        result["requirements"] = {"path": declared_in, "status": "unchecked", "packages": requirements}
+        result["requirements"] = {"path": declared_in, "status": "unchecked", "packages": requirements,
+                                  **({"unread": unread} if unread else {})}
     else:
         missing = [item for item in requirements if _normalize(_distribution(item)) not in declared]
         result["requirements"] = {"path": declared_in, "status": "incomplete" if missing else "declared",
-                                  **({"missing": missing} if missing else {})}
+                                  **({"missing": missing} if missing else {}),
+                                  **({"unread": unread} if unread else {})}
 
     packages, absent = {}, []
     for name, requirement in REQUIREMENTS.items():

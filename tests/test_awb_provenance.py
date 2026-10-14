@@ -25,15 +25,29 @@
 # test_views_read_follows_view_references: views read by FROM/JOIN/comma, transitively; a column alias is not a read.
 # test_finding_row_reuses_state_text_and_names_check_gaps: the row keeps existing finding text, escapes pipes, names failed and unassessed checks.
 # test_cli_stale_lists_changed_results_with_their_findings: stale lists failing results with state.md rows, missing linked evidence, skips non-evidence JSON, rejects an unknown investigation.
+# test_record_evidence_records_runtime: the runtime block holds this interpreter's Python and platform, the versions of duckdb, pandas, and each requirements.txt name, null when not installed, and the requirements lines it could not read.
+# test_requirement_name_reads_names_and_direct_references: every line the review rounds 1-5 probed: names with extras, versions, markers, or @ URL; wheel or sdist file names, winning over a disagreeing #egg=, and #egg= of other direct references (URL, percent-encoded or holding a ";", POSIX or Windows path), -e included, attached, quoted, or after =, with or without trailing extras, with trailing --hash or other per-requirement options and a continuation backslash ignored; options, comments, and references naming no package give none.
+# test_read_requirements_follows_includes_and_byte_order_marks: -r and --requirement includes, quoted or not, are read relative to the including file, once each; -c constraints add nothing; a UTF-8, UTF-16 or UTF-32 BOM is decoded; a URL include and a missing include are unread, an absent file is neither.
+# test_read_requirements_reports_each_include_of_a_missing_file: a missing file included twice, or by two files, is unread at every include; a readable file included twice is read once.
+# test_read_requirements_lists_every_line_it_cannot_read: each line naming no package, an unknown or malformed option, an unbalanced quote, an archive whose #egg= disagrees with its file name (declared by the file name), and an unreadable file are unread with file and line; recognised option lines are not; continued lines are joined.
+# test_runtime_records_a_wheel_url_package_and_its_drift: a requirements.txt wheel URL or path, hash-pinned or with extras, continued or not, percent-encoded or holding a ";", a compact -e, a quoted include, and a wheel whose #egg= disagrees (also unread) record their package's installed version, and a changed recorded version is a runtime mismatch.
+# test_runtime_records_missing_version_metadata_as_unknown: an installed distribution whose metadata has no Version is unknown, not null (not installed).
+# test_cli_stale_reports_runtime_mismatch_as_a_warning: a changed recorded duckdb or Python version, an unread requirements line, or no runtime block, is listed under runtime_mismatches with its findings rows, never under results, and compare_evidence still passes.
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
 # test_producing_paths_follow_the_result: run.py, the result's queries, other investigation code, src/ minus awb.py, provenance.py and packaging/, plus code_paths; other results' queries and the excluded helpers never stale it.
 # test_settings_fall_back_to_tomli: without tomllib, settings parse through tomli, and without either the content is unknown.
+# test_record_evidence_copies_question_and_inputs_verbatim: the settings question and inputs land in the evidence unchanged, and editing the question stales only the settings comparison.
+# test_record_evidence_refuses_a_result_without_its_question: a missing, blank, or multi-line question, or inputs that are not a list of names, raise and write no evidence.
+# test_run_template_refuses_results_without_a_question: run.py exits 2 naming every wanted result that lacks a question, before opening a session or writing anything; without duckdb.
 # test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: prior_result checks the state before unlink; the run.py template records a result and writes its state.md row, keeps it on an identical rerun, and refuses before touching evidence when state.md is missing or drifts; a run failing after the table is rewritten leaves no evidence.
 
 import hashlib
+import importlib.metadata
 import importlib.util
 import json
+import os
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
@@ -61,7 +75,8 @@ def write(root, path, content):
     target.write_bytes(content)
 
 
-SETTINGS = b"[parameters]\nthreshold = 5\n\n[results.r1]\n\n[results.r2]\n"
+SETTINGS = (b'[parameters]\nthreshold = 5\n\n[results.r1]\nquestion = "How many orders cleared the threshold?"\n\n'
+            b'[results.r2]\nquestion = "Which regions grew?"\n')
 
 
 @pytest.fixture
@@ -113,9 +128,9 @@ def test_record_evidence_records_clean_producing_state(project):
     raw = path.read_text()
     evidence = json.loads(raw)
     assert list(evidence) == [
-        "schema", "investigation", "result_id", "recorded_at", "producing_commit",
+        "schema", "investigation", "result_id", "question", "inputs", "recorded_at", "producing_commit",
         "producing_paths", "producing_uncommitted_changes", "views", "publications",
-        "acquisitions", "settings", "checks", "notes",
+        "acquisitions", "settings", "runtime", "checks", "notes",
     ]
     assert raw.endswith("\n") and raw.startswith('{\n  "schema": "awb-evidence/3",')
     assert evidence["producing_commit"] == git(project, "rev-parse", "HEAD")
@@ -125,7 +140,9 @@ def test_record_evidence_records_clean_producing_state(project):
     assert evidence["views"][0]["publications"] == ["data/parquet/orders/p1"]
     assert evidence["checks"] == CHECKS
     assert evidence["settings"]["result"] == "r1"
-    assert evidence["settings"]["content"] == {"parameters": {"threshold": 5}, "results": {"r1": {}}}
+    assert evidence["settings"]["content"] == {
+        "parameters": {"threshold": 5}, "results": {"r1": {"question": "How many orders cleared the threshold?"}}}
+    assert (evidence["question"], evidence["inputs"]) == ("How many orders cleared the threshold?", [])
     assert evidence["publications"][0]["files"] == [{"path": "part-0.parquet", "bytes": 13,
         "sha256": hashlib.sha256(b"parquet bytes").hexdigest()}]
     assert evidence["acquisitions"][0]["status"] == "complete"
@@ -191,7 +208,8 @@ def test_compare_evidence_names_changed_setting(project):
     assert "parameters" in settings["detail"]
 
 
-SCOPED = (b'[parameters]\nstart = 2026-01-01\n\n[results.r1]\nqueries = ["queries/r1.sql"]\n'
+SCOPED = (b'[parameters]\nstart = 2026-01-01\n\n[results.r1]\nquestion = "How many orders each month?"\n'
+          b'queries = ["queries/r1.sql"]\n'
           b'[results.r1.validation]\nrequired_columns = ["month"]\n')
 
 
@@ -341,6 +359,7 @@ def test_compare_evidence_resolves_landing_helper_layout(project):
         "converted_at": "2026-10-07T00:00:02+00:00",
         "files": [{"path": name, "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
                   for name, content in sorted(parts.items())],
+        "checks": [],
         "notes": None,
     }
     write(project, "data/raw/crm/a2/provenance.json", (json.dumps(landed_provenance, indent=2) + "\n").encode())
@@ -502,6 +521,40 @@ def test_record_evidence_requires_the_results_table(project, settings, reason):
     assert not (project / "investigations/inv/evidence/r1.json").exists()
 
 
+QUESTION = "Did returns rise after the \u201cspring\u201d price change: yes or no?  "
+
+
+def test_record_evidence_copies_question_and_inputs_verbatim(project):
+    write(project, "investigations/inv/settings.toml", SETTINGS.replace(
+        b'question = "How many orders cleared the threshold?"',
+        f'question = "{QUESTION}"\ninputs = ["orders", "regions_view"]'.encode()))
+    path = record(project)
+    evidence = json.loads(path.read_text())
+    assert (evidence["question"], evidence["inputs"]) == (QUESTION, ["orders", "regions_view"])
+    assert evidence["settings"]["content"]["results"]["r1"]["question"] == QUESTION
+    text = (project / "investigations/inv/settings.toml").read_text()
+    write(project, "investigations/inv/settings.toml", text.replace("spring", "summer").encode())
+    comparisons = provenance.compare_evidence(project, path)
+    assert [c["outcome"] for c in comparisons] == ["pass"] * 4 + ["fail"]
+    assert "results.r1" in comparisons[4]["detail"]
+
+
+@pytest.mark.parametrize("table, problem", [
+    (b"", "[results.r1] has no question; add question = "),
+    (b'question = "   "\n', "[results.r1] has no question"),
+    (b'question = 5\n', "[results.r1] has no question"),
+    (b'question = """How many\norders?"""\n', "[results.r1] question spans several lines"),
+    (b'question = "How many?"\ninputs = "orders"\n', "[results.r1] inputs must be a list of dataset or view names"),
+    (b'question = "How many?"\ninputs = ["orders", ""]\n', "[results.r1] inputs must be a list"),
+])
+def test_record_evidence_refuses_a_result_without_its_question(project, table, problem):
+    write(project, "investigations/inv/settings.toml", b"[parameters]\nthreshold = 5\n\n[results.r1]\n" + table)
+    with pytest.raises(ValueError, match="investigations/inv/settings.toml: ") as error:
+        record(project)
+    assert problem in str(error.value)
+    assert not (project / "investigations/inv/evidence/r1.json").exists()
+
+
 def test_producing_paths_follow_the_result(project):
     write(project, "investigations/inv/lib.py", b"y = 1\n")
     for path in ("src/awb.py", "src/provenance.py", "src/packaging/draft.py"):
@@ -533,6 +586,28 @@ def test_settings_fall_back_to_tomli(project, monkeypatch):
     assert "install tomli" in content["unknown"]
 
 
+def test_run_template_refuses_results_without_a_question(project):
+    assets = ASSET.parent
+    write(project, "src/provenance.py", (assets / "awb_provenance.py").read_bytes())
+    # Stand-ins for the duckdb and pandas helpers: opening a session would leave a marker.
+    write(project, "src/exploration/validate.py", b"profile = validate = None\n")
+    write(project, "src/preparation/landing.py",
+          b"from pathlib import Path\n\ndef session(root):\n    Path(root, 'opened').touch()\n    raise SystemExit(9)\n")
+    write(project, "investigations/inv/run.py", (assets / "workbench/investigation/run.py").read_bytes())
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS + b'\n[results.r3]\n\n[results.r4]\nquestion = "Two\\nlines?"\n')
+    run = [sys.executable, str(project / "investigations/inv/run.py")]
+    for argv, named in (([], ["r3", "r4"]), (["r1", "r3"], ["r3"])):
+        done = subprocess.run(run + argv, capture_output=True, text=True)
+        assert (done.returncode, done.stdout) == (2, "")
+        assert [line.split("]")[0] for line in done.stderr.splitlines()] == [
+            f"settings.toml: [results.{r}" for r in named]
+    assert "[results.r3] has no question" in done.stderr
+    assert not any((project / p).exists() for p in ("opened", "investigations/inv/results", "investigations/inv/evidence"))
+    done = subprocess.run(run + ["r1"], capture_output=True, text=True)
+    assert done.returncode == 9 and (project / "opened").exists()  # a result with its question runs
+
+
 def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(project):
     pytest.importorskip("duckdb")
     pytest.importorskip("pandas")
@@ -551,6 +626,7 @@ def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(p
     assert "state_row" not in line
     assert list(provenance.finding_rows(project / "investigations/inv/state.md")) == ["r1"]
     evidence = json.loads((project / line["evidence"]).read_text())
+    assert evidence["question"] == "How many orders cleared the threshold?"
     assert "investigations/inv/queries/r1.sql" in evidence["producing_paths"]
     assert evidence["views"][0]["path"] == "foundation/views/orders.sql"
     state = (project / "investigations/inv/state.md").read_bytes()
@@ -575,3 +651,261 @@ def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(p
     assert failed.returncode == 1 and "outside the project root" in failed.stdout
     assert (project / "investigations/inv/results/r1.csv").exists()
     assert not (project / "investigations/inv/evidence/r1.json").exists()
+
+
+def installed(name):
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
+def test_record_evidence_records_runtime(project):
+    evidence = json.loads(record(project).read_text())
+    interpreter = {"python": platform.python_version(), "platform": f"{platform.system()}-{platform.machine()}"}
+    assert evidence["runtime"] == {**interpreter, "packages": {"duckdb": installed("duckdb"),
+                                                               "pandas": installed("pandas")},
+                                   "unread_requirements": []}
+    write(project, "requirements.txt", b"# comment\nPyTest>=7  # the runner\n-r other.txt\n"
+                                       b"awb_fixture.absent; python_version < '4'\nduckdb\n")
+    runtime = json.loads(record(project).read_text())["runtime"]
+    packages = runtime["packages"]
+    assert packages == {"awb-fixture-absent": None, "duckdb": installed("duckdb"),
+                        "pandas": installed("pandas"), "pytest": installed("pytest")}
+    assert packages["pytest"] is not None
+    assert runtime["unread_requirements"] == ["requirements.txt:3: -r other.txt (No such file or directory)"]
+
+
+def test_requirement_name_reads_names_and_direct_references():
+    # Every requirements.txt line the review rounds probed, with the package it names or None.
+    digest = "--hash=sha256:" + "0" * 64
+    cases = {
+        # Names, with extras, versions, markers, @ URL, comments, and trailing options.
+        "PyTest>=7  # the runner": "pytest", "pkg[extra]==1 ; python_version < '4'": "pkg",
+        "awb_fixture.absent; python_version < '4'": "awb-fixture-absent",
+        "pkg --hash=sha256:ab": "pkg", "pkg>=1 --hash=sha256:ab": "pkg", "pkg\t--hash=sha256:ab": "pkg",
+        "pkg==1.0 \\": "pkg", "pkg\t# c": "pkg", "foo (>=1.0)": "foo",
+        "pkg===1.0": "pkg", "pkg~=1.4": "pkg", "pkg==1.0+local.1": "pkg",
+        "Name @ https://example.invalid/y.zip": "name", "pkg@git+https://example.invalid/r.git": "pkg",
+        "requests[security] @ https://example.invalid/r.whl": "requests",
+        "requests[security] @ https://example.invalid/requests-2.32.3-py3-none-any.whl": "requests",
+        # VCS references by #egg=, wherever it sits in the fragment.
+        "git+https://example.invalid/org/realpkg.git#egg=Real_Pkg": "real-pkg",
+        "git+https://example.invalid/r.git@v1#egg=bar&subdirectory=x": "bar",
+        "-e git+https://example.invalid/r.git#subdirectory=x&egg=baz": "baz",
+        "-e git+https://example.invalid/r.git#egg=ed": "ed", "--editable=./src/x#egg=edx": "edx",
+        "-e git+https://example.invalid/r.git#egg=cfg --config-settings k=v": "cfg",
+        "--editable git+ssh://git@example.invalid/r.git#egg=sshpkg": "sshpkg",
+        # Round 4: -e with its value attached or quoted, as pip's option parser reads it.
+        "-egit+https://example.invalid/repo.git#egg=requests": "requests",
+        '-e "git+https://example.invalid/r.git#egg=quoted"': "quoted",
+        # Wheel and sdist file names: URL, file URL, bare, relative, and Windows paths.
+        "https://example.invalid/wheels/otherpkg-1.0-py3-none-any.whl": "otherpkg",
+        "https://example.invalid/scipy-1.14.1-py3-none-any.whl": "scipy",
+        "https://example.invalid/scipy-1.14.1-py3-none-any.whl#sha256=ab": "scipy",
+        "file:///tmp/foo-1.0-py3-none-any.whl": "foo", "file:///tmp/foo-1.0.tar.gz": "foo",
+        "https://example.invalid/foo-1.0.zip?x=1": "foo",
+        # Round 4: a ";" inside a URL is part of it (pip ends a URL's marker only at "; "), and the
+        # file name is percent-decoded.
+        "https://example.invalid/path;param/requests-2.32.3-py3-none-any.whl": "requests",
+        "https://example.invalid/requests%2D2.32.3%2Dpy3%2Dnone%2Dany.whl": "requests",
+        'https://example.invalid/foo-1.0-py3-none-any.whl ; python_version < "4"': "foo",
+        "proj-name-1.0.tar.gz": "proj-name",
+        "numpy-1.26.0-cp312-cp312-macosx_11_0_arm64.whl": "numpy", "./dist/foo_bar-2.0.tar.gz": "foo-bar",
+        "foo-bar_baz-1.0rc1.tar.gz": "foo-bar-baz",
+        r"C:\wheels\foo-1.0-py3-none-any.whl": "foo", r"C:\dist\win_sdist-2.0.tar.gz": "win-sdist",
+        # Archives with --hash, other per-requirement options, or a continuation backslash.
+        "numpy-1.26.0-cp312-cp312-macosx_11_0_arm64.whl --hash=sha256:ab": "numpy",
+        "./dist/numpy-1.26.0.tar.gz --hash=sha256:ab": "numpy",
+        "https://example.invalid/numpy-1.26.0.tar.gz --hash=sha256:ab --hash=sha256:cd": "numpy",
+        "https://example.invalid/numpy-1.26.0-py3-none-any.whl --hash=sha256:ab": "numpy",
+        "https://example.invalid/numpy-1.26.0-py3-none-any.whl --hash=sha256:ab \\": "numpy",
+        f"https://example.invalid/scipy-1.14.1-py3-none-any.whl {digest}": "scipy",
+        # Archives with extras.
+        "requests-2.32.3-py3-none-any.whl[security]": "requests",
+        "./dist/requests-2.32.3-py3-none-any.whl[security]": "requests",
+        "./dist/requests-2.32.3.tar.gz[security]": "requests",
+        f"./dist/requests-2.32.3-py3-none-any.whl[security] {digest}": "requests",
+        # Round 5: an archive's file name wins over an #egg= naming another package, as pip installs
+        # what the archive is; a matching #egg= or one on a non-archive reference is read as before.
+        "https://example.invalid/requests-2.32.3-py3-none-any.whl#egg=urllib3": "requests",
+        "https://example.invalid/requests-2.32.3-py3-none-any.whl#egg=Requests": "requests",
+        "./dist/requests-2.32.3.tar.gz#egg=urllib3": "requests",
+        "-e ./dist/requests-2.32.3.tar.gz#egg=urllib3": "requests",
+        "https://example.invalid/o/r/archive/main.zip#egg=foo": "foo",
+        # A limit requirement_name() documents: a forge tag archive's file name is not name-version.
+        "https://example.invalid/o/r/archive/refs/tags/release-1.0.tar.gz": "release",
+        "https://example.invalid/o/r/archive/refs/tags/release-1.0.tar.gz#egg=foo": "release",
+        "foo @ https://example.invalid/o/r/archive/refs/tags/release-1.0.tar.gz": "foo",
+        # References naming no package, option lines, continued hashes, and comments.
+        "src/mypkg": None, "-e .": None, "-e ./local": None, "git+https://example.invalid/r.git": None,
+        "https://example.invalid/x/foo.whl": None, "jaraco.zip": None,
+        "https://example.invalid/o/r/archive/main.zip": None,
+        "-r other.txt": None, '-r "deps/base.txt"': None, "--pre": None, "--no-binary :all:": None, "-c constraints.txt": None, "--index-url https://example.invalid": None,
+        "-i https://example.invalid": None, "--extra-index-url=https://example.invalid": None,
+        "-f ./wheels": None, "--only-binary :all:": None,
+        "    --hash=sha256:ab": None, f"    {digest} \\": None, "    # via pandas": None,
+        "# comment": None, "": None,
+    }
+    assert {line: provenance.requirement_name(line) for line in cases} == cases
+
+
+def test_read_requirements_follows_includes_and_byte_order_marks(project):
+    write(project, "requirements.txt", b"\xef\xbb\xbfscipy\n-r deps/base.txt\n--requirement=missing.txt\n"
+                                       b"-r https://example.invalid/remote.txt\n-c constraints.txt\n"
+                                       b"-r \"deps/a b.txt\"\n--requirement 'deps/quoted.txt'\n")
+    write(project, "deps/base.txt", b"-rmore.txt\nnumpy  # base\n-r ../requirements.txt\n")
+    write(project, "deps/more.txt", "pandas\nrequests[security]\n".encode("utf-16"))
+    write(project, "deps/a b.txt", b"tomli\n")
+    write(project, "deps/quoted.txt", b"pyarrow\n")
+    write(project, "constraints.txt", b"constrained==1\n")
+    assert provenance.read_requirements(project / "requirements.txt") == (
+        ["scipy", "pandas", "requests", "numpy", "tomli", "pyarrow"],
+        ["requirements.txt:3: --requirement=missing.txt (No such file or directory)",
+         "requirements.txt:4: -r https://example.invalid/remote.txt (a URL include is not fetched)"])
+    for encoding in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"):
+        write(project, "requirements.txt", "\ufeffscipy\nnumpy\n".encode(encoding))
+        assert provenance.read_requirements(project / "requirements.txt") == (["scipy", "numpy"], []), encoding
+    assert provenance.read_requirements(project / "absent.txt") == ([], [])
+
+
+def test_read_requirements_reports_each_include_of_a_missing_file(project):
+    write(project, "requirements.txt", b"-r missing.txt\n-r missing.txt\n-r sub/a.txt\n-r sub/b.txt\n-r sub/b.txt\n")
+    write(project, "sub/a.txt", b"-r ../missing.txt\n")
+    write(project, "sub/b.txt", b"numpy\n")
+    assert provenance.read_requirements(project / "requirements.txt") == (["numpy"], [
+        "requirements.txt:1: -r missing.txt (No such file or directory)",
+        "requirements.txt:2: -r missing.txt (No such file or directory)",
+        "sub/a.txt:1: -r ../missing.txt (No such file or directory)"])
+
+
+def test_read_requirements_lists_every_line_it_cannot_read(project):
+    write(project, "requirements.txt", (
+        "# options and comments are not unread\n-i https://example.invalid\n--pre --no-index\n"
+        "-c constraints.txt\n    --hash=sha256:ab\n\n"
+        "-e .\nsrc/mypkg\ngit+https://example.invalid/r.git\n--unknown-option x\n-r \"unbalanced.txt\n"
+        "\"requests\"\n-e\n--pre=1\n"
+        "pkg==1.0 \\\n    --hash=sha256:ab\n-r deps/inner.txt\n").encode())
+    write(project, "deps/inner.txt", b"named\n./local/dir\n"
+                                     b"https://example.invalid/requests-2.32.3-py3-none-any.whl#egg=urllib3\n")
+    names, unread = provenance.read_requirements(project / "requirements.txt")
+    assert names == ["pkg", "named", "requests"]
+    assert unread == [
+        "requirements.txt:7: -e .", "requirements.txt:8: src/mypkg",
+        "requirements.txt:9: git+https://example.invalid/r.git", "requirements.txt:10: --unknown-option x",
+        'requirements.txt:11: -r "unbalanced.txt', 'requirements.txt:12: "requests"',
+        "requirements.txt:13: -e", "requirements.txt:14: --pre=1", "deps/inner.txt:2: ./local/dir",
+        "deps/inner.txt:3: https://example.invalid/requests-2.32.3-py3-none-any.whl#egg=urllib3 "
+        "(#egg=urllib3 disagrees with the file name; recorded requests)"]
+    if sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)() != 0:
+        (project / "requirements.txt").chmod(0)
+        try:
+            assert provenance.read_requirements(project / "requirements.txt") == (
+                [], ["requirements.txt (Permission denied)"])
+        finally:
+            (project / "requirements.txt").chmod(0o644)
+
+
+def test_runtime_records_a_wheel_url_package_and_its_drift(project, capsys):
+    digest = "--hash=sha256:" + "0" * 64
+    write(project, "requirements.txt", (
+        f"https://example.invalid/pytest-0.0.1-py3-none-any.whl {digest}\n"
+        f"./wheels/pluggy-0.0.1-py3-none-any.whl[dev] {digest} \\\n    {digest}\n"
+        f"iniconfig-0.0.1-py3-none-any.whl[dev]\n").encode())
+    path = record(project)
+    evidence = json.loads(path.read_text())
+    assert set(evidence["runtime"]["packages"]) == {"duckdb", "iniconfig", "pandas", "pluggy", "pytest"}
+    for name in ("iniconfig", "pytest", "pluggy"):
+        assert evidence["runtime"]["packages"][name] == installed(name) is not None
+        evidence["runtime"]["packages"][name] = "0.0.1-fixture"
+    path.write_text(json.dumps(evidence))
+    provenance.cli_stale(project, [])
+    assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["details"] == [
+        f"{name} 0.0.1-fixture recorded, {installed(name)} now" for name in ("iniconfig", "pluggy", "pytest")]
+    # Round 4's forms: a compact -e, a URL holding ";" or percent-encoding, and a quoted include.
+    write(project, "requirements.txt", (
+        "-egit+https://example.invalid/repo.git#egg=pytest\n"
+        "https://example.invalid/path;param/pluggy-0.0.1-py3-none-any.whl\n"
+        "https://example.invalid/iniconfig%2D0.0.1%2Dpy3%2Dnone%2Dany.whl\n"
+        '-r "deps/more reqs.txt"\n').encode())
+    write(project, "deps/more reqs.txt", b"packaging\n")
+    path = record(project)
+    evidence = json.loads(path.read_text())
+    assert evidence["runtime"]["unread_requirements"] == []
+    assert set(evidence["runtime"]["packages"]) == {"duckdb", "iniconfig", "packaging", "pandas", "pluggy", "pytest"}
+    for name in ("iniconfig", "packaging", "pluggy", "pytest"):
+        assert evidence["runtime"]["packages"][name] == installed(name) is not None
+        evidence["runtime"]["packages"][name] = "0.0.1-fixture"
+    path.write_text(json.dumps(evidence))
+    provenance.cli_stale(project, [])
+    assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["details"] == [
+        f"{name} 0.0.1-fixture recorded, {installed(name)} now"
+        for name in ("iniconfig", "packaging", "pluggy", "pytest")]
+    # Round 5: a wheel whose #egg= names another package records the wheel's package and its drift,
+    # and its line is unread.
+    line = "https://example.invalid/pluggy-0.0.1-py3-none-any.whl#egg=iniconfig"
+    write(project, "requirements.txt", f"{line}\n".encode())
+    path = record(project)
+    evidence = json.loads(path.read_text())
+    assert set(evidence["runtime"]["packages"]) == {"duckdb", "pandas", "pluggy"}
+    evidence["runtime"]["packages"]["pluggy"] = "0.0.1-fixture"
+    path.write_text(json.dumps(evidence))
+    provenance.cli_stale(project, [])
+    assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["details"] == [
+        f"pluggy 0.0.1-fixture recorded, {installed('pluggy')} now",
+        f"requirements not read, packages unrecorded: requirements.txt:1: {line} "
+        "(#egg=iniconfig disagrees with the file name; recorded pluggy)"]
+
+
+@pytest.mark.filterwarnings("ignore:Implicit None:DeprecationWarning")
+def test_runtime_records_missing_version_metadata_as_unknown(project, tmp_path, monkeypatch):
+    info = tmp_path / "site/broken_package-0.dist-info"
+    info.mkdir(parents=True)
+    (info / "METADATA").write_text("Metadata-Version: 2.1\nName: broken-package\n")
+    monkeypatch.syspath_prepend(str(tmp_path / "site"))
+    write(project, "requirements.txt", b"broken-package\n")
+    packages = provenance.runtime(project)["packages"]
+    assert provenance._is_unknown(packages["broken-package"])
+    assert packages["broken-package"]["unknown"].startswith("broken-package: ")
+
+
+def test_cli_stale_reports_runtime_mismatch_as_a_warning(project, capsys):
+    path = record(project)
+    row = "| Orders are flat | [r1](evidence/r1.json) | supported | |"
+    write(project, "investigations/inv/state.md",
+          f"| Finding | Evidence | Status | Caveat |\n| --- | --- | --- | --- |\n{row}\n".encode())
+    assert provenance.cli_stale(project, []) == 0
+    assert json.loads(capsys.readouterr().out)["runtime_mismatches"] == []
+    evidence = json.loads(path.read_text())
+    current = evidence["runtime"]["packages"]["duckdb"]
+    evidence["runtime"]["packages"]["duckdb"] = "0.0.1-fixture"
+    path.write_text(json.dumps(evidence))
+    assert provenance.cli_stale(project, []) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["stale"] == 0 and out["results"] == []
+    assert out["runtime_mismatches"] == [{
+        "investigation": "inv", "result_id": "r1", "evidence": "investigations/inv/evidence/r1.json",
+        "details": [f"duckdb 0.0.1-fixture recorded, {current or 'not installed'} now"], "findings": [row]}]
+    assert [c["outcome"] for c in provenance.compare_evidence(project, path)] == ["pass"] * 5
+    evidence["runtime"]["python"] = "2.7.18"
+    path.write_text(json.dumps(evidence))
+    provenance.cli_stale(project, [])
+    details = json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["details"]
+    assert details[:2] == [f"python 2.7.18 recorded, {platform.python_version()} now",
+                           f"duckdb 0.0.1-fixture recorded, {current or 'not installed'} now"]
+    # A requirements line the runtime could not read is reported verbatim, never dropped: the
+    # trailing "." of -e . and a marker's "; " stay the line's own.
+    write(project, "requirements.txt", b"-e .\n./vendor/mypkg ; sys_platform == 'linux'\n")
+    path = record(project)
+    unread = ["requirements.txt:1: -e .", "requirements.txt:2: ./vendor/mypkg ; sys_platform == 'linux'"]
+    assert json.loads(path.read_text())["runtime"]["unread_requirements"] == unread
+    provenance.cli_stale(project, [])
+    out = json.loads(capsys.readouterr().out)
+    assert out["stale"] == 0 and out["runtime_mismatches"][0]["details"] == [
+        "requirements not read, packages unrecorded: " + line for line in unread]
+    evidence = json.loads(path.read_text())
+    del evidence["runtime"]
+    path.write_text(json.dumps(evidence))
+    provenance.cli_stale(project, [])
+    out = json.loads(capsys.readouterr().out)
+    assert out["stale"] == 0 and out["runtime_mismatches"][0]["details"] == ["evidence records no runtime"]

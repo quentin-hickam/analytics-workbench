@@ -46,7 +46,7 @@ Every scan after the edit uses `--rescan`, which keeps the pre-cleaning baseline
 
 ## 5. Flag affected findings
 
-Run `python3 src/awb.py stale`. Flag the findings whose `stale` entry names the corrected view or publication, or a view built on it; findings `stale` lists for other reasons keep their status.
+Run `python3 src/awb.py stale` with the interpreter that runs `run.py`, such as the project's virtual environment. Flag the findings whose `stale` entry names the corrected view or publication, or a view built on it; findings `stale` lists for other reasons keep their status. `runtime_mismatches` flag nothing; report them as a rerun decision for the user. A version mismatch on every result at once usually means a different interpreter, not an upgrade: rerun `stale` with the right one before reporting. A `requirements not read` entry in an entry's `details` ends with a line whose package version went unrecorded, not a change; report it with that line, quoted as given.
 
 ## 6. Record
 
@@ -64,7 +64,7 @@ EOF
 
 Flags go through the project's `src/provenance.py` state flag helper. A helper predating `findings.json` refuses before writes; run `awb-init` repair (`install_helpers.py --upgrade`).
 
-With no affected finding, add `"findings": "none: stale listed no finding reading <view>"`. The script fills new rows' IDs, observations, counts, and markers, keeps scan links and recorded counts and dates in `foundation/quality.json`, fills flagged statuses, and turns `{S1}` into that issue's quality ID. Reopening updates judgment cells and the link; the observation stays as first written. A decision on a recorded issue the scan no longer lists uses its quality ID, such as `"Q-004"`, as the key; it revises judgment cells while keeping the observation and link. `{Q-004}` placeholders also resolve. Record shared vocabulary in the glossary yourself.
+With no affected finding, add `"findings": "none: stale listed no finding reading <view>"`. The script fills new rows' IDs, observations, counts, and markers, keeps scan links and recorded counts and dates in `foundation/quality.json`, fills flagged statuses, and turns `{S1}` into that issue's quality ID. Reopening updates judgment cells and the link; the observation stays as first written. A decision on a recorded issue the scan no longer lists uses its quality ID, such as `"Q-004"`, as the key; it revises judgment cells while keeping the observation and link. `{Q-004}` placeholders also resolve. To cite a declared publication check that establishes a row, such as a `key` check confirming a decided grain, add `"check": {"publication": "data/parquet/<dataset>/<publication-id>/", "name": "key:order_id"}` to its decision; the script confirms that `publication.json` records the check and appends the citation to Current treatment. Record shared vocabulary in the glossary yourself.
 
 Read the existing catalog row before setting any of its cells; when a publication row shares the dataset's name, `record_cleaning.py` sets the view's row (Kind `canonical view`), so read that one. A cell you set replaces the whole cell: give its complete new text, keeping what still holds and citing quality IDs for rationale.
 

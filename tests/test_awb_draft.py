@@ -5,9 +5,18 @@
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten, revised_at stamped only when it changes, other manifest fields kept; nothing is written outside the draft.
 # test_evidence_older_than_scoped_3_is_reported_for_rerun: check-draft and export --result refuse awb-evidence/1 and unscoped /3 with a rerun instruction.
 # test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
+# test_check_draft_requires_each_question_in_methodology: export's questions pass once methodology repeats them; a question methodology lacks or rewords, a results entry without a question, and a manifest without results fail check-draft's questions, and release refuses on the check.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
 # test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
+# test_check_draft_traces_narrative_numbers: numbers in both narratives trace to a represented result's table cells within rounding, check details, settings, and profile rates as percents; an untraced number fails with its file, line, and text in both modes and refuses release; allowed_numbers accepts it and export keeps that field; dropping a result from the represented set untraces its numbers.
+# test_check_draft_reports_number_problems: a malformed allowed_numbers value or entry, a malformed results value or result_id, a missing result table, and an unreadable profile are numbers_problems that fail the check.
+# test_check_numbers_reads_formats: thousands separators, percents of fractions, scales, multipliers, scientific notation, ranges, and rounding trace; dates, years where their period ends, times with am or pm or seconds, codes, glued names, chart number lists, list markers, footnotes, code, comments, and link targets are skipped; a count beside a month name, a bare or parenthesized year-like count, a fraction, a time without am or pm, and a hash in scientific form are read; allowed texts pass.
+# test_check_numbers_reviewed_probes: every narrative probed in review rounds 1 to 4 is reported or skipped as intended, reading fail-safe: a context skips a number only where it marks no quantity, so a count after a punctuation mark, a chart reference, a date, or a year, or a year a word follows, is read; paths and identifiers are skipped whole; joined digits that are not thousands grouping or one decimal are read and never trace; a unit or context split by whitespace or a line wrap still counts; a number wrapping a list item's text is read, and a row's text allowed exactly covers it across a wrap; a leading- or trailing-point scientific mantissa is one number; and non-quantities such as a comparison year or a week number are reported.
+# test_recorded_text_reviewed_probes: every recorded text probed in review records the magnitudes intended, and an extreme or non-finite cell records nothing or itself without crashing.
+# test_check_numbers_allowed_phrases_and_precision: an allowed phrase covers only the number it is written around, a bare allowed text every occurrence; a row's text copied exactly covers its number after a line wrap or extra spaces; a number traces at every written digit beyond 28 significant digits and not one unit of a further place outside its rounding.
+# test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's or a path's digits add nothing; evidence text and parsed settings content add scaled and scientific values a narrative can write in full, without dates, booleans, or the settings file's size.
+# test_recorded_values_keep_every_json_digit: profile and evidence fractions keep every written digit, so the exact narrative value traces and a value one digit off does not.
 # test_verify_only_never_writes: a changed file is reported against the recorded inventory; the manifest stays byte-identical.
 # test_missing_manifest_runs_other_checks: without manifest.json the findings and chart checks still run; verify is not run and the check fails.
 # test_export_results_records_provenance_only: --result alone writes shared commit, inputs, settings, and packaging state, creates the manifest with its identity fields, leaves chart files untouched, and is not gated by a changed setting.
@@ -23,6 +32,7 @@
 # test_export_display_stub_names_each_gap_once: missing display names on chart and dataset paths give one quoted [columns] line each, deduplicated, a dotted column kept as one key; a blank name gets its own error and no stub line, so the stub pastes as valid TOML.
 # test_release_refuses_failed_check_or_pending_disposition: a failing verify, an unmatched flag, or a none/revalidate disposition creates no release; a missing or unknown disposition or malformed places fail the check's flag_entries; represented_in none needs no disposition.
 # test_release_reports_fields_for_the_report: datasets, dispositions marked new against the prior release's manifest (unknown when it is unreadable), provenance gaps, checkout-only acquisitions, and a clean local verify.
+# test_release_manifest_lists_runtime_per_result: export copies each represented result's runtime block into its results entry, unknown when the evidence has none or a null one, as stale reads it, and the release manifest keeps them; each unread requirements line is a provenance gap.
 # test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy compared.
 # test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do.
 # test_check_draft_refuses_causal_wording_above_claim_strength: causal wording on an association finding's slide fails with a row naming the phrase, line, and claim; a causal finding's slide and the Answer slide under a causal represented finding pass; method and caveat slides, code, comments, and hyphenated words are not read; release refuses on the row.
@@ -41,6 +51,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -59,10 +70,16 @@ CREATE OR REPLACE VIEW orders_view AS
 WITH recent AS (SELECT * FROM read_parquet('data/parquet/orders/p1/*.parquet'))
 SELECT r.*, EXTRACT(year FROM r.ordered_at) AS y FROM recent r JOIN main.regions_table g USING (region);
 """
-SETTINGS = b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n[results.r-001]\n\n[results.r-002]\n"
+SETTINGS = (b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n"
+            b'[results.r-001]\nquestion = "How many claims closed late?"\n\n'
+            b'[results.r-002]\nquestion = "Which regions close claims late?"\n')
 STALE_SETTINGS = SETTINGS.replace(b"minimum_count = 5", b"minimum_count = 6")
+RESULT = "region,late_rate,n\nW,21.349,10\nE,2.675,8\n"
 FINDINGS = "# Order quality\n\n### Late orders rose in the west\n\n**Chart 1.** Bar: late share by region\n"
-METHODOLOGY = "# Methodology\n\n## Findings\n\n### Late orders rose in the west\n\n**Claim strength:** association\n"
+QUESTIONS = {"r-001": "How many claims closed late?", "r-002": "Which regions close claims late?"}
+METHODOLOGY = ("# Methodology\n\n## Findings\n\n### Late orders rose in the west\n\n"
+               "**Claim strength:** association\n\n"
+               "Question (r-001): How many claims closed late?\nQuestion (r-002): Which regions close\nclaims late?\n")
 STATE = """# Current investigation state
 
 Last updated: 2026-10-01
@@ -154,10 +171,13 @@ def project(tmp_path):
     write(draft, "findings.md", FINDINGS)
     write(draft, "methodology.md", METHODOLOGY)
     write(draft, "charts/chart-1.csv", "Region,Late (%)\nWest,21\n")
+    write(tmp_path, "investigations/inv/results/r-001.csv", RESULT)
+    write(tmp_path, "investigations/inv/results/r-002.csv", "region\nW\n")
     write(draft, "manifest.json", json.dumps({
         "investigation": "inv", "package": "pkg", "status": "draft",
         "revalidation_flags": "none", "inventory": [],
-        "results": [{"result_id": "r-009", "evidence": "investigations/inv/evidence/r-009.json"}]}))
+        "results": [{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json", "question": q}
+                    for r, q in QUESTIONS.items()]}))
     return tmp_path
 
 
@@ -190,7 +210,8 @@ def test_toml_keys_fall_back_to_tomli_then_key_lines(project, monkeypatch):
     monkeypatch.setitem(sys.modules, "tomllib", None)
     monkeypatch.setitem(sys.modules, "tomli", tomllib)
     assert draft._toml_keys(text) == {"parameters", "parameters.minimum_count", "parameters.start",
-                                      "results", "results.r-001", "results.r-002"}
+                                      "results", "results.r-001", "results.r-001.question",
+                                      "results.r-002", "results.r-002.question"}
     monkeypatch.setitem(sys.modules, "tomli", None)
     assert {"parameters", "results.r-001", "minimum_count"} <= draft._toml_keys(text)
     write(project, "foundation/display.toml", "[columns]\n")
@@ -202,6 +223,7 @@ def test_check_draft_rewrites_inventory_and_passes(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["passed"] and "record" not in report
     assert (report["findings"], report["charts"], report["verify"], report["errors"]) == ([], [], [], [])
+    assert report["questions"] == []  # r-002's question is wrapped across two lines and still matches
     assert report["inventory"] == {"rows": 4, "source": "rewritten"}
     record = manifest(project)
     assert [row["path"] for row in record["inventory"]] == [
@@ -236,6 +258,46 @@ def test_check_draft_reports_each_helper_problem(project, capsys):
     assert report["names_problems"] == [
         "no settings found: investigations/inv/settings.toml is absent and no evidence records a settings file"]
     assert report["verify"] == []
+
+
+def set_results(project, results):
+    path = project / "deliveries/inv/pkg/draft/manifest.json"
+    record = json.loads(path.read_text())
+    if results is None:
+        record.pop("results")
+    else:
+        record["results"] = results
+    path.write_text(json.dumps(record))
+
+
+def test_check_draft_requires_each_question_in_methodology(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    write(draft, "methodology.md", METHODOLOGY.split("Question (r-002)")[0])
+    code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001")
+    assert code == 0 and report["questions"] == {"r-001": QUESTIONS["r-001"]}
+    assert run(project, capsys, "check-draft", "inv", "pkg")[1]["passed"]
+    assert run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")[1]["written"]
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and not report["passed"] and report["questions"] == [
+        {"result_id": "r-002", "question": QUESTIONS["r-002"],
+         "problem": "methodology.md does not repeat this question verbatim"}]
+    write(draft, "methodology.md", METHODOLOGY.replace("Which regions close", "Which regions closed"))
+    assert run(project, capsys, "check-draft", "inv", "pkg")[1]["questions"][0]["result_id"] == "r-002"
+    write(draft, "methodology.md", METHODOLOGY)
+    run(project, capsys, "check-draft", "inv", "pkg")
+    no_question = "the manifest records no question for this result; run export, or copy its question " \
+                  "from settings into a hand-added entry"
+    for results, problems in (
+            ([{"result_id": "r-001", "evidence": "investigations/inv/evidence/r-001.json"}],
+             [{"result_id": "r-001", "problem": no_question}]),
+            ([{"result_id": "r-001", "question": {"unknown": "evidence lacks question"}}],
+             [{"result_id": "r-001", "problem": no_question}]),
+            (None, [{"result_id": None, "problem": "the manifest records no results list; run export"}])):
+        set_results(project, results)
+        code, report = run(project, capsys, "release", "inv", "pkg")
+        assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
+        assert report["check"]["questions"] == problems
+    assert not (project / "deliveries/inv/pkg/released").exists()
 
 
 def set_flags(project, flags):
@@ -300,6 +362,272 @@ def test_check_draft_and_release_refuse_malformed_flag_entries(project, capsys):
     assert not (project / "deliveries/inv/pkg/released").exists()
 
 
+def set_manifest(project, **fields):
+    path = project / "deliveries/inv/pkg/draft/manifest.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), **fields}))
+
+
+TRACED = """# Order quality, January to June 2026
+
+### Late orders rose in the west
+
+- West closed 21.3% of orders late, against 2.7% in the east.
+- Ten checks covered 3 rows; regions needed at least 5 orders.
+- Missing regions were 0.0% of rows, and 1,240 orders were reviewed.
+
+**Chart 1.** Bar: late share by region
+"""
+
+
+def test_check_draft_traces_narrative_numbers(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    write(project, "investigations/inv/results/r-001.profile.json", json.dumps(
+        {"row_count": 2, "columns": {"region": {"dtype": "object", "null_rate": 0.0, "distinct_count": 2}}}))
+    write(project, "investigations/inv/results/r-002.csv", "orders\n1240\n")
+    set_manifest(project, results=[{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json",
+                                    "question": QUESTIONS[r]} for r in ("r-001", "r-002")])
+    # Table cells rounded, a check detail, a setting, a profile rate as a percent, a thousands separator.
+    write(draft, "findings.md", TRACED)
+    write(draft, "methodology.md", METHODOLOGY + "\nSettings `minimum_count = 7` (r-001), release 002, as of "
+          "2026-06-30.\n\n- West closed 21.3% late.\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["numbers"] == [] and report["numbers_problems"] == []
+    # A number no represented result produced fails with its file and line, in both modes and at release.
+    write(draft, "findings.md", TRACED.replace("21.3%", "23.1%"))
+    write(draft, "methodology.md", METHODOLOGY + "\nAbout 40 stores.\n")
+    rows = [{"file": "findings.md", "line": 5, "text": "23.1%"},
+            {"file": "methodology.md", "line": 13, "text": "40"}]
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and not report["passed"] and report["numbers"] == rows
+    code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert code == 1 and report["numbers"] == rows and report["verify"] == []
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
+    assert report["check"]["numbers"] == rows and not (project / "deliveries/inv/pkg/released").exists()
+    # An allowed number passes with its reason; a represented result's table is what makes a number trace.
+    set_manifest(project, allowed_numbers=[{"text": "23.1%", "reason": "the prior release's figure"},
+                                           {"text": "40", "reason": "store count from the owner"}])
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["numbers"] == []
+    allowed = manifest(project)["allowed_numbers"]
+    code, _ = run(project, capsys, "export", "inv", "pkg", "--result", "r-002")
+    assert code == 0 and manifest(project)["allowed_numbers"] == allowed  # export keeps the hand-recorded field
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and {"file": "findings.md", "line": 5, "text": "2.7%"} in report["numbers"]
+
+
+def test_check_draft_reports_number_problems(project, capsys):
+    (project / "investigations/inv/results/r-002.csv").unlink()
+    for fields, problems in [
+            ({"allowed_numbers": [{"text": "40", "reason": " "}, "40"]},
+             ["allowed_numbers entry 1 is not {text, reason} with both filled in",
+              "allowed_numbers entry 2 is not {text, reason} with both filled in"]),
+            ({"allowed_numbers": {"text": "40"}}, ["allowed_numbers is not none or a list of {text, reason}"]),
+            ({"results": [{"result_id": "../r-001"}]}, ["manifest.json results is not a list of result_id entries; "
+                                                         "rerun export"]),
+            ({"results": "none"}, ["manifest.json results is not a list of result_id entries; rerun export"]),
+            ({"results": [{"result_id": "r-002"}]},
+             ["investigations/inv/results/r-002.csv is missing; numbers from r-002 cannot be traced"])]:
+        set_manifest(project, allowed_numbers="none",
+                     results=[{"result_id": "r-001", "evidence": "investigations/inv/evidence/r-001.json"}])
+        set_manifest(project, **fields)
+        code, report = run(project, capsys, "check-draft", "inv", "pkg")
+        assert code == 1 and report["numbers"] == [] and report["numbers_problems"] == problems
+    write(project, "investigations/inv/results/r-002.profile.json", "{not json")
+    write(project, "investigations/inv/results/r-002.csv", "n\n1\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["numbers_problems"][0].startswith(
+        "investigations/inv/results/r-002.profile.json: unreadable")
+
+
+def test_check_numbers_reads_formats(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_numbers")
+    values = sorted({Decimal(v) for v in ("21.349", "0.105", "0.15", "3", "4213000", "12480", "1240", "0.5")})
+    path = tmp_path / "findings.md"
+    path.write_text("""# Orders, January to June 2026
+
+- n = 1,240 as of June 30, 2026, 30 June 2026, 2026-06-30T14:05:00-04:00, 6/30/2026, and 14:05:30.
+- West 21% and 21.35; between 10-15% or 10 and 15%; 3x the east; $4.2M and 12.5 thousand; 0.5 percentage points.
+- Release 002, Q-3, chart-1, v1.2.3, COVID-19, FY2026, and Charts 1.
+1. A list marker[^2], `code 77`, and [the 7 guide](notes/88.md).
+<!-- 66 -->
+```
+44
+```
+- Untraced: 21.4%, 1,250, 4.3M, 16%, 2, 3/4 of stores, 14:05, and (2025).
+- Skipped: in 2026, Q3 2026, Charts 2 and 3, 9:30am, 9:30 a.m., June 5, June 5-7, 2026, Monday, June 5.
+- Traced: 1.24e3, 4.213e6, 1.5e-1 and 5e-1. Untraced: a hash 12345e6, 1e-5, 1.5e6, June 77 orders, 1950 orders.
+""")
+    assert draft.check_numbers(path, values) == [
+        {"file": "findings.md", "line": 6, "text": "7"},
+        *({"file": "findings.md", "line": 11, "text": t} for t in ("21.4%", "1,250", "4.3M", "16%", "2", "3/4", "14:05", "2025")),
+        *({"file": "findings.md", "line": 13, "text": t} for t in ("12345e6", "1e-5", "1.5e6", "77", "1950"))]
+    assert draft.check_numbers(path, values, allowed={"7", "2", "16%", "1,250", "4.3M", "21.4%", "3/4", "14:05", "(2025)",
+                                                      "12345e6", "1e-5", "1.5e6", "77", "1950"}) == []
+
+
+# Each narrative a review probed in rounds 1 to 4, and each case the fail-safe reading settles, with the numbers
+# check_numbers reports for it ([] is all skipped or traced), against recorded values [0.5] unless a row gives its own values or allowed texts.
+# Reading fails safe, so a number in a doubtful context is reported, never skipped.
+SHARE, FIXTURE, SCALED = {"values": ["0.213"]}, {"values": ["21.349", "2.675", "10", "8"]}, \
+    {"values": ["4.2", "4.2e6", "0.00001", "1.2e9"]}
+REVIEWED_PROBES = [
+    ("Probability is 1e-5.", ["1e-5"]), ("Revenue is 1.5e6.", ["1.5e6"]), ("Revenue is 1.5E+06.", ["1.5E+06"]),
+    ("12e3 orders", ["12e3"]), ("12.5e3", ["12.5e3"]),  # any mantissa: a hash such as 12345e6 is reported too
+    ("Failure probability was .5e-3.", [".5e-3"], {"values": ["0.5", "3"]}),  # one number, never its pieces
+    ("Failure probability was 5.e-3.", ["5.e-3"], {"values": ["5", "3"]}),
+    ("Failure rate was .5e-3.", [], {"values": ["0.0005"]}), ("Failure rate was 5.e-3.", [], {"values": ["0.005"]}),
+    ("In June 77 orders were lost.", ["77"]), ("in June 31 orders", ["31"]), ("June 5, 77 orders", ["77"]),
+    ("on June 5 77 orders", ["5", "77"]), ("5 June 77 orders", ["5", "77"]),  # a date ends at punctuation
+    ("June 5 we met", ["5"]), ("On June 5, 2026 we met", ["2026"]), ("From June 1, 2026 to June 30, 2026.", []),
+    ("As shown in Chart 1, 77 orders were late.", ["77"]), ("As shown in Chart 1; 77 orders were late.", ["77"]),
+    ("Chart 1, 2 regions led.", ["2"]), ("See Chart 2 and 40 stores.", ["40"]), ("Chart 3 - 12 regions", ["12"]),
+    ("Chart 1: 77 orders", ["77"]), ("Charts 1 and 4 show 77 orders", ["4", "77"]), ("Charts 1 and 4 show it", ["4"]),
+    ("Charts 1, 2, and 3 show it", ["2", "3"]), ("Charts 2-3 show it", ["3"]), ("Charts 2-3", []),
+    ("Charts 1 and 4.", []), ("Charts 1, 40 stores", ["40"]), ("Charts 1 and 2, 40 stores", ["40"]),
+    ("Charts 4,5 show it", ["4,5"]),
+    ("in 2025, 2030 orders shipped", ["2030"]), ("since 2019, and 2020", []), ("between 2023 and 2024", []),
+    ("in 2023, 2024 and 2025", []), ("We reviewed 1950 orders and 2,000 stores", ["1950", "2,000"]),
+    ("an increase in 2000 orders", ["2000"]), ("between 1950 and 2000 stores were affected", ["1950", "2000"]),
+    ("late 2000 orders were found", ["2000"]), ("in 2025 and 2026 orders", ["2025", "2026"]), ("mid-2025.", []),
+    ("In June 2026 orders were lost", ["2026"]), ("Q3 2025 revenue", ["2025"]), ("In Q3 2000 orders were late", ["2000"]),
+    ("Revenue fell in Q3 2025.", []), ("FY 2024 and 2025 orders", ["2024", "2025"]), ("FY 2024 and 2025.", []),
+    ("Late orders (2025) exceeded the target.", ["2025"]),
+    ("in 2000\norders were lost", ["2000"]),  # a line wrap continues the sentence
+    ("Late orders rose 3 points over 2025.", ["3", "2025"]), ("compared with 2024", ["2024"]),
+    ("the 2025 baseline", ["2025"]), ("2026 H1", ["2026"]), ("Week 23", ["23"]),
+    ("Python 3.12 and DuckDB 1.1.3", ["3.12"]), ("Python 3.11", ["3.11"]), ("Python 3.12.1", []), ("3.12", ["3.12"]),
+    ("host 10.0.0.1", []), ("1.234.567 orders", ["1.234.567"]), ("1.234,5 orders", ["1.234,5"]),
+    ("?id=42", ["42"]), ("## 2. Sources", []), ("1. 77 orders", ["77"]),
+    ("The count rose to\n77. Orders then fell.", ["77"]),  # 77. continues a paragraph; only 1. starts a list
+    # Inside a list item or a quote, an indented number wraps the item's text unless a list item above has its indent.
+    ("- Orders in the West rose to\n  77. Returns fell.", ["77"]), ("* Orders rose to\n  77. Then fell.", ["77"]),
+    ("1. Orders in the West rose to\n   77. Returns fell.", ["77"]), ("> - The count rose to\n>   77. Orders then fell.", ["77"]),
+    ("- Orders rose\n  steadily to\n  77. Then fell.", ["77"]), ("- Orders rose to\n77. Then fell.", []),
+    ("  1. Orders rose\n  2. Orders fell", []), ("- Orders\n  - rose\n  77. Then fell.", []), ("- Orders\n  1. rose", []),
+    ("1. Orders rose\n   steadily\n2. Orders fell", []),
+    ("opened at 9:30am", []), ("opened at 14:05", ["14:05"]), ("a 1:20 ratio", ["1:20"]),
+    ("-21.3%", ["21.3%"]), ("10–15 percent", ["10", "15 percent"]),
+    ("values 1,2,3 and 4, 5", ["1,2,3", "4", "5"]), ("21,3%", ["21,3%"]), ("3/4 of stores", ["3/4"]),
+    ("Total,77 orders were late.", ["77"]), ("Total, 77 orders were late.", ["77"]), ("Total;77", ["77"]),
+    ("Total:77", ["77"]), ("(77 orders)", ["77"]), ("Rates: West,21.3%; East,2.7%.", ["21.3%", "2.7%"]),
+    ("West/21.3%", ["21.3%"]), ("sentence.5 stores", ["5"]), ("_77 orders_", ["77"]), ("late_77", []),
+    ("Source: results/r-001-77.csv.", []), ("file data/run-2-45.parquet", []), ("**results/r-001-77.csv**", []),
+    ("./run-2-45.csv and results/12-45.csv", []), ("ORD-123-45 and ORD-123", []), ("COVID-19", []),
+    ("COVID-19-related 77 orders", ["77"]), ("top-10 stores", ["10"]), ("45/day", ["45"]),
+    ("1st place", ["1st"], {"values": []}), ("77th percentile", ["77th"]), ("100ms", ["100ms"]),
+    ("1 000 000 orders", ["1 000 000"], {"values": ["1", "0", "1000000"]}), ("5½", ["5½"], {"values": ["5"]}), ("30d window", [], {"values": ["30"]}),
+    ("USD4.2M", [], {"values": ["4.2e6"]}),
+    ("Late rate (%) <- r-001.late_rate", []), ("chart-1: Late rate (%) <- r-001.late_rate", []),
+    ("Share was 21.3 percent.", [], SHARE), ("Share was 21.3  percent.", [], SHARE),
+    ("Share was 21.3\npercent.", [], SHARE), ("Share was 21.3 %.", [], SHARE), ("> Share was 21.3\n> percent.", [], SHARE),
+    ("> Orders rose in 2025\n> orders 77", ["2025", "77"]), ("> The count rose to\n> 77. Orders fell.", ["77"]),
+    ("Revenue was 4.2  million.", [], SCALED), ("Revenue was 1.2 bn.", [], SCALED),
+    ("Revenue is 4,200,000.", [], SCALED), ("The threshold is 0.00001.", [], SCALED),
+    # Both narratives' numbers are recorded, so the check passes them; whether they agree is the manual item.
+    ("### Late orders rose in the west\n\n- West closed 21.3% of orders late.", [], FIXTURE),
+    ("### Late orders rose in the west\n\nWest closed 2.7% of orders late (r-001).", [], FIXTURE),
+    ("Late orders rose 3 points over 2025; 2025 orders. Week 23 and 23 stores.", ["2025", "23"],
+     {"values": ["3"], "allowed": {"over 2025", "Week 23"}}),
+    ("Week 23 ran on Python 3.12, up 3 points over 2025; 23 stores and 2025 orders.", ["3", "23", "2025"],
+     {"values": [], "allowed": {"Week 23", "Python 3.12", "over 2025"}}),
+    ("compared with 2024, the 2025 baseline, 2026 H1", [],
+     {"values": [], "allowed": {"compared with 2024", "the 2025 baseline", "2026 H1"}}),
+    ("140 and 40%", ["140", "40%"], {"allowed": {"40"}}), ("Week 230", ["230"], {"allowed": {"Week 23"}}),
+    # A row's text copied exactly covers its number across extra spaces or a wrap; a bare number does not cover its unit.
+    ("Share was 18.2\npercent last year.", [], {"values": [], "allowed": {"18.2 percent"}}),
+    ("Share was 18.2  percent last year.", [], {"values": [], "allowed": {"18.2 percent"}}),
+    ("> Share was 18.2\n> percent.", [], {"values": [], "allowed": {"18.2 percent"}}),
+    ("- Share was 18.2\n  percent.", [], {"values": [], "allowed": {"18.2 percent"}}),
+    ("Share was 18.2\npercent this year.", ["18.2 percent"], {"values": [], "allowed": {"18.2"}}),
+    ("Ran in Week\n23 of the year.", [], {"values": [], "allowed": {"Week 23"}}),
+]
+
+
+def test_check_numbers_reviewed_probes(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_probes")
+    path = tmp_path / "findings.md"
+    found = {}
+    for line, _, *options in REVIEWED_PROBES:
+        option = options[0] if options else {}
+        path.write_text(line + "\n")
+        values = sorted(Decimal(value) for value in option.get("values", ["0.5"]))
+        found[line] = [row["text"] for row in draft.check_numbers(path, values, allowed=option.get("allowed", ()))]
+    assert found == {line: expected for line, expected, *_ in REVIEWED_PROBES}
+
+
+# Each recorded text a review probed, with the magnitudes it records.
+REVIEWED_RECORDED = [
+    ("Revenue is $4.2M.", ["4.2", "4.2e6"]), ("threshold = 1e-5", ["0.00001"]), ("results/r-001-77.csv", []),
+    ("ORD-123", []), ("1e999999999999999999", ["1e999999999999999999"]), ("9e9999999999999999999", []),
+    ("sNaN", []), ("Infinity", []), ("-0", ["0"]), ("1,5", []), ("Total,77", ["77"]),
+    ("threshold = .5e-3", ["0.0005"]), ("rate 5.e-3", ["0.005"]),
+]
+
+
+def test_recorded_text_reviewed_probes():
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_recorded_probes")
+    for text, expected in REVIEWED_RECORDED:
+        found = set()
+        draft._magnitudes(text, found)
+        assert sorted(found) == sorted(Decimal(value) for value in expected), text
+
+
+def test_check_numbers_allowed_phrases_and_precision(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_phrases")
+    path = tmp_path / "methodology.md"
+    path.write_text("Week 23 ran on Python 3.12, up 3 points over 2025; 23 stores and 2025 orders.\n")
+    assert [row["text"] for row in draft.check_numbers(path, [], allowed={"Week 23", "Python 3.12", "over 2025"})] \
+        == ["3", "23", "2025"]
+    assert [row["text"] for row in draft.check_numbers(path, [], allowed={"23", "3.12", "3", "2025"})] == []
+    for text in ("Share was 23.1\npercent.\n", "Share was 23.1  percent.\n", "Share was 23.1 \n  percent.\n"):
+        path.write_text(text)  # the row's text, copied exactly, covers it after a wrap or extra spaces
+        assert [row["text"] for row in draft.check_numbers(path, [])] == ["23.1 percent"]
+        assert draft.check_numbers(path, [], allowed={"23.1 percent"}) == []
+    path.write_text("Share 0.12345678901234567890123456789, or 1.2345678901234567890123456789e-1.\n")
+    assert draft.check_numbers(path, [Decimal("0.12345678901234567890123456789")]) == []
+    assert [row["text"] for row in draft.check_numbers(path, [Decimal("0.1234567890123456789012345679")])] == [
+        "0.12345678901234567890123456789", "1.2345678901234567890123456789e-1"]  # 1E-29 away: outside the rounding
+
+
+def test_recorded_values_reads_whole_cells_and_quantities(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_recorded")
+    write(tmp_path, "investigations/inv/results/r-001.csv",
+          "customer_hash,orders,label,source\n4e1234567,3,ORD-123,results/r-001-77.csv\n")
+    # settings content is parsed TOML, as awb_provenance records it.
+    write(tmp_path, "investigations/inv/evidence/r-001.json", json.dumps(
+        {"checks": [{"detail": "Revenue is $4.2M on 2026-06-30"}], "producing_commit": "1234567", "notes": "run 9",
+         "settings": {"path": "settings.toml", "bytes": 120, "content": {
+             "parameters": {"threshold": 1e-5, "start": "2026-01-01", "flag": True},
+             "results": {"r-001": {"window_days": 30}}}}}))
+    values, problems = draft.recorded_values(tmp_path, "inv", [{"result_id": "r-001"}])
+    assert problems == [] and values == sorted(  # no 123 from ORD-123, no 77 from the path, no overflow
+        Decimal(v) for v in ("3", "4e1234567", "4.2", "4.2e6", "0.00001", "30"))
+    path = tmp_path / "findings.md"
+    path.write_text("Revenue was 4,200,000 against a threshold of 0.00001.\n")
+    assert draft.check_numbers(path, values) == []
+
+
+def test_recorded_values_keep_every_json_digit(tmp_path):
+    # Profile and evidence fractions are read as written, not through a binary float.
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_exact_json")
+    write(tmp_path, "investigations/inv/results/r-001.csv", "label\nwest\n")
+    write(tmp_path, "investigations/inv/results/r-001.profile.json",
+          '{"value": 0.12345678901234567890123456789, "rate": 0.21300000000000001, "rows": 12345678901234567890}')
+    write(tmp_path, "investigations/inv/evidence/r-001.json",
+          '{"checks": [{"detail": {"share": 0.30000000000000004}}], "settings": {"content": {"cut": 1e-30}}}')
+    values, problems = draft.recorded_values(tmp_path, "inv", [{"result_id": "r-001"}])
+    assert problems == [] and values == sorted(Decimal(v) for v in (
+        "0.12345678901234567890123456789", "0.21300000000000001", "12345678901234567890", "0.30000000000000004",
+        "1e-30"))
+    path = tmp_path / "findings.md"
+    path.write_text("Shares 0.12345678901234567890123456789 and 0.21300000000000001.\n")
+    assert draft.check_numbers(path, values) == []
+    path.write_text("Shares 0.12345678901234568000000000000 and 0.21300000000000002.\n")
+    assert [row["text"] for row in draft.check_numbers(path, values)] == [
+        "0.12345678901234568000000000000", "0.21300000000000002"]
+
+
 def test_verify_only_never_writes(project, capsys):
     run(project, capsys, "check-draft", "inv", "pkg")
     before = (project / "deliveries/inv/pkg/draft/manifest.json").read_bytes()
@@ -341,9 +669,13 @@ def test_export_results_records_provenance_only(project, capsys):
         (["r-002"], {"minimum_count": 5, "start": "2026-01-01"})]
     assert record["packaging_commit"] == head and record["packaging_uncommitted_changes"] == "none"
     assert record["export_checks"] == "none" and "charts" not in record and "dataset_selection" not in record
-    # A result represented without serialization is still listed with its evidence, for status.
-    assert record["results"] == [{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json"}
-                                 for r in ("r-001", "r-002")]
+    # A result represented without serialization is still listed with its evidence, for status, the
+    # question its evidence recorded, verbatim, for methodology.md, and the runtime it recorded.
+    assert record["results"] == [
+        {"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json", "question": QUESTIONS[r],
+         "runtime": json.loads((project / f"investigations/inv/evidence/{r}.json").read_text())["runtime"]}
+        for r in ("r-001", "r-002")]
+    assert report["questions"] == QUESTIONS
     assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes() == chart
 
 
@@ -488,7 +820,6 @@ late_rate = 1
 
 
 def with_results(project):
-    write(project, "investigations/inv/results/r-001.csv", "region,late_rate,n\nW,21.349,10\nE,2.675,8\n")
     write(project, "foundation/display.toml", DISPLAY)
 
 
@@ -529,6 +860,7 @@ def test_export_checks_follow_the_represented_set(project, capsys):
 
 
 def test_export_names_every_gap_and_blocks_stale_results(project, capsys):
+    (project / "investigations/inv/results/r-002.csv").unlink()
     with_results(project)
     write(project, "foundation/display.toml", DISPLAY.replace('n = "Cases"\n', ""))
     code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--chart", "r-002", "--no-datasets")
@@ -642,6 +974,42 @@ def test_release_reports_fields_for_the_report(project, capsys):
     (project / "deliveries/inv/pkg/released/003/manifest.json").write_text("not json")
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["release_number"] == "004" and report["dispositions"][0]["new"] is None
+
+
+def test_release_manifest_lists_runtime_per_result(project, capsys):
+    evidence = project / "investigations/inv/evidence"
+    first = json.loads((evidence / "r-001.json").read_text())["runtime"]
+    assert set(first) == {"python", "platform", "packages", "unread_requirements"}
+    second = json.loads((evidence / "r-002.json").read_text())
+    second["runtime"]["packages"]["duckdb"] = "0.0.1-fixture"
+    (evidence / "r-002.json").write_text(json.dumps(second))
+    code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    assert code == 0 and report["written"]
+    run(project, capsys, "check-draft", "inv", "pkg")
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 0 and report["released"] and report["provenance_gaps"] == []
+    assert [(r["result_id"], r["runtime"]) for r in manifest(project, "released/001")["results"]] == [
+        ("r-001", first), ("r-002", second["runtime"])]
+    second["runtime"]["unread_requirements"] = ["requirements.txt:2: -e ."]
+    (evidence / "r-002.json").write_text(json.dumps(second))
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    run(project, capsys, "check-draft", "inv", "pkg")
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 0 and report["released"] and report["provenance_gaps"] == [
+        {"field": "results[1].runtime.unread_requirements[0]",
+         "reason": "requirements not read, packages unrecorded: requirements.txt:2: -e ."}]
+    del second["runtime"]
+    (evidence / "r-002.json").write_text(json.dumps(second))
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    run(project, capsys, "check-draft", "inv", "pkg")
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 0 and report["provenance_gaps"] == [
+        {"field": "results[1].runtime", "reason": "evidence lacks runtime"}]
+    assert manifest(project, "released/003")["results"][1]["runtime"] == {"unknown": "evidence lacks runtime"}
+    second["runtime"] = None
+    (evidence / "r-002.json").write_text(json.dumps(second))
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    assert manifest(project, "draft")["results"][1]["runtime"] == {"unknown": "evidence lacks runtime"}
 
 
 def test_release_numbers_stamps_and_copies_to_storage(project, capsys, tmp_path_factory):
@@ -817,11 +1185,17 @@ Result `r-002`.
 
 def claim_draft(project, findings=CLAIM_FINDINGS, methodology=CLAIM_METHODOLOGY, results=("r-009", "r-002")):
     draft = project / "deliveries/inv/pkg/draft"
+    # Each represented result's question, repeated in a section of its own so it cites no result, and the
+    # table the findings' numbers trace to: the questions and numbers checks pass, leaving claims to judge.
+    questions = {r: {**QUESTIONS, "r-009": "Did west late orders rise?"}.get(r, "What did this result record?")
+                 for r in results}
     write(draft, "findings.md", findings)
-    write(draft, "methodology.md", methodology)
+    write(draft, "methodology.md", methodology + "\n## Result questions\n\n" + "\n\n".join(questions.values()) + "\n")
+    write(project, "investigations/inv/results/r-009.csv", "region,late_rate,change\nW,21,4\n")
     path = draft / "manifest.json"
     record = json.loads(path.read_text())
-    record["results"] = [{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json"} for r in results]
+    record["results"] = [{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json", "question": questions[r]}
+                         for r in results]
     path.write_text(json.dumps(record))
 
 

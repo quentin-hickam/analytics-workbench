@@ -16,7 +16,7 @@ Every skill name carries the `awb-` prefix, so typing `awb-` in a host that list
 ## Requirements
 
 - For package chart files, the chart helper that `awb-package` ships needs Python 3.10 or later and pandas.
-- The project helpers need Python 3.10 or later (3.11 or later, or `tomli`, for TOML settings). `awb-init`'s installer declares and checks their packages: pandas for validation and charts, and `duckdb` for sessions, queries, and publication. `land()`, `publish()`, and `retain()` themselves use only the standard library.
+- The project helpers need Python 3.10 or later (3.11 or later, or `tomli`, for TOML settings). `awb-init`'s installer declares and checks their packages: pandas for validation and charts, and `duckdb` for sessions, queries, and publication. `land()`, `publish()`, and `retain()` themselves use only the standard library, except that `publish()` needs `duckdb` to run a dataset's declared checks and, on Python 3.10, `tomli` to read an existing `foundation/datasets.toml`.
 - For result validation under the project `AGENTS.md`, the analysis project's Python environment needs Python 3.10 or later and pandas. The shared validation file was tested with pandas 2.2.
 - The `awb-clean` and `awb-eda` scans need Python 3.10 or later and the `duckdb` package in the project's interpreter (TOML settings need 3.11 or later, or `tomli`); the `awb-clean` record script needs only the standard library.
 - The read-only status collector needs Python 3.10 or later and the standard library; unsupported project record formats use targeted manual reads.
@@ -52,7 +52,7 @@ In the target project's agent session, start from the business question:
 
 If you ask without a question, `awb-init` asks for one; say there is no question yet to set up the project alone. Continue analytical work normally using the generated AGENTS.md instructions. The default data flow is independent source landing, validated Parquet datasets, and DuckDB views loaded into separate analytical sessions. Data gathering never writes directly into the canonical database as its only retained representation.
 
-`awb-init` installs the project helpers under `src/` with its installer, `scripts/install_helpers.py`, and writes a `requirements.txt` when the project declares no dependencies; it records what it installs in a receipt, `.awb-receipt.json`, so its `--upgrade` can bring unmodified earlier copies up to date. Mechanical work then runs as single commands whose output the agent reports verbatim, and computation runs as saved queries rather than scratch scripts: `python3 src/awb.py --help` lists the commands (`sql`, `profile`, `land`, `retain`, `publish`, `state`, `stale`, `export`, `check-draft`, `release`, `copy-releases`). Each investigation's run script, `run.py`, produces, validates, and records its results in one run and writes their `state.md` rows; `state` prints the active investigation's brief and state to resume, and records finding wording and status, with history where due, and issues and next steps.
+`awb-init` installs the project helpers under `src/` with its installer, `scripts/install_helpers.py`, and writes a `requirements.txt` when the project declares no dependencies; it records what it installs in a receipt, `.awb-receipt.json`, so its `--upgrade` can bring unmodified earlier copies up to date. Mechanical work then runs as single commands whose output the agent reports verbatim, and computation runs as saved queries rather than scratch scripts: `python3 src/awb.py --help` lists the commands (`sql`, `profile`, `land`, `retain`, `publish`, `state`, `stale`, `export`, `review-rules`, `check-draft`, `release`, `copy-releases`). Each investigation's run script, `run.py`, produces, validates, and records its results in one run and writes their `state.md` rows; `state` prints the active investigation's brief and state to resume, and records finding wording and status, with history where due, and issues and next steps.
 
 To see where things stand and what you can ask for next:
 
@@ -62,7 +62,7 @@ When a package is needed:
 
 > Use awb-package to prepare a draft for the active investigation.
 
-The skill asks which datasets to include. Subsequent requests revise the same draft. Drafting never releases it. When it is ready:
+The skill asks which datasets to include. Subsequent requests revise the same draft. Drafting never releases it. Before the draft's final check, and again before a release, a fresh reviewer subagent limited to read tools checks the narratives and every rule in `foundation/review-rules.md` and reports without fixing anything; only an agent host with no subagents has the drafting agent follow the same read-only review itself. Each correction you make while reviewing a draft that later drafts could repeat is appended there as a numbered rule, `R-<area>-NNN`, that every later review checks; a one-off edit, such as a preferred wording on one slide, is not. When it is ready:
 
 > Use awb-release — mark the package delivered.
 
@@ -70,11 +70,13 @@ That preserves the next numbered release, frozen from then on, once you have cho
 
 Landed source data gets the same treatment. `data/raw/` is also excluded from Git, and a landed original often cannot be fetched again, so before the first acquisition is landed the agent asks where landed originals are kept outside the checkout, records it on the project README's `Landed data is kept at` line, and copies each completed landing there when the location is reachable. `awb-status` reports landed data that exists only in the checkout.
 
+The third-party documentation a source assessment relies on, such as a data dictionary or codebook, is kept under `foundation/references/<source-id>/` and suggested for commit; material whose license or confidentiality bars committing it stays outside the checkout, recorded by location and checksum. `awb-status` reports a source assessed from documentation with no recorded reference.
+
 After installing a newer release of the skills, bring each existing workbench up to date with `awb-init`'s repair:
 
 > Use awb-init to repair this workbench.
 
-Repair runs the helper installer with `--upgrade`. It replaces only unmodified copies of earlier shipped helpers, package formats, and workbench guides, which it recognizes from the checksum receipt it writes at each install; it reports customized copies for you to decide and removes retired files only when you ask. The agent then reconciles the project's adapted `AGENTS.md` and `README.md` against the current templates.
+Repair runs the helper installer with `--upgrade`. It installs missing helpers, guides, and the `foundation/references/` README and replaces only unmodified copies of earlier shipped helpers, package formats, workbench guides, and that README, which it recognizes from the checksum receipt it writes at each install; it reports customized copies for you to decide and removes retired files only when you ask. The agent then reconciles the project's adapted `AGENTS.md`, `README.md`, and `.gitignore` against the current templates.
 
 <!-- dist:exclude -->
 ## Design and validation

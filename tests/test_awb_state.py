@@ -1,5 +1,6 @@
 # Kept cases:
 # test_show_prints_brief_and_state_verbatim: resume prints brief.md and state.md verbatim with a warning per row whose evidence is missing, writes nothing, honours --investigation, lists investigations when none is active, and exits 2 for an unknown one.
+# test_show_prints_each_findings_question: resume prints the question each finding's evidence records, by result ID in table order, after state.md and before missing-evidence warnings.
 # test_run_rows_are_added_kept_and_refreshed: a new result gets a placeholder row; an exact-match rerun leaves state.md and history.md untouched; a changed rerun keeps wording and notes, demotes supported with a history entry, keeps superseded, and demotes provisional silently.
 # test_flagged_rerun_always_writes_history: a flagged row returns to provisional, or superseded when it was, with a reset caveat and a history entry naming the flag reason and the exact match.
 # test_failed_state_write_removes_new_evidence: evidence is removed only before findings.json is replaced; a failed state replacement names render, and failed history names missing prior rows.
@@ -90,7 +91,8 @@ def project(tmp_path):
         for record in ("state.md", "history.md", "brief.md"):
             shutil.copyfile(TEMPLATES / "investigation" / record, directory / record)
         (directory / "settings.toml").write_text(
-            "[parameters]\nyear = 2026\n" + "".join(f"\n[results.r{i}]\n" for i in range(1, 6)))
+            "[parameters]\nyear = 2026\n"
+            + "".join(f'\n[results.r{i}]\nquestion = "What is question {i}?"\n' for i in range(1, 6)))
         for i in range(1, 6):
             (directory / f"queries/r{i}.sql").write_text(f"select {i}\n")
     state = tmp_path / STATE
@@ -158,6 +160,18 @@ def test_show_prints_brief_and_state_verbatim(project, capsys):
     code, out, _ = run(project, capsys)
     assert code == 0 and out.startswith("No active investigation. Investigations: churn, pricing.")
     assert run(project, capsys, "issues", "--add", "x")[0] == 1
+
+
+def test_show_prints_each_findings_question(project, capsys):
+    for result_id in ("r2", "r1", "r3"):
+        produce(project, result_id)
+    (project / f"{INV}/evidence/r3.json").unlink()
+    code, out, _ = run(project, capsys)
+    assert code == 0
+    view = (f"{text(project, STATE).rstrip()}\n\n==> questions the findings answer, by result <==\n"
+            "r2: What is question 2?\nr1: What is question 1?\n\n"
+            "warning: r3 links evidence/r3.json, which does not exist")
+    assert out.rstrip().endswith(view)
 
 
 def test_run_rows_are_added_kept_and_refreshed(project):

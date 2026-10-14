@@ -2,15 +2,16 @@
 """Run script for this investigation: produce, validate, and record each result.
 
 Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With no IDs it
-produces every result in settings.toml. For each result it runs the result's saved queries in a
-fresh session of canonical views, validates the result, saves the table and its profile under
-results/, records evidence under evidence/, writes its state.md findings row, and prints one
-compact JSON line with the paths, failed and unassessed checks, and what it did to the row,
-with the row's status and claim strength.
+produces every result in settings.toml. It refuses to run, exiting 2, while a wanted result's
+table lacks its question. For each result it runs the result's saved queries in a fresh session
+of canonical views, validates the result, saves the table and its profile under results/,
+records evidence under evidence/, writes its state.md findings row, and prints one compact JSON
+line with the paths, failed and unassessed checks, and what it did to the row, with the row's
+status and claim strength.
 
-Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml
-and its query in queries/<id>.sql. Add a producer below only when a result needs more than its
-query, and put reusable operations in src/. Requires duckdb and pandas.
+Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml,
+with the question it answers, and its query in queries/<id>.sql. Add a producer below only when
+a result needs more than its query, and put reusable operations in src/. Requires duckdb and pandas.
 """
 
 import json
@@ -32,7 +33,8 @@ sys.path.insert(0, str(ROOT))
 
 from src.exploration.validate import profile, validate  # noqa: E402
 from src.preparation.landing import session  # noqa: E402
-from src.provenance import prior_result, record_evidence, record_finding, views_read  # noqa: E402
+from src.provenance import (  # noqa: E402
+    prior_result, record_evidence, record_finding, result_problems, views_read)
 
 
 def run(connection, sql, parameters):
@@ -109,6 +111,10 @@ def main(argv):
     if unknown or not wanted:
         print(f"settings.toml defines no result {', '.join(unknown)}" if unknown else
               "settings.toml defines no [results.<id>] tables", file=sys.stderr)
+        return 2
+    problems = [problem for result_id in wanted for problem in result_problems(result_id, results[result_id])]
+    if problems:
+        print("\n".join(f"settings.toml: {problem}" for problem in problems), file=sys.stderr)
         return 2
     status = 0
     with session(ROOT) as connection:
