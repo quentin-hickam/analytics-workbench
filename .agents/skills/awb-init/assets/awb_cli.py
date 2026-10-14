@@ -37,6 +37,9 @@ COMMANDS = {
     "export": ("packaging/draft.py", "cli_export",
                "write the draft's chart and dataset files and the manifest's producing and packaging state; "
                "--result alone refreshes provenance"),
+    "review-rules": ("packaging/draft.py", "cli_review_rules",
+                     "check: list each review rule with the draft lines its pattern matches, writing nothing; "
+                     "add: append the next numbered rule from a user's correction"),
     "check-draft": ("packaging/draft.py", "cli_check_draft",
                     "run every mechanical draft check, including state.md's current flags, and rewrite the "
                     "manifest inventory; --verify-only checks a release candidate"),
@@ -73,6 +76,12 @@ def main(argv=None):
         print(f"{name} needs src/{relative}, which this project lacks; install the workbench helpers "
               "with the awb-init skill's scripts/install_helpers.py", file=sys.stderr)
         return 2
+    if name == "review-rules":
+        # The read-only review's `review-rules check` must leave the project untouched, so loading its
+        # helper writes no __pycache__. The flag is process-wide, so other commands keep Python's cache
+        # (git ignores __pycache__/): turned off for them, every call would recompile pandas and duckdb
+        # wherever they were installed without bytecode.
+        sys.dont_write_bytecode = True
     # Helpers import their siblings by bare name, as the skill references show.
     sys.path.insert(0, str(path.parent))
     spec = importlib.util.spec_from_file_location(f"awb_{path.stem}", path)
