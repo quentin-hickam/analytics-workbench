@@ -849,11 +849,12 @@ def cli_land(root: Path, argv: list[str]) -> int:
                         help="new acquisition directory name under data/raw/<source>/")
     parser.add_argument("files", nargs="+", metavar="file",
                         help="file or directory to copy under its own name; relative to the current directory")
-    parser.add_argument("--request", help="source version, query, or request (default: the copied paths)")
+    parser.add_argument("--request", help="source version, query, or request (default: the copied paths); "
+                                          "name a credential's variable, never its value")
     parser.add_argument("--records", action="append", default=[], metavar="NAME=COUNT",
                         help="record count of a landed file, by its path inside the acquisition; "
                              "repeat the flag for each file")
-    parser.add_argument("--notes", help="note recorded in the Acquisitions row")
+    parser.add_argument("--notes", help="note recorded in the Acquisitions row; never a secret")
     args = parser.parse_args(argv)
     records = {}
     for item in args.records:

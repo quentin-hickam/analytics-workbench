@@ -41,7 +41,7 @@ The interview is done when the question, population, supported decision or explo
 
 Adapt asset files to the target; their instructional comments and example rows are guidance, not project facts. The user-level skills serve every project, so the project holds only these files.
 
-1. Adapt the [orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [agent instructions](assets/workbench/AGENTS.md) into missing root files; merge `.gitignore` rules one by one. A repair reconciles existing ones through references/repair.md.
+1. Adapt the [orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [agent instructions](assets/workbench/AGENTS.md) into missing root files; merge `.gitignore` rules one by one, each negation after every rule it overrides. A repair reconciles existing ones through references/repair.md.
 2. When merging into an existing `AGENTS.md`, link both guides relatively and check the links resolve.
 3. Install the project helpers and workbench guides and declare their packages, with the interpreter that will run the project's analysis, such as its virtual environment. Run it as a black box; `--check` reports without writing. A repair runs it from references/repair.md instead.
 
@@ -50,11 +50,11 @@ Adapt asset files to the target; their instructional comments and example rows a
    ```
 
    Carry into the report every `files` entry not `installed` or `current`, any `requirements` entry marked `missing` or `unread` (a line the helpers could not read, which may declare a missing package), and the `install` command it prints; the user adds or runs those.
-4. Create shared foundation records as their conditions fire: the [source register](assets/workbench/foundation/sources.md) when a source becomes a real candidate, the [catalog](assets/workbench/foundation/catalog.md) when a dataset, view, or deliberate cache exists, the [quality record](assets/workbench/foundation/quality.md) when a shared limitation, check, or correction is known, the [dataset checks](assets/workbench/foundation/datasets.toml) when a dataset's publication checks are declared, and the [glossary](assets/workbench/foundation/glossary.md) when shared vocabulary is resolved. Keep an existing project's format when it serves the same responsibility; create each ledger only with content.
+4. Create shared foundation records as their conditions fire: the [source register](assets/workbench/foundation/sources.md) when a source becomes a real candidate, the [catalog](assets/workbench/foundation/catalog.md) when a dataset, view, or deliberate cache exists, the [quality record](assets/workbench/foundation/quality.md) when a shared limitation, check, or correction is known, the [dataset checks](assets/workbench/foundation/datasets.toml) when a dataset's publication checks are declared, and the [glossary](assets/workbench/foundation/glossary.md) when shared vocabulary is resolved. `foundation/review-rules.md` has no template: `python3 src/awb.py review-rules add` creates it with the first rule. Keep an existing project's format when it serves the same responsibility; create each ledger only with content.
 5. Investigation:
    - New: adapt the [brief](assets/workbench/investigation/brief.md), [state](assets/workbench/investigation/state.md), and [history](assets/workbench/investigation/history.md), and copy [run.py](assets/workbench/investigation/run.py) with its [settings.toml](assets/workbench/investigation/settings.toml), under `investigations/<stable-slug>/`, with a slug named for the question rather than the population so an expansion keeps it right. Populate them only with settled facts, put open questions in the brief and state, and point README's `Active investigation` line at the state file.
    - Extending: revise the brief, settings, and state to the settled scope; record superseded findings in the history.
-6. Create `data/raw/`, `data/parquet/`, `data/cache/`, `foundation/views/`, and further code or configuration only when their first content exists.
+6. Create `data/raw/`, `data/parquet/`, `data/cache/`, `foundation/views/`, `.env.example` (credential variable names, under the data guide's rule), and further code or configuration only when their first content exists.
 
 Package templates and `deliveries/` stay absent. If the user explicitly asks for a package, finish initialization, then invoke the sibling [`awb-package` skill](../awb-package/SKILL.md).
 

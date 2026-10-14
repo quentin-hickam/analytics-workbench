@@ -52,7 +52,7 @@ In the target project's agent session, start from the business question:
 
 If you ask without a question, `awb-init` asks for one; say there is no question yet to set up the project alone. Continue analytical work normally using the generated AGENTS.md instructions. The default data flow is independent source landing, validated Parquet datasets, and DuckDB views loaded into separate analytical sessions. Data gathering never writes directly into the canonical database as its only retained representation.
 
-`awb-init` installs the project helpers under `src/` with its installer, `scripts/install_helpers.py`, and writes a `requirements.txt` when the project declares no dependencies; it records what it installs in a receipt, `.awb-receipt.json`, so its `--upgrade` can bring unmodified earlier copies up to date. Mechanical work then runs as single commands whose output the agent reports verbatim, and computation runs as saved queries rather than scratch scripts: `python3 src/awb.py --help` lists the commands (`sql`, `profile`, `land`, `retain`, `publish`, `state`, `stale`, `export`, `check-draft`, `release`, `copy-releases`). Each investigation's run script, `run.py`, produces, validates, and records its results in one run and writes their `state.md` rows; `state` prints the active investigation's brief and state to resume, and records finding wording and status, with history where due, and issues and next steps.
+`awb-init` installs the project helpers under `src/` with its installer, `scripts/install_helpers.py`, and writes a `requirements.txt` when the project declares no dependencies; it records what it installs in a receipt, `.awb-receipt.json`, so its `--upgrade` can bring unmodified earlier copies up to date. Mechanical work then runs as single commands whose output the agent reports verbatim, and computation runs as saved queries rather than scratch scripts: `python3 src/awb.py --help` lists the commands (`sql`, `profile`, `land`, `retain`, `publish`, `state`, `stale`, `export`, `review-rules`, `check-draft`, `release`, `copy-releases`). Each investigation's run script, `run.py`, produces, validates, and records its results in one run and writes their `state.md` rows; `state` prints the active investigation's brief and state to resume, and records finding wording and status, with history where due, and issues and next steps.
 
 To see where things stand and what you can ask for next:
 
@@ -62,7 +62,7 @@ When a package is needed:
 
 > Use awb-package to prepare a draft for the active investigation.
 
-The skill asks which datasets to include. Subsequent requests revise the same draft. Drafting never releases it. When it is ready:
+The skill asks which datasets to include. Subsequent requests revise the same draft. Drafting never releases it. Before the draft's final check, and again before a release, a fresh reviewer subagent limited to read tools checks the narratives and every rule in `foundation/review-rules.md` and reports without fixing anything; only an agent host with no subagents has the drafting agent follow the same read-only review itself. Each correction you make while reviewing a draft that later drafts could repeat is appended there as a numbered rule, `R-<area>-NNN`, that every later review checks; a one-off edit, such as a preferred wording on one slide, is not. When it is ready:
 
 > Use awb-release — mark the package delivered.
 
@@ -74,7 +74,7 @@ After installing a newer release of the skills, bring each existing workbench up
 
 > Use awb-init to repair this workbench.
 
-Repair runs the helper installer with `--upgrade`. It replaces only unmodified copies of earlier shipped helpers, package formats, and workbench guides, which it recognizes from the checksum receipt it writes at each install; it reports customized copies for you to decide and removes retired files only when you ask. The agent then reconciles the project's adapted `AGENTS.md` and `README.md` against the current templates.
+Repair runs the helper installer with `--upgrade`. It replaces only unmodified copies of earlier shipped helpers, package formats, and workbench guides, which it recognizes from the checksum receipt it writes at each install; it reports customized copies for you to decide and removes retired files only when you ask. The agent then reconciles the project's adapted `AGENTS.md`, `README.md`, and `.gitignore` against the current templates.
 
 <!-- dist:exclude -->
 ## Design and validation
