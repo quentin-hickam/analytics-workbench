@@ -30,7 +30,7 @@
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
 # test_gitignore_template_tracks_env_example: in a fresh repository with the template .gitignore, .env.example is tracked while .env and .env.local stay ignored.
-# test_repair_check_ignore_follows_the_env_rules_the_project_keeps: repair's check-ignore command agrees with each kept .env rule for the template and for each declined restoration of .env, .env.*, or !.env.example, and disagrees when !.env.example precedes .env.*; repair asks before re-adding a dropped rule and reports each one kept dropped.
+# test_repair_check_ignore_follows_the_env_rules_the_project_keeps: repair's check-ignore command agrees with each kept .env rule for the template and for each declined restoration of .env, .env.*, or !.env.example, and disagrees when !.env.example precedes .env.*; repair asks once before adding any missing template rule and reports each one declined.
 # test_guides_state_the_credentials_convention: the data guide and landing reference state where credentials live, where they never go, that records name the variable, and that land() records request and notes unchecked.
 
 import hashlib
@@ -678,7 +678,11 @@ def test_repair_check_ignore_follows_the_env_rules_the_project_keeps(tmp_path):
     repair = (ASSET.parents[1] / "references/repair.md").read_text(encoding="utf-8")
     command = re.search(r"run `(git check-ignore --no-index [^`]+)`\. Its output must agree with each of "
                         r"these rules the project keeps: ", repair).group(1)
-    assert "ask before re-adding it, and report each rule the user keeps dropped as an exception" in repair
+    for fact in ("List every [ignore rule](../assets/workbench/.gitignore) the project's `.gitignore` lacks and "
+                 "ask the user once, naming them all, whether to add each",
+                 "each rule the user declines stays dropped, and report it as an exception"):
+        assert fact in repair
+    assert "git log" not in repair.split("\n3. ")[1].split("\n4. ")[0]
     assert "step 3's `git check-ignore` output agrees with each `.env` rule the project keeps" in repair
     # Each kept rule: the file it decides, and whether the check must print that file.
     rules = {".env": (".env", True), ".env.*": (".env.local", True), "!.env.example": (".env.example", False)}
