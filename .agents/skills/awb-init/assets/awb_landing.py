@@ -8,7 +8,7 @@ data/raw/<source>/<acquisition-id>/provenance.json:
      files: [{path, bytes, sha256, records, upstream}], notes}
     status is "complete"; records is an integer or null; upstream is null or
     {url, etag, last_modified, version_id}, each a string or null, as the fetch received them;
-    url carries no credentials.
+    url carries no credentials, and an http(s) url has a host, a valid port, and no space or control character.
 data/parquet/<dataset>/<publication-id>/publication.json:
     {dataset, publication_id,
      inputs: [{source, acquisition_id, files: [{path, sha256}]}],
@@ -84,13 +84,14 @@ def _complete_provenance(directory):
 
 UPSTREAM_FIELDS = ("url", "etag", "last_modified", "version_id")
 # Matched against a query, fragment, or path parameter name, lowercased with non-alphanumerics removed:
-# api_key, access_token, client_secret, X-Amz-Signature, X-Amz-Credential, sig (Azure SAS), jsessionid, ...
-CREDENTIAL_PARAMETER = re.compile(r"(key|token|secret|signature|password|passwd|credentials?|session|sessionid|sessid)$"
-                                  r"|^(sig|pwd|auth|authorization|sid|jwt)$")
+# api_key, access_token, client_secret, X-Amz-Signature, X-Amz-Credential, sig (Azure SAS), api_sig, jsessionid, pass, ...
+CREDENTIAL_PARAMETER = re.compile(r"(key|token|secret|sig|signature|password|passwd|credentials?|session|sessionid|sessid)$"
+                                  r"|^(pass|pwd|auth|authorization|sid|jwt)$")
 
 
 def _check_url(path, url):
-    """Refuse a URL carrying credentials, since provenance files are copied into committed evidence."""
+    """Refuse a URL carrying credentials, since provenance files are copied into committed evidence,
+    and an http(s) URL a request cannot be sent to as recorded."""
     try:
         parts = urllib.parse.urlsplit(url)
     except ValueError:
@@ -109,6 +110,14 @@ def _check_url(path, url):
     if names:
         raise ValueError(f"upstream url of {path} carries credential parameters ({', '.join(names)}); "
                          "record it without credentials")
+    try:
+        parts.port  # raises ValueError for a port that is not a number from 0 to 65535
+    except ValueError:
+        raise ValueError(f"upstream url of {path} is not a valid URL: "
+                         "its port is not a number from 0 to 65535") from None
+    if parts.scheme in {"http", "https"} and (not parts.hostname or re.search(r"[\x00-\x20\x7f]", url)):
+        raise ValueError(f"upstream url of {path} is not a valid URL: an http(s) URL needs a host "
+                         "and no space or control character")
 
 
 def _upstream(upstream, paths):

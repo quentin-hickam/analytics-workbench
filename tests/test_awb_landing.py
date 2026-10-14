@@ -1,8 +1,8 @@
 # Kept cases:
 # test_land_writes_complete_provenance_and_publishes_directory: provenance schema/key order, metadata-relative paths, checksums and partial rename.
 # test_land_records_upstream_validators_the_fetch_supplies: upstream fields filled during fetch are recorded per file in fixed key order, with null for absent fields and files.
-# test_land_refuses_malformed_upstream_unpublished: unknown fields, blank or non-string values, unlanded files, an invalid url, and a url with userinfo (with or without //) or credential-named query, fragment, or path parameters (each split on & or ;, names percent-decoded), session IDs among them, keep the acquisition partial, and the refusal echoes no secret.
-# test_land_records_a_url_whose_parameters_name_no_credential: an @ outside the host, path and query parameters split on & or ;, and names that merely contain a credential word are recorded as given.
+# test_land_refuses_malformed_upstream_unpublished: unknown fields, blank or non-string values, unlanded files, an invalid url or an http(s) url without a host, with an invalid port, or with a space or control character, and a url with userinfo (with or without //) or credential-named query, fragment, or path parameters (each split on & or ;, names percent-decoded), session IDs, pass, and api_sig among them, keep the acquisition partial, and the refusal echoes no secret.
+# test_land_records_a_url_whose_parameters_name_no_credential: an @ outside the host, path and query parameters split on & or ;, names that merely contain a credential word, an IPv6 host with a port, and an s3 URL are recorded as given.
 # test_land_keeps_failed_fetch_unpublished: fetch failure keeps partial files and writes no provenance.
 # test_publish_records_inputs_and_uncommitted_conversion: publication schema/key order, path bases, copied input checksums, no-commit state and partial rename.
 # test_publish_records_resolved_head: publication conversion_commit records the producing Git HEAD.
@@ -146,7 +146,18 @@ def test_land_records_upstream_validators_the_fetch_supplies(tmp_path):
     # The check goes by name alone, so content parameters with credential-like names are refused too (landing.md).
     ({"page.json": {"url": "https://api.example.test/x?sortkey=date"}}, r"parameters \(sortkey\)"),
     ({"page.json": {"url": "https://api.example.test/x?primary_key=id"}}, r"parameters \(primary_key\)"),
+    ({"page.json": {"url": "https://x.test/a?user=bob&pass=SECRET"}}, r"parameters \(pass\)"),
+    ({"page.json": {"url": "https://x.test/a?api_sig=SECRET"}}, r"parameters \(api_sig\)"),
+    ({"page.json": {"url": "https://x.test/a?apisig=SECRET"}}, r"parameters \(apisig\)"),
     ({"page.json": {"url": "https://[", "etag": '"v1"'}}, "is not a valid URL"),
+    # An http(s) URL a request cannot be sent to as recorded.
+    ({"page.json": {"url": "https://", "etag": '"v1"'}}, "is not a valid URL: an http.s. URL needs a host"),
+    ({"page.json": {"url": "http:/nohost", "etag": '"v1"'}}, "is not a valid URL: an http.s. URL needs a host"),
+    ({"page.json": {"url": "https://:443/x", "etag": '"v1"'}}, "is not a valid URL: an http.s. URL needs a host"),
+    ({"page.json": {"url": "https://api.test:bad/x", "etag": '"v1"'}}, "is not a valid URL: its port"),
+    ({"page.json": {"url": "https://api.test:99999/x", "etag": '"v1"'}}, "is not a valid URL: its port"),
+    ({"page.json": {"url": "https://api.test/a b.csv", "etag": '"v1"'}}, "no space or control character"),
+    ({"page.json": {"url": "https://api.test/a.csv\n", "etag": '"v1"'}}, "no space or control character"),
 ])
 def test_land_refuses_malformed_upstream_unpublished(tmp_path, upstream, message):
     with pytest.raises(ValueError, match=message) as refused:
@@ -165,6 +176,9 @@ def test_land_refuses_malformed_upstream_unpublished(tmp_path, upstream, message
     "https://api.example.test/x;format=csv&page=2",
     "https://api.example.test/v;rev=2/x?format=csv;page=2#section=3",
     "https://api.example.test/x?monkeys=3&tokenize=yes&keyword=sky",
+    "https://api.example.test/x?compass=north&passage=2&signal=1",
+    "https://[::1]:8443/x",
+    "s3://bucket/x.csv",
 ])
 def test_land_records_a_url_whose_parameters_name_no_credential(tmp_path, url):
     final = landing.land(tmp_path, "api", "batch-1", lambda directory: (directory / "page.json").write_bytes(b"abc"),
