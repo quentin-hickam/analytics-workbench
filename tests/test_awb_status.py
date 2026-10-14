@@ -16,6 +16,7 @@
 # test_unreadable_draft_manifest_is_unknown: an unreadable draft manifest leaves dates and counts null with an uncertainty.
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
+# test_ledger_writes_leave_the_state_current: a later questions.json or questions.md change, uncommitted or committed, leaves the state current; a later brief change does not.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
 # test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by one of the two forms foundation/sources.md defines, a link in its stated grammar or a backticked location with its sha256, in plain text outside code, HTML, emphasis, strikethrough, links and brackets; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
 # test_absent_project_and_unsafe_active_pointer: a missing project is not a workbench; an unsafe pointer is an uncertainty.
@@ -302,6 +303,26 @@ def test_git_no_commits_dirty_date_precision_and_no_index_writes(workbench):
     result = status.collect(workbench)["git"]
     assert result["state_status"] == "out of date"
     assert result["days_after_state"] == 2
+
+
+def test_ledger_writes_leave_the_state_current(workbench):
+    git(workbench, "init")
+    day = lambda d: {**os.environ, "GIT_AUTHOR_DATE": f"2026-10-{d:02}T12:00:00Z", "GIT_COMMITTER_DATE": f"2026-10-{d:02}T12:00:00Z"}
+    commit = lambda d: git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "work", env=day(d))
+    git(workbench, "add", ".")
+    commit(1)
+    assert status.collect(workbench)["git"]["state_status"] == "indeterminate at date precision"
+    later = __import__("datetime").datetime(2026, 10, 5, 12).timestamp()
+    for name in ("questions.json", "questions.md"):
+        os.utime(write(workbench, f"investigations/churn/{name}", "ledger\n"), (later, later))
+    result = status.collect(workbench)["git"]
+    assert (result["state_status"], result["days_after_state"]) == ("indeterminate at date precision", 0)
+    git(workbench, "add", ".")
+    commit(5)
+    assert status.collect(workbench)["git"]["state_status"] == "indeterminate at date precision"
+    os.utime(write(workbench, "investigations/churn/brief.md", "changed\n"), (later, later))
+    result = status.collect(workbench)["git"]
+    assert (result["state_status"], result["days_after_state"]) == ("out of date", 4)
 
 
 def test_commit_out_of_date_state_and_undated_deletion(workbench):

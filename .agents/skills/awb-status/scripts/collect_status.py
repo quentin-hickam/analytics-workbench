@@ -820,10 +820,13 @@ def git_status(root, slug, state_date, uncertain):
     if not slug:
         return result
     prefix = f"investigations/{slug}/"
+    # The state and the question ledger, a record of its own that state.md does not hold, never date
+    # the state: ledger writes alone leave it current.
+    exempt = [prefix + name for name in ("state.md", "questions.json", "questions.md")]
     dates = []
     missing = []
     for name in sorted(set(changed)):
-        if name.startswith(prefix) and name != prefix + "state.md":
+        if name.startswith(prefix) and name not in exempt:
             path = root / name
             try:
                 dates.append((date.fromtimestamp(path.stat().st_mtime), name))
@@ -835,7 +838,7 @@ def git_status(root, slug, state_date, uncertain):
             uncertain(root / name, "Uncommitted change lacks a readable mtime (for example deletion); state date check uncertain")
     if has_head:
         repo_prefix = project_prefix + prefix
-        log = git("log", "-1", "--format=%cs", "--", ":(top,literal)" + repo_prefix, ":(top,exclude,literal)" + repo_prefix + "state.md")
+        log = git("log", "-1", "--format=%cs", "--", ":(top,literal)" + repo_prefix, *(":(top,exclude,literal)" + project_prefix + name for name in exempt))
         if log.returncode:
             uncertain(root / prefix, "Cannot read Git commit date")
         elif log.stdout.strip():
