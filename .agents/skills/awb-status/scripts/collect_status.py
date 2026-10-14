@@ -14,6 +14,7 @@ import json
 import os
 from pathlib import Path
 import re
+import string
 import subprocess
 from email.utils import parsedate_to_datetime
 import http.client
@@ -420,17 +421,41 @@ class RedirectRefused(urllib.error.URLError):
 
 
 def endpoint(url):
-    """Return an http(s) URL's host and port as host:port, the scheme's port when none is given.
+    """Return the host and port an http(s) URL is requested from as host:port, the scheme's port
+    when none is given. The host is the one urllib connects to: percent-decoded, lowercased, and
+    IDNA-encoded, so each spelling of one host gives one endpoint.
 
-    Raise ValueError for any other URL, without a host, or with an invalid port; land() refuses
-    an http(s) URL without a host or with an invalid port.
+    Raise ValueError for any other URL, without a host, with an invalid port, or with a host IDNA
+    cannot encode; land() refuses an http(s) URL without a host or with an invalid port.
     """
     parts = urllib.parse.urlsplit(url)
-    port, default = parts.port, {"http": 80, "https": 443}.get(parts.scheme)
-    if default is None or not parts.hostname:
+    default = {"http": 80, "https": 443}.get(parts.scheme)
+    # urllib percent-decodes the host and port before it connects.
+    decoded = urllib.parse.urlsplit("//" + urllib.parse.unquote(parts.netloc))
+    host, port = decoded.hostname, decoded.port
+    if default is None or not host:
         raise ValueError("not an http(s) URL with a host")
-    host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+    if not host.isascii():
+        host = host.encode("idna").decode("ascii")
+    host = f"[{host}]" if ":" in host else host
     return f"{host}:{default if port is None else port}"
+
+
+def sendable(url):
+    """Return url as a request can send it: a non-ASCII host IDNA-encoded, and non-ASCII characters
+    in the path, query, and fragment percent-encoded as UTF-8. An ASCII url is returned as recorded.
+
+    Raise ValueError for a host IDNA cannot encode.
+    """
+    if url.isascii():
+        return url
+    parts = urllib.parse.urlsplit(url)
+    netloc = parts.netloc
+    if not netloc.isascii():
+        host = parts.hostname.encode("idna").decode("ascii")
+        netloc = host if parts.port is None else f"{host}:{parts.port}"
+    return urllib.parse.urlunsplit((parts.scheme, netloc, *(urllib.parse.quote(part, safe=string.punctuation)
+                                                            for part in (parts.path, parts.query, parts.fragment))))
 
 
 class HeadRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -484,11 +509,16 @@ def probe_file(recorded, opener, unresponsive):
     endpoint whose request timed out, after any redirects, is added, and no request is sent to one
     already in it. Another port on the same host is still requested.
     """
-    # land() refuses an http(s) URL without a host or with an invalid port, so this cannot raise.
-    target = endpoint(recorded["url"])
+    # land() refuses an http(s) URL without a host or with an invalid port; what is left to raise
+    # is a host IDNA cannot encode, or one whose percent-encoding decodes to an invalid port.
+    try:
+        url = sendable(recorded["url"])
+        target = endpoint(url)
+    except ValueError as error:
+        return {"result": "unknown", "reason": f"not a URL a request can be sent to: {error}"}
     if target in unresponsive:
         return {"result": "unknown", "reason": f"not requested: an earlier request to {target} timed out"}
-    request = urllib.request.Request(recorded["url"], method="HEAD")
+    request = urllib.request.Request(url, method="HEAD")
     request.unresponsive, request.endpoints = unresponsive, [target]
     try:
         with opener.open(request, timeout=PROBE_TIMEOUT) as response:

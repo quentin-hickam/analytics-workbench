@@ -672,6 +672,37 @@ def test_a_host_that_times_out_is_not_requested_again(workbench, monkeypatch, ti
         "https://slow.test:8443/a.csv", "https://fast.test/c.csv", "https://slow.test/d.csv"]
 
 
+def test_each_spelling_of_a_timed_out_host_is_not_requested_again(workbench, monkeypatch):
+    import urllib.error
+    land_with_upstream(workbench, "batch-1", {name: {"url": url, "etag": '"v1"'} for name, url in (
+        ("a.csv", "https://%73low.test/a"), ("b.csv", "https://SLOW.test/b"), ("c.csv", "https://slow.test:443/c"),
+        ("d.csv", "https://bücher.test/d"), ("e.csv", "https://xn--bcher-kva.test/e"))})
+    timed_out = urllib.error.URLError(TimeoutError("timed out"))
+    server = FakeServer({"https://%73low.test/a": timed_out, "https://xn--bcher-kva.test/d": timed_out})
+    serve(monkeypatch, server)
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["reason"]) for file in files] == [
+        ("a.csv", f"no response from slow.test:443 within {status.PROBE_TIMEOUT} s"),
+        ("b.csv", "not requested: an earlier request to slow.test:443 timed out"),
+        ("c.csv", "not requested: an earlier request to slow.test:443 timed out"),
+        ("d.csv", f"no response from xn--bcher-kva.test:443 within {status.PROBE_TIMEOUT} s"),
+        ("e.csv", "not requested: an earlier request to xn--bcher-kva.test:443 timed out")]
+    assert [url for _, url, _ in server.requests] == ["https://%73low.test/a", "https://xn--bcher-kva.test/d"]
+
+
+def test_a_non_ascii_url_is_requested_percent_encoded(workbench, monkeypatch):
+    land_with_upstream(workbench, "batch-1", {
+        "a.csv": {"url": "https://example.test/données/a.csv?q=café", "etag": '"v1"'},
+        "b.csv": {"url": "https://example.test/x?q=caf%C3%A9", "etag": '"v1"'}})
+    server = FakeServer({"https://example.test/donn%C3%A9es/a.csv?q=caf%C3%A9": {"ETag": '"v1"'},
+                         "https://example.test/x?q=caf%C3%A9": {"ETag": '"v1"'}})
+    serve(monkeypatch, server)
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["result"]) for file in files] == [("a.csv", "unchanged"), ("b.csv", "unchanged")]
+    assert [url for _, url, _ in server.requests] == [
+        "https://example.test/donn%C3%A9es/a.csv?q=caf%C3%A9", "https://example.test/x?q=caf%C3%A9"]
+
+
 def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench, monkeypatch):
     monkeypatch.setattr(status, "head_opener", refuse_network)
     assert status.collect(workbench)["upstream"] == {"probeable_files": 0}
