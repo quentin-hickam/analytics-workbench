@@ -4,7 +4,9 @@
 # Any failure refuses the publication. Checks name columns, never publications: a new publication
 # of the dataset meets the same checks. Details carry counts, never source values. The checks read
 # the publication's Parquet files as one table; columns and types must hold in every file, because
-# a reader takes the table's schema from the first. Dates and date-times compare in UTC.
+# a reader takes the table's schema from the first. A hive partition column (a key=value directory),
+# which no file stores, is checked once, as the files read together type it. Dates and date-times
+# compare in UTC.
 #
 # [datasets.<dataset>.checks], each key optional; quote a dataset name containing a dot, as in
 # [datasets."orders.v1".checks]. publication.json records the checks in this key order, under the

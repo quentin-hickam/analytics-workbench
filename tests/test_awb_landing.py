@@ -932,6 +932,32 @@ def test_declared_columns_and_types_hold_in_every_parquet_file(tmp_path):
     assert not (tmp_path / "data/parquet/events/v2").exists() and not (tmp_path / "data/parquet/events/v3").exists()
 
 
+def partitioned(duckdb, select, column):
+    def convert(directory):
+        duckdb.execute(f"COPY ({select}) TO '{directory / 'out'}' (FORMAT parquet, PARTITION_BY ({column}))")
+    return convert
+
+
+def test_a_partition_column_is_typed_from_every_path_together(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    original = acquisition(tmp_path)
+    # Read alone, year=__HIVE_DEFAULT_PARTITION__ would type year VARCHAR and code=1 would type code BIGINT.
+    declare(tmp_path, '[datasets.events.checks]\ncolumns = ["year", "x"]\ntypes = { year = "BIGINT", x = "INT" }\n')
+    final = landing.publish(tmp_path, "events", "v1", partitioned(
+        duckdb, "SELECT 2024::INTEGER AS year, 1 AS x UNION ALL SELECT NULL, 2", "year"), acquisitions=[original])
+    assert [check["detail"] for check in json.loads((final / "publication.json").read_text())["checks"]] == [
+        "All 2 declared columns present.", "year is BIGINT.", "x is INTEGER."]
+    mixed = "SELECT '1' AS code, 1 AS x UNION ALL SELECT 'A', 2"
+    declare(tmp_path, '[datasets.events.checks]\ntypes = { code = "VARCHAR" }\nnot_null = ["code"]\n')
+    final = landing.publish(tmp_path, "events", "v2", partitioned(duckdb, mixed, "code"), acquisitions=[original])
+    assert [check["detail"] for check in json.loads((final / "publication.json").read_text())["checks"]] == [
+        "code is VARCHAR.", "No nulls in 2 rows."]
+    declare(tmp_path, '[datasets.events.checks]\ntypes = { code = "BIGINT" }\n')
+    with pytest.raises(landing.ChecksFailed) as error:
+        landing.publish(tmp_path, "events", "v3", partitioned(duckdb, mixed, "code"), acquisitions=[original])
+    assert [check["detail"] for check in error.value.checks] == ["code is VARCHAR, declared BIGINT."]
+
+
 class Zoned:
     """duckdb whose new connections start in zone, as on a host set to that time zone."""
 

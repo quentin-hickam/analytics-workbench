@@ -295,7 +295,8 @@ def _span(bounds):
 def _run_checks(directory, spec):
     """Run spec's checks over the Parquet files under directory; return [{name, outcome, detail}].
 
-    columns and types hold in every Parquet file, since a reader takes the first file's schema.
+    columns and types hold in every Parquet file, since a reader takes the first file's schema; a hive
+    partition column, which no file stores, holds in the files read together (foundation/datasets.toml).
     Temporal values compare in UTC. When the files cannot be read, every check fails.
     """
     duckdb = _duckdb()
@@ -315,17 +316,21 @@ def _run_checks(directory, spec):
         schemas = []
         for path in paths:
             try:
+                # The file's stored columns: read alone, a partition column would take its type from one path.
                 schemas.append(dict(connection.execute(
                     "SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_parquet("
-                    + _literal(directory / path) + "))").fetchall()))
+                    + _literal(directory / path) + ", hive_partitioning = false))").fetchall()))
             except duckdb.Error as error:  # name the file and the error's kind, never DuckDB's message
                 return unread(f"{path} could not be read as Parquet ({type(error).__name__}).")
         try:
             connection.execute("CREATE VIEW awb_publication AS SELECT * FROM read_parquet(["
                                + ", ".join(_literal(directory / path) for path in paths) + "])")
             rows = connection.execute("SELECT count(*) FROM awb_publication").fetchone()[0]
+            combined = connection.execute("SELECT column_name, column_type FROM (DESCRIBE awb_publication)").fetchall()
         except duckdb.Error as error:
             return unread(f"The Parquet files could not be read together ({type(error).__name__}).")
+        # A hive partition column lives in the paths, so its type is the one inferred from all of them.
+        partitions = {column: kind for column, kind in combined if not any(column in schema for schema in schemas)}
 
         def count(condition, parameters=()):
             return connection.execute(f"SELECT count(*) FROM awb_publication WHERE {condition}",
@@ -337,7 +342,8 @@ def _run_checks(directory, spec):
                                       f"FROM awb_publication WHERE {where} GROUP BY {listed})").fetchone()[0]
 
         def columns_present(columns):
-            lacking = {column: sum(column not in schema for schema in schemas) for column in columns}
+            lacking = {column: 0 if column in partitions else sum(column not in schema for schema in schemas)
+                       for column in columns}
             missing = [column if files == len(schemas) else f"{column} (from {files} of {len(schemas)} Parquet files)"
                        for column, files in lacking.items() if files]
             return f"Missing column{'s' * (len(missing) > 1)}: {', '.join(missing)}." if missing else None
@@ -354,10 +360,11 @@ def _run_checks(directory, spec):
                 expected = connection.execute(f"SELECT typeof(CAST(NULL AS {declared}))").fetchone()[0]
             except duckdb.Error:
                 return f"Declared type {declared} is not a DuckDB type.", ""
-            wrong = [schema[column] for schema in schemas if schema[column] != expected]
+            held = [partitions] if column in partitions else schemas
+            wrong = [schema[column] for schema in held if schema[column] != expected]
             if not wrong:
                 return None, f"{column} is {expected}."
-            files = "" if len(wrong) == len(schemas) else f" in {len(wrong)} of {len(schemas)} Parquet files"
+            files = "" if len(wrong) == len(held) else f" in {len(wrong)} of {len(held)} Parquet files"
             return f"{column} is {' or '.join(sorted(set(wrong)))}{files}, declared {expected}.", ""
 
         def measure_not_null(column):
