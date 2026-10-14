@@ -504,73 +504,122 @@ def heading_problems(draft) -> list[dict]:
 # ---------------------------------------------------------------- numbers in the narratives
 
 NARRATIVES = ("findings.md", "methodology.md")
+# Reading fails safe: a number is skipped only in one of the contexts below, each of which marks it as no
+# quantity; every other number is read, so a doubtful one becomes a row the author clears by rewording or
+# by allowing it. references/helpers.md states the same list.
 _MONTH = (r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
           r"|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?")
-_DAY = r"(?:3[01]|[12][0-9]|0?[1-9])"  # a calendar day, so "June 77 orders" stays a count
+_DAY = r"(?:3[01]|[12][0-9]|0?[1-9])"
 _DAYS = rf"{_DAY}(?:\s*(?:[-–—]|to|through)\s*{_DAY})?"
 _YEAR = r"(?:19|20)[0-9]{2}"
-# Years listed after a year: a range, or a comma list that "and" or "or" closes, so a count after a
-# comma ("in 2025, 2030 orders") is still read.
-_YEARS = (rf"{_YEAR}(?:\s*(?:[-–—]|to|through|vs\.?)\s*{_YEAR}"
-          rf"|(?:\s*,\s*{_YEAR})*,?\s+(?:and|or)\s+{_YEAR})?")
-# A day beside a month name is a date after one of these words or before a year or punctuation.
-_ON = (r"(?i:\b(?:on|by|to|from|until|till|since|through|before|after|between|as\s+of"
-       r"|(?:mon|tues|wednes|thurs|fri|satur|sun)day,?))\s+")
-# A year is a year after one of these words, a month name, or a quarter or half, or in parentheses.
-_IN = (rf"(?:(?i:\b(?:in|from|since|during|until|till|through|before|after|between|early|mid|late|fiscal"
-       rf"|calendar|year|FY|CY))\s+|{_MONTH}\s+|\b[QH][1-4]\s+)")
-# Dates, times, chart numbers, list and heading markers, and footnote marks are blanked before
-# numbers are read. A single chart takes one number and only "Charts" takes a list, closed the way a
-# year list is, so a count after "Chart 1," is still read.
+# Not glued to a word or to digits joined by a dot, comma, slash, or colon.
+_ALONE = r"(?![\w%]|[.,/:][0-9])"
+# Where a period or a date ends: punctuation, a dash before a space, or the end of its paragraph. A word
+# after it could make its last number a count ("in 2000 orders"), so it is no period there.
+_ENDS = r"(?=\s*(?:[,.;:!?()\[\]{}|*_\"'“”‘’…]|[-–—]\s|\Z))"
+
+
+def _listed(item):
+    """A range or a list closed by and or or, after a first item: 2023-2024, 2023 to 2025, 1, 2, and 3."""
+    return rf"(?:\s*(?:[-–—]|to|through|vs\.?)\s*{item}|(?:\s*,\s*{item})*,?\s+(?:and|or)\s+{item})"
+
+
+_DATE = rf"(?:{_MONTH}\s+{_DAY}|{_DAY}\s+{_MONTH})"
+_DATE_ENDS = rf"(?:{_ENDS}|(?=\s+(?:to|through|until|till|and|or|[-–—])\s+{_DATE}))"
+# A year after one of these words, a month name, or a quarter or half, where the period ends.
+_IN = (rf"(?:(?i:\b(?:in|from|since|during|until|till|through|before|after|between|year|FY|CY|fiscal|calendar)\s+"
+       rf"|\b(?:early|mid|late)[\s-]+)|{_MONTH}\s+|\b[QH][1-4]\s+)")
 _NOT_QUANTITY = re.compile(
-    r"(?<![\w.])(?:[0-9]{4}-[0-9]{1,2}(?:-[0-9]{1,2})?(?:T[0-9:.]+(?:Z|[+-][0-9:]+)?)?"
-    r"|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?(?:\s?(?i:[ap]\.?m\.?))?"
-    rf"|{_ON}{_MONTH}\s+{_DAYS}(?:,?\s+{_YEAR})?"
-    rf"|{_MONTH}\s+{_DAYS}(?:,?\s+{_YEAR}|(?=\s*(?:[,.;:)|]|$)))"
-    rf"|{_DAYS}\s+{_MONTH}(?:,?\s+{_YEAR})?"
-    rf"|{_IN}{_YEARS}|\(\s*{_YEARS}\s*\)"
-    r"|[Cc]hart\s+[0-9]+|[Cc]harts\s+[0-9]+(?:\s*(?:[-–—]|to|through)\s*[0-9]+"
-    r"|(?:\s*,\s*[0-9]+)*,?\s+(?:and|or)\s+[0-9]+)?)"
-    r"(?![\w%]|[.,][0-9])"
-    r"|^\s*(?:#{1,6}\s+)?[0-9]+[.)]\s|\[\^[^\]]*\]", re.MULTILINE)
-# Paths and names are blanked whole, so no digit inside them is read (results/r-001-77.csv, ORD-123-45):
-# a slash token that starts with a letter, tilde, underscore, or ./ or ../; a file name with a lowercase
-# extension; and a hyphenated name that starts with a letter. A rate such as 45/day starts with its number.
-_NAME_TOKEN = re.compile(
-    r"(?<![^\s(\[<\"'*_])(?:[A-Za-z_~][^\s,;|()\[\]<>\"']*|\.{1,2})[/\\][^\s,;|()\[\]<>\"']*"
-    r"|(?<![\w.,/\\-])[\w-]*\w\.[a-z][a-z0-9]{0,7}(?![\w/\\])"
-    r"|(?<![\w.-])[A-Za-z_]\w*(?:-\w+)+")
-# A number not glued to a word, path, version, or hyphenated name (Q-3, chart-1), with its unit.
-# Scientific notation needs a one-digit mantissa and an exponent of at most three digits, so an
-# all-digit hash with one e (12345e6) stays a glued name. Digits joined by commas are read as one
-# number; unless they are thousands grouping (1,2,3 or a decimal comma 21,3) it never traces.
+    rf"(?<![\w.])(?:{_YEAR}-(?:1[0-2]|0?[1-9])(?:-{_DAY})?(?:T[0-9:.]+(?:Z|[+-][0-9:]+)?)?{_ALONE}"
+    rf"|[0-9]{{1,2}}/[0-9]{{1,2}}/{_YEAR}{_ALONE}"
+    r"|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?\s?(?i:[ap]\.?m\.?|UTC|GMT)(?!\w)"
+    rf"|[0-9]{{1,2}}:[0-9]{{2}}:[0-9]{{2}}{_ALONE}"
+    rf"|{_MONTH}\s+{_DAYS}(?:,?\s+{_YEAR}{_ALONE}{_DATE_ENDS}|{_ALONE}{_DATE_ENDS})"
+    rf"|{_DAYS}\s+{_MONTH}(?:,?\s+{_YEAR}{_ALONE})?{_DATE_ENDS}"
+    rf"|{_IN}{_YEAR}(?:{_listed(_YEAR)})?{_ALONE}{_ENDS}"
+    rf"|[Cc]harts\s+[0-9]+{_listed('[0-9]+')}{_ALONE}{_ENDS}|[Cc]harts?\s+[0-9]+{_ALONE})"
+    r"|^[ \t]*#{1,6}[ \t]+[0-9]+[.)](?=\s)|\[\^[^\]\n]*\]", re.MULTILINE)
+_LIST_MARKER = re.compile(r"[ \t]*([0-9]{1,9})[.)](?=\s|$)")
+_CURRENCY = re.compile(r"\b(?:USD|EUR|GBP|JPY|CHF|CAD|AUD|CNY|INR)(?=[0-9])")
+# Paths and names are blanked whole, so no digit inside them is read (results/r-001-77.csv, ORD-123-45).
+_PATH_CANDIDATE = re.compile(
+    r"(?<![^\s(\[<\"'*_])(?:[A-Za-z_~][^\s,;|()\[\]<>\"']*|\.{1,2})[/\\][^\s,;|()\[\]<>\"']*")
+_EXTENSIONS = "md|py|csv|tsv|parquet|jsonl?|sql|png|svg|jpe?g|pdf|html?|duckdb|db|xlsx?|docx|pptx|ya?ml|toml|txt|log|ipynb"
+_FILE = re.compile(rf"(?<![\w.,/\\-])[\w-]*\w\.(?:{_EXTENSIONS})(?![\w/\\])")
+_HYPHENATED = re.compile(r"(?<![\w.-])([A-Za-z_]\w*)(?:-\w+)+")
+
+
+def _path(token):
+    token = token.rstrip(".:!?*_~")
+    segments = re.split(r"[/\\]", token)
+    return (token.startswith(("./", "../", ".\\", "..\\", "~")) or len(segments) >= 3
+            or segments[0] in _PATH_ROOTS or bool(_FILE.fullmatch(segments[-1])))
+
+
+def _identifier(first):
+    # ORD-123-45, COVID-19, Q-3, r-001, and the chart file stem chart-1; top-10 and mid-2025 stay words.
+    return (len(first) == 1 or first.lower() == "chart" or bool(re.search(r"[0-9_]", first))
+            or bool(re.search(r"[A-Z]", first[1:])))
+
+
+def _blank_names(text):
+    blanks = [match.span() for match in _PATH_CANDIDATE.finditer(text) if _path(match.group(0))]
+    blanks += [match.span() for match in _FILE.finditer(text)]
+    blanks += [match.span() for match in _HYPHENATED.finditer(text) if _identifier(match.group(1))]
+    for start, end in blanks:
+        text = _blank(text, start, end)
+    return text
+
+
+# A number not glued to a word or a path, with its unit. A word unit or % may stand after any whitespace,
+# a line wrap included; a letter scale (k, M, b) or x is written against its number. Letters written against
+# a number are shown with it (5GB, 30d, 95th). Digits joined by dots, commas, slashes, colons, or spaces between
+# three-digit groups are read as one number: a version or address (3.12.1, 10.0.0.1) is no quantity, and any
+# other join but thousands grouping or one decimal point never traces (1,2,3, 21,3, 3/4, 14:05, 1.234.567, 1 000).
 _NUMBER = re.compile(
-    r"(?<![\w.,/\\])(?<![A-Za-z_]-)"
-    r"([0-9](?:\.[0-9]+)?[eE][-+]?[0-9]{1,3}|[0-9]+(?:,[0-9]+)+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?|\.[0-9]+)"
-    r"(\s?%|\s?(?:per\s?cent|percentage\s+points?|pp)(?!\w)|(?:mn|bn|tn|[kKmMbB])(?!\w)"
-    r"|\s(?:thousand|million|billion|trillion)(?!\w)|[x×](?!\w))?"
-    r"(?!\w|[.,/][0-9])")
-_GROUPED = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[^,]*")
-_RANGE = re.compile(r"\s?(?:[-–—]|to|and)\s?")
+    r"(?<![^\W_])(?<![^\W_]_)(?<![0-9][.,/:])"
+    r"([0-9]+(?:\.[0-9]+)?[eE][-+]?[0-9]+|[0-9]{1,3}(?:[ \u00a0\u202f][0-9]{3})+(?:\.[0-9]+)?"
+    r"|[0-9]+(?:[.,/:][0-9]+)*|\.[0-9]+)"
+    r"(\s*%|\s*(?:per\s*cent|percentage\s+points?|pp|thousand|million|billion|trillion|mn|bn|tn)(?!\w)"
+    r"|(?:[kKmMbB]|[x×])(?!\w))?"
+    r"((?<=[0-9])[^\W\d_]+)?"
+    r"(?![^\W_]|_[^\W_]|[.,/:][0-9])")
+_GROUPED = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?")
+_VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){2,}")
+_RANGE = re.compile(r"\s*(?:[-–—]|to|and)\s*")
 _SCALES = {"k": 3, "thousand": 3, "m": 6, "mn": 6, "million": 6, "b": 9, "bn": 9, "billion": 9,
            "tn": 12, "trillion": 12}
 
 
-def _quantities(line):
+def _quantities(line, before="", after="", *, marker=True):
     """Yield (text, body, unit, column) for each number a line states, after the skips check_numbers names.
 
-    Every skip blanks with spaces, so a column indexes the line as written.
+    `before` and `after` are the lines of the same paragraph around `line`, read only so that a context or a
+    unit a line wrap splits from its number is still seen. `marker` is false where a leading number cannot
+    be a list marker. Every skip blanks with spaces, so a column indexes the line as written.
     """
-    for pattern in (_CODE_SPAN, _NAME_TOKEN, _NOT_QUANTITY):
-        line = pattern.sub(lambda match: " " * len(match.group(0)), line)
-    line = _LINK_TARGET.sub(lambda match: "]" + " " * (len(match.group(0)) - 1), line)
-    matches = list(_NUMBER.finditer(line))
+    offset = len(before) + 1 if before else 0
+    if marker and (found := _LIST_MARKER.match(line)):
+        line = _blank(line, 0, found.end())
+    text = (before + "\n" if before else "") + line + ("\n" + after if after else "")
+    for pattern in (_CODE_SPAN, _CURRENCY):
+        text = pattern.sub(lambda match: " " * len(match.group(0)), text)
+    text = _NOT_QUANTITY.sub(lambda match: " " * len(match.group(0)), _blank_names(text))
+    text = re.sub(r"\]\([^)\n]*\)", lambda match: "]" + " " * (len(match.group(0)) - 1), text)
+    matches = list(_NUMBER.finditer(text))
     for index, match in enumerate(matches):
-        body, unit = match.group(1), match.group(2) or ""
-        if not unit and index + 1 < len(matches) and _RANGE.fullmatch(line[match.end():matches[index + 1].start()]):
+        if not offset <= match.start() < offset + len(line):
+            continue
+        body, unit, letters = match.group(1), match.group(2) or "", match.group(3) or ""
+        if not unit and not letters and index + 1 < len(matches) and _RANGE.fullmatch(
+                text[match.end():matches[index + 1].start()]):
             unit = matches[index + 1].group(2) or ""  # 10-15%: the lower bound takes the upper's unit
-        if not re.fullmatch(r"0[0-9]+", body):  # a zero-padded code such as release 002
-            yield match.group(0).strip(), body, " ".join(unit.lower().split()), match.start()
+        if re.fullmatch(r"0[0-9]+", body) or _VERSION.fullmatch(body) and not re.fullmatch(
+                r"[0-9]{1,3}(?:\.[0-9]{3})+", body):
+            continue  # a zero-padded code such as release 002, or a version; 1.234.567 is read
+        if letters and not letters.isalpha():
+            body += letters  # 5½ has no one value
+        yield " ".join(match.group(0).split()), body, " ".join(unit.lower().split()), match.start() - offset
 
 
 # Arithmetic on written numbers never rounds: every digit a narrative or a record writes is kept.
@@ -578,7 +627,10 @@ _EXACT = Context(prec=MAX_PREC, Emax=MAX_EMAX, Emin=MIN_EMIN)
 
 
 def _value(body):
-    """Return a number's value and half a unit of its last written place, both exact."""
+    """Return a number's value and half a unit of its last written place, both exact.
+
+    Raises ValueError or ArithmeticError for an exponent too large to hold.
+    """
     mantissa, _, exponent = body.replace(",", "").lower().partition("e")
     exponent = int(exponent or 0)
     with localcontext(_EXACT):
@@ -594,8 +646,8 @@ def _magnitudes(value, into, *, text=True):
     """
     if isinstance(value, bool):
         return
-    if isinstance(value, (int, float)):
-        value = str(value)
+    if isinstance(value, (int, float, Decimal)):
+        value = str(value)  # recorded JSON is read with exact decimals, so str keeps every written digit
     elif isinstance(value, dict):
         for item in value.values():
             _magnitudes(item, into, text=text)
@@ -615,10 +667,13 @@ def _magnitudes(value, into, *, text=True):
             for _, body, unit, _ in _quantities(line):
                 if not _GROUPED.fullmatch(body):
                     continue
-                number = _value(body)[0]
-                found.append(number)
-                if unit in _SCALES:
-                    found.append(number.scaleb(_SCALES[unit], _EXACT))
+                try:
+                    number = _value(body)[0]
+                    found.append(number)
+                    if unit in _SCALES:
+                        found.append(number.scaleb(_SCALES[unit], _EXACT))
+                except (ValueError, ArithmeticError):
+                    continue  # an exponent too large to hold records nothing
     into.update(number.copy_abs() for number in found)  # copy_abs never rounds, so 4e1234567 cannot overflow
 
 
@@ -629,11 +684,19 @@ def _evidence_numbers(record):
             settings.get("content") if isinstance(settings, dict) else None]
 
 
+def _read_exact_json(path):
+    """Read a JSON object with every fraction as an exact Decimal, so no recorded digit is lost."""
+    record = json.loads(Path(path).read_text(encoding="utf-8"), parse_float=Decimal)
+    if not isinstance(record, dict):
+        raise ValueError(f"{Path(path).name} is not a JSON object")
+    return record
+
+
 def recorded_values(root, investigation, results) -> tuple[list, list[str]]:
     """Return the sorted magnitudes the manifest's represented results record, and the problems.
 
     Each result contributes every cell of results/<id>.csv, the numbers in results/<id>.profile.json,
-    and the numbers in its evidence's check details and settings.
+    and the numbers in its evidence's check details and settings. JSON numbers are read exactly as written.
     """
     if not isinstance(results, list) or not all(
             isinstance(entry, dict) and isinstance(entry.get("result_id"), str)
@@ -655,7 +718,7 @@ def recorded_values(root, investigation, results) -> tuple[list, list[str]]:
         # The table holds the result; a profile or evidence, when present, adds its counts and settings.
         for path in (base / "results" / f"{result_id}.profile.json", base / "evidence" / f"{result_id}.json"):
             try:
-                record = _read_json(path)
+                record = _read_exact_json(path)
             except FileNotFoundError:
                 continue
             except (OSError, ValueError) as error:
@@ -693,33 +756,66 @@ def _within(values, low, high):
 def _traces(body, unit, values):
     # Written to d places, the number stands for any value within half a unit of its last place.
     if not _GROUPED.fullmatch(body):
-        return False  # 1,2,3 or 21,3 has no one value
-    number, half = _value(body)
-    with localcontext(_EXACT):
-        low, high = number - half, number + half
-        windows = [(low, high)]
-        if unit.startswith(("%", "per", "pp")):
-            windows.append((low.scaleb(-2), high.scaleb(-2)))
-        elif unit in _SCALES:
-            windows.append((low.scaleb(_SCALES[unit]), high.scaleb(_SCALES[unit])))
+        return False  # 1,2,3, the decimal comma 21,3, 3/4, 14:05, and 1.234.567 have no one value
+    try:
+        number, half = _value(body)
+        with localcontext(_EXACT):
+            low, high = number - half, number + half
+            windows = [(low, high)]
+            if unit.startswith(("%", "per", "pp")):
+                windows.append((low.scaleb(-2), high.scaleb(-2)))
+            elif unit in _SCALES:
+                windows.append((low.scaleb(_SCALES[unit]), high.scaleb(_SCALES[unit])))
+    except (ValueError, ArithmeticError):
+        return False  # an exponent too large to hold traces to nothing
     return any(_within(values, low, high) for low, high in windows)
+
+
+# A line that opens a block (a heading, a bullet, a quote, a table row, or a fence) starts no wrap.
+_OPENS_BLOCK = re.compile(r"\s*(?:$|#{1,6}(?:\s|$)|[-*+](?:\s|$)|>|\||`{3,}|~{3,})")
+_QUOTE = re.compile(r"[ \t]*(?:>[ \t]?)+")
+
+
+def _unquoted(line):
+    """The line with its blockquote markers blanked, so a quoted paragraph reads like any other."""
+    return _QUOTE.sub(lambda match: " " * len(match.group(0)), line, count=1) if _QUOTE.match(line) else line
+
+
+def _continues(previous, line):
+    """Whether `line` wraps the paragraph `previous` ends, so a context or a unit may span the two.
+
+    A numbered line continues plain paragraph text unless it numbers 1, the only number that starts a
+    list there; so "rose to\\n77. Orders" reads 77. Two quoted lines are compared inside the quote.
+    """
+    if _QUOTE.match(previous) and _QUOTE.match(line):
+        previous, line = _QUOTE.sub("", previous, count=1), _QUOTE.sub("", line, count=1)
+    if _OPENS_BLOCK.match(previous) and not re.match(r"\s*[-*+>]\s", previous) or _OPENS_BLOCK.match(line):
+        return False
+    numbered = _LIST_MARKER.match(line)
+    return not numbered or (int(numbered.group(1)) != 1 and not re.match(r"\s|[-*+>]\s|[0-9]+[.)]\s", previous))
 
 
 def check_numbers(path: str | os.PathLike, values, *, allowed=()) -> list[dict]:
     """List each number in a narrative file that no recorded value rounds to and `allowed` does not cover.
 
     `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
-    text is written around it on the line: a bare `40` covers every 40, and `Week 23` only that 23. Code,
-    comments, link targets, paths and names, dates, times, years in a year's context, chart numbers, list
-    and heading markers, slash-joined numbers, and zero-padded codes are not read.
+    text is written around it on the line: a bare `40` covers every 40, and `Week 23` only that 23. A
+    number is skipped only in a context references/helpers.md lists; every other number is read.
     """
-    rows = []
-    for number, line, opens in _unfenced(path):
+    rows, lines = [], list(_unfenced(path))
+    for index, (number, line, opens) in enumerate(lines):
         if opens:
             continue
+        previous = lines[index - 1] if index and lines[index - 1][0] == number - 1 else None
+        following = lines[index + 1] if index + 1 < len(lines) and lines[index + 1][0] == number + 1 else None
+        wraps = previous is not None and not previous[2] and _continues(previous[1], line)
+        before = previous[1] if wraps else ""
+        after = following[1] if following is not None and not following[2] and _continues(line, following[1]) \
+            else ""
         spans = [(found.start(), found.end()) for text in allowed if text
                  for found in re.finditer(re.escape(text), line)]
-        for text, body, unit, column in _quantities(line):
+        for text, body, unit, column in _quantities(_unquoted(line), _unquoted(before), _unquoted(after),
+                                                     marker=not wraps):
             covered = any(start <= column and column + len(text) <= end for start, end in spans)
             if not covered and not _traces(body, unit, values):
                 rows.append({"file": Path(path).name, "line": number, "text": text})

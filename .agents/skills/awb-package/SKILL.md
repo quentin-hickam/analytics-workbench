@@ -57,7 +57,7 @@ A `numbers` row is a number no represented result records. Repair it by the firs
 
 1. It comes from a recorded result the draft relies on but `export` was not given: rerun `export` as step 4 says, passing that result too. `allowed_numbers` never stands in for representing a result.
 2. A represented result records it at another value or precision: rewrite it from the recorded value.
-3. It is not a quantity, such as a comparison year, a tool version, or a week number, or the records support it from elsewhere, such as a figure from an earlier release or a fact the user supplied that `history.md` records: list it in the manifest's `allowed_numbers` as `package-format/manifest-template.md` describes.
+3. It is not a quantity, such as a date, a comparison year, a chart number, a tool version, or a week number: the check reports any number whose context leaves it in doubt, so reword where a context [helpers](references/helpers.md) lists would mark it, such as a comma after a date or year; otherwise, or when the records support it from elsewhere, such as a figure from an earlier release or a fact the user supplied that `history.md` records, list it in the manifest's `allowed_numbers` as `package-format/manifest-template.md` describes.
 4. It is computed from results that none records: only separately authorized analysis records it; until then, leave it out.
 
 **Done** when `check-draft` prints `passed: true` on the final files and you have confirmed what it cannot check: both narratives carry the same qualifications and caveats; every `revalidation_flags` place carries its caveat or omission; every claim in `findings.md` traces to `methodology.md`. Any edit after `check-draft` reruns it. Report its rows verbatim.

@@ -381,57 +381,114 @@ def test_check_numbers_reads_formats(tmp_path):
     path = tmp_path / "findings.md"
     path.write_text("""# Orders, January to June 2026
 
-- n = 1,240 as of June 30, 2026, 30 June 2026, 2026-06-30T14:05:00-04:00, 6/30/2026, and 14:05.
+- n = 1,240 as of June 30, 2026, 30 June 2026, 2026-06-30T14:05:00-04:00, 6/30/2026, and 14:05:30.
 - West 21% and 21.35; between 10-15% or 10 and 15%; 3x the east; $4.2M and 12.5 thousand; 0.5 percentage points.
-- Release 002, Q-3, chart-1, v1.2.3, COVID-19, FY2026, 1st, 3/4 of stores, and Charts 1.
+- Release 002, Q-3, chart-1, v1.2.3, COVID-19, FY2026, and Charts 1.
 1. A list marker[^2], `code 77`, and [the 7 guide](notes/88.md).
 <!-- 66 -->
 ```
 44
 ```
-- Untraced: 21.4%, 1,250, 4.3M, 16%, 2.
-- Skipped: in 2026, Q3 2026, (2025), Charts 2 and 3, 9:30am, 9:30 a.m., on June 5, June 5-7, 2026, Monday, June 5 met.
-- Traced: 1.24e3, 4.213e6, 1.5e-1 and 5e-1; a hash 12345e6. Untraced: 1e-5, 1.5e6, June 77 orders, in June 31 orders, 1950 orders.
+- Untraced: 21.4%, 1,250, 4.3M, 16%, 2, 3/4 of stores, 14:05, and (2025).
+- Skipped: in 2026, Q3 2026, Charts 2 and 3, 9:30am, 9:30 a.m., June 5, June 5-7, 2026, Monday, June 5.
+- Traced: 1.24e3, 4.213e6, 1.5e-1 and 5e-1. Untraced: a hash 12345e6, 1e-5, 1.5e6, June 77 orders, 1950 orders.
 """)
     assert draft.check_numbers(path, values) == [
         {"file": "findings.md", "line": 6, "text": "7"},
-        *({"file": "findings.md", "line": 11, "text": t} for t in ("21.4%", "1,250", "4.3M", "16%", "2")),
-        *({"file": "findings.md", "line": 13, "text": t} for t in ("1e-5", "1.5e6", "77", "31", "1950"))]
-    assert draft.check_numbers(path, values, allowed={"7", "2", "16%", "1,250", "4.3M", "21.4%", "1e-5", "1.5e6",
-                                                      "77", "31", "1950"}) == []
+        *({"file": "findings.md", "line": 11, "text": t} for t in ("21.4%", "1,250", "4.3M", "16%", "2", "3/4", "14:05", "2025")),
+        *({"file": "findings.md", "line": 13, "text": t} for t in ("12345e6", "1e-5", "1.5e6", "77", "1950"))]
+    assert draft.check_numbers(path, values, allowed={"7", "2", "16%", "1,250", "4.3M", "21.4%", "3/4", "14:05", "(2025)",
+                                                      "12345e6", "1e-5", "1.5e6", "77", "1950"}) == []
 
 
-# Each narrative line a review probed, with the numbers check_numbers reports for it; [] is skipped.
+# Each narrative a review probed in rounds 1 to 3, and each case the fail-safe reading settles, with the numbers
+# check_numbers reports for it ([] is all skipped or traced), against recorded values [0.5] unless a row gives its own values or allowed texts.
+# Reading fails safe, so a number in a doubtful context is reported, never skipped.
+SHARE, FIXTURE, SCALED = {"values": ["0.213"]}, {"values": ["21.349", "2.675", "10", "8"]}, \
+    {"values": ["4.2", "4.2e6", "0.00001", "1.2e9"]}
 REVIEWED_PROBES = [
     ("Probability is 1e-5.", ["1e-5"]), ("Revenue is 1.5e6.", ["1.5e6"]), ("Revenue is 1.5E+06.", ["1.5E+06"]),
-    ("12e3 orders", []),  # a two-digit mantissa is a glued name, as a hash is
+    ("12e3 orders", ["12e3"]), ("12.5e3", ["12.5e3"]),  # any mantissa: a hash such as 12345e6 is reported too
     ("In June 77 orders were lost.", ["77"]), ("in June 31 orders", ["31"]), ("June 5, 77 orders", ["77"]),
-    ("on June 5 77 orders", ["77"]), ("5 June 77 orders", ["77"]),
+    ("on June 5 77 orders", ["5", "77"]), ("5 June 77 orders", ["5", "77"]),  # a date ends at punctuation
+    ("June 5 we met", ["5"]), ("On June 5, 2026 we met", ["2026"]), ("From June 1, 2026 to June 30, 2026.", []),
     ("As shown in Chart 1, 77 orders were late.", ["77"]), ("As shown in Chart 1; 77 orders were late.", ["77"]),
     ("Chart 1, 2 regions led.", ["2"]), ("See Chart 2 and 40 stores.", ["40"]), ("Chart 3 - 12 regions", ["12"]),
-    ("Chart 1: 77 orders", ["77"]), ("Charts 1 and 4 show 77 orders", ["77"]), ("Charts 1 and 4 show it", []),
-    ("Charts 1, 2, and 3 show it", []), ("Charts 2-3 show it", []), ("Charts 1, 40 stores", ["40"]),
-    ("Charts 1 and 2, 40 stores", ["40"]), ("Charts 4,5 show it", ["4,5"]),
+    ("Chart 1: 77 orders", ["77"]), ("Charts 1 and 4 show 77 orders", ["4", "77"]), ("Charts 1 and 4 show it", ["4"]),
+    ("Charts 1, 2, and 3 show it", ["2", "3"]), ("Charts 2-3 show it", ["3"]), ("Charts 2-3", []),
+    ("Charts 1 and 4.", []), ("Charts 1, 40 stores", ["40"]), ("Charts 1 and 2, 40 stores", ["40"]),
+    ("Charts 4,5 show it", ["4,5"]),
     ("in 2025, 2030 orders shipped", ["2030"]), ("since 2019, and 2020", []), ("between 2023 and 2024", []),
     ("in 2023, 2024 and 2025", []), ("We reviewed 1950 orders and 2,000 stores", ["1950", "2,000"]),
+    ("an increase in 2000 orders", ["2000"]), ("between 1950 and 2000 stores were affected", ["1950", "2000"]),
+    ("late 2000 orders were found", ["2000"]), ("in 2025 and 2026 orders", ["2025", "2026"]), ("mid-2025.", []),
+    ("In June 2026 orders were lost", ["2026"]), ("Q3 2025 revenue", ["2025"]), ("In Q3 2000 orders were late", ["2000"]),
+    ("Revenue fell in Q3 2025.", []), ("FY 2024 and 2025 orders", ["2024", "2025"]), ("FY 2024 and 2025.", []),
+    ("Late orders (2025) exceeded the target.", ["2025"]),
+    ("in 2000\norders were lost", ["2000"]),  # a line wrap continues the sentence
     ("Late orders rose 3 points over 2025.", ["3", "2025"]), ("compared with 2024", ["2024"]),
     ("the 2025 baseline", ["2025"]), ("2026 H1", ["2026"]), ("Week 23", ["23"]),
-    ("Python 3.12 and DuckDB 1.1.3", ["3.12"]), ("Python 3.11", ["3.11"]), ("?id=42", ["42"]),
-    ("## 2. Sources", []), ("opened at 9:30am", []), ("-21.3%", ["21.3%"]), ("10–15 percent", ["10", "15 percent"]),
-    ("values 1,2,3 and 4, 5", ["1,2,3", "4", "5"]), ("21,3%", ["21,3%"]),
+    ("Python 3.12 and DuckDB 1.1.3", ["3.12"]), ("Python 3.11", ["3.11"]), ("Python 3.12.1", []), ("3.12", ["3.12"]),
+    ("host 10.0.0.1", []), ("1.234.567 orders", ["1.234.567"]), ("1.234,5 orders", ["1.234,5"]),
+    ("?id=42", ["42"]), ("## 2. Sources", []), ("1. 77 orders", ["77"]),
+    ("The count rose to\n77. Orders then fell.", ["77"]),  # 77. continues a paragraph; only 1. starts a list
+    ("opened at 9:30am", []), ("opened at 14:05", ["14:05"]), ("a 1:20 ratio", ["1:20"]),
+    ("-21.3%", ["21.3%"]), ("10–15 percent", ["10", "15 percent"]),
+    ("values 1,2,3 and 4, 5", ["1,2,3", "4", "5"]), ("21,3%", ["21,3%"]), ("3/4 of stores", ["3/4"]),
+    ("Total,77 orders were late.", ["77"]), ("Total, 77 orders were late.", ["77"]), ("Total;77", ["77"]),
+    ("Total:77", ["77"]), ("(77 orders)", ["77"]), ("Rates: West,21.3%; East,2.7%.", ["21.3%", "2.7%"]),
+    ("West/21.3%", ["21.3%"]), ("sentence.5 stores", ["5"]), ("_77 orders_", ["77"]), ("late_77", []),
     ("Source: results/r-001-77.csv.", []), ("file data/run-2-45.parquet", []), ("**results/r-001-77.csv**", []),
-    ("./run-2-45.csv and results/12-45.csv", []), ("ORD-123-45 and ORD-123", []),
-    ("COVID-19-related 77 orders", ["77"]), ("45/day", ["45"]),
+    ("./run-2-45.csv and results/12-45.csv", []), ("ORD-123-45 and ORD-123", []), ("COVID-19", []),
+    ("COVID-19-related 77 orders", ["77"]), ("top-10 stores", ["10"]), ("45/day", ["45"]),
+    ("1st place", ["1st"], {"values": []}), ("77th percentile", ["77th"]), ("100ms", ["100ms"]),
+    ("1 000 000 orders", ["1 000 000"], {"values": ["1", "0", "1000000"]}), ("5½", ["5½"], {"values": ["5"]}), ("30d window", [], {"values": ["30"]}),
+    ("USD4.2M", [], {"values": ["4.2e6"]}),
+    ("Late rate (%) <- r-001.late_rate", []), ("chart-1: Late rate (%) <- r-001.late_rate", []),
+    ("Share was 21.3 percent.", [], SHARE), ("Share was 21.3  percent.", [], SHARE),
+    ("Share was 21.3\npercent.", [], SHARE), ("Share was 21.3 %.", [], SHARE), ("> Share was 21.3\n> percent.", [], SHARE),
+    ("> Orders rose in 2025\n> orders 77", ["2025", "77"]), ("> The count rose to\n> 77. Orders fell.", ["77"]),
+    ("Revenue was 4.2  million.", [], SCALED), ("Revenue was 1.2 bn.", [], SCALED),
+    ("Revenue is 4,200,000.", [], SCALED), ("The threshold is 0.00001.", [], SCALED),
+    # Both narratives' numbers are recorded, so the check passes them; whether they agree is the manual item.
+    ("### Late orders rose in the west\n\n- West closed 21.3% of orders late.", [], FIXTURE),
+    ("### Late orders rose in the west\n\nWest closed 2.7% of orders late (r-001).", [], FIXTURE),
+    ("Late orders rose 3 points over 2025; 2025 orders. Week 23 and 23 stores.", ["2025", "23"],
+     {"values": ["3"], "allowed": {"over 2025", "Week 23"}}),
+    ("Week 23 ran on Python 3.12, up 3 points over 2025; 23 stores and 2025 orders.", ["3", "23", "2025"],
+     {"values": [], "allowed": {"Week 23", "Python 3.12", "over 2025"}}),
+    ("compared with 2024, the 2025 baseline, 2026 H1", [],
+     {"values": [], "allowed": {"compared with 2024", "the 2025 baseline", "2026 H1"}}),
+    ("140 and 40%", ["140", "40%"], {"allowed": {"40"}}), ("Week 230", ["230"], {"allowed": {"Week 23"}}),
 ]
 
 
 def test_check_numbers_reviewed_probes(tmp_path):
     draft = load(ASSETS["src/packaging/draft.py"], "draft_probes")
     path = tmp_path / "findings.md"
-    path.write_text("".join(line + "\n" for line, _ in REVIEWED_PROBES))
-    rows = draft.check_numbers(path, [Decimal("0.5")])
-    assert {line: [row["text"] for row in rows if row["line"] == number]
-            for number, (line, _) in enumerate(REVIEWED_PROBES, start=1)} == dict(REVIEWED_PROBES)
+    found = {}
+    for line, _, *options in REVIEWED_PROBES:
+        option = options[0] if options else {}
+        path.write_text(line + "\n")
+        values = sorted(Decimal(value) for value in option.get("values", ["0.5"]))
+        found[line] = [row["text"] for row in draft.check_numbers(path, values, allowed=option.get("allowed", ()))]
+    assert found == {line: expected for line, expected, *_ in REVIEWED_PROBES}
+
+
+# Each recorded text a review probed, with the magnitudes it records.
+REVIEWED_RECORDED = [
+    ("Revenue is $4.2M.", ["4.2", "4.2e6"]), ("threshold = 1e-5", ["0.00001"]), ("results/r-001-77.csv", []),
+    ("ORD-123", []), ("1e999999999999999999", ["1e999999999999999999"]), ("9e9999999999999999999", []),
+    ("sNaN", []), ("Infinity", []), ("-0", ["0"]), ("1,5", []), ("Total,77", ["77"]),
+]
+
+
+def test_recorded_text_reviewed_probes():
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_recorded_probes")
+    for text, expected in REVIEWED_RECORDED:
+        found = set()
+        draft._magnitudes(text, found)
+        assert sorted(found) == sorted(Decimal(value) for value in expected), text
 
 
 def test_check_numbers_allowed_phrases_and_precision(tmp_path):
@@ -463,6 +520,26 @@ def test_recorded_values_reads_whole_cells_and_quantities(tmp_path):
     path = tmp_path / "findings.md"
     path.write_text("Revenue was 4,200,000 against a threshold of 0.00001.\n")
     assert draft.check_numbers(path, values) == []
+
+
+def test_recorded_values_keep_every_json_digit(tmp_path):
+    # Profile and evidence fractions are read as written, not through a binary float.
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_exact_json")
+    write(tmp_path, "investigations/inv/results/r-001.csv", "label\nwest\n")
+    write(tmp_path, "investigations/inv/results/r-001.profile.json",
+          '{"value": 0.12345678901234567890123456789, "rate": 0.21300000000000001, "rows": 12345678901234567890}')
+    write(tmp_path, "investigations/inv/evidence/r-001.json",
+          '{"checks": [{"detail": {"share": 0.30000000000000004}}], "settings": {"content": {"cut": 1e-30}}}')
+    values, problems = draft.recorded_values(tmp_path, "inv", [{"result_id": "r-001"}])
+    assert problems == [] and values == sorted(Decimal(v) for v in (
+        "0.12345678901234567890123456789", "0.21300000000000001", "12345678901234567890", "0.30000000000000004",
+        "1e-30"))
+    path = tmp_path / "findings.md"
+    path.write_text("Shares 0.12345678901234567890123456789 and 0.21300000000000001.\n")
+    assert draft.check_numbers(path, values) == []
+    path.write_text("Shares 0.12345678901234568000000000000 and 0.21300000000000002.\n")
+    assert [row["text"] for row in draft.check_numbers(path, values)] == [
+        "0.12345678901234568000000000000", "0.21300000000000002"]
 
 
 def test_verify_only_never_writes(project, capsys):
