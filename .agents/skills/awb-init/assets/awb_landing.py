@@ -69,27 +69,53 @@ def _check_name(value):
 
 
 # Obvious credential shapes, refused in the request and notes that provenance.json and the
-# Acquisitions row keep. A secret-named key or assignment holds a literal when its value is not
-# empty and not wholly a reference: $NAME, ${NAME}, <name>, *** or ALL_CAPS_NAME, optionally after
-# an auth scheme (Bearer ${NAME}). A name is secret-named when, with separators and case dropped, it
-# contains a secret word anywhere (aws_secret_access_key, X-Api-Key, refresh_token, clientSecret),
-# unless it is a cursor (page_token, next-token, nextPageToken) or its last word describes the
-# secret rather than holding it (secret_name, token_url, aws_access_key_id; see _DESCRIPTOR). An
-# assignment's quoted value is read through its closing quote, and any text after that quote makes
-# it a literal. Every other pattern refuses a match unless its value is a reference or lies inside a
-# $NAME, ${NAME} or <name> one (<sk-key-from-vault>). The refusal names the field and the kind of
-# secret, never the value or the key.
-# A guard, not a scanner: a secret in another shape is recorded as given.
+# Acquisitions row keep. The refusal names the field and the kind of secret, never the value or key.
+#
+# Names. A name is secret-named when, with separators and case dropped, it contains a secret word
+# anywhere (aws_secret_access_key, X-Api-Key, refresh_token, clientSecret). Exempt: a cursor
+# (page_token, next-token, nextPageToken), a token count or tokenizer (max_tokens, tokenizer), and a
+# name whose last word describes the secret rather than holding it (secret_name, token_url,
+# aws_access_key_id, secret_names; see _DESCRIPTOR).
+# Values. A secret-named dict key (or a list under one), name= assignment, or Name: header (also
+# "name": in JSON text) holds a literal when its value is not empty and not wholly a reference:
+# $NAME, ${NAME}, <name>, *** or ALL_CAPS_NAME, optionally after an auth scheme (Bearer ${NAME}).
+# A quoted value is read through its closing quote. Text joined to the value with nothing between,
+# bare or as a quoted fragment ('$NAME''hunter2', $NAME'hunter2'), makes it a literal; a closing
+# bracket does not ("token": "$NAME"}). A Name: value that is not quoted is read only when it ends
+# the text, a line or a quoted string, as a header does, so prose such as "token: from $ACME_TOKEN"
+# passes. Every other pattern (a bearer or basic credential, a URL's password, a private-key header,
+# a known key format) refuses a match unless it is wholly a reference or lies inside a $NAME,
+# ${NAME} or <name> one (<sk-key-from-vault>).
+#
+# Limits: this is a guard against obvious secrets, not a scanner. These are recorded as given:
+# - A literal typed onto a $NAME with no delimiter, which is a whole reference to another variable:
+#   password=$ERP_PASSWORDhunter2, Bearer $ACME_TOKENabcdefghijklmnop1.
+# - A joined quoted fragment holding whitespace or & ; , because without parsing the outer quoting
+#   it reads the same as the close of one string and the start of the next, which must pass. Each
+#   miss below cannot be refused without refusing the allowed form under it:
+#     password=$ERP_PASSWORD'hunter 2'
+#     curl -d "token=$ACME_TOKEN" "https://api.example.com/orders"
+#     password=$ERP_PASSWORD'&hunter2'
+#     ["token=$ACME_TOKEN","page=2"]
+# - A secret in prose (password: hunter2 until May), a number under a secret-named key ({"token":
+#   12345}; numbers there are usually lifetimes, as in token_expires_in), and a secret with neither
+#   a known key format nor a secret-named label.
 _SECRET_WORD = re.compile(r"password|passwd|passphrase|pwd|secret|token|apikey|privatekey"
                           r"|accesskey|credential|authorization")
 _CURSOR_NAME = re.compile(r"(?:page|next|prev|previous|continuation|sync|pagination|cursor|resume)+token")
 _DESCRIPTOR = {"name", "id", "type", "url", "uri", "endpoint", "path", "file", "arn"}
+_TOKEN_COUNT = {"max", "min", "num", "total", "prompt", "completion", "input", "output", "new",
+                "context"}
 _ASSIGNMENT = re.compile(  # the value is a lookahead, so a nested assignment is read too
-    r"(?<![\w-])(?P<name>[\w-]+)\s*=(?=\s*(?:(?P<quote>['\"])(?P<quoted>[^\n]*?)(?P=quote)"
-    r"|['\"]?(?P<bare><[\w .-]+>|[^\s&;,'\"]+))(?P<tail>[^\s&;,'\"]*))")
+    r"(?<![\w-])(?P<name>[\w-]+)['\"]?\s*(?P<separator>=|:(?!//))"
+    r"(?=\s*(?:(?P<quote>['\"])(?P<quoted>[^\n]*?)(?P=quote)"
+    r"|['\"]?(?P<bare>(?:(?i:basic|bearer|digest|token|bot)\s+)?(?:<[\w .-]+>|[^\s&;,'\"]+)))"
+    r"(?P<tail>(?:[^\s&;,'\")\]}]|(?P<joined>['\"])[^\s&;,'\"]+(?P=joined))*))")
+_HEADER_END = {"", "\n", "\r", "'", '"', ";", ",", "&"}
 _SECRET_PATTERNS = [
-    ("a bearer token", re.compile(
-        r"\bbearer\s+(?P<value>(?=[A-Za-z._~+/=${}-]*\d)[A-Za-z0-9._~+/=${}-]{16,})", re.I)),
+    ("a bearer or basic credential", re.compile(
+        r"\b(?:bearer|basic)\s+(?P<value>(?=(?:<[\w .-]+>|[A-Za-z._~+/=${}-])*\d)"
+        r"(?:<[\w .-]+>|[A-Za-z0-9._~+/=${}-]){16,})", re.I)),
     ("credentials in a URL", re.compile(r"://[^/\s:@?#]+:(?P<value>[^/\s@?#]+)@")),
     ("a private key", re.compile(r"(?P<value>-----BEGIN [A-Z ]*PRIVATE KEY-----)")),
     ("a known key format", re.compile(
@@ -104,14 +130,22 @@ _SCHEMED_VARIABLE = re.compile(rf"(?:(?i:basic|bearer|digest|token|bot)\s+)?(?:{
 
 
 def _secret_name(name):
-    joined = re.sub(r"[\W_]", "", name).lower()
-    words = re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", name)
-    return (bool(_SECRET_WORD.search(joined)) and not _CURSOR_NAME.fullmatch(joined)
-            and words[-1].lower() not in _DESCRIPTOR)
+    joined = re.sub(r"tokeni[sz]", "", re.sub(r"[\W_]", "", name).lower())
+    if not _SECRET_WORD.search(joined) or _CURSOR_NAME.fullmatch(joined):
+        return False
+    words = [word.lower() for word in re.findall(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", name)]
+    last = words[-1]
+    if last in _DESCRIPTOR or (last.endswith("s") and last[:-1] in _DESCRIPTOR):
+        return False
+    return not (last == "tokens" and len(words) > 1 and words[-2] in _TOKEN_COUNT)
 
 
 def _holds_literal(value):
     """Whether a secret-named key's or assignment's value is a literal, not a reference."""
+    if isinstance(value, (list, tuple)):
+        return any(_holds_literal(item) for item in value)
+    if not isinstance(value, str):
+        return False
     value = value.strip()
     return bool(value) and not _SCHEMED_VARIABLE.fullmatch(value)
 
@@ -119,9 +153,12 @@ def _holds_literal(value):
 def _assigns_literal(match):
     if not _secret_name(match["name"]):
         return False
-    if match["quote"] is None:
-        return _holds_literal(match["bare"] + match["tail"])
-    return bool(match["tail"]) or _holds_literal(match["quoted"])
+    if match["quote"] is not None:
+        return bool(match["tail"]) or _holds_literal(match["quoted"])
+    end = match.end("tail")
+    if match["separator"] == ":" and match.string[end:end + 1] not in _HEADER_END:
+        return False
+    return _holds_literal(match["bare"] + match["tail"])
 
 
 def _inside_reference(text, match):
@@ -140,10 +177,11 @@ def _secret_kind(value):
                 return kind
     elif isinstance(value, dict):
         for key, item in value.items():
-            if isinstance(key, str) and _secret_name(key) and isinstance(item, str):
+            if isinstance(key, str) and _secret_name(key):
                 if _holds_literal(item):
                     return "a literal value under a credential-named key"
-                kind = _secret_kind(key)
+                # A reference that passed is not rescanned: <sk-key-from-vault> stays a reference.
+                kind = _secret_kind(key) or (None if isinstance(item, str) else _secret_kind(item))
             else:
                 kind = _secret_kind(key) or _secret_kind(item)
             if kind:

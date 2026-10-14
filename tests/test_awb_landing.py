@@ -658,23 +658,36 @@ def test_cli_publish_view_sql_loads_through_session(tmp_path, capsys, dataset):
         assert connection.execute(f"SELECT * FROM {name} ORDER BY id").fetchall() == [(1, 20), (2, 40)]
 
 
+# Every shape the review rounds probed is a row here, in SECRETS, ALLOWED or KNOWN_MISSES.
 SECRETS = [
+    # A bearer or basic credential, a URL's password, a private key, a known key format.
     "GET /orders with Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOjF9.sig",
-    "https://api.example.com/orders?page=2&access_token=a1b2c3d4",
-    "DRIVER=sql;SERVER=erp;UID=reader;PWD=hunter2;",
+    "auth Basic cmVhZGVyOmh1bnRlcjI=",
     "https://reader:hunter2@erp.example.com/export",
+    "<a href=\"https://reader:hunter2@erp.example.com\">",
+    "-----BEGIN RSA PRIVATE KEY-----",
     "key AKIAIOSFODNN7EXAMPLE",
+    "key sk-proj-Ab3dEf6hIj9kLm2nOp5q",
+    "<x>sk-proj-Ab3dEf6hIj9kLm2nOp5q",
+    "slack xoxb-1234567890-abcdefghij",
+    {"aws_access_key_id": "AKIAIOSFODNN7EXAMPLE"},
+    # A literal under a secret-named dict key, or in a list under one.
     {"headers": {"Authorization": "Basic cmVhZGVyOmh1bnRlcjI="}},
+    {"headers": {"Proxy-Authorization": "Basic abc"}},
     [{"password": "hunter2"}],
+    {"password": ["hunter2"]},
     {"headers": {"X-Api-Key": "9f8e7d6c5b4a39281706"}},
+    {"headers": {"x-api-key": "9f8e7d6c5b4a39281706"}},
+    {"headers": {"X-Auth-Token": "9f8e7d6c5b4a"}},
+    {"params": {"apikey": "9f8e7d6c"}},
     {"db_password": "hunter2"},
-    "connect with password='hunter2'",
-    'GET /orders?x-api-key="9f8e7d6c5b4a39281706"',
-    "UID=reader;db_pwd=hunter2;",
+    {"DB_PASSWORD": "hunter2"},
     {"password": "pa$hunter2"},
+    {"password": "hunter2***"},
+    {"password": "hunter2 (from $DB_PASSWORD)"},
     {"Authorization": "hunter2 ($ACME_TOKEN)"},
-    "password=${ERP_PASSWORD}hunter2",
-    "api_key=<redacted>hunter2",
+    {"Authorization": "Bearer ${ACME_TOKEN}hunter2"},
+    {"Authorization": "Bearer <ACME_TOKEN>abcdefghijklmnop1"},
     # A secret word anywhere in the name.
     "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
     {"aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"},
@@ -683,18 +696,49 @@ SECRETS = [
     {"secret_key": "hunter2"},
     {"private_key": "hunter2"},
     {"clientSecret": "hunter2"},
+    # An assignment, bare or quoted, including one nested in another value.
+    "https://api.example.com/orders?page=2&access_token=a1b2c3d4",
+    "DRIVER=sql;SERVER=erp;UID=reader;PWD=hunter2;",
+    "UID=reader;db_pwd=hunter2;",
+    "password=Hunter2",
+    "password=***hunter2",
+    "password=${ERP_PASSWORD}hunter2",
+    "api_key=<redacted>hunter2",
+    "authorization=Bearer a1b2c3",
     "export DB_PASSWORD=hunter2 && fetch --url=https://erp.example.com/?password=hunter2",
+    "connect with password='hunter2'",
+    'password="hunter2"',
+    "pwd='hunter2'",
+    "api_key='sk_live_abcdef123456'",
+    "token = 'hunter2'",
+    'access_token="a1b2c3d4"',
+    'GET /orders?x-api-key="9f8e7d6c5b4a39281706"',
     # A quoted value is read through its closing quote.
     "password=' hunter2'",
+    'password=" hunter2"',
     "password='&Xk9pLq2'",
+    "password=';Xk9pLq2'",
     'password=",Xk9pLq2"',
     "password='${ERP_PASSWORD}&hunter2'",
+    "password='${ERP_PASSWORD};hunter2'",
+    "password='${ERP_PASSWORD},hunter2'",
     "password='${ERP_PASSWORD} hunter2'",
+    # Text joined to a reference, bare or as a quoted fragment.
     "password='$ERP_PASSWORD'hunter2",
-    # A reference with a literal around it, in a bearer header or URL.
-    "Authorization: Bearer ${ACME_TOKEN}abcdefghijklmnop1",
+    "password=$ERP_PASSWORD'hunter2'",
+    "password='$ERP_PASSWORD''hunter2'",
+    'password="$ERP_PASSWORD""hunter2"',
     "https://reader:${ERP_PASSWORD}hunter2@erp.example.com/export",
-    "key sk-proj-Ab3dEf6hIj9kLm2nOp5q",
+    "Authorization: Bearer ${ACME_TOKEN}abcdefghijklmnop1",
+    "Authorization: Bearer <ACME_TOKEN>abcdefghijklmnop1",
+    "Authorization: Bearer abcdefghijklmnop1<ACME_TOKEN>",
+    "Authorization: Bearer abcdefghijklmnop1${ACME_TOKEN}",
+    # A header written as a string, as curl -H records it, and JSON text.
+    'curl -H "Authorization: Basic cmVhZGVyOmh1bnRlcjI=" https://api.example.com/orders',
+    'curl -H "X-Api-Key: 9f8e7d6c5b4a39281706" https://api.example.com/orders',
+    "X-Api-Key: 9f8e7d6c5b4a39281706",
+    "password: hunter2",
+    '{"password": "hunter2"}',
 ]
 
 
@@ -705,43 +749,86 @@ def test_land_refuses_an_obvious_secret_before_fetch(tmp_path, field, secret):
     values = {"request": "orders export", "notes": None, field: secret}
     with pytest.raises(ValueError, match=f"^{field} appears to hold a secret") as error:
         landing.land(tmp_path, "api", "batch-1", called.append, **values)
-    for fragment in ("hunter2", "a1b2c3d4", "eyJhbGci", "AKIAIOSFODNN7EXAMPLE", "cmVhZGVy", "9f8e7d6c",
-                     "wJalrXUt", "1//0gabc", "Xk9pLq2", "abcdefghijklmnop1", "Ab3dEf6h"):
+    for fragment in ("hunter2", "Hunter2", "a1b2c3", "eyJhbGci", "AKIAIOSFODNN7EXAMPLE", "cmVhZGVy",
+                     "9f8e7d6c", "wJalrXUt", "1//0gabc", "Xk9pLq2", "abcdefghijklmnop1", "Ab3dEf6h",
+                     "sk_live", "xoxb-"):
         assert fragment not in str(error.value)
     assert called == []
     assert not (tmp_path / "data").exists()
 
 
-def test_land_refusal_never_echoes_a_key(tmp_path):
+@pytest.mark.parametrize("key", ["AKIAIOSFODNN7EXAMPLE_password", "xoxb-1234567890-abcdefghij_token"])
+def test_land_refusal_never_echoes_a_key(tmp_path, key):
     with pytest.raises(ValueError) as error:
-        landing.land(tmp_path, "api", "batch-1", lambda output: None,
-                     request={"AKIAIOSFODNN7EXAMPLE_password": "hunter2"})
-    assert "AKIA" not in str(error.value) and "hunter2" not in str(error.value)
+        landing.land(tmp_path, "api", "batch-1", lambda output: None, request={key: "hunter2"})
+    assert key[:8] not in str(error.value) and "hunter2" not in str(error.value)
 
 
-# References, cursors and descriptor names, each checked whole, and look-alikes of a URL or key.
+# References, cursors, counts and descriptor names, each checked whole, look-alikes of a URL or
+# key, prose, and the ordinary forms that bound what the check can read (see KNOWN_MISSES).
 ALLOWED = [
     "<sk-api-key-from-environment>",
     {"api_key": "<sk-api-key-from-environment>"},
     {"Authorization": "Bearer <sk-api-key-from-environment>"},
+    "Authorization: Bearer <sk-api-key-from-environment>",
     "token from <xoxb-slack-bot-token>",
+    "<AKIAIOSFODNN7EXAMPLE> $AKIAIOSFODNN7EXAMPLE ${AKIAIOSFODNN7EXAMPLE}",
     "Authorization: Bearer ${GITHUB_TOKEN_V2}",
-    "password=' $ERP_PASSWORD '",
+    'curl -H "Authorization: Bearer $ACME_TOKEN" https://api.example.com/orders',
+    '{"Authorization": "Bearer ${ACME_TOKEN}", "page": "2"}',
+    "authorization=Bearer $ACME_TOKEN",
     "authorization=\"Bearer $ACME_TOKEN\"",
+    "Bearer authentication_by_header, Basic authentication",
+    "password=' $ERP_PASSWORD '",
     "SET s3_secret_access_key='$AWS_SECRET_ACCESS_KEY'",
+    'password=""',
+    "token='$ACME_TOKEN'",
+    'token="${ACME_TOKEN}"',
+    "password='***'",
+    "api_key='<acme key>'",
+    "page_token='x'",
+    "page_token=abc123&page-token=abc123&next-token=abc",
     'curl -d "token=$ACME_TOKEN" "https://api.example.com/orders"',
+    "curl -d 'token=$ACME_TOKEN' -H 'Accept: x'",
+    '["token=$ACME_TOKEN","page=2"]',
     "https://reader:${ERP_PASSWORD}@erp.example.com/export",
+    "https://user:$PASS@host",
+    "postgres://user@host:5432/db",
     "https://api.example.com:8443?email=me@example.com",
     "https://example.com:443#a@b",
     "slug sk-bratislava-region-2026-q1",
+    {"page_token": "a1b2", "pageToken": "x", "next_token": "y", "key": "z"},
     {"nextPageToken": "c3d4e5f6", "continuation_token": "d4e5f6a7"},
     {"secret_name": "prod/erp-db", "token_url": "https://auth.example.com/oauth/token",
-     "aws_access_key_id": "$AWS_ACCESS_KEY_ID"},
+     "aws_access_key_id": "$AWS_ACCESS_KEY_ID", "secret_names": ["prod/a", "prod/b"]},
+    "GET /orders?max_tokens=1000&total_tokens=5&tokenizer=bert",
+    {"max_tokens": "1000", "maxTokens": "1000", "max_new_tokens": "5"},
+    "key secret: rotated monthly",
+    "token: from $ACME_TOKEN",
+    "Authorization: Bearer from the vault",
 ]
 
 
 @pytest.mark.parametrize("value", ALLOWED)
 def test_land_records_a_reference_or_look_alike(tmp_path, value):
+    final = landing.land(tmp_path, "api", "batch-1",
+                         lambda output: (output / "page.json").write_bytes(b"{}"), request=value)
+    assert json.loads((final / "provenance.json").read_text())["request"] == value
+
+
+# Secrets the guard does not see, recorded as given; the comment above _SECRET_WORD says why.
+KNOWN_MISSES = [
+    "password=$ERP_PASSWORDhunter2",
+    "Authorization: Bearer $ACME_TOKENabcdefghijklmnop1",
+    "password=$ERP_PASSWORD'hunter 2'",   # as curl -d "token=$ACME_TOKEN" "https://…" in ALLOWED
+    "password=$ERP_PASSWORD'&hunter2'",   # as ["token=$ACME_TOKEN","page=2"] in ALLOWED
+    "password: hunter2 until May",
+    {"token": 12345},
+]
+
+
+@pytest.mark.parametrize("value", KNOWN_MISSES)
+def test_land_records_a_secret_outside_the_guarded_shapes(tmp_path, value):
     final = landing.land(tmp_path, "api", "batch-1",
                          lambda output: (output / "page.json").write_bytes(b"{}"), request=value)
     assert json.loads((final / "provenance.json").read_text())["request"] == value
@@ -764,15 +851,19 @@ def test_land_records_a_request_that_names_its_variables(tmp_path):
 
 def test_cli_land_refuses_a_secret_request_before_landing(tmp_path, capsys):
     (tmp_path / "x.csv").write_bytes(b"1")
-    for option, value in itertools.product(("--request", "--notes"),
-                                           ("pulled with password=hunter2", "password='hunter2'",
-                                            "password='&hunter2'")):
+    for option, value in itertools.product(
+            ("--request", "--notes"),
+            ("pulled with password=hunter2", "password='hunter2'", "password='&hunter2'",
+             "password=$ERP_PASSWORD'hunter2'",
+             'curl -H "Authorization: Basic cmVhZGVyOmh1bnRlcjI=" https://api.example.com/orders')):
         with pytest.raises(SystemExit) as error:
             landing.cli_land(tmp_path, ["orders", "r1", str(tmp_path / "x.csv"), option, value])
         assert error.value.code == 2
         message = capsys.readouterr().err
-        assert f"{option} appears to hold a secret" in message and "hunter2" not in message
+        assert f"{option} appears to hold a secret" in message
+        assert "hunter2" not in message and "cmVh" not in message
     assert not (tmp_path / "data").exists()
+    assert not (tmp_path / "foundation/sources.md").exists()
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
