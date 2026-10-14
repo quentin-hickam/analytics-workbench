@@ -1,6 +1,6 @@
 # Analytics workbench
 
-One data foundation serves every investigation here. Source knowledge, quality records, vocabulary, the catalog, and canonical SQL views belong in `foundation/`; reusable operations in `src/`; each question's scope, settings, exploration, findings, and history in `investigations/<name>/`.
+One data foundation serves every investigation here. Source knowledge and references, quality records, vocabulary, the catalog, and canonical SQL views belong in `foundation/`; reusable operations in `src/`; each question's scope, settings, exploration, findings, and history in `investigations/<name>/`.
 
 ## Start or resume
 

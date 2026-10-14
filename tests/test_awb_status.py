@@ -17,6 +17,7 @@
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
+# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by one of the two forms foundation/sources.md defines, a link in its stated grammar or a backticked location with its sha256, in plain text outside code, HTML, emphasis, strikethrough, links and brackets; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
 # test_absent_project_and_unsafe_active_pointer: a missing project is not a workbench; an unsafe pointer is an uncertainty.
 # test_standard_active_state_pointer: link, path, and backticked pointer forms resolve to the investigation.
 # test_other_state_reader_stops_before_conclusions: another investigation's state is read only up to its first section.
@@ -85,6 +86,7 @@ def test_collect_standard_records_without_writes_or_other_conclusions(workbench)
     assert result["other_investigations"] == [{"name": "pricing", "last_updated": "2026-08-01"}]
     assert "PRIVATE CONCLUSION" not in json.dumps(result)
     assert result["acquisitions"] == {"count": 0, "without_retained_copy": 0}
+    assert result["sources"] == {"count": 0, "documentation_without_reference": []}
     assert result["packages"] == []
     assert result["uncertainties"] == []
     assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in workbench.rglob("*") if p.is_file()}
@@ -95,7 +97,7 @@ def test_missing_and_custom_tables_are_unknown_not_zero(workbench):
     (workbench / "foundation/sources.md").unlink()
     result = status.collect(workbench)
     assert result["active"]["counts"] is None
-    assert result["acquisitions"] is None
+    assert result["acquisitions"] is None and result["sources"] is None
     assert {u["path"] for u in result["uncertainties"]} == {"investigations/churn/state.md", "foundation/sources.md"}
 
 
@@ -302,6 +304,135 @@ def test_acquisitions_and_storage_risks(workbench):
     assert result["acquisitions"] == {"count": 2, "without_retained_copy": 2}
     assert result["landed_data_storage"] == {"location": "none chosen", "availability": "none chosen"}
     assert result["release_storage"]["availability"] == "unrecorded"
+
+
+SHA = "ab12" * 16
+# Notes probes for the two reference forms foundation/sources.md defines: (source ID, Notes, whether
+# it counts as a reference, where the probe came from). Every reviewer probe from PR 38 rounds 1-7
+# is a row, in both directions; rows marked "limit" pin Markdown that renders as a reference but is
+# outside the grammar foundation/sources.md states, or what a syntax-only check cannot tell apart.
+REFERENCE_PROBES = [
+    # The link form.
+    ("link", "reference: [dictionary](references/link/dictionary.pdf)", True, "template example"),
+    ("link-after-period", "Owner confirmed. Reference: [codebook](references/link-after-period/codebook.pdf)", True, "worker r1"),
+    ("link-after-br", "Owner confirmed<br>reference: [codebook](references/link-after-br/codebook.pdf)", True, "Opus r2 #2 (p6)"),
+    ("link-after-br-slash", "Owner confirmed<br/>reference: [codebook](references/link-after-br-slash/codebook.pdf)", True, "worker r3"),
+    ("link-parens", "reference: [codebook](references/link-parens/manual(v1).pdf)", True, "worker r3"),
+    ("link-parens-2", "reference: [manual](references/link-parens-2/manual(v1(2026)).pdf)", True, "Codex r4 #1"),
+    ("link-parens-3", "reference: [manual](references/link-parens-3/manual(v1(2026(a))).pdf)", True, "worker r4"),
+    ("link-parens-escaped", "reference: [manual](references/link-parens-escaped/manual\\(v1.pdf)", False, "worker r4; limit: a bare destination has no \\"),
+    ("link-escaped-backslash", "reference: [manual](references/link-escaped-backslash/manual(v1\\\\).pdf)", False, "worker r4; limit: a bare destination has no \\"),
+    ("link-lt-in-bare", "reference: [dd](references/link-lt-in-bare/a<b.pdf)", False, "Opus r5 #1; limit: a bare destination has no <"),
+    ("link-text-brackets", "reference: [HR dictionary [2024]](references/link-text-brackets/dd.pdf)", False, "Opus r5 #1; limit: link text has no brackets"),
+    ("link-text-escaped", "reference: [dd \\[v2\\]](references/link-text-escaped/dd.pdf)", False, "Opus r5 #1; limit: link text has no brackets or \\"),
+    ("link-angle-escaped-end", "reference: [manual](<references/link-angle-escaped-end/manual.pdf\\>)", False, "Codex r5 #1"),
+    ("link-angle-escaped", "reference: [manual](<references/link-angle-escaped/manual\\>v1.pdf>)", False, "Codex r5 #1; limit: an angle destination has no \\"),
+    ("link-angle", "reference: [codebook](<references/link-angle/data dictionary.pdf>)", True, "template example"),
+    ("link-angle-parens-2", "reference: [manual](<references/link-angle-parens-2/manual(v1(2026)).pdf>)", True, "Codex r4 #1"),
+    ("link-unclosed", "reference: [codebook](references/link-unclosed/codebook.pdf", False, "Codex r2 #1"),
+    ("link-unclosed-parens", "reference: [codebook](references/link-unclosed-parens/manual(v1).pdf", False, "Codex r3 #1"),
+    ("link-unclosed-parens-2", "reference: [manual](references/link-unclosed-parens-2/manual(v1(2026).pdf)", False, "worker r4"),
+    ("link-unclosed-parens-3", "reference: [manual](references/link-unclosed-parens-3/manual(v1(2026(a)).pdf)", False, "worker r4"),
+    ("link-extra-open", "reference: [manual](references/link-extra-open/manual((v1).pdf)", False, "worker r4"),
+    ("link-extra-close", "reference: [manual](references/link-extra-close/manual(v1)).pdf)", True, "limit: CommonMark ends the destination at the first unmatched )"),
+    ("link-unclosed-angle", "reference: [codebook](<references/link-unclosed-angle/manual.pdf)", False, "Codex r3 #1"),
+    ("link-spaced-bare", "reference: [codebook](references/link-spaced-bare/data dictionary.pdf)", False, "worker r3"),
+    ("link-in-code", "reference: `[codebook](references/link-in-code/codebook.pdf)`", False, "worker r3"),
+    ("link-titled", 'reference: [codebook](references/link-titled/codebook.pdf "Codebook")', False, "limit: link titles are not read"),
+    ("link-placeholder", "reference: [none](none)", True, "limit: syntax only"),
+    ("link-empty-text", "reference: [](references/link-empty-text/manual.pdf)", False, "Opus r6 #1; limit: link text is not empty"),
+    # What the label sits in: a clause counts only in plain text, outside code, HTML, emphasis,
+    # strikethrough, links and brackets.
+    ("code-span-after", "Owner `HR`; reference: [codebook](references/code-span-after/codebook.pdf)", True, "worker r5"),
+    ("code-span-label", "No reference kept. Attempted note: `status pending; reference: [manual](references/code-span-label/manual.pdf)`", False, "Codex r5 #2"),
+    ("code-span-double", "``draft; reference: [manual](references/code-span-double/manual.pdf)``", False, "worker r5"),
+    ("code-span-escaped", "\\`draft; reference: [manual](references/code-span-escaped/manual.pdf)", True, "worker r5: an escaped backtick opens no code span"),
+    ("code-span-after-escape", "\\`a` b; reference: [manual](references/code-span-after-escape/manual.pdf)`", False, "worker r5"),
+    ("html-attribute", "<span title='draft; reference: [manual](references/html-attribute/manual.pdf)'>x</span>", False, "worker r5"),
+    ("html-comment", "<!-- draft; reference: [manual](references/html-comment/manual.pdf) -->", False, "worker r5"),
+    ("html-code", "<code>draft; reference: [manual](references/html-code/manual.pdf)</code>", False, "Codex r6 #1"),
+    ("html-hidden", "<span hidden>draft; reference: [manual](references/html-hidden/manual.pdf)</span>", False, "Codex r6 #1"),
+    ("html-del", "<del>old; reference: [manual](references/html-del/manual.pdf)</del>", False, "Opus r6 closure"),
+    ("html-before", "<b>Owner</b>; reference: [manual](references/html-before/manual.pdf)", False, "worker r6; limit: reading stops at raw HTML other than <br>"),
+    ("strikethrough", "~~old note; reference: [manual](references/strikethrough/manual.pdf)~~", False, "Opus r6 #3"),
+    ("emphasis", "*draft; reference: [manual](references/emphasis/manual.pdf)*", False, "Opus r6 #3"),
+    ("emphasis-underscore", "_draft; reference: [manual](references/emphasis-underscore/manual.pdf)_", False, "worker r6"),
+    ("emphasis-before", "**Owner**: HR; reference: [manual](references/emphasis-before/manual.pdf)", True, "worker r6"),
+    ("emphasis-unclosed", "*draft; reference: [manual](references/emphasis-unclosed/manual.pdf)", True, "worker r6: an unclosed * is literal"),
+    ("emphasis-after", "reference: [manual](references/emphasis-after/manual.pdf); *draft*", True, "worker r6"),
+    ("emphasis-around", "**Owner**; reference: [manual](references/emphasis-around/manual.pdf). **Checked**", False, "worker r6; limit: reading stops at emphasis that may hold a bracket"),
+    ("emphasis-escaped-closer", "*_draft\\*; reference: [manual](references/emphasis-escaped-closer/manual.pdf)_", False, "Codex r7 #1: an escaped * closes nothing"),
+    ("emphasis-nested-opener", "_~~__; reference: [manual](references/emphasis-nested-opener/manual.pdf)~~", False, "worker r7 (Codex r7 #1 fix): the ~~ inside the skipped _ span closes after the clause"),
+    ("emphasis-nested-before", "**Owner _HR_**; reference: [manual](references/emphasis-nested-before/manual.pdf)", False, "worker r7; limit: reading stops at emphasis holding another opening delimiter"),
+    ("emphasis-intraword-before", "**Owner**: HR_name; reference: [manual](references/emphasis-intraword-before/manual.pdf)", True, "worker r7"),
+    ("underscore-intraword", "Owner hr_team; reference: [manual](references/hr_data/underscore-intraword.pdf)", True, "worker r6: an intraword _ opens no emphasis"),
+    ("autolink-before", "Owner <https://example.org/hr>; reference: [manual](references/autolink-before/manual.pdf)", True, "worker r5"),
+    ("entity-before", "AT&amp;T; reference: [manual](references/entity-before/manual.pdf)", True, "worker r5"),
+    ("image-alt", "![scan; reference: [manual](references/image-alt/manual.pdf)](scan.png)", False, "worker r5"),
+    ("in-destination", "[draft](notes;reference:[manual](references/in-destination/manual.pdf))", False, "worker r5"),
+    ("in-brackets", "[draft; reference: [manual](references/in-brackets/manual.pdf)]", False, "worker r5; limit: a clause inside brackets is not read"),
+    ("after-titled-link", '[owner](https://example.org "HR"); reference: [manual](references/after-titled-link/manual.pdf)', False, "worker r5; limit: a clause after a link outside form 1 is not read"),
+    ("after-other-link", "[owner [HR]](https://example.org/hr); reference: [manual](references/after-other-link/manual.pdf)", True, "worker r5"),
+    # The retained-location form.
+    ("kept", f"reference: `/secure/kept/manual.pdf`, sha256 {SHA}", True, "template example"),
+    ("kept-spaced", f"reference: `OneDrive - Contoso/Docs/kept-spaced/manual.pdf`, sha256 {SHA}", True, "Opus r3 #1"),
+    ("kept-spelled", f"reference: `/secure/kept-spelled/manual.pdf`, SHA-256 {SHA}", True, "Opus r2 #2 (p4)"),
+    ("kept-digest", f"reference: `/secure/kept-digest/manual.pdf`, sha256:{SHA}", True, "Opus r2 #2 (p5)"),
+    ("kept-bare", f"reference: /secure/kept-bare/manual.pdf, sha256 {SHA}", False, "Opus r2 closure, Opus r3 #1 (the old template example)"),
+    ("kept-spaced-bare", f"reference: OneDrive - Contoso/Docs/kept-spaced-bare/manual.pdf, sha256 {SHA}", False, "Opus r3 #1"),
+    ("kept-none", f"reference: none, sha256 {SHA}", False, "Codex r3 #2"),
+    ("kept-pending", f"reference: pending, sha256 {SHA}", False, "Codex r3 #2"),
+    ("kept-none-kept", f"reference: none kept, sha256 {SHA}", False, "Opus r3 closure"),
+    ("kept-short", "reference: `/secure/kept-short/manual.pdf`, sha256 ab12", False, "worker r1"),
+    ("kept-long", f"reference: `/secure/kept-long/manual.pdf`, sha256 {SHA}a", False, "worker r3"),
+    ("kept-letter", f"reference: `/secure/kept-letter/manual.pdf`, sha256 {SHA}g", False, "Codex r6 #2, Opus r6 #2"),
+    ("kept-suffix", f"reference: `/secure/kept-suffix/manual.pdf`, sha256 {SHA}xyz123", False, "Codex r6 #2"),
+    ("kept-underscore", f"reference: `/secure/kept-underscore/manual.pdf`, sha256 {SHA}_v2", False, "worker r6"),
+    ("kept-unicode-letter", f"reference: `/secure/kept-unicode-letter/manual.pdf`, sha256 {SHA}\u00e9", False, "Codex r7 #2"),
+    ("kept-fullwidth-digit", f"reference: `/secure/kept-fullwidth-digit/manual.pdf`, sha256 {SHA}\uff19", False, "Codex r7 #2"),
+    ("kept-arabic-digit", f"reference: `/secure/kept-arabic-digit/manual.pdf`, sha256 {SHA}\u0663", False, "Opus r7 #1"),
+    ("kept-then-text", f"reference: `/secure/kept-then-text/manual.pdf`, sha256 {SHA}. Verified", True, "worker r6"),
+    ("kept-escape-after", f"reference: `/secure/kept-escape-after/manual.pdf`, sha256 {SHA}\\_v2", False, "worker r6 (renders an attached _)"),
+    ("kept-entity-after", f"reference: `/secure/kept-entity-after/manual.pdf`, sha256 {SHA}&#x67;", False, "worker r6 (renders an attached g)"),
+    ("kept-no-sum", "reference: `/secure/kept-no-sum/manual.pdf`", False, "worker r3"),
+    ("kept-no-comma", f"reference: `/secure/kept-no-comma/manual.pdf` sha256 {SHA}", False, "worker r3"),
+    ("kept-placeholder", f"reference: `none`, sha256 {SHA}", True, "limit: syntax only"),
+    # Placeholders, labels, and what follows them.
+    ("blank", "reference:", False, "Codex r1 #1"),
+    ("pending", "reference: not yet retained", False, "Codex r1 #1"),
+    ("negated", "no reference: vendor publishes none", False, "Opus r1 #3"),
+    ("unlabelled", f"kept at /secure/unlabelled/manual.pdf, sha256 {SHA}", False, "Opus r1 #1"),
+    ("later-thread", "reference: pending. Owner notes in [thread](https://chat.example/t/1)", False, "Opus r2 #1 (p1)"),
+    ("later-link", "reference: not yet retained. Owner: [HR](https://example.org/hr)", False, "Codex r2 #1"),
+    ("later-comma", "reference: not yet retained, see [request](https://tickets.example/42)", False, "Opus r2 #1 (p2)"),
+    ("later-sum", f"reference: none kept. Landing checked against /data/raw/later-sum, sha256 {SHA}", False, "Opus r2 #1 (p3)"),
+    ("label-backticked", "`reference:` [schema](references/label-backticked/schema.json)", False, "worker r1, now outside the forms"),
+    ("label-bold", "**reference:** [schema](references/label-bold/schema.json)", False, "Opus r3 verified"),
+    ("label-prefixed", "Docs: reference: [schema](references/label-prefixed/schema.json)", False, "Opus r3 verified"),
+]
+
+
+def test_sources_assessed_from_documentation_need_a_reference(workbench):
+    path = workbench / "foundation/sources.md"
+    probes = [f"| {source} | X | x | y | z | from documentation: fit | candidate | {notes} |" for source, notes, _, _ in REFERENCE_PROBES]
+    rows = "\n".join(probes + [
+        "| hr | HRIS | employees, one row each | HR ops | export | From documentation: has tenure | candidate | owner confirmed |",
+        "| pay | Payroll | pay lines | Finance | API | `from documentation`; fit | acquired | reference: [dictionary](references/pay/dictionary.pdf) |",
+        "| crm | CRM | accounts | Sales | export | from landed records: sparse | rejected | |",
+        "| erp | ERP | orders | Finance | export | from landed records: verified field absent from documentation | acquired | |",
+        "| new | New | x | y | z | | candidate | |",
+        "| loose | Loose | x | y | z | not from documentation; from landed records | candidate | |"])
+    path.write_text(path.read_text().replace("| --- | --- | --- | --- | --- | --- | --- | --- |\n", "| --- | --- | --- | --- | --- | --- | --- | --- |\n" + rows + "\n", 1))
+    result = status.collect(workbench)
+    listed = result["sources"]["documentation_without_reference"]
+    assert [(source, source not in listed, origin) for source, _, _, origin in REFERENCE_PROBES] == [(source, counted, origin) for source, _, counted, origin in REFERENCE_PROBES]
+    assert result["sources"] == {"count": len(REFERENCE_PROBES) + 6, "documentation_without_reference": [source for source, _, counted, _ in REFERENCE_PROBES if not counted] + ["hr"]}
+    assert result["acquisitions"] == {"count": 0, "without_retained_copy": 0}
+    assert result["uncertainties"] == [{"path": "foundation/sources.md", "reason": "Source loose: Relevance and fitness does not begin with its basis"}]
+    path.write_text(path.read_text().replace("| Relevance and fitness |", "| Fitness |", 1))
+    result = status.collect(workbench)
+    assert result["sources"] is None
+    assert [u["path"] for u in result["uncertainties"]] == ["foundation/sources.md"]
 
 
 def test_absent_project_and_unsafe_active_pointer(tmp_path, workbench):
