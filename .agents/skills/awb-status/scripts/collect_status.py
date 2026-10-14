@@ -258,12 +258,17 @@ def collect(root):
         # `<br>`, outside code spans, raw HTML, autolinks, emphasis, strikethrough, links and brackets;
         # only what directly follows the label counts, so `reference: pending. See [x](y)` records no
         # reference. Where a clause could sit inside an element (any raw HTML but `<br>`, or emphasis or
-        # strikethrough that may hold a backtick, bracket or `<`) or the reading is uncertain (a
-        # backtick, bracket or `<` inside an autolink, or a link whose destination this does not
-        # read), the rest of the cell counts as no reference.
+        # strikethrough that may hold a backtick, bracket or `<`, or holds an opening run of another
+        # delimiter character) or the reading is uncertain (a backtick, bracket or `<` inside an
+        # autolink, or a link whose destination this does not read), the rest of the cell counts as
+        # no reference.
         position, clause, brackets = 0, True, 0
-        last_closer = {char: max((found.span() for found in re.finditer(rf"\{char}+", notes)
-                                  if can_close(notes, *found.span())), default=(0, 0)) for char in "*_~"}
+        # A backslash escapes the punctuation after it, read left to right as the loop below reads it,
+        # and an escaped delimiter is literal, so only the unescaped rest of a run opens or closes.
+        escaped = {found.end() - 1 for found in re.finditer(rf"\\[{re.escape(string.punctuation)}]", notes)}
+        runs = [(start, found.end()) for found in re.finditer(r"\*+|_+|~+", notes)
+                for start in [found.start() + (found.start() in escaped)] if start < found.end()]
+        last_closer = {char: max((run for run in runs if notes[run[0]] == char and can_close(notes, *run)), default=(0, 0)) for char in "*_~"}
         while position < len(notes):
             labelled = clause and not brackets and label.match(notes, position)
             if labelled and (retained.match(notes, labelled.end()) or link(notes, labelled.end())):
@@ -288,11 +293,13 @@ def collect(root):
                 clause = bool(broken)
             elif char in "*_~":
                 # Emphasis or strikethrough: whatever this run opens closes by the last run of the same
-                # character that can close, so the span to there is skipped, unless it may hold a clause.
+                # character that can close, so the span to there is skipped, unless it may hold a clause
+                # or holds a run of another of the three characters that can open, which may close later.
                 end = re.compile(rf"\{char}+").match(notes, position).end()
                 closer_start, closer_end = last_closer[char]
                 if closer_start >= end and can_open(notes, position, end):
-                    if any(inner in "`[]<" for inner in notes[position:closer_end]):
+                    if any(inner in "`[]<" for inner in notes[position:closer_end]) or any(
+                            end <= start < closer_start and notes[start] != char and can_open(notes, start, stop) for start, stop in runs):
                         return False
                     end = closer_end
                 position = end
