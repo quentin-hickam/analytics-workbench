@@ -187,12 +187,19 @@ def collect(root):
             uncertain(sources_path, f"Source {row['Source ID']}: Relevance and fitness does not begin with its basis")
         return basis is not None and basis.group(1).lower() == "documentation"
 
+    # The two reference forms foundation/sources.md defines, and nothing else. A complete Markdown link:
+    # bracketed text without brackets, then a destination in angle brackets, or one without spaces or
+    # `<` whose parentheses are balanced (one level deep). Or a backticked retained location, a comma,
+    # then `sha256` (also `SHA-256`, `sha256:`) and exactly 64 hex digits.
+    link = r"\[[^\[\]]*\]\((?:<[^<>\n]+>|(?:[^\s()<]|\([^\s()<]*\))+)\)"
+    retained = r"`[^`\n]*[^`\s][^`\n]*`,\s*sha-?256:?\s*[0-9a-f]{64}(?![0-9a-f])"
+    reference = re.compile(r"(?:^|[;,.]|<br\s*/?>)\s*reference:\s*(?:" + link + "|" + retained + ")", re.I)
+
     def referenced(notes):
-        """Whether a Notes clause opens with `reference:` directly followed by a complete link, or by a retained location and its SHA-256."""
+        """Whether a Notes clause opens with `reference:` directly followed by one of the two reference forms."""
         # A clause opens the cell or follows `;`, `,`, `.`, or a `<br>` line break. Only what directly
         # follows the label counts, so `reference: pending. See [x](y)` records no reference.
-        form = r"(?:\[[^\]]*\]\(\s*[^)\s]+[^)]*\)|(?:`[^`]+`|[^\s`]+?)(?:,\s*|\s+)sha-?256:?\s*[0-9a-f]{64}\b)"
-        return re.search(r"(?:^|(?<=[;,.>]))\s*`?reference:`?\s*" + form, notes, re.I) is not None
+        return reference.search(notes) is not None
 
     # foundation/sources.md states the basis and reference forms these read.
     result["sources"] = None if registered is None else {"count": len(registered), "documentation_without_reference": [

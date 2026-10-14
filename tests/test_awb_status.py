@@ -17,7 +17,7 @@
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
-# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by a complete link, or a location and its SHA-256 (sha256, SHA-256, or sha256:), so a placeholder followed by an unrelated link or checksum, or an unclosed link, is listed; a <br> opens a clause; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
+# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by one of the two forms foundation/sources.md defines, a complete Markdown link or a backticked location with its sha256; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
 # test_absent_project_and_unsafe_active_pointer: a missing project is not a workbench; an unsafe pointer is an uncertainty.
 # test_standard_active_state_pointer: link, path, and backticked pointer forms resolve to the investigation.
 # test_other_state_reader_stops_before_conclusions: another investigation's state is read only up to its first section.
@@ -293,32 +293,70 @@ def test_acquisitions_and_storage_risks(workbench):
     assert result["release_storage"]["availability"] == "unrecorded"
 
 
+SHA = "ab12" * 16
+# Notes probes for the two reference forms foundation/sources.md defines: (source ID, Notes, whether
+# it counts as a reference, where the probe came from). Every reviewer probe from PR 38 rounds 1-3
+# is a row, in both directions; rows marked "limit" pin what a syntax-only check cannot tell apart.
+REFERENCE_PROBES = [
+    # The link form.
+    ("link", "reference: [dictionary](references/link/dictionary.pdf)", True, "template example"),
+    ("link-after-period", "Owner confirmed. Reference: [codebook](references/link-after-period/codebook.pdf)", True, "worker r1"),
+    ("link-after-br", "Owner confirmed<br>reference: [codebook](references/link-after-br/codebook.pdf)", True, "Opus r2 #2 (p6)"),
+    ("link-after-br-slash", "Owner confirmed<br/>reference: [codebook](references/link-after-br-slash/codebook.pdf)", True, "worker r3"),
+    ("link-parens", "reference: [codebook](references/link-parens/manual(v1).pdf)", True, "worker r3"),
+    ("link-angle", "reference: [codebook](<references/link-angle/data dictionary.pdf>)", True, "template example"),
+    ("link-unclosed", "reference: [codebook](references/link-unclosed/codebook.pdf", False, "Codex r2 #1"),
+    ("link-unclosed-parens", "reference: [codebook](references/link-unclosed-parens/manual(v1).pdf", False, "Codex r3 #1"),
+    ("link-unclosed-angle", "reference: [codebook](<references/link-unclosed-angle/manual.pdf)", False, "Codex r3 #1"),
+    ("link-spaced-bare", "reference: [codebook](references/link-spaced-bare/data dictionary.pdf)", False, "worker r3"),
+    ("link-in-code", "reference: `[codebook](references/link-in-code/codebook.pdf)`", False, "worker r3"),
+    ("link-titled", 'reference: [codebook](references/link-titled/codebook.pdf "Codebook")', False, "limit: link titles are not read"),
+    ("link-placeholder", "reference: [none](none)", True, "limit: syntax only"),
+    # The retained-location form.
+    ("kept", f"reference: `/secure/kept/manual.pdf`, sha256 {SHA}", True, "template example"),
+    ("kept-spaced", f"reference: `OneDrive - Contoso/Docs/kept-spaced/manual.pdf`, sha256 {SHA}", True, "Opus r3 #1"),
+    ("kept-spelled", f"reference: `/secure/kept-spelled/manual.pdf`, SHA-256 {SHA}", True, "Opus r2 #2 (p4)"),
+    ("kept-digest", f"reference: `/secure/kept-digest/manual.pdf`, sha256:{SHA}", True, "Opus r2 #2 (p5)"),
+    ("kept-bare", f"reference: /secure/kept-bare/manual.pdf, sha256 {SHA}", False, "Opus r2 closure, Opus r3 #1 (the old template example)"),
+    ("kept-spaced-bare", f"reference: OneDrive - Contoso/Docs/kept-spaced-bare/manual.pdf, sha256 {SHA}", False, "Opus r3 #1"),
+    ("kept-none", f"reference: none, sha256 {SHA}", False, "Codex r3 #2"),
+    ("kept-pending", f"reference: pending, sha256 {SHA}", False, "Codex r3 #2"),
+    ("kept-none-kept", f"reference: none kept, sha256 {SHA}", False, "Opus r3 closure"),
+    ("kept-short", "reference: `/secure/kept-short/manual.pdf`, sha256 ab12", False, "worker r1"),
+    ("kept-long", f"reference: `/secure/kept-long/manual.pdf`, sha256 {SHA}a", False, "worker r3"),
+    ("kept-no-sum", "reference: `/secure/kept-no-sum/manual.pdf`", False, "worker r3"),
+    ("kept-no-comma", f"reference: `/secure/kept-no-comma/manual.pdf` sha256 {SHA}", False, "worker r3"),
+    ("kept-placeholder", f"reference: `none`, sha256 {SHA}", True, "limit: syntax only"),
+    # Placeholders, labels, and what follows them.
+    ("blank", "reference:", False, "Codex r1 #1"),
+    ("pending", "reference: not yet retained", False, "Codex r1 #1"),
+    ("negated", "no reference: vendor publishes none", False, "Opus r1 #3"),
+    ("unlabelled", f"kept at /secure/unlabelled/manual.pdf, sha256 {SHA}", False, "Opus r1 #1"),
+    ("later-thread", "reference: pending. Owner notes in [thread](https://chat.example/t/1)", False, "Opus r2 #1 (p1)"),
+    ("later-link", "reference: not yet retained. Owner: [HR](https://example.org/hr)", False, "Codex r2 #1"),
+    ("later-comma", "reference: not yet retained, see [request](https://tickets.example/42)", False, "Opus r2 #1 (p2)"),
+    ("later-sum", f"reference: none kept. Landing checked against /data/raw/later-sum, sha256 {SHA}", False, "Opus r2 #1 (p3)"),
+    ("label-backticked", "`reference:` [schema](references/label-backticked/schema.json)", False, "worker r1, now outside the forms"),
+    ("label-bold", "**reference:** [schema](references/label-bold/schema.json)", False, "Opus r3 verified"),
+    ("label-prefixed", "Docs: reference: [schema](references/label-prefixed/schema.json)", False, "Opus r3 verified"),
+]
+
+
 def test_sources_assessed_from_documentation_need_a_reference(workbench):
     path = workbench / "foundation/sources.md"
-    rows = "\n".join([
+    probes = [f"| {source} | X | x | y | z | from documentation: fit | candidate | {notes} |" for source, notes, _, _ in REFERENCE_PROBES]
+    rows = "\n".join(probes + [
         "| hr | HRIS | employees, one row each | HR ops | export | From documentation: has tenure | candidate | owner confirmed |",
-        "| pay | Payroll | pay lines | Finance | API | from documentation; fit | acquired | reference: [dictionary](references/pay/dictionary.pdf) |",
-        "| vendor | Vendor feed | events | Vendor | SFTP | from documentation | candidate | Owner confirmed. Reference: /secure/vendor/manual.pdf, sha256 ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 |",
-        "| ads | Ad platform | spend by day | Marketing | API | `from documentation`: fit | candidate | `reference:` [schema](references/ads/schema.json) |",
+        "| pay | Payroll | pay lines | Finance | API | `from documentation`; fit | acquired | reference: [dictionary](references/pay/dictionary.pdf) |",
         "| crm | CRM | accounts | Sales | export | from landed records: sparse | rejected | |",
         "| erp | ERP | orders | Finance | export | from landed records: verified field absent from documentation | acquired | |",
-        "| blank | Blank | x | y | z | from documentation: fit | candidate | reference: |",
-        "| pending | Pending | x | y | z | from documentation: fit | candidate | reference: not yet retained |",
-        "| negated | Negated | x | y | z | from documentation: fit | candidate | no reference: vendor publishes none |",
-        "| unlabelled | Unlabelled | x | y | z | from documentation: fit | candidate | kept at /secure/unlabelled/manual.pdf, sha256 ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 |",
-        "| short | Short | x | y | z | from documentation: fit | candidate | reference: /secure/short/manual.pdf, sha256 ab12 |",
-        "| later-link | Later-Link | x | y | z | from documentation: fit | candidate | reference: not yet retained. Owner: [HR](https://example.org/hr) |",
-        "| later-comma | Later-Comma | x | y | z | from documentation: fit | candidate | reference: not yet retained, see [request](https://tickets.example/42) |",
-        "| later-sum | Later-Sum | x | y | z | from documentation: fit | candidate | reference: none kept. Landing checked against /data/raw/later-sum, sha256 ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 |",
-        "| unclosed | Unclosed | x | y | z | from documentation: fit | candidate | reference: [codebook](references/unclosed/codebook.pdf |",
-        "| spelled | Spelled | x | y | z | from documentation: fit | candidate | reference: /secure/spelled/manual.pdf, SHA-256 ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 |",
-        "| digest | Digest | x | y | z | from documentation: fit | candidate | reference: /secure/digest/manual.pdf, sha256:ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12 |",
-        "| broken | Broken | x | y | z | from documentation: fit | candidate | Owner confirmed<br>reference: [codebook](references/broken/codebook.pdf) |",
         "| new | New | x | y | z | | candidate | |",
         "| loose | Loose | x | y | z | not from documentation; from landed records | candidate | |"])
     path.write_text(path.read_text().replace("| --- | --- | --- | --- | --- | --- | --- | --- |\n", "| --- | --- | --- | --- | --- | --- | --- | --- |\n" + rows + "\n", 1))
     result = status.collect(workbench)
-    assert result["sources"] == {"count": 20, "documentation_without_reference": ["hr", "blank", "pending", "negated", "unlabelled", "short", "later-link", "later-comma", "later-sum", "unclosed"]}
+    listed = result["sources"]["documentation_without_reference"]
+    assert [(source, source not in listed, origin) for source, _, _, origin in REFERENCE_PROBES] == [(source, counted, origin) for source, _, counted, origin in REFERENCE_PROBES]
+    assert result["sources"] == {"count": len(REFERENCE_PROBES) + 6, "documentation_without_reference": [source for source, _, counted, _ in REFERENCE_PROBES if not counted] + ["hr"]}
     assert result["acquisitions"] == {"count": 0, "without_retained_copy": 0}
     assert result["uncertainties"] == [{"path": "foundation/sources.md", "reason": "Source loose: Relevance and fitness does not begin with its basis"}]
     path.write_text(path.read_text().replace("| Relevance and fitness |", "| Fitness |", 1))
