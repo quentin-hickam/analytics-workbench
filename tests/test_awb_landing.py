@@ -19,6 +19,8 @@
 # test_session_refuses_a_project_root_containing_a_comma: regression: comma-containing project root is rejected before opening a connection.
 # test_cli_sql_prints_first_rows_and_total_and_writes_full_result: sql runs a project-relative query file or SQL text, prints a capped Markdown table and the total, and writes CSV or Parquet.
 # test_cli_sql_reports_failures_on_one_line: SQL errors, failing view files and non-query SQL print one stderr line and return 1; a bad --out extension is a usage error.
+# test_cli_sql_read_only_runs_select_and_refuses_every_write: --read-only prints SELECT results and refuses COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, PRAGMA, CALL, CREATE, and INSERT before any statement runs, and refuses --out, leaving the project unchanged; profile --read-only does the same.
+# test_read_only_session_refuses_a_writable_attachment_and_locks_configuration: a view file attaching a writable database is refused, a READ_ONLY attachment loads, and the loaded session's configuration is locked with spills outside the project.
 # test_cli_land_copies_files_retains_and_writes_ledger_rows: land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
 # test_cli_land_skips_unusable_retention_location: unrecorded, none chosen, unreachable and non-filesystem locations skip retention and record this checkout only.
 # test_cli_land_creates_a_missing_ledger_from_the_template: missing sources.md is written from the template with the row, reported as created.
@@ -503,6 +505,69 @@ def test_cli_sql_reports_failures_on_one_line(tmp_path, capsys):
         landing.cli_sql(tmp_path, ["SELECT 1", "--out", "result.json"])
     assert exit.value.code == 2
     assert not (tmp_path / "result.json").exists()
+def _files(root):
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+def test_cli_sql_read_only_runs_select_and_refuses_every_write(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    validate_spec = importlib.util.spec_from_file_location("awb_validate_read_only", ASSET.parent / "awb_validate.py")
+    validate = importlib.util.module_from_spec(validate_spec)
+    validate_spec.loader.exec_module(validate)
+    (tmp_path / "src/preparation").mkdir(parents=True)
+    shutil.copyfile(ASSET, tmp_path / "src/preparation/landing.py")
+    before = _files(tmp_path)
+    assert landing.cli_sql(tmp_path, ["--read-only", "queries/large.sql", "--limit", "1"]) == 0
+    assert capsys.readouterr().out == "| id |\n|---|\n| 1 |\n1 of 4 rows shown\n"
+    assert landing.cli_sql(tmp_path, ["--read-only", "WITH a AS (SELECT 1 AS x) SELECT * FROM a; FROM orders"]) == 0
+    capsys.readouterr()
+    writes = [f"COPY (SELECT 1) TO '{tmp_path / 'copy.csv'}'", f"ATTACH '{tmp_path / 'new.duckdb'}' AS extra",
+              "INSTALL httpfs", "LOAD httpfs", f"EXPORT DATABASE '{tmp_path / 'export'}'",
+              f"SET temp_directory = '{tmp_path / 'spill'}'", "PRAGMA enable_profiling", "CALL checkpoint()",
+              "CREATE TABLE t AS SELECT 1", "SELECT 1; CREATE TABLE t AS SELECT 1; SELECT 2",
+              "CREATE TABLE t (x INT); INSERT INTO t VALUES (1); SELECT * FROM t"]
+    for query in writes:
+        assert landing.cli_sql(tmp_path, ["--read-only", query]) == 1, query
+        captured = capsys.readouterr()
+        assert captured.out == "" and "read-only: refused" in captured.err, query
+        assert validate.cli_profile(tmp_path, ["--read-only", query]) == 1, query
+        assert "read-only: refused" in capsys.readouterr().err, query
+    for command in (landing.cli_sql, validate.cli_profile):
+        with pytest.raises(SystemExit) as exit:
+            command(tmp_path, ["--read-only", "SELECT 1", "--out", "out.csv"])
+        assert exit.value.code == 2
+    capsys.readouterr()
+    assert validate.cli_profile(tmp_path, ["--read-only", "orders"]) == 0
+    assert "rows: 5" in capsys.readouterr().out
+    assert _files(tmp_path) == before
+
+
+def test_read_only_session_refuses_a_writable_attachment_and_locks_configuration(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    with duckdb.connect(str(tmp_path / "side.duckdb")) as side:
+        side.execute("CREATE TABLE extra AS SELECT 7 AS n")
+    view = tmp_path / "foundation/views/02_side.sql"
+    attach = f"ATTACH '{tmp_path / 'side.duckdb'}' AS side"
+    view.write_text(f"{attach}; CREATE VIEW extra AS SELECT * FROM side.extra;")
+    with pytest.raises(ValueError, match=r"writable database \(side\).*READ_ONLY"):
+        landing.session(tmp_path, read_only=True)
+    with landing.session(tmp_path) as connection:  # the default session keeps loading it
+        assert connection.sql("SELECT n FROM extra").fetchall() == [(7,)]
+    view.write_text(f"{attach} (READ_ONLY); CREATE VIEW extra AS SELECT * FROM side.extra;")
+    with landing.session(tmp_path, read_only=True) as connection:
+        assert landing.read_only_sql(connection, "SELECT n FROM extra").fetchall() == [(7,)]
+        settings = dict(connection.execute(
+            "SELECT name, value FROM duckdb_settings() WHERE name IN ('lock_configuration', "
+            "'autoinstall_known_extensions', 'allow_persistent_secrets', 'temp_directory')").fetchall())
+        with pytest.raises(duckdb.Error, match="locked"):
+            connection.execute("SET threads = 1")
+    assert settings["lock_configuration"] == "true" and settings["autoinstall_known_extensions"] == "false"
+    assert settings["allow_persistent_secrets"] == "false"
+    assert not Path(settings["temp_directory"]).resolve().is_relative_to(tmp_path.resolve())
+
+
 WORKBENCH = ASSET.parent / "workbench"
 
 

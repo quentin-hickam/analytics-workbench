@@ -29,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 from collections.abc import Callable, Sequence
 from datetime import date, datetime, timezone
@@ -1152,13 +1153,19 @@ def cli_publish(root: Path, argv: list[str]) -> int:
 
 
 def session(project_root: str | Path, *,
-            views_dir: str | Path = "foundation/views") -> "duckdb.DuckDBPyConnection":
+            views_dir: str | Path = "foundation/views",
+            read_only: bool = False) -> "duckdb.DuckDBPyConnection":
     """Open an in-memory DuckDB session and load view files in name order.
 
     Project-relative paths in views, such as data/parquet/..., resolve against
     the project root from any working directory. A view that reads another view
     must sort after it; use numeric prefixes, for example 01_base.sql and
     02_derived.sql.
+
+    read_only=True opens a session that writes nothing: no extension installs, no
+    persistent secrets, spill files outside the project, configuration locked once
+    the views load, and a refusal when a view file attaches a writable database.
+    Run queries in it through read_only_sql(), which admits only SELECT statements.
     """
     try:
         import duckdb
@@ -1169,7 +1176,10 @@ def session(project_root: str | Path, *,
         # file_search_path is a comma-separated list with no escape for a comma.
         raise ValueError(f"session() cannot use a project root containing a comma: {root}")
     directory = _under(root, views_dir)
-    connection = duckdb.connect()
+    # An in-memory database spills to .tmp/ under the working directory by default.
+    connection = duckdb.connect(config={
+        "autoinstall_known_extensions": False, "allow_persistent_secrets": False,
+        "temp_directory": str(Path(tempfile.gettempdir()) / "awb-duckdb")}) if read_only else duckdb.connect()
     try:
         connection.execute("SET file_search_path = ?", [str(root)])
         for path in sorted(directory.glob("*.sql")):
@@ -1179,10 +1189,30 @@ def session(project_root: str | Path, *,
                 connection.execute(path.read_text(encoding="utf-8"))
             except Exception as error:
                 raise RuntimeError(f"Failed to load view file: {path}") from error
+        if read_only:
+            writable = connection.execute(
+                "SELECT database_name FROM duckdb_databases() WHERE path IS NOT NULL AND NOT readonly "
+                "ORDER BY database_name").fetchall()
+            if writable:
+                raise ValueError("a read-only session refuses view files that attach a writable database ("
+                                 + ", ".join(name for name, in writable) + "); attach it with (READ_ONLY)")
+            connection.execute("SET lock_configuration = true")
     except BaseException:
         connection.close()
         raise
     return connection
+
+
+def read_only_sql(connection, text):
+    """Run SQL text in a read-only session(): only SELECT statements, refusing COPY, ATTACH, INSTALL,
+    LOAD, EXPORT, SET, PRAGMA, CALL, CREATE, and every other kind before any statement runs. Returns
+    the last statement's relation, as connection.sql() does."""
+    import duckdb
+    for statement in duckdb.extract_statements(text):
+        if statement.type != duckdb.StatementType.SELECT:
+            kind = getattr(statement.type, "name", "") or " ".join(statement.query.split()[:1]).upper()
+            raise ValueError(f"read-only: refused a {kind or 'non-SELECT'} statement; only SELECT runs here")
+    return connection.sql(text)
 
 
 def _sql_argument(root, argument):
@@ -1222,16 +1252,22 @@ def cli_sql(root: Path, argv: list[str]) -> int:
     parser.add_argument("query", help="query file (absolute or project-relative) or SQL text")
     parser.add_argument("--limit", type=int, default=20, help="rows to print (default 20)")
     parser.add_argument("--out", help="write the full result to this project-relative .csv or .parquet file")
+    parser.add_argument("--read-only", action="store_true",
+                        help="write nothing: run only SELECT statements, refusing every other kind, in a "
+                             "session that installs no extension and spills outside the project; refuses --out")
     args = parser.parse_args(argv)
     if args.limit < 0:
         parser.error("--limit must be 0 or more")
+    if args.read_only and args.out:
+        parser.error("--read-only refuses --out")
     out = _under(root, args.out) if args.out else None
     if out is not None and out.suffix.lower() not in {".csv", ".parquet"}:
         parser.error("--out must end in .csv or .parquet")
     try:
-        with session(root) as connection:
+        with session(root, read_only=args.read_only) as connection:
             # sql() runs every statement and returns the last one's result, or None.
-            relation = connection.sql(_sql_argument(root, args.query))
+            text = _sql_argument(root, args.query)
+            relation = read_only_sql(connection, text) if args.read_only else connection.sql(text)
             if relation is None:
                 raise ValueError("the SQL returns no rows; end it with a query")
             if out is not None:
