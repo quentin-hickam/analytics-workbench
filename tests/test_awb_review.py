@@ -2,16 +2,18 @@
 # test_correction_becomes_a_numbered_rule: add creates foundation/review-rules.md with its header and R-<area>-001, numbers per area after every ID used, retired and hand-numbered ones included, and never renumbers earlier rules.
 # test_next_review_reports_against_the_rule: check lists every rule in file order with matched lines from both narratives, no match, no pattern, and retired; matches are capped; nothing is written.
 # test_check_without_rules_or_draft: no rule file reports none recorded and exits 0; a missing draft narrative is an error and exits 1.
-# test_malformed_rule_file_is_reported_and_blocks_add: a bad heading, a repeated ID or field, missing fields, an unknown severity, and an unusable pattern (one overflowing included) are problems; check exits 1 with the rule unchecked; add refuses and writes nothing.
+# test_malformed_rule_file_is_reported_and_blocks_add: a bad heading, a repeated ID or field (at its line), missing fields, an unknown severity, and an unusable pattern (one overflowing included) are problems; check exits 1 with the rule unchecked; add refuses and writes nothing.
 # test_broken_rule_section_is_reported_not_dropped: a rule under a malformed heading, or field lines outside a rule section, are problems; check exits 1 and add refuses, so no ID is reused.
 # test_wrapped_field_line_is_reported: a line inside a rule section that is not a field, such as a wrapped Rule, is a problem rather than lost text.
 # test_line_starting_with_hash_never_cuts_a_rule_short: after the first rule, a wrapped line starting with # or a heading that is not a rule's is a problem; check exits 1 and add refuses, so no rule is silently truncated.
 # test_rule_numbers_are_ascii_and_unique: an ID repeating another's number with more zero padding, or a number in non-ASCII digits, is a problem; add refuses.
 # test_rule_file_lines_count_only_newlines: a U+2028, form feed, or lone carriage return in the rule file is a problem at its grep -n line and shifts no later line; add refuses; CRLF endings are no problem.
 # test_match_lines_count_only_newlines: a U+2028, form feed, or lone carriage return in a narrative does not shift the reported line numbers away from grep -n's, and CRLF endings still match a pattern anchored with $.
+# test_lines_end_where_the_file_ends: a narrative has no empty line after its final \n, keeps a \r no \n follows, and reads a byte order mark as no part of line 1.
+# test_rule_file_ends_where_the_file_ends: a lone \r as the rule file's last byte is a problem at its line, and add refuses; a rule heading after a byte order mark is sound.
 # test_check_through_the_dispatcher_writes_nothing: run as a script with bytecode writes enabled, review-rules check leaves every project file, __pycache__ included, unchanged.
 # test_add_to_an_empty_rule_file_writes_the_header: add to an empty rule file writes the header before the first rule.
-# test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes or blank, an unknown severity, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
+# test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes, blank, or holding bytes that are not UTF-8, an unknown severity, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
 # test_pattern_round_trips_through_backticks: a pattern holding backticks, or the word none, is written in backticks and read back as the same expression.
 # test_package_and_release_invoke_the_read_only_review: both skills link the review brief and run it before their final command; the brief has a fresh subagent review in every host with subagents, Codex included, and the writer review only where there are none; it limits the reviewer to read tools and the read-only command, asks one line per rule, ends with a summary line counting violations, narrative problems, and command problems, any of which blocks, defines when a review is stale, and with AGENTS.md says which corrections become rules.
 
@@ -156,7 +158,7 @@ def test_malformed_rule_file_is_reported_and_blocks_add(project, capsys):
     problems = out["problems"]
     assert problems[0] == {"line": 3, "problem": "rule heading is not ## R-<area>-NNN with a lowercase area, its "
                                                  "last part holding a letter, and a three-digit number"}
-    assert {"rule": "R-periods-001", "problem": "repeated Rule line"} in problems
+    assert {"rule": "R-periods-001", "line": 18, "problem": "repeated Rule line"} in problems
     assert {"rule": "R-periods-001", "problem": "rule ID appears more than once"} in problems
     assert {"rule": "R-periods-002", "problem": "missing Fix"} in problems
     assert any(p.get("rule") == "R-periods-002" and "unknown severity 'blocker'" in p["problem"] for p in problems)
@@ -277,6 +279,40 @@ def test_match_lines_count_only_newlines(project, capsys, brk):
         ("findings.md", 3, "Sales in the partial month")]
 
 
+@pytest.mark.parametrize("text, pattern, lines", [
+    (b"Alpha\n", "^$", []),  # grep -n '^$' finds nothing: the file has one line
+    (b"", "^$", []),
+    (b"\n", "^$", [1]),
+    (b"Alpha\nBeta", "^Beta$", [2]),
+    (b"Alpha\r", "\\r$", [1]),  # a \r at the end of the file is kept
+    (b"Alpha\r\n", "\\r$", []),  # a CRLF ending's \r is not
+    (b"\xef\xbb\xbfAlpha\n", "^Alpha", [1])])
+def test_lines_end_where_the_file_ends(project, capsys, text, pattern, lines):
+    draft = project / "deliveries/inv/pkg/draft"
+    (draft / "findings.md").write_bytes(text)
+    (draft / "methodology.md").write_bytes(b"")
+    add(project, capsys, pattern=pattern)
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 0 and [m["line"] for m in out["rules"][0].get("matches", [])] == lines
+
+
+def test_rule_file_ends_where_the_file_ends(project, capsys):
+    path = project / RULES
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"# Review rules\n\n## R-periods-001\n\n" + RULE.rstrip("\n").encode() + b"\r")
+    before = path.read_bytes()
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 1 and out["problems"] == [  # the Fix line, 8, ends the file with a lone \r
+        {"line": 8, "problem": "line holds U+000D, a line break other than \\n; replace it with a space or a newline"}]
+    code, out = add(project, capsys)
+    assert code == 1 and out["added"] is None and path.read_bytes() == before
+
+    path.write_bytes(b"\xef\xbb\xbf## R-periods-001\n\n" + RULE.encode())
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 0 and out["problems"] == [] and out["rules"][0]["id"] == "R-periods-001"
+    assert add(project, capsys)[1]["added"] == "R-periods-002"
+
+
 def test_check_through_the_dispatcher_writes_nothing(project, capsys):
     add(project, capsys, pattern="partial month")
     before = snapshot(project, caches=True)
@@ -300,7 +336,8 @@ def test_add_to_an_empty_rule_file_writes_the_header(project, capsys):
     {"area": "Periods"}, {"area": "periods_x"}, {"area": "-periods"}, {"area": "periods-001"}, {"area": "2024"},
     {"rule": "two\nlines"}, {"rule": "Never compare\u2028partial months."}, {"fix": "a\x85b"},
     {"pattern": "a\vb"}, {"fix": "  "}, {"severity": "retired"}, {"pattern": "(unclosed"}, {"pattern": ""},
-    {"pattern": "x{4294967296}"}])
+    {"pattern": "x{4294967296}"}, {"rule": "Never compare\udc85partial months."}, {"fix": "a\udcffb"},
+    {"pattern": "a\udc85"}])  # argv holds bytes that are not UTF-8 as lone surrogates
 def test_add_rejects_unusable_arguments(project, capsys, change):
     code, out = add(project, capsys, **change)
     assert code == 2 and out is None and not (project / RULES).exists()

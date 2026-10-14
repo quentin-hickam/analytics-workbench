@@ -1181,10 +1181,13 @@ def _pattern_problem(pattern):
 
 
 def _read_lines(path):
-    r"""A file's lines split on \n only, as grep -n counts them, each without a CRLF ending's \r.
+    r"""A file's lines as grep -n numbers them: split on \n only, with no empty line after a final \n.
 
-    Read as bytes: text mode would turn a lone \r into \n and shift every later line number."""
-    return [line.removesuffix("\r") for line in Path(path).read_bytes().decode("utf-8").split("\n")]
+    Read as bytes: text mode would turn a lone \r into \n and shift every later line number. A \r is
+    dropped only where a \n follows it, as a CRLF ending; any other \r, one at the end of the file
+    included, stays in its line. A UTF-8 byte order mark is not part of line 1."""
+    *ended, last = Path(path).read_bytes().decode("utf-8-sig").split("\n")
+    return [line.removesuffix("\r") for line in ended] + ([last] if last else [])
 
 
 def parse_review_rules(lines: list) -> tuple:
@@ -1227,7 +1230,7 @@ def parse_review_rules(lines: list) -> tuple:
         field = _RULE_FIELD.fullmatch(line.rstrip())
         if field:
             if field[1] in current["fields"]:
-                problems.append({"rule": current["id"], "problem": f"repeated {field[1]} line"})
+                problems.append({"rule": current["id"], "line": number, "problem": f"repeated {field[1]} line"})
             current["fields"][field[1]] = field[2].strip()
         elif line.strip():
             problems.append({"rule": current["id"], "line": number,
@@ -1321,7 +1324,7 @@ def add_review_rule(root, area, severity, rule, fix, pattern=None, *, today=None
     day = today or datetime.now().astimezone().date().isoformat()
     entry = (f"## {rule_id}\n\n- Severity: {severity}\n- Rule: {rule}\n"
              f"- Pattern: {f'`{pattern}`' if pattern else 'none'}\n- Fix: {fix}\n- Added: {day}\n")
-    existing = path.read_text(encoding="utf-8") if parsed is not None else ""
+    existing = path.read_text(encoding="utf-8-sig") if parsed is not None else ""
     if not existing.strip():
         existing = _RULES_HEADER
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1376,9 +1379,16 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
                   f"letter: {args.area!r}")
     for name in ("rule", "fix", "pattern"):
         value = getattr(args, name)
-        # Every line break the parser splits on, not only \n and \r, or the rest of the text is lost.
-        if value is not None and (not value.strip() or value.splitlines() != [value]):
+        if value is None:
+            continue
+        # \n and every other break the parser reports (_OTHER_BREAK), or the file add writes would fail
+        # its own check and block the next add.
+        if not value.strip() or value.splitlines() != [value]:
             add.error(f"--{name} must be one non-blank line")
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:  # bytes that are not UTF-8 reach argv as lone surrogates
+            add.error(f"--{name} is not valid UTF-8")
     if args.pattern is not None and (problem := _pattern_problem(args.pattern)):
         add.error(f"--pattern {problem}")
     report = add_review_rule(Path(root), args.area, args.severity, args.rule.strip(), args.fix.strip(),
