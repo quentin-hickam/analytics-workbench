@@ -310,9 +310,10 @@ def collect(root, *, probe_upstream=False):
 def upstream(root, probe, uncertain, entries):
     """Count landed files a HEAD request can check; with probe, check each and report the rest.
 
-    Only the latest acquisition of a source to record a URL is checked, by completed_at: a file of
-    an earlier acquisition of the same source and URL counts as superseded, since landing again is
-    how a changed upstream is taken up. probeable_files is null when an acquisition directory or
+    Only the latest acquisition of a source to record a URL is checked, by completed_at and then,
+    for acquisitions completed in the same second, by the greater acquisition ID: a file of an
+    earlier acquisition of the same source and URL counts as superseded, since landing again is how
+    a changed upstream is taken up. probeable_files is null when an acquisition directory or
     provenance.json could not be read; an uncertainty names each one, and the files that were read
     are still counted and probed. entries is collect()'s directory listing, None when unreadable.
     """
@@ -332,7 +333,8 @@ def upstream(root, probe, uncertain, entries):
             if acquisition is None:
                 complete = False
                 continue
-            order = acquisition[0]
+            # land() records completed_at to the second; the acquisition ID orders a tie.
+            order = (acquisition[0], directory.name)
             for file in acquisition[1]:
                 recorded = file.get("upstream")
                 if recorded is None:

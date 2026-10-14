@@ -30,6 +30,7 @@
 # test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes: land()'s upstream fields drive one HEAD per probeable file; ETag wins over Last-Modified unless only the ETag changed, a weak ETag and an equal date in another form match, HTTP and network errors are unknown, and nothing is written.
 # test_out_of_range_server_date_is_compared_as_text_and_the_probe_continues: a Last-Modified the date parser overflows on falls back to text comparison, and the remaining files are still probed.
 # test_a_relanded_url_is_checked_only_in_its_latest_acquisition: after a changed upstream is landed again, only the newest acquisition of that source and URL is probed and the earlier one counts as superseded, even when the newer one records no validator.
+# test_the_latest_acquisition_is_ordered_by_completed_at_then_acquisition_id: completed_at instants are compared across offsets, not by ID, and acquisitions completed in the same second are ordered by acquisition ID, so exactly one stays current.
 # test_a_host_that_times_out_is_not_requested_again: after a connect or read timeout, the host's remaining files are unknown without a request, and other hosts are still probed.
 # test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
 # test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including any upstream field land() refuses (by land()'s own check: an invalid or credential-bearing URL among them), is named under uncertainties with or without the probe and makes probeable_files null, nothing is requested for it, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
@@ -608,6 +609,26 @@ def test_a_relanded_url_is_checked_only_in_its_latest_acquisition(workbench, mon
                                         "reason": "no ETag or Last-Modified recorded"}]
     assert result["superseded"] == 2
     assert sorted(url for _, url, _ in server.requests) == [url + "data", url + "data"]
+
+
+@pytest.mark.parametrize("completed, checked", [
+    ({"batch-1": "2026-10-13T08:00:00+00:00", "batch-2": "2026-10-13T09:00:00+00:00"}, "batch-2"),
+    ({"z-old": "2026-10-13T10:00:00+02:00", "a-new": "2026-10-13T08:30:00+00:00"}, "a-new"),
+    ({"a1": "2026-10-13T08:00:00+00:00", "a2": "2026-10-13T08:00:00+00:00"}, "a2"),
+    ({"a2": "2026-10-13T08:00:00+00:00", "a1": "2026-10-13T10:00:00+02:00"}, "a2"),
+])
+def test_the_latest_acquisition_is_ordered_by_completed_at_then_acquisition_id(workbench, monkeypatch, completed, checked):
+    url = "https://example.test/data"
+    for etag, (acquisition_id, at) in enumerate(completed.items(), start=1):
+        monkeypatch.setattr(landing, "_timestamp", lambda at=at: at)
+        land_with_upstream(workbench, acquisition_id, {"data.csv": {"url": url, "etag": f'"v{etag}"'}})
+    server = FakeServer({url: {"ETag": '"v2"'}})
+    serve(monkeypatch, server)
+    result = status.collect(workbench, probe_upstream=True)["upstream"]
+    assert (result["probeable_files"], result["superseded"]) == (1, 1)
+    assert [(file["acquisition_id"], file["result"]) for file in result["files"]] == [
+        (checked, "unchanged" if list(completed).index(checked) == 1 else "changed")]
+    assert [request_url for _, request_url, _ in server.requests] == [url]
 
 
 @pytest.mark.parametrize("timeout", ["connect", "read"])
