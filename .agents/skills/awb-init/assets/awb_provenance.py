@@ -413,7 +413,7 @@ def _joined(lines):
 def read_requirements(path) -> tuple[list[str], list[str]]:
     """(names, unread) for a requirements file: the normalized package names it declares, in order,
     with those of each file it includes by -r or --requirement (a path relative to the including
-    file, read once); and each line it cannot read, as "<file>:<line>: <text>", which is every
+    file, read once; one that cannot be read is reported at each include); and each line it cannot read, as "<file>:<line>: <text>", which is every
     non-blank, non-comment line requirement_name() cannot name other than an option line installing
     nothing, and, with the reason in parentheses, every include that cannot be read and every
     archive whose #egg= names another package than its file name (declared by the file name). An
@@ -431,8 +431,8 @@ def read_requirements(path) -> tuple[list[str], list[str]]:
             key = file.resolve()
             if key in seen:
                 return
-            seen.add(key)
             data = file.read_bytes()
+            seen.add(key)  # After the read, so each include of a file that cannot be read is reported.
         except (OSError, RuntimeError) as error:
             if source is not None or not isinstance(error, FileNotFoundError):
                 unread.append(f"{source or label} ({getattr(error, 'strerror', None) or error})")
