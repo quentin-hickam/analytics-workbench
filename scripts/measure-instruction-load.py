@@ -63,6 +63,10 @@ def main():
         'narrative_revision': ([AGENTS, skill('awb-package')], [AGENTS, skill('awb-package'), CONTRACT, REVIEW]),
         'clean': ([AGENTS], [AGENTS, skill('awb-clean')]),
         'eda': ([AGENTS], [AGENTS, skill('awb-eda')]),
+        # Scoping left awb-init for awb-scope: a new project loads both, a later question only awb-scope.
+        'project_setup': ([AGENTS, skill('awb-init')], [AGENTS, skill('awb-init'), skill('awb-scope')]),
+        'new_investigation': ([AGENTS, skill('awb-init')], [AGENTS, skill('awb-scope')]),
+        'brainstorm': ([AGENTS], [AGENTS, skill('awb-brainstorm')]),
     }
     result = {'measurement': 'Static instruction words and characters, not model tokens or full-run cost',
               'baseline': args.baseline, 'scenarios': {}}

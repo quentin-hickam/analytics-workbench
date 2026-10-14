@@ -15,8 +15,8 @@ The table is rendered from `findings.json`; change it only through `run.py` and 
 
 ## Unresolved issues
 
-List open analytical questions, relevant data limitations, and decisions still needed. Keep this a short list.
+List relevant data problems, coverage limitations, and blockers. Questions go in the question ledger, `questions.md`. Keep this a short list.
 
 ## Next steps
 
-List the smallest concrete steps that would advance the investigation. Keep this a short list.
+List the smallest concrete actions that would advance the investigation, citing the ledger question each serves, such as "test Q-012 in run.py". Keep this a short list.

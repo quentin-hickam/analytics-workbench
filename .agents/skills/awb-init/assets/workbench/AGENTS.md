@@ -6,7 +6,7 @@ One data foundation serves every investigation here. Source knowledge and refere
 
 For investigation work, run `python3 src/awb.py state` to resume README's active investigation (`--investigation <name>` for another) and name it briefly; read history when prior reasoning matters. Switch with `state switch <name>`. When an ask could belong to several investigations, ask which before changing records.
 
-Use the workbench skills for their work even when you start it yourself; take a consequential scope change, such as a broader or different population, through `awb-init`'s scoping interview.
+Use the workbench skills for their work even when you start it yourself; take a new business question or a consequential scope change, such as a broader or different population, through `awb-scope`.
 
 ## Procedures
 
@@ -31,7 +31,7 @@ Only a result from the investigation's `run.py`, run with its settings, can beco
 
 Settle ambiguous terms with concrete examples and the data. Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and dataset, view, and cache descriptions in `foundation/catalog.md`; these replace context maps and ADRs.
 
-`run.py` writes findings rows; hand edits to the table are refused as drift. Change wording, status, claim strength, or caveats with `awb.py state finding`, which writes any history entry due, and issues and next steps with `state issues` or `state next`. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. When the user names who will read the deliverables, record it in the brief's Audience section.
+`run.py` writes findings rows; hand edits to the table are refused as drift. Change wording, status, claim strength, or caveats with `awb.py state finding`, which writes any history entry due, and issues and next steps with `state issues` or `state next`. Unresolved issues hold data problems and blockers, Next steps actions; a question raised in the work goes in the investigation's ledger with `awb.py questions add`, and an answer the user gives with `questions answer`. A data question is answered only by a result whose settings table declares it. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. When the user names who will read the deliverables, record it in the brief's Audience section.
 
 Commit when the user asks; suggest one when analytical code is uncommitted, so evidence carries a SHA.
 

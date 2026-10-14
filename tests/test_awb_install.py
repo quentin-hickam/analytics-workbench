@@ -277,7 +277,7 @@ def test_refuses_non_workbench_old_python_and_unreadable_receipt(tmp_path, proje
                                                        "workbench": False,
                                                        "missing": ["AGENTS.md", "foundation/", "investigations/"],
                                                        "hint": "No workbench markers here. At the project root, first adapt "
-                                                               "README.md and AGENTS.md (awb-init SKILL.md, section 4, "
+                                                               "README.md and AGENTS.md (awb-init SKILL.md, section 3, "
                                                                "item 1); otherwise pass the project root."}
     (project / ".awb-receipt.json").write_text("{")
     before = snapshot(project)
@@ -296,7 +296,7 @@ def test_refuses_readme_only_directory(tmp_path):
     assert report["workbench"] is False
     assert report["missing"] == ["AGENTS.md", "foundation/", "investigations/"]
     assert report["hint"] == "No workbench markers here. At the project root, first adapt README.md and AGENTS.md " \
-        "(awb-init SKILL.md, section 4, item 1); otherwise pass the project root."
+        "(awb-init SKILL.md, section 3, item 1); otherwise pass the project root."
     result = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path)], capture_output=True, text=True)
     assert result.returncode == 1 and json.loads(result.stdout) == report
     assert list(tmp_path.iterdir()) == before

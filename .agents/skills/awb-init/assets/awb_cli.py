@@ -32,6 +32,8 @@ COMMANDS = {
     "state": ("provenance.py", "cli_state",
               "print the active investigation's brief and state to resume; promote, reword, or set the claim "
               "strength of findings with their history, edit issues and next steps, or switch investigations"),
+    "questions": ("provenance.py", "cli_questions",
+                  "list, add, answer, park, decline, supersede, or reword the investigation's ledger questions"),
     "stale": ("provenance.py", "cli_stale",
               "list findings whose evidence no longer matches the current code, views, inputs, or settings, "
               "and warn on runtime differences"),

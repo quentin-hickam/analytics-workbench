@@ -153,7 +153,7 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
         return {"project": str(root), "workbench": False,
                 "missing": ["AGENTS.md", "foundation/", "investigations/"],
                 "hint": "No workbench markers here. At the project root, first adapt README.md and AGENTS.md "
-                        "(awb-init SKILL.md, section 4, item 1); otherwise pass the project root."}
+                        "(awb-init SKILL.md, section 3, item 1); otherwise pass the project root."}
     try:
         receipt = json.loads((root / RECEIPT).read_text()) if (root / RECEIPT).exists() else {}
         if not isinstance(receipt, dict):

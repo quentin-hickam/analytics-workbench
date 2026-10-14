@@ -14,18 +14,20 @@ Keep the skills as agent-agnostic folders under `.agents/skills/`. Generated pro
 
 The eventual implementation must provide these artifacts:
 
-1. **Initialization skill (`awb-init`).** Establishes the project structure, working conventions, shared data foundation, and the first investigation. A new project starts from a business question; the skill asks for one when none is supplied and completes setup without an investigation only when the user explicitly has none yet. It also starts later investigations and resolves consequential scope changes, using the self-contained scoping interview below. Its repair also brings an existing workbench up to date after newer skills are installed: the helper installer's `--upgrade` installs missing helpers, guides, and the `foundation/references/` README and replaces only unmodified copies of earlier shipped helpers, package formats, workbench guides, and that README, recognized by the project's install receipt. It reports customized copies for the user to decide and removes retired unmodified files only when asked. The agent then reconciles the adapted `AGENTS.md`, `README.md`, and `.gitignore` against the current templates. The upgrade leaves investigation records, data, and releases as they are. Initialization does not create a delivery package.
+1. **Initialization skill (`awb-init`).** Establishes the project structure, working conventions, and shared data foundation, then hands the business question to the scoping skill, which creates the first investigation. A new project starts from a business question; the skill asks for it in one line when none is supplied, without interviewing, and completes setup without an investigation only when the user explicitly has none yet. Its repair also brings an existing workbench up to date after newer skills are installed: the helper installer's `--upgrade` installs missing helpers, guides, and the `foundation/references/` README and replaces only unmodified copies of earlier shipped helpers, package formats, workbench guides, and that README, recognized by the project's install receipt. It reports customized copies for the user to decide and removes retired unmodified files only when asked. The agent then reconciles the adapted `AGENTS.md`, `README.md`, and `.gitignore` against the current templates. The upgrade leaves investigation records, data, and releases as they are. Initialization does not create a delivery package.
 2. **Project `AGENTS.md` template.** Governs daily analytical work, architectural boundaries, automatic record maintenance, source and cache handling, investigation switching, and the prohibition on unsolicited deliverables.
-3. **Status skill (`awb-status`).** A read-only report of the active investigation, its findings including flagged ones, unresolved issues, package and release state, landed data and release storage, and sources assessed from documentation with no recorded reference, ending with the requests that are relevant now. It changes nothing and makes the workbench's request-gated capabilities discoverable to the analyst.
+3. **Status skill (`awb-status`).** A read-only report of the active investigation, its findings including flagged ones, its open ledger questions, unresolved issues, package and release state, landed data and release storage, and sources assessed from documentation with no recorded reference, ending with the requests that are relevant now. It changes nothing and makes the workbench's request-gated capabilities discoverable to the analyst.
 4. **Packaging skill (`awb-package`).** Creates or revises a named delivery package's working draft only when the user explicitly requests it. It gathers the package's dataset selection, records provenance, carries a caveat for each flagged finding, and produces an audience-facing findings document, an internal methodology reference, and M365 assembly instructions. Before its final check it runs a read-only review of the draft against the project's review rules (see **Packaging and release behavior**). It owns the draft layout, shared package format, manifest fields, and draft consistency rules.
 5. **Release skill (`awb-release`).** Preserves a frozen, numbered release from the working draft only when the user explicitly marks the package delivered. Its structural gate is `check-draft --verify-only`, which reruns every mechanical check, so it refuses a draft whose narrative numbers a rerun result no longer backs, and verifies every file but the manifest against the inventory the packaging skill recorded (see `awb-release`), so the releasing agent does not repeat the structural checks itself. Review rules can be added after packaging, so release runs the whole read-only review again, narrative checks included (see **Packaging and release behavior**), and it settles a disposition for each flagged finding the draft represents. It records the project's release storage location, copying each release there when reachable; `copy-releases` copies existing releases when that location is recorded or changed later.
 6. **Cleaning skill (`awb-clean`).** Cleans one dataset at the shared foundation level: a scan proposes candidate issues in one call, the user decides those that change meaning, corrections become canonical view definitions or a new validated publication, and a record script writes quality rows and catalog cells and, through the project's provenance helper, flags affected findings in one call. Question-specific exclusions stay in the investigation.
 7. **Exploration skill (`awb-eda`).** Explores one dataset for the active investigation within its scope and settings: one scan writes the complete exploration under the investigation's `exploration/`, follow-ups are saved queries, shared data problems go to `awb-clean`, and a confirmed coverage gap becomes an open row in `foundation/quality.md`. Exploration records no findings.
-8. **Supporting templates.** Provide consistent starting formats for the shared source register, data catalog, quality record, glossary, investigation brief, current state, investigation history, package findings and methodology documents, M365 assembly instructions, and package manifest. Templates should be created or instantiated only when the corresponding artifact is needed.
+8. **Scoping skill (`awb-scope`).** Starts an investigation, digs into its business question and context, and resolves consequential scope changes, including whether a new ask extends an investigation or starts another, through the self-contained interview in **Scoping behavior**. It creates and rescopes the investigation's records and keeps its question ledger.
+9. **Brainstorming skill (`awb-brainstorm`).** Proposes new questions for an investigation from its answered and open ledger questions, its findings, and the cataloged data, each naming what prompted it, who can answer it, and the decision it serves. It runs no queries and records in the ledger only the questions the user keeps, parks, or declines, so a declined proposal is not repeated.
+10. **Supporting templates.** Provide consistent starting formats for the shared source register, data catalog, quality record, glossary, investigation brief, current state, investigation history, package findings and methodology documents, M365 assembly instructions, and package manifest. Templates should be created or instantiated only when the corresponding artifact is needed.
 
 Every skill name carries the `awb-` prefix so the workbench's actions group together in hosts that list skills as commands.
 
-The skills may also provide a concise project orientation file and ignore rules appropriate to the selected analytical backend. Those details must support the accepted workflow without introducing another required ledger or documentation system. The two JSON files named in **Records and vocabulary**, `findings.json` and `foundation/quality.json`, are part of their Markdown records, not second ledgers.
+The skills may also provide a concise project orientation file and ignore rules appropriate to the selected analytical backend. Those details must support the accepted workflow without introducing another required ledger or documentation system. The three JSON files named in **Records and vocabulary**, `findings.json`, `questions.json`, and `foundation/quality.json`, are part of their Markdown records, not second ledgers.
 
 ## Core working model
 
@@ -41,7 +43,7 @@ At investigation creation, record:
 - the population or scope;
 - the decision the analysis is meant to support, or that the work is exploratory;
 - what would make the answer useful; and
-- material unknowns that should remain visible without blocking exploration.
+- material unknowns, as open questions in the investigation's question ledger, which remain visible without blocking exploration.
 
 When work resumes, continue the last active investigation unless the user indicates a switch, and briefly identify it. If a request plausibly belongs to more than one investigation, ask before changing investigation records.
 
@@ -101,9 +103,10 @@ Each investigation separates a concise current state from a chronological histor
 
 The workbench updates these records automatically when a finding, decision, flag, or next step changes. The user can also request a checkpoint before switching investigations. Records and a package's methodology document retain limitations and errors in the data and the methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, but exclude routine debugging, coding mistakes, and abandoned execution attempts that changed no understanding. Git remains the record for code evolution.
 
-Two Markdown records keep machine state in a JSON file beside them. Each table cell has exactly one owner.
+Three Markdown records keep machine state in a JSON file beside them. Each table cell has exactly one owner.
 
 - An investigation's `findings.json` owns every cell of the Current findings table in `state.md`. Only the project's provenance helper (`src/provenance.py`, shipped as `awb_provenance.py`) writes it and renders the table from it: `run.py` and `awb.py state` write through it, and `awb-clean` flags a finding by calling it, never by editing `state.md`. When the project's helper predates `findings.json`, `awb-clean` refuses to flag and points to `awb-init` repair. A writer refuses when the table differs from its render, so a hand edit to the table is reported as drift rather than overwritten or kept. Other readers of findings, such as status and packaging, read the rendered table. The rest of `state.md` and all of `history.md` remain Markdown.
+- An investigation's `questions.json` owns its question ledger, and `questions.md` is rendered from it whole; `awb.py questions` and `run.py` write both through the provenance helper, and a writer refuses a `questions.md` that differs from its render. See **Question ledger**.
 - `foundation/quality.json`, written by `awb-clean`'s record script and read by its scan, holds only the links from cleaning-scan issues to quality rows. A link is keyed by the lowercase hex SHA-256 of the UTF-8 text `<scan name> + "\n" + <issue key>`, where the scan name is the scan file's name under `foundation/scans/`, and it records the row's quality ID with the issue count, total, and observation date most recently recorded for that row, at creation or reopening; `awb-clean` compares later scans with those, while the row's observation keeps the values it was written with. Every cell of `quality.md`, including its IDs, statuses, and the observation's `<scan>#<key>` marker and counts, remains Markdown. A link counts only while exactly one row has its quality ID and that row's observation carries its marker; a repeated ID or marker voids only the links it touches. The observation prose is read back only to link the one row that carries a marker no link names.
 
 `findings.json` holds only the table's own cells, so it adds no value `state.md` does not already show. `quality.json` holds issue keys only as hashes, because a key can embed source values; a quality row's example values and its marker's key stay in `quality.md`, under the confirmation before commit that the quality record requires when `foundation/sources.md` restricts copying the source's values.
@@ -116,15 +119,28 @@ The workflow must embed an analytics-specific domain-modeling discipline: challe
 
 ## Scoping behavior
 
-Initialization and consequential scope changes use a self-contained interview in `awb-init`. Follow the decisions that depend on each scope or purpose choice:
+A new investigation, a sharpening of its question, and a consequential scope change use a self-contained interview in `awb-scope`; `awb-init` only collects the first question and hands it over. Follow the decisions that depend on each scope or purpose choice:
 
-- ask one unresolved consequential decision question at a time, with a recommended answer;
-- carry settled answers forward;
-- resolve facts directly from the environment;
-- capture the question, population, decision or exploratory purpose, usefulness criteria, and material unknowns; and
-- finish when consequential decisions are settled or explicitly recorded as material unknowns, then create the records without a separate confirmation round.
+- ask in dependency order: a decision whose answer shapes the next question alone, and decisions at the same level together, at most four, each with a recommended answer;
+- follow up a vague, hedged, or conflicting answer at once, restated as a concrete case, before moving on;
+- push on what makes an answer usable: the measure's and population's definitions, the comparison that gives a number meaning, the result that would change the decision, and what is already believed;
+- carry settled answers forward, and in a rescope ask only about the decisions the change reopens;
+- resolve facts directly from the environment, and never ask the user a question the data can answer;
+- capture the question, population, decision or exploratory purpose, and usefulness criteria in the brief, and every material unknown as an open ledger question with who can answer it; and
+- finish when those are settled or recorded as open questions, then create the records without a separate confirmation round.
 
 Routine implementation choices need no interview. The vocabulary discipline above is embedded in this workflow. No external interview or domain-modeling skill is required.
+
+### Question ledger
+
+Each investigation keeps every question it raises, answered or not, in `questions.json`, rendered whole to `questions.md`. A question has a never-reused ID `Q-NNN`, its text, a kind (context, decision, or analytical), who can answer it (the user, a stakeholder, or the data), what an answer unblocks, what raised it (scoping, brainstorming, exploration, or analysis), and a status: open, answered, parked, declined, or superseded, each but open and answered with a reason.
+
+- The ledger holds questions. Settled scope and purpose decisions stay in the brief, data problems and coverage limitations in the state's Unresolved issues, and actions in its Next steps. The brief's Material unknowns section points to the ledger.
+- A person's answer records the answer and who gave it, and only a person answers a user or stakeholder question. A data question is answered only by a recorded result: the result's settings table declares `answers = ["Q-NNN"]`, evidence recording refuses an ID the ledger lacks or one a person answers, and `run.py` marks the question answered with the result linked. The ledger stores the link, never the numbers; status and resume views show each linked finding's current status, and a question whose every linked finding is flagged or superseded is reported as resting on an unsettled answer.
+- `answers` links questions and computes nothing, so it is left out of every settings comparison: declaring or changing it makes no result stale and leaves an exact rerun exact. `awb.py questions answer --result` links an already recorded result whose settings declare the question.
+- An answered question is never reopened or edited; a scope change supersedes it, keeping its answer, and adds a replacement.
+- `awb-eda` records each untested candidate explanation as an open data question, and `awb-brainstorm` records the proposals the user keeps, parks, or declines.
+- An investigation that predates the ledger keeps its records; `awb-scope` moves its Material unknowns and question-shaped Next steps into a new ledger when it next runs on it.
 
 ## Instruction loading
 
@@ -168,6 +184,8 @@ project-root/
 │       ├── brief.md              # Question, scope, purpose, audience, usefulness, local terms
 │       ├── state.md              # Current findings, flags, issues, and next steps
 │       ├── findings.json         # The findings table's source, rendered into state.md
+│       ├── questions.json        # Question ledger source: every question raised, answered or not
+│       ├── questions.md          # Question ledger, rendered whole from questions.json
 │       ├── history.md            # Meaningful learnings and analytical decisions
 │       ├── <configuration>       # Population and analytical settings
 │       ├── run.py                # Run script: thin composition of shared operations
@@ -234,7 +252,9 @@ An initial organizational-communications investigation covers approximately 120 
 
 Expected behavior:
 
+- handle the change through `awb-scope` as a rescope;
 - continue the existing investigation rather than create a new one;
+- supersede the ledger answers the expansion invalidates, keeping them, and add their replacements;
 - revise its population setting and current state;
 - reuse shared preparation and neutral graph operations;
 - preserve meaningful prior findings in investigation history when they are superseded;
@@ -250,7 +270,7 @@ Expected behavior:
 - create a new investigation with fresh state, history, and findings;
 - begin with the current method, parameters, and package format inherited from the related investigation unless the user changes them;
 - reuse foundation preparation and shared analytical operations;
-- run the scoping interview one question at a time only for unresolved scope or purpose decisions; and
+- run the `awb-scope` interview in dependency order only for unresolved scope or purpose decisions, with a fresh question ledger; and
 - treat findings from the original population as context for method selection, not evidence about the new group.
 
 ### 3. Shared-data correction discovered through EDA
@@ -306,6 +326,20 @@ Expected behavior:
 - expose completed datasets through shared SQL view definitions loaded into each process's DuckDB session;
 - permit separate analytical sessions to query completed, stable datasets while another job prepares new files, without requiring access to a shared writable DuckDB file; and
 - apply the same landing-first rule to acquired batches if a project uses an incremental workflow or another backend.
+
+### 7. Question ledger and brainstorming
+
+The user starts an investigation with open questions only a stakeholder can answer, explores a dataset, records a result that answers one question, and later asks what else to explore.
+
+Expected behavior:
+
+- record each open question in the ledger with who can answer it, and ask the user none that the data can answer;
+- record a stakeholder's answer with who gave it;
+- record exploration's untested candidate explanations as open data questions, not findings;
+- mark a data question answered only when a recorded result declaring it is run, without making that result stale when the declaration is added later;
+- report a question whose answering finding is later flagged as resting on an unsettled answer;
+- propose new questions that each name what prompted them, who can answer them, and the decision they serve, skipping those already asked; and
+- record the proposals the user declines so a later brainstorm does not repeat them.
 
 ## Explicit exclusions
 

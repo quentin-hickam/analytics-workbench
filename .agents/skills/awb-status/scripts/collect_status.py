@@ -85,6 +85,41 @@ def collect(root, *, probe_upstream=False):
         rest = text[matches[0].end():]
         return re.split(r"^##? ", rest, maxsplit=1, flags=re.M)[0].strip()
 
+    def ledger(investigation, findings):
+        """The question ledger's counts, open questions, and answers resting only on unsettled findings.
+
+        None when the investigation has no questions.json. Findings statuses come from state.md's table.
+        """
+        path = investigation / "questions.json"
+        if not path.exists():
+            if (investigation / "questions.md").exists():
+                uncertain(path, "questions.md exists without questions.json; restore questions.json from Git")
+            return None
+        try:
+            content = json.loads(path.read_text(encoding="utf-8"))
+            if content.get("schema") != "awb-questions/1" or not isinstance(content.get("questions"), list):
+                raise ValueError("unexpected schema")
+            questions = [q for q in content["questions"] if isinstance(q, dict)]
+            if len(questions) != len(content["questions"]) or not all(
+                    isinstance(q.get(k), str) for q in questions for k in ("id", "text", "status", "answerer", "kind", "answer")) \
+                    or not all(isinstance(q.get("results"), list) for q in questions):
+                raise ValueError("malformed question")
+        except (OSError, UnicodeError, ValueError) as error:
+            uncertain(path, f"Unreadable question ledger ({type(error).__name__}); read questions.md")
+            return None
+        statuses = {}
+        for row in findings or []:
+            for result_id in re.findall(r"evidence/([A-Za-z0-9][A-Za-z0-9._-]*)\.json", row["Evidence"]):
+                statuses[result_id] = row["Status"]
+        unsettled = [f"{q['id']} answered by " + ", ".join(f"{r} ({statuses.get(r, 'no findings row')})" for r in q["results"])
+                     for q in questions if q["status"] == "answered" and q["results"] and not q["answer"]
+                     and all(not statuses.get(r, "").startswith(("provisional", "supported")) for r in q["results"])]
+        open_questions = [q for q in questions if q["status"] == "open"]
+        return {"counts": dict(Counter(q["status"] for q in questions)),
+                "open_by_answerer": dict(Counter(q["answerer"] for q in open_questions)),
+                "open": [f"{q['id']} [{q['answerer']}, {q['kind']}] {q['text']}" for q in open_questions],
+                "answered_by_unsettled": unsettled}
+
     def table(text, columns, path):
         if text is None:
             return None
@@ -171,6 +206,7 @@ def collect(root, *, probe_upstream=False):
         result["active"] = {"name": slug, "last_updated": updated, "counts": dict(counts) if findings is not None else None, "findings": visible_findings if findings is not None else None,
                             "question": section(brief, "Business question", brief_path), "material_unknowns": section(brief, "Material unknowns", brief_path),
                             "unresolved_issues": section(state, "Unresolved issues", state_path), "next_steps": section(state, "Next steps", state_path)}
+        result["active"]["questions"] = ledger(investigation, findings)
     others = []
     investigations_path = root / "investigations"
     investigation_dirs = entries(investigations_path, directories=True)
@@ -784,10 +820,13 @@ def git_status(root, slug, state_date, uncertain):
     if not slug:
         return result
     prefix = f"investigations/{slug}/"
+    # The state and the question ledger, a record of its own that state.md does not hold, never date
+    # the state: ledger writes alone leave it current.
+    exempt = [prefix + name for name in ("state.md", "questions.json", "questions.md")]
     dates = []
     missing = []
     for name in sorted(set(changed)):
-        if name.startswith(prefix) and name != prefix + "state.md":
+        if name.startswith(prefix) and name not in exempt:
             path = root / name
             try:
                 dates.append((date.fromtimestamp(path.stat().st_mtime), name))
@@ -799,7 +838,7 @@ def git_status(root, slug, state_date, uncertain):
             uncertain(root / name, "Uncommitted change lacks a readable mtime (for example deletion); state date check uncertain")
     if has_head:
         repo_prefix = project_prefix + prefix
-        log = git("log", "-1", "--format=%cs", "--", ":(top,literal)" + repo_prefix, ":(top,exclude,literal)" + repo_prefix + "state.md")
+        log = git("log", "-1", "--format=%cs", "--", ":(top,literal)" + repo_prefix, *(":(top,exclude,literal)" + project_prefix + name for name in exempt))
         if log.returncode:
             uncertain(root / prefix, "Cannot read Git commit date")
         elif log.stdout.strip():

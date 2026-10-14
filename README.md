@@ -6,7 +6,9 @@ A portable, agent-agnostic workflow for shared data preparation, distinct invest
 
 Every skill name carries the `awb-` prefix, so typing `awb-` in a host that lists skills as commands shows every workbench action.
 
-- [awb-init](.agents/skills/awb-init/SKILL.md): initialize a project, repair it or bring it up to date after installing newer skills, start an investigation, or resolve a consequential scope change. Its [project AGENTS.md template](.agents/skills/awb-init/assets/workbench/AGENTS.md) governs everyday analysis and recordkeeping.
+- [awb-init](.agents/skills/awb-init/SKILL.md): initialize a project for a first business question, or repair it and bring it up to date after installing newer skills. Its [project AGENTS.md template](.agents/skills/awb-init/assets/workbench/AGENTS.md) governs everyday analysis and recordkeeping.
+- [awb-scope](.agents/skills/awb-scope/SKILL.md): start an investigation, dig into its business question and context through an interview, or change its scope. Every question left open goes into the investigation's question ledger, with who can answer it.
+- [awb-brainstorm](.agents/skills/awb-brainstorm/SKILL.md): propose new questions from those already asked and answered, the findings, and the cataloged data; the ones you keep, park, or decline go into the ledger.
 - [awb-clean](.agents/skills/awb-clean/SKILL.md): clean one dataset at the shared foundation level: scan it for candidate issues in one call, decide with you where meaning changes, correct them through canonical views, and record the quality rows and catalog cells and flag affected findings in one call.
 - [awb-eda](.agents/skills/awb-eda/SKILL.md): explore one dataset for the active investigation with one scan within the investigation's scope and settings, follow up with saved queries, and record what was learned; shared data problems go to `awb-clean`, and a confirmed coverage gap becomes an open row in `foundation/quality.md`; exploration records no findings.
 - [awb-status](.agents/skills/awb-status/SKILL.md): read-only report of where the project stands and the requests that fit right now.
@@ -26,7 +28,7 @@ Every skill name carries the `awb-` prefix, so typing `awb-` in a host that list
 
 ## Install
 
-Download `analytics-workbench-skills-vX.Y.Z.zip` from the repository's GitHub releases and unzip it anywhere. It unpacks to one folder, `analytics-workbench-skills/`, holding the six `awb-*` skill folders beside this README, `LICENSE`, and `CHANGELOG.md`. Copy the six `awb-*` folders into your agent host's user-level skills directory, replacing any earlier copies, and delete an `awb-update` folder left by an earlier release: its job now belongs to `awb-init`. Do not unzip the archive into the skills directory itself: a host looks for `<skills directory>/<skill name>/SKILL.md`, and the extra folder level hides the skills. In a clone of this repository, the same six folders are under `.agents/skills/`.
+Download `analytics-workbench-skills-vX.Y.Z.zip` from the repository's GitHub releases and unzip it anywhere. It unpacks to one folder, `analytics-workbench-skills/`, holding the eight `awb-*` skill folders beside this README, `LICENSE`, and `CHANGELOG.md`. Copy the eight `awb-*` folders into your agent host's user-level skills directory, replacing any earlier copies, and delete an `awb-update` folder left by an earlier release: its job now belongs to `awb-init`. Do not unzip the archive into the skills directory itself: a host looks for `<skills directory>/<skill name>/SKILL.md`, and the extra folder level hides the skills. In a clone of this repository, the same eight folders are under `.agents/skills/`.
 
 The skills serve every project from the user-level directory; projects need no local copies.
 
@@ -50,9 +52,17 @@ In the target project's agent session, start from the business question:
 
 > Use awb-init to initialize this analytics project. The question is …
 
-If you ask without a question, `awb-init` asks for one; say there is no question yet to set up the project alone. Continue analytical work normally using the generated AGENTS.md instructions. The default data flow is independent source landing, validated Parquet datasets, and DuckDB views loaded into separate analytical sessions. Data gathering never writes directly into the canonical database as its only retained representation.
+If you ask without a question, `awb-init` asks for one; say there is no question yet to set up the project alone. Once the project is set up, `awb-init` hands the question to `awb-scope`, which interviews you about it and creates the investigation. Bring later questions, open questions you can now answer, and scope changes to `awb-scope` directly:
 
-`awb-init` installs the project helpers under `src/` with its installer, `scripts/install_helpers.py`, and writes a `requirements.txt` when the project declares no dependencies; it records what it installs in a receipt, `.awb-receipt.json`, so its `--upgrade` can bring unmodified earlier copies up to date. Mechanical work then runs as single commands whose output the agent reports verbatim, and computation runs as saved queries rather than scratch scripts: `python3 src/awb.py --help` lists the commands (`sql`, `profile`, `land`, `retain`, `publish`, `state`, `stale`, `export`, `review-rules`, `check-draft`, `release`, `copy-releases`). Each investigation's run script, `run.py`, produces, validates, and records its results in one run and writes their `state.md` rows; `state` prints the active investigation's brief and state to resume, and records finding wording and status, with history where due, and issues and next steps.
+> Use awb-scope to start an investigation into why overtime rose in Q3.
+
+Each investigation keeps a question ledger, `questions.md`, of every question it has raised and who can answer it. A question about the data is answered only by a recorded result that declares it. To widen the inquiry:
+
+> Use awb-brainstorm — what else should we ask?
+
+Continue analytical work normally using the generated AGENTS.md instructions. The default data flow is independent source landing, validated Parquet datasets, and DuckDB views loaded into separate analytical sessions. Data gathering never writes directly into the canonical database as its only retained representation.
+
+`awb-init` installs the project helpers under `src/` with its installer, `scripts/install_helpers.py`, and writes a `requirements.txt` when the project declares no dependencies; it records what it installs in a receipt, `.awb-receipt.json`, so its `--upgrade` can bring unmodified earlier copies up to date. Mechanical work then runs as single commands whose output the agent reports verbatim, and computation runs as saved queries rather than scratch scripts: `python3 src/awb.py --help` lists the commands (`sql`, `profile`, `land`, `retain`, `publish`, `state`, `questions`, `stale`, `export`, `review-rules`, `check-draft`, `release`, `copy-releases`). Each investigation's run script, `run.py`, produces, validates, and records its results in one run and writes their `state.md` rows; `state` prints the active investigation's brief and state to resume, and records finding wording and status, with history where due, and issues and next steps.
 
 To see where things stand and what you can ask for next:
 

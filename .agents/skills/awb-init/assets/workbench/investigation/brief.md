@@ -22,7 +22,7 @@ Describe what would make the answer useful to its intended audience.
 
 ## Material unknowns
 
-List unresolved facts or decisions that should remain visible. An unknown need not block useful exploration.
+Open questions live in the question ledger, `questions.md`, kept with `python3 src/awb.py questions`; list none here. An open question need not block useful exploration.
 
 ## Starting method, settings, and package format
 
