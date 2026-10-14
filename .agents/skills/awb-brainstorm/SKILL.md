@@ -42,7 +42,7 @@ Present five to eight, numbered and ranked by how much an answer could change th
 From the project root, with `--origin brainstorm`:
 
 - **Kept, in scope**: `python3 src/awb.py questions add "<question>" --kind <kind> --answerer <answerer> --origin brainstorm --unblocks "<what it serves>"`. A re-proposed parked or declined question the user keeps is reopened instead, keeping its ID: `python3 src/awb.py questions status Q-NNN --set open`.
-- **Parked or declined**: the same command with `--status parked` or `--status declined` and `--reason "<the user's reason>"`. Record every in-scope proposal the user did not keep as declined with the reason `not chosen`, so later brainstorms do not repeat it, and say so in the report.
+- **Parked or declined**: the same command with `--status parked` or `--status declined` and `--reason "<the user's reason>"`. A re-proposed question keeps its ID: change its status with `python3 src/awb.py questions status Q-NNN --set parked|declined --reason "<the user's reason>"`, or leave it as it is when its status does not change. Record every in-scope proposal the user did not keep as declined with the reason `not chosen`, so later brainstorms do not repeat it, and say so in the report.
 - **Needing a scope change or a new investigation**: add nothing; suggest `awb-scope` with the question.
 
 ## 4. Report

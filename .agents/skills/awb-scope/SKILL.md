@@ -37,7 +37,7 @@ Cover the business question, population or scope, the decision it supports or an
 
 **Record meanings where they belong.** Shared meanings go in `foundation/glossary.md`, an investigation's departure in its brief's Local terms section, dataset and view descriptions in `foundation/catalog.md`, consequential analytical decisions in its history; never in `CONTEXT.md` or ADRs.
 
-The interview is done when the question, population, purpose, and usefulness criteria are each settled in the brief, every material unknown is an open ledger question with its answerer, and no answer received is still vague. Write the records without a separate confirmation round.
+The interview is done when the question, population, purpose, and usefulness criteria are each settled in the brief or held open as a ledger question with its answerer, such as a usefulness threshold only a stakeholder owns, which that brief section names by ID; every other material unknown is an open ledger question with its answerer; and no answer received is still vague. Write the records without a separate confirmation round.
 
 ## 3. Write the records
 
