@@ -29,6 +29,9 @@
 # test_cli_publish_keeps_a_failed_check_or_empty_result_unpublished: check rows or an empty select keep the partial directory unpublished and print the failures.
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
+# test_gitignore_template_tracks_env_example: in a fresh repository with the template .gitignore, .env.example is tracked while .env and .env.local stay ignored.
+# test_repair_check_ignore_follows_the_env_rules_the_project_keeps: repair's check-ignore command agrees with each kept .env rule for the template and for each declined restoration of .env, .env.*, or !.env.example, and disagrees when !.env.example precedes .env.*; repair asks once before adding any missing template rule and reports each one declined.
+# test_guides_state_the_credentials_convention: the data guide and landing reference state where credentials live, where they never go, that records name the variable, and that land() records request and notes unchecked.
 # test_publish_records_validate_detail_and_no_checks_by_default: without declared checks publication.json records no declared check; a string validate returns is its check's detail; another dataset's declaration does not apply.
 # test_declared_checks_refuse_a_malformed_declaration_before_conversion: unknown and malformed keys, an empty columns list, range bounds other than numbers or dates, a min above its max (date-times compared in UTC), an empty column name in a table form, two checks sharing a name, a column repeated within a key or unique entry, one unique column set declared twice, a non-checks key, an unknown top-level table, another dataset's malformed entry, and invalid TOML refuse before any partial directory exists.
 # test_a_dotted_dataset_name_is_declared_quoted_and_refused_unquoted: [datasets.orders.v1.checks] refuses publishing orders.v1, naming the quoted spelling, before conversion; [datasets."orders.v1".checks] declares its checks.
@@ -51,6 +54,10 @@
 import hashlib
 import importlib.util
 import json
+import os
+import re
+import shlex
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -668,6 +675,70 @@ def test_cli_publish_view_sql_loads_through_session(tmp_path, capsys, dataset):
     (root / "foundation/views/01_view.sql").write_text(out["view_sql"] + "\n", encoding="utf-8")
     with landing.session(root) as connection:
         assert connection.execute(f"SELECT * FROM {name} ORDER BY id").fetchall() == [(1, 20), (2, 40)]
+
+
+# Git commands in the .gitignore tests see only the project's rules, not the developer's global excludes.
+GIT_ENV = {**os.environ, "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.excludesFile",
+           "GIT_CONFIG_VALUE_0": os.devnull}
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_gitignore_template_tracks_env_example(tmp_path):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=GIT_ENV)
+    (tmp_path / ".gitignore").write_bytes((WORKBENCH / ".gitignore").read_bytes())
+    for name in (".env", ".env.local", ".env.example"):
+        (tmp_path / name).write_text("ACME_TOKEN=\n")
+    status = subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain", "--ignored",
+                             "--untracked-files=all"], check=True, capture_output=True, text=True, env=GIT_ENV)
+    assert sorted(status.stdout.splitlines()) == [
+        "!! .env", "!! .env.local", "?? .env.example", "?? .gitignore"]
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_repair_check_ignore_follows_the_env_rules_the_project_keeps(tmp_path):
+    repair = (ASSET.parents[1] / "references/repair.md").read_text(encoding="utf-8")
+    command = re.search(r"run `(git check-ignore --no-index [^`]+)`\. Its output must agree with each of "
+                        r"these rules the project keeps: ", repair).group(1)
+    for fact in ("List every [ignore rule](../assets/workbench/.gitignore) the project's `.gitignore` lacks and "
+                 "ask the user once, naming them all, whether to add each",
+                 "each rule the user declines stays dropped, and report it as an exception"):
+        assert fact in repair
+    assert "git log" not in repair.split("\n3. ")[1].split("\n4. ")[0]
+    assert "step 3's `git check-ignore` output agrees with each `.env` rule the project keeps" in repair
+    # Each kept rule: the file it decides, and whether the check must print that file.
+    rules = {".env": (".env", True), ".env.*": (".env.local", True), "!.env.example": (".env.example", False)}
+    for rule, (name, printed) in rules.items():
+        assert f"{'prints' if printed else 'omits'} `{name}` if the `{rule}` rule is kept" in repair
+    template = (WORKBENCH / ".gitignore").read_text(encoding="utf-8").splitlines()
+    misplaced = ["!.env.example"] + [line for line in template if line != "!.env.example"]
+    layouts = [(template, [".env", ".env.local"], True),
+               (misplaced, [".env.example", ".env", ".env.local"], False)]
+    # A restoration the user declines leaves that rule out; the check still passes on the rest.
+    for dropped, expected in ((".env.*", [".env"]), ("!.env.example", [".env.example", ".env", ".env.local"]),
+                              (".env", [".env.local"])):
+        layouts.append(([line for line in template if line != dropped], expected, True))
+    for lines, expected, done in layouts:
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=GIT_ENV)
+        (tmp_path / ".gitignore").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        output = subprocess.run(shlex.split(command), cwd=tmp_path, capture_output=True, text=True, env=GIT_ENV)
+        assert output.stdout.splitlines() == expected
+        agrees = all((name in expected) == printed for rule, (name, printed) in rules.items() if rule in lines)
+        assert agrees == done
+
+
+def test_guides_state_the_credentials_convention():
+    guide = (WORKBENCH / "workbench-guides/data.md").read_text(encoding="utf-8")
+    rule = guide.split("## Assess and acquire")[1].split("\n## ")[0]
+    for fact in ("environment variables", "gitignored `.env`", "tracked `.env.example`",
+                 "Secrets never go in `settings.toml`, saved SQL, `request` or `notes` values, or "
+                 "foundation ledger rows", "Saved SQL names no credential at all",
+                 "the others record the variable's name instead, as `$NAME`"):
+        assert fact in rule
+    reference = (ASSET.parents[1] / "references/landing.md").read_text(encoding="utf-8")
+    for fact in ("environment variables", "gitignored `.env`", "`workbench-guides/data.md` (**Assess and acquire**)",
+                 "refers to a credential, it names the variable, as `$NAME`, never its value",
+                 "`land()` records both as given, without checking them"):
+        assert fact in reference
 
 
 def declare(root, text):
