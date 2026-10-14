@@ -73,7 +73,7 @@ def workbench(tmp_path):
         text = (TEMPLATES / source).read_text().replace("<!-- use an ISO date -->", "2026-10-01")
         write(tmp_path, target, text)
     state = tmp_path / "investigations/churn/state.md"
-    text = state.read_text().replace("| --- | --- | --- | --- |", "| --- | --- | --- | --- |\n| Renewal lag | evidence.json | revalidation-needed (was supported) | Q-004 correction |\n| Pricing | evidence.json | supported | |")
+    text = state.read_text().replace("| --- | --- | --- | --- | --- |", "| --- | --- | --- | --- | --- |\n| Renewal lag | evidence.json | revalidation-needed (was supported) | association | Q-004 correction |\n| Pricing | evidence.json | supported | causal (experiment: randomized price test) | |")
     state.write_text(text)
     return tmp_path
 
@@ -92,6 +92,27 @@ def test_collect_standard_records_without_writes_or_other_conclusions(workbench)
     assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in workbench.rglob("*") if p.is_file()}
 
 
+@pytest.mark.parametrize("claim", ["", "strong", "causal", "causal (survey)", "causal (experiment:  )", "Association"])
+def test_absent_or_unrecognized_claim_strength_fails_the_status_check(workbench, claim):
+    path = workbench / "investigations/churn/state.md"
+    path.write_text(path.read_text().replace("| supported | causal (experiment: randomized price test) |",
+                                             f"| supported | {claim} |"))
+    result = status.collect(workbench)
+    assert result["uncertainties"] == [{"path": "investigations/churn/state.md",
+                                        "reason": "Missing or unrecognized finding claim strength; interpret manually"}]
+    assert {"finding": "Pricing", "status": "supported", "claim": claim, "reason": ""} in result["active"]["findings"]
+
+
+def test_table_without_claim_column_is_unsupported(workbench):
+    path = workbench / "investigations/churn/state.md"
+    text = path.read_text().replace("| Status | Claim |", "| Status |").replace("| --- | --- | --- | --- | --- |", "| --- | --- | --- | --- |")
+    path.write_text(text.replace("| association |", "|").replace("| causal (experiment: randomized price test) |", "|"))
+    result = status.collect(workbench)
+    assert result["active"]["counts"] is None
+    assert {"path": "investigations/churn/state.md", "reason": "Unsupported or missing table: Finding, Evidence, Status, "
+            "Claim, Revalidation reason or caveat"} in result["uncertainties"]
+
+
 def test_missing_and_custom_tables_are_unknown_not_zero(workbench):
     (workbench / "investigations/churn/state.md").write_text("Updated: today\nFindings: none")
     (workbench / "foundation/sources.md").unlink()
@@ -105,7 +126,7 @@ def test_malformed_table_does_not_count_partial_rows(workbench):
     with (workbench / "investigations/churn/state.md").open("a") as stream:
         stream.write("\n")
     path = workbench / "investigations/churn/state.md"
-    path.write_text(path.read_text().replace("| Pricing | evidence.json | supported | |", "| Pricing | too few |"))
+    path.write_text(path.read_text().replace("| Pricing | evidence.json | supported | causal (experiment: randomized price test) | |", "| Pricing | too few |"))
     assert status.collect(workbench)["active"]["counts"] is None
 
 
@@ -594,7 +615,7 @@ def test_status_reads_rendered_table_with_json_present(workbench):
     before = {p: p.read_bytes() for p in workbench.rglob("*") if p.is_file()}
     result = status.collect(workbench)
     assert result["active"]["counts"] == {"revalidation-needed": 1, "supported": 1}
-    assert {"finding": "Renewal lag", "status": "revalidation-needed",
+    assert {"finding": "Renewal lag", "status": "revalidation-needed", "claim": "association",
             "reason": "Q-004 correction"} in result["active"]["findings"]
     assert before == {p: p.read_bytes() for p in workbench.rglob("*") if p.is_file()}
 

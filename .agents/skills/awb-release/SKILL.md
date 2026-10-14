@@ -21,7 +21,7 @@ Run the read-only review in [awb-package's references/review.md](../awb-package/
 
 Run `python3 src/awb.py release <investigation> <package>`. Its gate is `check-draft --verify-only`: a pass reruns every mechanical check and verifies every file but the manifest against the recorded inventory, so the contract needs no rereading and only the review reads the narratives. It refuses, creating nothing, in two ways:
 
-- `check-draft --verify-only does not pass`: report the `check` rows verbatim and stop; repairs are package revisions through awb-package.
+- `check-draft --verify-only does not pass`: report the `check` rows verbatim and stop; repairs are package revisions through awb-package. A `claims` row also follows a claim strength or causal design basis changed in `state.md` since packaging: the released methodology must state each finding's current Claim.
 - `flagged findings without a release disposition`: settle them under **4. Resolve flags**, then run `release` again.
 
 The step is done when it exits with `released: true`; a `verify` row on the local copy is reported verbatim.

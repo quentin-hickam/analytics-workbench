@@ -5,6 +5,7 @@
 # test_write_charts_rejects_bad_input: a chart without rows, an identifier header, a blank header, or a repeated header raises and writes nothing.
 # test_check_charts_clean_package_returns_no_rows: specifications and chart files match one to one.
 # test_check_charts_reports_each_mismatch: misnumbered, missing, unspecified, foreign, and empty files are one row each.
+# test_check_charts_spec_continuing_a_block: a specification directly under a bullet or paragraph line renders inside that block; the row says to leave a blank line.
 # test_check_charts_without_directory: specifications with no charts directory each report it; no specifications and no directory is clean.
 # test_charts_without_pandas: the module loads, writes, and checks charts when pandas cannot be imported.
 
@@ -89,6 +90,19 @@ def test_check_charts_reports_each_mismatch(tmp_path):
         {"chart": "Chart 4", "problem": "chart file has no specification in findings"},
         {"chart": "Chart 1", "problem": "chart file has no data rows"},
     ]
+
+
+@pytest.mark.parametrize("above", ["- West 12%\n- East 8%", "West had 12%."])
+def test_check_charts_spec_continuing_a_block(tmp_path, above):
+    # Round 4 (Opus 1): CommonMark renders the line inside the bullet or paragraph above it, so it is no
+    # specification, and the row says how to make it one.
+    charts.write_charts(tmp_path / "charts", [LATE])
+    path = tmp_path / "findings.md"
+    path.write_text(f"### H\n\n{above}\n**Chart 1.** Horizontal bar: rate by region\n- **Data:** Region\n")
+    assert charts.check_charts(path, tmp_path / "charts") == [{"chart": "Chart 1", "problem": (
+        "Chart 1's specification continues the paragraph or bullet above it; leave a blank line before it")}]
+    path.write_text(f"### H\n\n{above}\n\n**Chart 1.** Horizontal bar: rate by region\n- **Data:** Region\n")
+    assert charts.check_charts(path, tmp_path / "charts") == []
 
 
 def test_check_charts_without_directory(tmp_path):

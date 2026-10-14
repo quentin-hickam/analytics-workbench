@@ -17,12 +17,15 @@ import argparse
 import bisect
 import csv
 import hashlib
+import html
 import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
+import unicodedata
+from collections import Counter, namedtuple
 from datetime import datetime
 from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, ROUND_HALF_UP, Context, Decimal, InvalidOperation, localcontext
 from pathlib import Path
@@ -139,13 +142,336 @@ def _evidence_files(root, investigation):
             yield path, None, f"{_rel(root, path)}: {_UNUSABLE}"
 
 
-# ---------------------------------------------------------------- internal names in findings.md
+# ---------------------------------------------------------------- Markdown as it renders
+#
+# Every draft check reads findings.md and methodology.md through `_view`, one reading of what renders, so
+# a form that hides text from the reader hides it from every check, and a form that shows text shows it
+# to every check. The reading covers the Markdown subset helpers.md lists. A block form outside it that
+# could hide or move text is refused (`markdown_problems`) rather than guessed at, so it never passes.
 
-_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")
-_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
-_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
-_LINK_TARGET = re.compile(r"\]\([^)]*\)")
+# One source line as it renders. kind is "text", "heading", "fence" (a code fence's opening line),
+# "code" (inside a fence, its closing line included), "hidden" (inside a comment block), or "html" (the
+# text after a comment block's end on its line). plain is the rendered text with code spans and
+# autolinks kept for the names scan; prose is the same with them blanked, for wording, and spaced is
+# prose with markup characters read as word breaks (see `_inline`). Link targets
+# are in neither, so a link's text joins the words around it; links lists the targets opened on the
+# line. title: a heading's text as it shows, code spans and autolinks unwrapped, so formatting never sets
+# two headings apart. group: the paragraph or heading the line belongs to, None for blank, fence, and
+# hidden lines. start: the line opens a paragraph. declares: it opens a top-level paragraph at column 0,
+# the only place a **Claim strength:** line counts.
+_Line = namedtuple("_Line", "number kind level title plain prose spaced links group start declares")
+
+_FENCE = re.compile(r"( {0,3})(`{3,}|~{3,})")
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
+_URI = r"[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*"
+_AUTOLINK = re.compile(rf"<({_URI})>")
 _TOKEN = re.compile(r"\S+")
+_QUOTE = re.compile(r" {0,3}> ?")
+_ITEM = re.compile(r"( {0,3})([-*+]|(\d{1,9})[.)])(?=[ \t]|$)( *)(.*)")
+_RULE = re.compile(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
+_ATX = re.compile(r" {0,3}(#{1,6})(?=[ \t]|$)(.*)")
+_UNDERLINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*$")
+_COMMENT_OPEN = re.compile(r" {0,3}<!--")
+# A link reference or footnote definition renders nothing where it stands.
+_DEFINITION = re.compile(r" {0,3}\[[^\]]+\]:")
+# HTML blocks as CommonMark starts them: types 1 to 6 interrupt a paragraph; a lone tag (type 7) does not.
+_HTML_BLOCK = re.compile(
+    r" {0,3}(?:<(?:script|pre|style|textarea)(?:\s|>|$)|<\?|<![A-Za-z]|<!\[CDATA\["
+    r"|</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|col|colgroup|dd|details|dialog"
+    r"|dir|div|dl|dt|fieldset|figcaption|figure|footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe"
+    r"|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|section|summary|table"
+    r"|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:\s|/?>|$))", re.IGNORECASE)
+_HTML_LINE = re.compile(r" {0,3}(?:<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:\"[^\"]*\"|'[^']*'"
+                        r"|[^\s\"'=<>`]+))?)*\s*/?>|</[A-Za-z][A-Za-z0-9-]*\s*>)[ \t]*$")
+# Inline: a code span that opens first is code, so a `<!--` inside one opens nothing.
+# A backslash before a backtick or `<` makes it a literal character, opening nothing.
+_SPAN = r"(?<![`\\])(`+)(?!`).+?(?<!`)\1(?!`)"
+_INLINE_COMMENT = re.compile(_SPAN + r"|(?<!\\)<!--(?:-?>|.*?-->)", re.DOTALL)
+_OPEN_COMMENT = re.compile(_SPAN + r"|(?<!\\)<!--", re.DOTALL)
+# An inline HTML tag other than a line break: its attributes can hide the text it wraps.
+_INLINE_TAG = re.compile(_SPAN + r"|(?<!\\)<(?!br\s*/?>)/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>",
+                         re.DOTALL | re.IGNORECASE)
+# Code spans and autolinks render as themselves; an inline link's target renders as nothing. A reference
+# link `[text][label]` never resolves, since every definition is refused, so it renders as written, label
+# included (group 4); the claims check's spaced reading also drops the label, as the link would render if
+# a definition were added, so a phrase is found either way.
+_PIECE = re.compile(
+    _SPAN + rf"|(?<!\\)(<{_URI}>)"
+    r"|\]\(\s*(<[^<>\n]*>|(?:[^()\s]|\([^()\s]*\))*)(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^()]*\)))?\s*\)"
+    r"|(?<!\\)\]\[([^\]]*)\]",
+    re.DOTALL)
+_BREAK_TAG = re.compile(r"(?<!\\)<br\s*/?>", re.IGNORECASE)
+_TAG = re.compile(r"(?<!\\)</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
+# Emphasis and strikethrough: every `*` and `~` first, then each `_` run not inside a word, as in
+# CommonMark, so `r_009` and orders_**view** keep their underscore while `_leads_` renders as leads. An
+# escaped marker goes too ("\*leads\* to" shows the phrase with stars around a word, and the phrase is
+# what is checked), except an escaped `_` inside a word, which renders as the underscore: orders\_view.
+_STARS = re.compile(r"\\?[*~]")
+_UNDERSCORES = re.compile(r"(?<![^\W_])(?<![_\\])\\?_+(?!_)|(?<![_\\])\\?_+(?!_)(?![^\W_])")
+_BRACKET = re.compile(r"!?\\?\[|\\?\]")
+_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
+_HARD_BREAK = re.compile(r"\\(?=\n)")
+_INSIDE = "inside a list item or block quote"
+
+
+def _keep_lines(pattern, text, replacement=""):
+    """Replace each match, keeping its line breaks, so a rendered paragraph keeps its source lines."""
+    return pattern.sub(lambda match: replacement + "\n" * match.group(0).count("\n"), text)
+
+
+def _rendered(text, gap=""):
+    """Inline text as it renders, each markup character removed or, with gap=" ", read as a word break."""
+    text = _keep_lines(_TAG, _keep_lines(_BREAK_TAG, _HARD_BREAK.sub(" ", text), " "), gap)
+    # An escaped & starts no character reference: \&#108; shows as written.
+    text = _ESCAPE.sub(lambda m: "&amp;" if m[1] == "&" else m[1], _BRACKET.sub(gap, _UNDERSCORES.sub(gap, _STARS.sub(gap, _visible(text)))))
+    return "\n".join(unicodedata.normalize("NFKC", _visible(html.unescape(line).replace("\r", " ").replace("\n", " ")))
+                     for line in text.split("\n"))
+
+
+def _visible(text):
+    """Text without zero-width characters, which render as nothing, written or as character references."""
+    return "".join(c for c in text if unicodedata.category(c) != "Cf")
+
+
+def _inline(text):
+    """Text's rendered inline content, line breaks kept: (plain, prose, spaced, [(line offset, link target)]).
+
+    spaced is prose with each markup character read as a word break rather than as nothing. CommonMark
+    leaves an unmatched marker as a visible character, so x*drives shows the word drives; the claims
+    check reads both, and a phrase found in either counts.
+    """
+    plain, prose, spaced, links, last = [], [], [], [], 0
+    for match in _PIECE.finditer(text):
+        segment, piece = text[last:match.start()], match.group(0)
+        plain += [_rendered(segment)]
+        prose += [plain[-1]]
+        spaced += [_rendered(segment, " ")]
+        if match.group(1) or match.group(2):
+            plain.append(piece)
+            prose.append(re.sub(r"[^\n]", " ", piece))
+            spaced.append(prose[-1])
+        elif match.group(4) is not None:
+            plain.append(" " + _rendered(match.group(4)))
+            prose.append(plain[-1])
+            spaced.append(" " + "\n" * piece.count("\n"))
+        else:
+            if match.group(3) is not None:
+                links.append((text.count("\n", 0, match.start()), match.group(3).strip("<>")))
+            plain.append("\n" * piece.count("\n"))
+            prose.append(plain[-1])
+            spaced.append(" " + plain[-1])
+        last = match.end()
+    plain.append(_rendered(text[last:]))
+    prose.append(plain[-1])
+    spaced.append(_rendered(text[last:], " "))
+    return "".join(plain), "".join(prose), "".join(spaced), links
+
+
+def _shown(plain):
+    """plain text as it shows: a code span's content without its backticks, an autolink without its brackets."""
+    return _AUTOLINK.sub(r"\1", _CODE_SPAN.sub(lambda match: match[2], plain))
+
+
+def _collapse(text):
+    return " ".join(text.split())
+
+
+def _indent(text):
+    return len(text) - len(text.lstrip(" "))
+
+
+def _opens_fence(text):
+    marker = _FENCE.match(text)
+    return marker if marker and not (marker[2][0] == "`" and "`" in text[marker.end():]) else None
+
+
+def _item_width(text, interrupting):
+    """The content indent of a list item `text` opens, or None. Interrupting a paragraph, a bullet needs
+    content and a numbered item must be 1, as in CommonMark."""
+    item = _ITEM.match(text)
+    if not item or _RULE.match(text) or interrupting and (not item[5] or item[3] and int(item[3]) != 1):
+        return None
+    marker = len(item[1]) + len(item[2])
+    return marker + 1 if not item[5] or len(item[4]) > 4 else marker + len(item[4])
+
+
+def _interrupts(text, paragraph=True):
+    """Whether `text` starts a block that ends an open paragraph. A paragraph left in a container the line
+    does not continue (paragraph=False) is ended by any list item, as a sibling item ends the one before."""
+    return bool(_ATX.match(text) or _COMMENT_OPEN.match(text) or _HTML_BLOCK.match(text) or _QUOTE.match(text)
+                or _RULE.match(text) or _opens_fence(text) or _item_width(text, paragraph) is not None)
+
+
+def _view(text):
+    """Markdown as it renders, one _Line per source line, and the refused forms as (line, problem)."""
+    rows, forms, refused = [], [], set()
+    stack = []          # open containers, outermost first: None for a block quote, else [content indent, empty]
+    fence = comment = None
+    para = False        # the previous line is paragraph text, which the next may continue
+    group = 0
+
+    def refuse(number, what, how):
+        if number not in refused:
+            refused.add(number)
+            forms.append((number, f"unsupported Markdown: {what} at line {number}; rewrite as {how}"))
+
+    def row(number, kind, leaf="", **fields):
+        rows.append({"number": number, "kind": kind, "leaf": leaf, "level": 0, "title": None, "group": None,
+                     "start": False, "inside": False, "indent": 0, **fields})
+
+    for number, line in enumerate(text.splitlines(), start=1):
+        line = line.expandtabs(4)
+        if comment is not None:
+            end = line.find("-->")
+            if end < 0:
+                row(number, "hidden")
+                continue
+            comment, group = None, group + 1
+            row(number, "html", line[end + 3:], group=group, start=True)
+            para = False
+            continue
+        if fence is not None:
+            marker = _FENCE.match(line)
+            if (marker and marker[2][0] == fence[0][0] and len(marker[2]) >= len(fence[0])
+                    and not line[marker.end():].strip()):
+                fence = None
+            row(number, "code")
+            continue
+
+        rest, matched = line, 0
+        for container in stack:
+            if container is None:
+                quote = _QUOTE.match(rest)
+                if not quote:
+                    break
+                rest = rest[quote.end():]
+            elif not rest.strip():
+                if container[1]:  # an item opened empty ends at a blank line, as in CommonMark
+                    break
+                rest = ""
+            elif _indent(rest) >= container[0]:
+                rest, container[1] = rest[container[0]:], False
+            else:
+                break
+            matched += 1
+        lazy = matched < len(stack) and para and bool(rest.strip()) and not _interrupts(rest, False)
+        if matched < len(stack) and not lazy:
+            del stack[matched:]
+            para = False
+        while not lazy:
+            if quote := _QUOTE.match(rest):
+                stack.append(None)
+                rest = rest[quote.end():]
+            elif (width := _item_width(rest, para)) is not None:
+                stack.append([width, not rest[width:].strip()])
+                rest = rest[width:]
+            else:
+                break
+            para = False
+        inside, indent = bool(stack), _indent(rest)
+
+        if not rest.strip():
+            row(number, "text")
+            para = False
+        elif para and not lazy and _UNDERLINE.match(rest):
+            refuse(number, "text underlined with = or -, which renders as a heading",
+                   "a # heading, or leave a blank line before a rule")
+            row(number, "text", rest, group=group, inside=inside)
+            para = False
+        elif lazy or para and not _interrupts(rest):
+            row(number, "text", rest, group=group, inside=inside)
+        elif indent >= 4 and not para:
+            refuse(number, "text indented four or more spaces, which renders as code",
+                   "a fenced code block starting at the beginning of its line, or remove the indent")
+            group += 1
+            row(number, "text", rest, group=group, start=True, inside=inside, indent=indent)
+            para = True
+        elif marker := _opens_fence(rest):
+            if inside or indent:
+                refuse(number, f"a code fence {_INSIDE if inside else 'indented from the start of its line'}",
+                       "a fence at the start of its line, outside lists and quotes")
+                group += 1
+                row(number, "text", rest, group=group, start=True, inside=inside, indent=indent)
+            else:
+                fence = (marker[2], number)
+                row(number, "fence", line)
+            para = False
+        elif _COMMENT_OPEN.match(rest):
+            group += 1
+            if inside or indent:
+                refuse(number, f"a comment {_INSIDE if inside else 'indented from the start of its line'}",
+                       "a comment at the start of its line, outside lists and quotes")
+                row(number, "text", rest, group=group, start=True, inside=inside, indent=indent)
+            elif (end := rest.find("-->", 2)) < 0:
+                comment = number
+                row(number, "hidden")
+            else:
+                row(number, "html", rest[end + 3:], group=group, start=True)
+            para = False
+        elif _HTML_BLOCK.match(rest) or _HTML_LINE.match(rest):
+            refuse(number, "an HTML block", "Markdown text")
+            group += 1
+            row(number, "text", rest, group=group, start=True, inside=inside, indent=indent)
+            para = True
+        elif not para and _DEFINITION.match(rest):
+            refuse(number, "a link reference or footnote definition", "an inline link, or text where it is cited")
+            group += 1
+            row(number, "text", rest, group=group, start=True, inside=inside, indent=indent)
+            para = True
+        elif heading := _ATX.match(rest):
+            group += 1
+            if inside:
+                refuse(number, f"a heading {_INSIDE}", "a heading at the start of its own line, outside lists and quotes")
+                row(number, "text", rest, group=group, start=True, inside=inside, indent=indent)
+            else:
+                row(number, "heading", re.sub(r"(?:^|[ \t])#+[ \t]*$", "", heading[2]), group=group,
+                    level=len(heading[1]))
+            para = False
+        elif _RULE.match(rest):
+            row(number, "text")
+            para = False
+        else:
+            group += 1
+            row(number, "text", rest, group=group, start=True, inside=inside, indent=indent)
+            para = True
+    if fence is not None:
+        refuse(fence[1], "a code fence never closed", "a fence closed by a matching fence line")
+    if comment is not None:
+        refuse(comment, "a comment never closed", "a comment closed with -->, or delete it")
+
+    paragraphs = {}
+    for index, entry in enumerate(rows):
+        entry.update(plain=entry["leaf"] if entry["kind"] == "fence" else "", prose="", spaced="", links=[])
+        if entry["group"] is not None:
+            paragraphs.setdefault(entry["group"], []).append(index)
+    for indexes in paragraphs.values():
+        joined = _INLINE_COMMENT.sub(lambda m: m.group(0) if m.group(1) else "\n" * m.group(0).count("\n"),
+                                     "\n".join(rows[i]["leaf"] for i in indexes))
+        for pattern, what, how in ((_OPEN_COMMENT, "a comment never closed",
+                                     "a comment closed with --> in the same paragraph, or delete it"),
+                                    (_INLINE_TAG, "an inline HTML tag", "Markdown emphasis or plain text")):
+            found = next((m for m in pattern.finditer(joined) if not m.group(1)), None)
+            if found:
+                refuse(rows[indexes[joined.count("\n", 0, found.start())]]["number"], what, how)
+        plain, prose, spaced, links = _inline(joined)
+        for offset, (i, *texts) in enumerate(zip(indexes, *(text.split("\n") for text in (plain, prose, spaced)))):
+            rows[i].update(zip(("plain", "prose", "spaced"), texts), links=[t for o, t in links if o == offset])
+
+    view = []
+    for entry in rows:
+        declares = entry["start"] and not entry["inside"] and not entry["indent"] and entry["kind"] == "text"
+        if entry["kind"] in ("text", "html") and entry["plain"].lstrip().startswith("Claim strength:") and not declares:
+            where = (_INSIDE if entry["inside"] else "indented from the start of its line" if entry["indent"]
+                     else "after a comment on its line" if entry["kind"] == "html" else "inside a paragraph")
+            refuse(entry["number"], f"a **Claim strength:** line {where}",
+                   "a line opening a top-level paragraph at the start of its line, outside lists and quotes")
+        view.append(_Line(entry["number"], entry["kind"], entry["level"],
+                          _collapse(_shown(entry["plain"])) if entry["kind"] == "heading" else None, entry["plain"],
+                          entry["prose"], entry["spaced"], entry["links"], entry["group"], entry["start"], declares))
+    return view, sorted(forms)
+
+
+# ---------------------------------------------------------------- internal names in findings.md
 
 # Wrapping punctuation and Markdown emphasis around a token; leading dots stay so `./x` is a path.
 # Underscores are stripped only in matching pairs (`_word_`), so `__init__.py` keeps its own.
@@ -206,14 +532,25 @@ def _name_pattern(names):
     )
 
 
-def _scan_line(number, line, roots, pattern):
-    found = []
-    for match in _CODE_SPAN.finditer(line):
-        found.append((match.start(), "code", match.group(0)))
-        line = _blank(line, match.start(), match.end())
-    for match in _LINK_TARGET.finditer(line):
-        line = _blank(line, match.start() + 1, match.end())
+def _scan_paragraph(lines, roots, pattern):
+    """Scan one paragraph's lines. A code span is found in the joined paragraph, since it can cross a line
+    break, and reported at its opening line with each line break read as a space, as it renders."""
+    joined = "\n".join(line.plain for line in lines)
+    spans = []
+    for match in _CODE_SPAN.finditer(joined):
+        start = joined.rfind("\n", 0, match.start()) + 1
+        spans.append((joined.count("\n", 0, match.start()), match.start() - start, match.group(0).replace("\n", " ")))
+    joined = _keep_lines(_CODE_SPAN, joined, " ")
+    rows = []
+    for offset, (line, text) in enumerate(zip(lines, joined.split("\n"))):
+        code = [(column, "code", span) for at, column, span in spans if at == offset]
+        rows.extend(_scan_line(line.number, text, roots, pattern, code))
+    return rows
 
+
+def _scan_line(number, line, roots, pattern, found):
+    """Scan one line whose code spans are already blanked and listed in `found` as (column, "code", text)."""
+    found = list(found)
     taken = []
     if pattern is not None:
         for match in pattern.finditer(line):
@@ -233,6 +570,10 @@ def _scan_line(number, line, roots, pattern):
     return [{"line": number, "kind": kind, "text": text} for _, kind, text in sorted(found)]
 
 
+# The numbers check reads source lines, not the rendered view: it drops comments and fenced code only.
+_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
 def _unfenced(path):
     """Yield (line number, line, opens a fence) for each line outside fenced code and HTML comments."""
     text = Path(path).read_text(encoding="utf-8")
@@ -241,13 +582,13 @@ def _unfenced(path):
     for number, line in enumerate(text.splitlines(), start=1):
         if fence is not None:
             closing = _FENCE.match(line)
-            if (closing and closing.group(1)[0] == fence[0] and len(closing.group(1)) >= len(fence)
+            if (closing and closing.group(2)[0] == fence[0] and len(closing.group(2)) >= len(fence)
                     and not line[closing.end():].strip()):
                 fence = None
             continue
         opening = _FENCE.match(line)
-        if opening and not (opening.group(1)[0] == "`" and "`" in line[opening.end():]):
-            fence = opening.group(1)
+        if opening and not (opening.group(2)[0] == "`" and "`" in line[opening.end():]):
+            fence = opening.group(2)
             yield number, line, True
             continue
         yield number, line, False
@@ -261,13 +602,15 @@ def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]
     """
     pattern = _name_pattern(names)
     roots = set(names) | set(roots)
-    rows = []
-    for number, line, opens in _unfenced(path):
-        if opens:
-            rows.append({"line": number, "kind": "code", "text": line.strip()})
-        else:
-            rows.extend(_scan_line(number, line, roots, pattern))
-    return rows
+    rows, paragraphs = [], {}
+    for line in _read_view(path)[0]:
+        if line.kind == "fence":
+            rows.append({"line": line.number, "kind": "code", "text": line.plain.strip()})
+        elif line.group is not None:
+            paragraphs.setdefault(line.group, []).append(line)
+    for lines in paragraphs.values():
+        rows.extend(_scan_paragraph(lines, roots, pattern))
+    return sorted(rows, key=lambda row: row["line"])
 
 
 # ---------------------------------------------------------------- the names set
@@ -490,14 +833,22 @@ def flag_entry_problems(record: dict) -> list[dict]:
     return problems
 
 
-def _headings(path):
-    headings, fenced = [], False
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
-        elif not fenced and line.startswith("### "):
-            headings.append(line[4:].strip().rstrip("#").strip())
-    return headings
+def _read_view(path):
+    return _view(Path(path).read_text(encoding="utf-8"))
+
+
+def _regions(view):
+    """Split a view into [level, title, first line number, lines] at level 1 to 3 headings.
+
+    Level 0 is the text before the first heading; every other region's lines open with its heading
+    line, so a slide's headline is read with its body.
+    """
+    regions = [[0, None, 1, []]]
+    for line in view:
+        if 1 <= line.level <= 3:
+            regions.append([line.level, line.title, line.number, []])
+        regions[-1][3].append(line)
+    return regions
 
 
 def question_problems(draft, record: dict) -> list[dict]:
@@ -523,10 +874,182 @@ def question_problems(draft, record: dict) -> list[dict]:
 
 
 def heading_problems(draft) -> list[dict]:
-    """List each `###` finding heading in findings.md that no methodology.md heading repeats exactly."""
-    methodology = set(_headings(Path(draft) / "methodology.md"))
-    return [{"heading": heading, "problem": "methodology.md has no ### section with this exact heading"}
-            for heading in _headings(Path(draft) / "findings.md") if heading not in methodology]
+    """List each `###` finding heading in findings.md that not exactly one methodology.md section repeats,
+    or that findings.md repeats."""
+    draft = Path(draft)
+    findings, methodology = (Counter(line.title for line in _read_view(draft / name)[0] if line.level == 3)
+                             for name in ("findings.md", "methodology.md"))
+    rows = []
+    for heading, count in findings.items():
+        if count > 1:
+            rows.append({"heading": heading, "problem": f"findings.md has {count} ### slides with this heading; "
+                                                        "give each finding its own"})
+        if heading not in methodology:
+            rows.append({"heading": heading, "problem": "methodology.md has no ### section with this exact heading"})
+        elif methodology[heading] > 1:
+            rows.append({"heading": heading, "problem": f"methodology.md has {methodology[heading]} ### sections "
+                                                        "with this exact heading; merge them into one"})
+    return rows
+
+
+def markdown_problems(draft) -> list[dict]:
+    """List each block form in findings.md or methodology.md outside the Markdown subset the checks read."""
+    draft = Path(draft)
+    return [{"file": name, "line": number, "problem": problem}
+            for name in ("findings.md", "methodology.md") for number, problem in _read_view(draft / name)[1]]
+
+
+# ---------------------------------------------------------------- claim strength
+
+# Claim strengths, weakest first, as state.md's Claim column renders them; the project's provenance
+# helper owns the values. Only causal wording is checked: it exceeds descriptive and association.
+_CLAIMS = ("descriptive", "association", "causal")
+_CLAIM_CELL = re.compile(r"(descriptive|association)|(causal) \((?:experiment|natural experiment): \S.*\)")
+# Read from rendered text, so emphasis is gone, on a line that opens a top-level paragraph at column 0.
+_CLAIM_LINE = re.compile(r"Claim strength:(.*)")
+# Causal wording as whole words, so "data-driven" or "causality" is not one. Bare "because" and
+# "cause" are left out: they also give reasons for analytical choices and state disclaimers. So are
+# "result(s) in" and "affect": "Results in the North", "the result in June", and "affected stores"
+# are not claims.
+_CAUSAL = re.compile(r"(?<![\w-])(?:" + "|".join([
+    r"driv(?:e|es|en|ing)", r"drove", r"drivers?\s+of",
+    r"caus(?:es|ed|ing)", r"because\s+of", r"due\s+to",
+    r"lead(?:s|ing)?\s+to", r"led\s+to", r"result(?:ed|ing)\s+in", r"as\s+a\s+result\s+of",
+    r"impact(?:s|ed|ing)?", r"effects?\s+(?:of|on)", r"attributable\s+to", r"contribut(?:e|es|ed|ing)\s+to",
+]) + r")(?![\w-])", re.IGNORECASE)
+# Slides that describe method, data, and caveats rather than state findings.
+_UNCHECKED = {"How we know", "Limitations and open caveats", "What changed since the last version",
+              "Supporting datasets"}
+
+
+def _level(cell):
+    match = _CLAIM_CELL.fullmatch(cell) if isinstance(cell, str) else None
+    return (match[1] or match[2]) if match else None
+
+
+def _claim_text(value):
+    """A rendered Claim value for comparison: whitespace collapsed, a code span around it all unwrapped."""
+    value = _collapse(value)
+    span = _CODE_SPAN.fullmatch(value)
+    return _collapse(span[2]) if span else value
+
+
+def state_claims(root, investigation) -> dict:
+    """Map each result state.md's findings table links to its Claim cell, or None when unrecognized."""
+    path = Path(root) / "investigations" / investigation / "state.md"
+    try:
+        table = _section_table(path.read_text(encoding="utf-8"), "Current findings")
+    except (OSError, UnicodeError) as error:
+        raise ValueError(f"investigations/{investigation}/state.md: unreadable ({error})") from error
+    if table is None or not {"Evidence", "Claim"} <= set(table[0]):
+        raise ValueError(f"investigations/{investigation}/state.md has no Current findings table with "
+                         "Evidence and Claim columns")
+    claims = {}
+    for row in table[1]:
+        cell = row.get("Claim", "")
+        for result_id in _EVIDENCE_LINK.findall(row.get("Evidence", "")):
+            claims[result_id] = cell if _level(cell) else None
+    return claims
+
+
+def _cited(text, represented):
+    """The represented results a methodology section names by ID or evidence link."""
+    pattern = _name_pattern(represented)
+    found = set(_EVIDENCE_LINK.findall(text)) | set(pattern.findall(text) if pattern else ())
+    return [r for r in represented if r in found]
+
+
+def _weakest(results, levels):
+    known = [levels[r] for r in results if levels.get(r)]
+    return min(known, key=_CLAIMS.index) if known else _CLAIMS[0]
+
+
+def _declaration_problem(section, cited, ceiling, claims):
+    """Why a finding's methodology section does not state its claim as state.md records it, or None."""
+    if section is None:
+        return "methodology.md has no ### section with this heading, so no **Claim strength:** line"
+    declared = section["declared"]
+    if not declared:
+        return "methodology.md's section has no **Claim strength:** line opening a top-level paragraph"
+    if len(declared) > 1:
+        return f"methodology.md's section has {len(declared)} **Claim strength:** lines"
+    level = _level(declared[0])
+    if not level:
+        return ("methodology.md's **Claim strength:** line is not descriptive, association, or causal with its "
+                "design basis")
+    if level != ceiling:
+        return f"methodology.md states {level} on its **Claim strength:** line"
+    if level == "causal":
+        records = {}
+        for result in cited:
+            if _level(claims.get(result)) == "causal":
+                records.setdefault(_claim_text(_inline(claims[result])[0]), []).append(result)
+        recorded = "; ".join(f"{cell} for {', '.join(results)}" for cell, results in records.items())
+        if len(records) > 1:
+            return (f"the results it cites record different causal designs ({recorded}); give each design its "
+                    "own finding")
+        if declared[0] not in records:
+            return f"methodology.md states {declared[0]} on its **Claim strength:** line; state.md records {recorded}"
+    return None
+
+
+def _phrases(lines, field, level):
+    """Each causal phrase in a region's `field` text: (line offset, phrase, whether in a ### headline)."""
+    body = "\n".join(getattr(line, field) for line in lines)
+    return [(body.count("\n", 0, match.start()), " ".join(match.group(0).split()),
+             level == 3 and match.start() < len(getattr(lines[0], field))) for match in _CAUSAL.finditer(body)]
+
+
+def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
+    """List causal wording in findings.md above its claim strength, and claim records that are missing.
+
+    `claims` maps result IDs to state.md Claim cells, as `state_claims` returns them. A `###` finding
+    slide is held to the weakest claim among the results its methodology.md namesake cites, or among
+    all represented results when it cites none; the title, Answer, Implications, and any other slide
+    that states conclusions, to the strongest represented claim. Each finding's methodology section
+    states its strength on one `**Claim strength:**` line, a causal one as its results' Claim cell.
+    Both files are read as they render (`_view`).
+    """
+    draft = Path(draft)
+    levels = {result: _level(cell) for result, cell in claims.items()}
+    rows = [{"result": r, "problem": "state.md has no findings row with a claim strength for this result"
+             if r not in claims else "state.md's Claim cell is not descriptive, association, or causal "
+             "with its design basis"} for r in represented if not levels.get(r)]
+    # Sections sharing a heading pool their citations and declarations, so none is dropped.
+    sections = {}
+    for level, heading, _, lines in _regions(_read_view(draft / "methodology.md")[0]):
+        if level == 3:
+            section = sections.setdefault(heading, {"text": [], "declared": []})
+            section["text"] += [" ".join([line.plain, *line.links]) for line in lines]
+            section["declared"] += [_claim_text(m[1]) for line in lines
+                                    if line.declares and (m := _CLAIM_LINE.match(line.plain))]
+    known = [levels[r] for r in represented if levels.get(r)]
+    deck = max(known, key=_CLAIMS.index) if known else _CLAIMS[0]
+    declared = set()
+    for level, heading, first, lines in _regions(_read_view(draft / "findings.md")[0]):
+        if level == 2 and heading in _UNCHECKED:
+            continue
+        if level == 3:
+            section = sections.get(heading)
+            cited = _cited("\n".join(section["text"]) if section else "", represented) or list(represented)
+            ceiling = _weakest(cited, levels)
+            problem = None if heading in declared else _declaration_problem(section, cited, ceiling, claims)
+            declared.add(heading)
+            if problem:
+                rows.append({"section": heading, "problem": f"{problem}; its results support {ceiling}"})
+        else:
+            cited, ceiling = list(represented), deck
+        if ceiling == "causal":
+            continue
+        found = _phrases(lines, "prose", level)
+        found += (Counter(_phrases(lines, "spaced", level)) - Counter(found)).elements()
+        for offset, phrase, in_heading in sorted(found, key=lambda item: item[0]):
+            rows.append({"line": first + offset, "section": heading or "title",
+                         "phrase": phrase, "claim": ceiling, "results": cited,
+                         "problem": f"causal wording above the {ceiling} claim strength; reword it, since only "
+                                    "an experiment or an identified natural experiment supports a causal claim"
+                                    + ("; reword the methodology.md heading to match" if in_heading else "")})
+    return rows
 
 
 # ---------------------------------------------------------------- numbers in the narratives
@@ -804,12 +1327,12 @@ def _traces(body, unit, values):
 
 # A line that opens a block (a heading, a bullet, a quote, a table row, or a fence) starts no wrap.
 _OPENS_BLOCK = re.compile(r"\s*(?:$|#{1,6}(?:\s|$)|[-*+](?:\s|$)|>|\||`{3,}|~{3,})")
-_QUOTE = re.compile(r"[ \t]*(?:>[ \t]?)+")
+_QUOTE_MARKERS = re.compile(r"[ \t]*(?:>[ \t]?)+")
 
 
 def _unquoted(line):
     """The line with its blockquote markers blanked, so a quoted paragraph reads like any other."""
-    return _QUOTE.sub(lambda match: " " * len(match.group(0)), line, count=1) if _QUOTE.match(line) else line
+    return _QUOTE_MARKERS.sub(lambda match: " " * len(match.group(0)), line, count=1) if _QUOTE_MARKERS.match(line) else line
 
 
 def _continues(previous, line):
@@ -820,8 +1343,8 @@ def _continues(previous, line):
     indented line; an indented one only after a list item at its own indentation, so "- rose to\\n  77. Orders",
     where 77 wraps the item's text, reads 77. Two quoted lines are compared inside the quote.
     """
-    if _QUOTE.match(previous) and _QUOTE.match(line):
-        previous, line = _QUOTE.sub("", previous, count=1), _QUOTE.sub("", line, count=1)
+    if _QUOTE_MARKERS.match(previous) and _QUOTE_MARKERS.match(line):
+        previous, line = _QUOTE_MARKERS.sub("", previous, count=1), _QUOTE_MARKERS.sub("", line, count=1)
     if _OPENS_BLOCK.match(previous) and not re.match(r"\s*[-*+>]\s", previous) or _OPENS_BLOCK.match(line):
         return False
     numbered = _LIST_MARKER.match(line)
@@ -956,7 +1479,8 @@ def compare_trees(local_dir: str | os.PathLike, copy_dir: str | os.PathLike) -> 
 
 # A package's charts/ holds one CSV per **Chart N.** specification in findings.md, named chart-N.csv
 # in specification order: a header row of display names and the plotted values, nothing else.
-_CHART_SPEC = re.compile(r"\*\*Chart (\d+)\.\*\*")
+# A specification is a paragraph, or a list item, that renders opening with "Chart N.".
+_CHART_SPEC = re.compile(r"[ \t]*Chart (\d+)\.(?=\s|$)")
 _CHART_FILE = re.compile(r"chart-([1-9]\d*)\.csv")
 # An underscore or a dot between letters marks a column name or code, not a display name.
 _IDENTIFIER = re.compile(r"[A-Za-z0-9]_[A-Za-z0-9]|[A-Za-z]\.[A-Za-z]")
@@ -1001,8 +1525,11 @@ def write_charts(charts_dir: str | os.PathLike, charts: list) -> list[Path]:
 
 def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike) -> list[dict]:
     """Match the chart specifications in findings.md with the chart files."""
-    numbers = [int(match.group(1)) for match in _CHART_SPEC.finditer(
-        Path(findings_path).read_text(encoding="utf-8"))]
+    view = _read_view(findings_path)[0]
+    numbers = [int(match[1]) for line in view if line.start and (match := _CHART_SPEC.match(line.plain))]
+    # A spec line that continues the paragraph or bullet above it renders inside that block, so it is no spec.
+    continued = {int(match[1]) for line in view if line.kind == "text" and not line.start
+                 and (match := _CHART_SPEC.match(line.plain))}
     rows = []
     for position, number in enumerate(numbers, start=1):
         if number != position:
@@ -1021,7 +1548,9 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
     for number in sorted(specified - files.keys()):
         rows.append({"chart": f"Chart {number}", "problem": "no chart file for this specification"})
     for number in sorted(files.keys() - specified):
-        rows.append({"chart": f"Chart {number}", "problem": "chart file has no specification in findings"})
+        rows.append({"chart": f"Chart {number}", "problem": (
+            f"Chart {number}'s specification continues the paragraph or bullet above it; leave a blank line before "
+            "it" if number in continued else "chart file has no specification in findings")})
     for number in sorted(specified & files.keys()):
         with files[number].open(encoding="utf-8") as stream:
             lines = [line for line, _ in zip(stream, range(2)) if line.strip()]
@@ -1034,7 +1563,8 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
 
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
-            and report["charts"] == [] and report["headings"] == [] and report["questions"] == []
+            and report["charts"] == [] and report["headings"] == [] and report["markdown"] == []
+            and report["claims"] == [] and report["questions"] == []
             and report["verify"] == [] and report["flag_entries"] == [] and report["numbers"] == []
             and not report["numbers_problems"])
 
@@ -1044,9 +1574,9 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
-              "charts": None, "headings": None, "questions": None, "numbers": None, "numbers_problems": [],
-              "inventory": None, "verify": None, "flag_entries": None, "unmatched_flags": None, "errors": [],
-              "passed": False}
+              "charts": None, "headings": None, "markdown": None, "claims": None, "questions": None,
+              "numbers": None, "numbers_problems": [], "inventory": None, "verify": None,
+              "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
         return report
@@ -1067,6 +1597,10 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         report["headings"] = heading_problems(draft)
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"headings check: {error}")
+    try:
+        report["markdown"] = markdown_problems(draft)
+    except (OSError, UnicodeError) as error:
+        report["errors"].append(f"markdown check: {error}")
     # Without findings.json the table renders empty, so any row is drift.
     try:
         provenance = _load_provenance(root)
@@ -1084,6 +1618,11 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     except ValueError as error:
         flags = None
         report["errors"].append(f"flags: {error}")
+    try:
+        claims = state_claims(root, investigation)
+    except ValueError as error:
+        claims = None
+        report["errors"].append(f"claims: {error}")
 
     record = None
     try:
@@ -1096,6 +1635,15 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             report["questions"] = question_problems(draft, record)
         except (OSError, UnicodeError) as error:
             report["errors"].append(f"questions check: {error}")
+        represented = record.get("results")
+        if not isinstance(represented, list) or not all(
+                isinstance(r, dict) and isinstance(r.get("result_id"), str) for r in represented):
+            raise ValueError(f"{MANIFEST} records no results list; rerun export")
+        if claims is not None:
+            try:
+                report["claims"] = claim_problems(draft, [r["result_id"] for r in represented], claims)
+            except (OSError, UnicodeError) as error:
+                report["errors"].append(f"claims check: {error}")
         if not verify_only:
             rows = inventory(draft)
             if rows != record.get("inventory"):
@@ -1136,11 +1684,26 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py check-draft", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Run every mechanical draft check (internal names in findings.md, chart files, "
-                    "matching finding headings, each represented result's question in methodology.md, "
-                    "numbers in both narratives, the manifest inventory, and state.md's current flags) and "
-                    "rewrite the manifest inventory, stamping revised_at when it changes; --verify-only checks a "
-                    "release candidate and writes nothing.",
-        epilog="Prints one JSON line.\nnumbers lists, as file, line, and text, each number in findings.md or "
+                    "matching finding headings, the Markdown subset, causal wording against claim strength, "
+                    "each represented result's question in methodology.md, numbers in both narratives, the "
+                    "manifest inventory, and state.md's current flags) and rewrite the manifest inventory, "
+                    "stamping revised_at when it changes; --verify-only checks a release candidate and writes "
+                    "nothing.",
+        epilog="Prints one JSON line.\nclaims lists each causal phrase (line, section, phrase, claim, results) "
+               "in a findings.md slide, heading included, above its claim strength: a ### finding slide is held to the weakest "
+               "Claim in state.md among the results its methodology.md section cites (all represented results "
+               "when it cites none), and the title and other slides that state conclusions to the strongest; "
+               "How we know, Limitations and open caveats, What changed since the last version, and Supporting "
+               "datasets are not read. It also lists a represented result without a recognized Claim, and a "
+               "finding whose methodology.md section is missing or whose **Claim strength:** line is missing, "
+               "repeated, unrecognized, or differs from state.md, a causal design included.\nheadings lists a ### "
+               "finding heading without exactly one methodology.md section or repeated in findings.md.\nmarkdown "
+               "lists each form outside the Markdown subset the checks read, which could hide text or move "
+               "it between slides: a heading, fence, comment, or **Claim strength:** line inside a list or quote; "
+               "an indented fence or comment; a setext heading; indented code; an HTML block or inline tag; a link "
+               "reference definition; an unclosed fence or comment. Every check but numbers and questions reads "
+               "both files as they render."
+               "\nnumbers lists, as file, line, and text, each number in findings.md or "
                "methodology.md that no represented result's table, profile, check details, or settings round to "
                "and the manifest's allowed_numbers does not cover by its text or a phrase around it; "
                "numbers_problems names a missing table, an unreadable table, profile, or evidence file, or a "
@@ -1150,8 +1713,9 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
                "that is neither none nor a list of places, and an unknown disposition.\nquestions lists each "
                "manifest results entry without a question, or whose question methodology.md does not repeat "
-               "verbatim.\nExit 0 only when names_problems, findings, charts, headings, questions, numbers, "
-               "numbers_problems, verify, flag_entries, unmatched_flags, and errors are all empty.")
+               "verbatim.\nExit 0 only when names_problems, findings, charts, headings, markdown, claims, "
+               "questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
+               "are all empty.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
                         help="verify against the recorded inventory without rewriting it (the release gate)")

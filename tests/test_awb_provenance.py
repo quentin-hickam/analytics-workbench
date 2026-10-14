@@ -472,12 +472,14 @@ def test_finding_row_reuses_state_text_and_names_check_gaps(project):
               {"name": "joins", "outcome": "not-applicable", "detail": "not assessed"},
               {"name": "values", "outcome": "not-applicable", "detail": "No value drives it."}]
     assert provenance.finding_row(project, "inv", "r1", checks, finding="A | B") == (
-        r"| A \| B | [r1](evidence/r1.json) | provisional | failed checks: columns; not assessed: joins |")
+        r"| A \| B | [r1](evidence/r1.json) | provisional | association | failed checks: columns; not assessed: joins |")
+    assert provenance.finding_row(project, "inv", "r1", [], claim="descriptive").endswith(
+        "| provisional | descriptive |  |")
     write(project, "investigations/inv/state.md",
-          b"| Finding | Evidence | Status | Caveat |\n| --- | --- | --- | --- |\n"
-          b"| Orders \\| rose 4% | [r1](evidence/r1.json) | supported | |\n")
+          b"| Finding | Evidence | Status | Claim | Caveat |\n| --- | --- | --- | --- | --- |\n"
+          b"| Orders \\| rose 4% | [r1](evidence/r1.json) | supported | causal (experiment: price test) | |\n")
     assert provenance.finding_row(project, "inv", "r1", checks[2:]) == (
-        r"| Orders \| rose 4% | [r1](evidence/r1.json) | provisional |  |")
+        r"| Orders \| rose 4% | [r1](evidence/r1.json) | provisional | causal (experiment: price test) |  |")
     assert provenance.finding_row(project, "inv", "r2", []).startswith("| <state the finding from r2> |")
 
 
@@ -620,7 +622,8 @@ def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(p
     done = subprocess.run(run, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
     line = json.loads(done.stdout)
-    assert (line["state"], line["status"]) == ("added", "provisional") and "state_row" not in line
+    assert (line["state"], line["status"], line["claim"]) == ("added", "provisional", "association")
+    assert "state_row" not in line
     assert list(provenance.finding_rows(project / "investigations/inv/state.md")) == ["r1"]
     evidence = json.loads((project / line["evidence"]).read_text())
     assert evidence["question"] == "How many orders cleared the threshold?"

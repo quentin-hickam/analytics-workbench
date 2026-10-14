@@ -25,6 +25,8 @@ import urllib.parse
 import urllib.request
 
 DISPOSITIONS = {"none", "revalidate", "omit", "release_with_caveat"}
+# A rendered Claim cell: descriptive, association, or causal with its design basis.
+CLAIM = re.compile(r"(descriptive|association)|causal \((?:experiment|natural experiment): \S.*\)")
 BLOCKING = {"none", "revalidate"}
 
 
@@ -151,7 +153,7 @@ def collect(root, *, probe_upstream=False):
         state = read(state_path)
         updated = field(state, "Last updated", state_path)
         state_date = iso_date(updated, state_path)
-        findings = table(section(state, "Current findings", state_path), ["Finding", "Evidence", "Status", "Revalidation reason or caveat"], state_path)
+        findings = table(section(state, "Current findings", state_path), ["Finding", "Evidence", "Status", "Claim", "Revalidation reason or caveat"], state_path)
         counts = Counter()
         visible_findings = []
         if findings is not None:
@@ -161,7 +163,9 @@ def collect(root, *, probe_upstream=False):
                 if status not in {"supported", "provisional", "superseded", "revalidation-needed"}:
                     uncertain(state_path, "Unrecognized finding status; interpret manually")
                 counts[status] += 1
-                visible_findings.append({"finding": row["Finding"], "status": status, "reason": row["Revalidation reason or caveat"]})
+                if not CLAIM.fullmatch(row["Claim"]):
+                    uncertain(state_path, "Missing or unrecognized finding claim strength; interpret manually")
+                visible_findings.append({"finding": row["Finding"], "status": status, "claim": row["Claim"], "reason": row["Revalidation reason or caveat"]})
         brief_path = investigation / "brief.md"
         brief = read(brief_path)
         result["active"] = {"name": slug, "last_updated": updated, "counts": dict(counts) if findings is not None else None, "findings": visible_findings if findings is not None else None,

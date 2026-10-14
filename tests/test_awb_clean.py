@@ -240,15 +240,17 @@ def state_file(root, caveat=""):
     shutil.copyfile(ROOT / ".agents/skills/awb-init/assets/awb_provenance.py",
                     write(root, "src/provenance.py", ""))
     findings = [{"result": "r-003", "text": "Sales leads growth", "status": "supported", "prior_status": None,
-                 "flag_reason": "", "notes": [caveat] if caveat else [], "checks_caveat": "", "notes_checks": ""},
+                 "flag_reason": "", "notes": [caveat] if caveat else [], "checks_caveat": "", "notes_checks": "",
+                 "claim": "association", "claim_basis": ""},
                 {"result": "r-004", "text": "Age is stable", "status": "provisional", "prior_status": None,
-                 "flag_reason": "", "notes": [], "checks_caveat": "", "notes_checks": ""}]
+                 "flag_reason": "", "notes": [], "checks_caveat": "", "notes_checks": "",
+                 "claim": "descriptive", "claim_basis": ""}]
     write(root, "investigations/churn/findings.json", json.dumps({"schema": "awb-findings/1", "findings": findings}))
     text = (TEMPLATES / "investigation/state.md").read_text().replace("<!-- use an ISO date -->", "2026-09-01")
-    text = text.replace("| --- | --- | --- | --- |\n",
-                        f"| --- | --- | --- | --- |\n| Sales leads growth | [r-003](evidence/r-003.json) | supported | "
-                        f"{caveat + ' ' if caveat else ''}|\n"
-                        "| Age is stable | [r-004](evidence/r-004.json) | provisional | |\n", 1)
+    text = text.replace("| --- | --- | --- | --- | --- |\n",
+                        f"| --- | --- | --- | --- | --- |\n| Sales leads growth | [r-003](evidence/r-003.json) | supported | "
+                        f"association | {caveat + ' ' if caveat else ''}|\n"
+                        "| Age is stable | [r-004](evidence/r-004.json) | provisional | descriptive | |\n", 1)
     return write(root, "investigations/churn/state.md", text)
 
 
@@ -317,8 +319,8 @@ def test_record_writes_quality_catalog_and_flags_in_one_call(tmp_path, monkeypat
     catalog = (tmp_path / "foundation/catalog.md").read_text()
     assert "| `orders` | view |  |  |  | Trims dept (Q-001) |  |  |" in catalog
     text = state.read_text()
-    assert "| Sales leads growth | [r-003](evidence/r-003.json) | revalidation-needed (was supported) | Q-001 merges department labels |" in text
-    assert "| Age is stable | [r-004](evidence/r-004.json) | provisional | |" in text
+    assert "| Sales leads growth | [r-003](evidence/r-003.json) | revalidation-needed (was supported) | association | Q-001 merges department labels |" in text
+    assert "| Age is stable | [r-004](evidence/r-004.json) | provisional | descriptive | |" in text
     assert "Last updated: 2026-10-09" in text
 
 
@@ -746,7 +748,7 @@ def test_dry_run_prints_flag_rows_and_writes_nothing(tmp_path):
     result = recorder.record(tmp_path, "orders", {"issues": {"S1": judgment()},
                              "flags": [{"investigation": "churn", "result": "r-003", "reason": "{S1} merges labels"}]},
                              dry_run=True, today=TODAY)
-    assert "| Sales leads growth | [r-003](evidence/r-003.json) | revalidation-needed (was supported) | Q-001 merges labels |" in result["rows"]
+    assert "| Sales leads growth | [r-003](evidence/r-003.json) | revalidation-needed (was supported) | association | Q-001 merges labels |" in result["rows"]
     assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
 
 

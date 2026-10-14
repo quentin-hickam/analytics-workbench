@@ -12,4 +12,4 @@ Keep a chronological record of meaningful findings, analytical decisions, caveat
 - **Impact and caveats:**
 - **Supersedes or revalidation link:**
 
-Preserve older entries when a later result supersedes them. `run.py` and `python3 src/awb.py state finding` append the entries for reruns and status changes; write others, such as scope or method changes, by hand.
+Preserve older entries when a later result supersedes them. `run.py` and `python3 src/awb.py state finding` append the entries for reruns and status and claim changes; write others, such as scope or method changes, by hand.

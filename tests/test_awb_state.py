@@ -18,6 +18,8 @@
 # test_render_recovers_malformed_and_stray_rows: render replaces an unescaped pipe, a duplicate row, and a row cut off below the table, which writers refuse as drift.
 # test_flags_validate_and_are_idempotent: batches validate before writes, check migrates only in memory, duplicate reasons keep all records byte-identical, and a rerun keeps notes, drops the flag reason, and names only the reason in history.
 # test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helpers write.
+# test_claim_strength_is_recorded_and_guarded: a new row is association; --claim causal needs an experiment or natural-experiment basis and a reason; a claim change writes history; a rerun keeps the claim; a flagged finding's claim can only be lowered.
+# test_absent_claim_strength_is_refused: a findings.json entry without a valid claim strength makes every writer and the drift check refuse, writing nothing.
 
 from datetime import date
 import importlib.util
@@ -173,25 +175,25 @@ def test_show_prints_each_findings_question(project, capsys):
 
 
 def test_run_rows_are_added_kept_and_refreshed(project):
-    assert produce(project, "r1") == {"action": "added", "status": "provisional", "history": False}
-    row = "| <state the finding from r1> | [r1](evidence/r1.json) | provisional | |"
+    assert produce(project, "r1") == {"action": "added", "status": "provisional", "claim": "association", "history": False}
+    row = "| <state the finding from r1> | [r1](evidence/r1.json) | provisional | association | |"
     assert row in text(project, STATE) and f"Last updated: {TODAY}" in text(project, STATE)
     assert produce(project, "r2", checks=GAPS)["action"] == "added"
-    assert "| provisional | failed checks: columns; not assessed: joins |" in text(project, STATE)
+    assert "| provisional | association | failed checks: columns; not assessed: joins |" in text(project, STATE)
 
     set_row(project, "r1", "Churn rose 3 points", "supported", "joins: one table")
     records = snapshot(project)
     kept = produce(project, "r1")
-    assert kept == {"action": "kept", "status": "supported", "history": False}
+    assert kept == {"action": "kept", "status": "supported", "claim": "association", "history": False}
     assert text(project, STATE).encode() == records[STATE] and text(project, HISTORY).encode() == records[HISTORY]
 
     refreshed = produce(project, "r1", table="n\n2\n", checks=GAPS)
-    assert refreshed == {"action": "refreshed", "status": "provisional", "history": True}
-    assert ("| Churn rose 3 points | [r1](evidence/r1.json) | provisional | "
+    assert refreshed == {"action": "refreshed", "status": "provisional", "claim": "association", "history": True}
+    assert ("| Churn rose 3 points | [r1](evidence/r1.json) | provisional | association | "
             "failed checks: columns; not assessed: joins; joins: one table |") in text(project, STATE)
     [entry] = entries(project)
     assert entry.startswith(f"{TODAY} — r1 rerun: supported → provisional\n")
-    assert "prior row `| Churn rose 3 points | [r1](evidence/r1.json) | supported | joins: one table |`" in entry
+    assert "prior row `| Churn rose 3 points | [r1](evidence/r1.json) | supported | association | joins: one table |`" in entry
     assert "- **Reasoning or decision:** rerun\n" in entry
     assert "- **Impact and caveats:** provisional; re-promote with `awb.py state finding`." in entry
 
@@ -210,8 +212,8 @@ def test_flagged_rerun_always_writes_history(project):
     set_row(project, "r2", "Old view", "revalidation-needed (was superseded)", "Q-005 correction")
     head = commit(project)
     cleared = produce(project, "r1", checks=GAPS)
-    assert cleared == {"action": "flag cleared", "status": "provisional", "history": True}
-    assert "| Churn rose | [r1](evidence/r1.json) | provisional | failed checks: columns; not assessed: joins |" \
+    assert cleared == {"action": "flag cleared", "status": "provisional", "claim": "association", "history": True}
+    assert "| Churn rose | [r1](evidence/r1.json) | provisional | association | failed checks: columns; not assessed: joins |" \
         in text(project, STATE)
     entry = entries(project)[-1]
     assert entry.startswith(f"{TODAY} — r1 rerun: revalidation-needed (was supported) → provisional\n")
@@ -255,7 +257,7 @@ def test_failed_state_write_removes_new_evidence(project, monkeypatch):
     fail_on = "history.md"
     with pytest.raises(provenance.StateError, match=r"history.md not written .*prior rows it lacks: \| Churn"):
         produce(project, "r1", table="n\n4\n")
-    assert evidence.exists() and "| provisional |" in text(project, STATE)
+    assert evidence.exists() and "| provisional | association |" in text(project, STATE)
     assert calls[-3:] == ["findings.json", "state.md", "history.md"]
 
 
@@ -297,7 +299,7 @@ def test_finding_guards_and_history(project, capsys):
     commit(project)
 
     code, out, _ = run(project, capsys, "finding", "r1", "--text", "Churn | rose 3 points")
-    assert code == 0 and out == r"| Churn \| rose 3 points | [r1](evidence/r1.json) | provisional | |" + "\n"
+    assert code == 0 and out == r"| Churn \| rose 3 points | [r1](evidence/r1.json) | provisional | association | |" + "\n"
     assert entries(project) == []  # provisional rewording is silent
     before = snapshot(project)
     assert run(project, capsys, "finding", "r1", "--text", "Churn | rose 3 points")[1].startswith("unchanged: r1")
@@ -332,7 +334,7 @@ def test_finding_guards_and_history(project, capsys):
                        "--reason", "Checked against the Q3 renewals.")
     assert code == 0 and out.endswith(f"history.md: ### {TODAY} — r1, r3 promoted to supported\n")
     [entry] = entries(project)
-    assert "r1 was `| Churn \\| rose 3 points | [r1](evidence/r1.json) | provisional | |`; now " \
+    assert "r1 was `| Churn \\| rose 3 points | [r1](evidence/r1.json) | provisional | association | |`; now " \
            "\"Churn \\| rose 3 points\" (supported)." in entry
     assert f"[r1](evidence/r1.json) at commit {head}; [r3](evidence/r3.json) at commit {head}." in entry
     assert "- **Reasoning or decision:** Checked against the Q3 renewals.\n" in entry
@@ -342,7 +344,7 @@ def test_finding_guards_and_history(project, capsys):
     assert code == 0 and out.startswith("warning: r4 is flagged; package dispositions") and len(entries(project)) == 2
     assert run(project, capsys, "finding", "r4", "--status", "superseded")[0] == 2
     assert run(project, capsys, "finding", "r4", "--status", "superseded", "--reason", "Replaced by r1.")[0] == 0
-    assert "| Older | [r4](evidence/r4.json) | superseded | Q-004 correction |" in text(project, STATE)
+    assert "| Older | [r4](evidence/r4.json) | superseded | association | Q-004 correction |" in text(project, STATE)
     assert entries(project)[-1].startswith(f"{TODAY} — r4 set to superseded\n")
 
 
@@ -410,7 +412,7 @@ def test_switch_keeps_the_pointer_form(project, capsys, pointer, expected):
     (STATE, "## Next steps", "## Later"),
     (STATE, "## Unresolved issues", "## Next steps"),
     (STATE, "| Finding | Evidence |", "| Result | Evidence |"),
-    (STATE, "| provisional | |", "| provisional |"),
+    (STATE, "| provisional | association | |", "| provisional | association |"),
     (STATE, "[r2](evidence/r2.json)", "[r1](evidence/r1.json)"),
     (HISTORY, None, None),
 ])
@@ -449,11 +451,11 @@ def test_parsers_read_written_files(project, capsys):
     active = result["active"]
     assert active["last_updated"] == TODAY
     assert active["counts"] == {"supported": 1, "provisional": 2}
-    assert {"finding": r"Churn \| rose", "status": "supported", "reason": ""} in active["findings"]
+    assert {"finding": r"Churn \| rose", "status": "supported", "claim": "association", "reason": ""} in active["findings"]
     assert "- Q3 coverage gap" in active["unresolved_issues"] and "- Explore shifts" in active["next_steps"]
     found = provenance.finding_rows(project / STATE)
     assert sorted(found) == ["r1", "r2", "r3"] and all(len(rows) == 1 for rows in found.values())
-    assert found["r2"] == ["| <state the finding from r2> | [r2](evidence/r2.json) | provisional | "
+    assert found["r2"] == ["| <state the finding from r2> | [r2](evidence/r2.json) | provisional | association | "
                            "failed checks: columns; not assessed: joins |"]
 
 
@@ -462,7 +464,7 @@ def test_writers_refuse_drift(project, writer):
     produce(project, "r1")
     produce(project, "r2")
     state = project / STATE
-    state.write_text(state.read_text().replace("| provisional | |", "| revalidation-needed (was provisional) | Q-004 |", 1)
+    state.write_text(state.read_text().replace("| provisional | association | |", "| revalidation-needed (was provisional) | association | Q-004 |", 1)
                      .replace("<state the finding from r2>", "Hand edited finding"))
     before = snapshot(project)
     with pytest.raises(provenance.StateError, match="findings drift") as failure:
@@ -486,8 +488,8 @@ def test_writers_refuse_drift(project, writer):
 
 def test_render_restores_rows(project, capsys):
     template = text(project, STATE)
-    hand = "| Written by hand | [r9](evidence/r9.json) | supported | |"
-    (project / STATE).write_text(template.replace("| --- | --- | --- | --- |\n", "| --- | --- | --- | --- |\n" + hand + "\n"))
+    hand = "| Written by hand | [r9](evidence/r9.json) | supported | association | |"
+    (project / STATE).write_text(template.replace("| --- | --- | --- | --- | --- |\n", "| --- | --- | --- | --- | --- |\n" + hand + "\n"))
     with pytest.raises(provenance.StateError, match="findings drift"):  # no findings.json: the table renders empty
         provenance.update_findings(project, "churn", ["r9"], text="x")
     code, out, _ = run(project, capsys, "render")
@@ -497,8 +499,8 @@ def test_render_restores_rows(project, capsys):
     (project / STATE).write_text(original.replace("<state the finding from r1>", "Hand edit")
                                 .replace("## Next steps", "A handwritten note.\n\n## Next steps"))
     drift = provenance.findings_drift(project, "churn")
-    assert drift == [{"result": "r1", "disk": "| Hand edit | [r1](evidence/r1.json) | provisional | |",
-                      "rendered": "| <state the finding from r1> | [r1](evidence/r1.json) | provisional | |"}]
+    assert drift == [{"result": "r1", "disk": "| Hand edit | [r1](evidence/r1.json) | provisional | association | |",
+                      "rendered": "| <state the finding from r1> | [r1](evidence/r1.json) | provisional | association | |"}]
     json_before = text(project, f"{INV}/findings.json")
     code, out, _ = run(project, capsys, "render")
     assert code == 0 and out == "discarded: " + drift[0]["disk"] + "\n"
@@ -530,7 +532,7 @@ def test_flags_validate_and_are_idempotent(project, capsys, monkeypatch):
     produce(project, "r1", checks=GAPS)
     entry = json.loads(text(project, f"{INV}/findings.json"))["findings"][0]
     assert entry["notes"] == ["old note | detail"] and entry["flag_reason"] == "" and entry["prior_status"] is None
-    assert r"| provisional | failed checks: columns; not assessed: joins; old note \| detail |" in text(project, STATE)
+    assert r"| provisional | association | failed checks: columns; not assessed: joins; old note \| detail |" in text(project, STATE)
     assert "flag reason: Q-004 correction; Q-005\n" in text(project, HISTORY)
 
 
@@ -552,7 +554,7 @@ def test_lists_above_the_table_leave_it_intact(project):
     assert provenance.edit_list(project, "churn", "next", add=["Check Q3"])["added"] == ["Check Q3"]
     produce(project, "r2")
     assert sorted(provenance.finding_rows(project / STATE)) == ["r1", "r2"]
-    assert text(project, STATE).count("| --- | --- | --- | --- |") == 1
+    assert text(project, STATE).count("| --- | --- | --- | --- | --- |") == 1
     assert provenance.findings_drift(project, "churn") == []
 
 
@@ -560,7 +562,7 @@ def test_render_recovers_malformed_and_stray_rows(project, capsys):
     produce(project, "r1")
     produce(project, "r2")
     original = text(project, STATE)
-    row2 = "| <state the finding from r2> | [r2](evidence/r2.json) | provisional | |"
+    row2 = "| <state the finding from r2> | [r2](evidence/r2.json) | provisional | association | |"
     damaged = original.replace("<state the finding from r1>", "a | b").replace(row2, row2 + "\n" + row2)
     damaged = damaged.replace("## Unresolved issues", "\n" + row2 + "\n\n## Unresolved issues")
     (project / STATE).write_text(damaged)
@@ -582,7 +584,7 @@ def test_kept_notes_explain_only_the_checks_they_were_written_for(project):
     provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-004"}, {"result": "r2", "reason": "Q-004"}])
     produce(project, "r1", checks=totals)  # the correction changed r1's checks
     produce(project, "r2", checks=GAPS)
-    assert "| provisional | failed checks: totals; Agency workers excluded |" in text(project, STATE)
+    assert "| provisional | association | failed checks: totals; Agency workers excluded |" in text(project, STATE)
     before = snapshot(project)
     with pytest.raises(provenance.StateError, match="written for failed checks: columns; not assessed: joins, "
                                                     "so restate those that still hold"):
@@ -598,4 +600,73 @@ def test_kept_notes_explain_only_the_checks_they_were_written_for(project):
     before = snapshot(project)
     with pytest.raises(provenance.StateError, match="invalid finding"):
         produce(project, "r1", table="n\n5\n")
+    assert snapshot(project) == before
+
+
+CAUSAL = "causal (experiment: randomized price test, March 2026)"
+
+
+def test_claim_strength_is_recorded_and_guarded(project, capsys):
+    produce(project, "r1")
+    entry = json.loads(text(project, f"{INV}/findings.json"))["findings"][0]
+    assert (entry["claim"], entry["claim_basis"]) == ("association", "")
+    assert "| provisional | association | |" in text(project, STATE)
+    before = snapshot(project)
+    for argv, message in [
+            (["--claim", "causal", "--reason", "x"], "--claim causal needs --basis"),
+            (["--claim", "causal", "--basis", "survey of store managers", "--reason", "x"], "--claim causal needs --basis"),
+            (["--basis", "experiment: price test", "--reason", "x"], "give --status, --text, --caveat, or --claim"),
+            (["--claim", "descriptive", "--basis", "experiment: price test", "--reason", "x"], "--basis goes only"),
+            (["--claim", "causal", "--basis", "experiment: randomized price test, March 2026"], "--reason is required"),
+            (["--claim", "strong"], "invalid choice")]:
+        code, _, err = run(project, capsys, "finding", "r1", *argv)
+        assert code == 2 and message in err, (argv, err)
+    assert snapshot(project) == before
+    produce(project, "r2")
+    before = snapshot(project)
+    code, _, err = run(project, capsys, "finding", "r1", "r2", "--claim", "descriptive", "--reason", "x")
+    assert code == 2 and "several result IDs take --status only" in err and snapshot(project) == before
+    code, out, _ = run(project, capsys, "finding", "r1", "--claim", "causal", "--basis",
+                       "experiment:  randomized price test, March 2026", "--reason", "Stores were randomized.")
+    assert code == 0 and f"| provisional | {CAUSAL} | |" in out
+    assert f"r1 claim set to {CAUSAL}" in text(project, HISTORY)
+    assert f'now "<state the finding from r1>" (provisional; claim {CAUSAL}).' in text(project, HISTORY)
+    entry = json.loads(text(project, f"{INV}/findings.json"))["findings"][0]
+    assert (entry["claim"], entry["claim_basis"]) == ("causal", "experiment: randomized price test, March 2026")
+    produce(project, "r1", table="n\n2\n")  # a changed rerun keeps the claim
+    assert f"| provisional | {CAUSAL} | |" in text(project, STATE)
+    provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-004"}])
+    before = snapshot(project)
+    with pytest.raises(provenance.StateError, match="stronger claim or another design basis"):
+        provenance.update_findings(project, "churn", ["r1"], claim="causal", basis="natural experiment: a store fire",
+                                   reason="x")
+    assert snapshot(project) == before
+    result = provenance.update_findings(project, "churn", ["r1"], claim="association", reason="Randomization failed.")
+    assert result["rows"] == ["| <state the finding from r1> | [r1](evidence/r1.json) | revalidation-needed (was "
+                              "provisional) | association | Q-004 |"]
+    with pytest.raises(provenance.StateError, match="stronger claim"):
+        provenance.update_findings(project, "churn", ["r1"], claim="causal", basis="experiment: retest", reason="x")
+    assert provenance.update_findings(project, "churn", ["r1"], claim="descriptive", reason="Narrowed.")["rows"]
+
+
+@pytest.mark.parametrize("change", [
+    lambda entry: entry.pop("claim"),
+    lambda entry: entry.update(claim=""),
+    lambda entry: entry.update(claim="causal"),  # no design basis
+    lambda entry: entry.update(claim="association", claim_basis="experiment: price test"),
+    lambda entry: entry.pop("claim_basis")])
+def test_absent_claim_strength_is_refused(project, change):
+    produce(project, "r1")
+    path = project / INV / "findings.json"
+    content = json.loads(path.read_text())
+    change(content["findings"][0])
+    path.write_text(json.dumps(content))
+    before = snapshot(project)
+    for writer in (lambda: provenance.update_findings(project, "churn", ["r1"], text="x"),
+                   lambda: provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-004"}]),
+                   lambda: provenance.render_findings(project, "churn"),
+                   lambda: provenance.findings_drift(project, "churn"),
+                   lambda: produce(project, "r1", table="n\n5\n")):
+        with pytest.raises(provenance.StateError, match="no valid claim strength"):
+            writer()
     assert snapshot(project) == before

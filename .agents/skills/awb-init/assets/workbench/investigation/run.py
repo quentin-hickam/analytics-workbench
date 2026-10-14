@@ -6,7 +6,8 @@ produces every result in settings.toml. It refuses to run, exiting 2, while a wa
 table lacks its question. For each result it runs the result's saved queries in a fresh session
 of canonical views, validates the result, saves the table and its profile under results/,
 records evidence under evidence/, writes its state.md findings row, and prints one compact JSON
-line with the paths, failed and unassessed checks, and what it did to the row.
+line with the paths, failed and unassessed checks, and what it did to the row, with the row's
+status and claim strength.
 
 Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml,
 with the question it answers, and its query in queries/<id>.sql. Add a producer below only when
@@ -98,7 +99,7 @@ def produce_result(connection, result_id, config, parameters):
         "evidence": evidence.relative_to(ROOT).as_posix(),
         "table": table.relative_to(ROOT).as_posix(),
         "profile": profile_path.relative_to(ROOT).as_posix(),
-        "state": state["action"], "status": state["status"], "history": state["history"],
+        "state": state["action"], "status": state["status"], "claim": state["claim"], "history": state["history"],
     }
 
 
