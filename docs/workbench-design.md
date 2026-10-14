@@ -46,7 +46,7 @@ Shared analytical code implements neutral operations on data independently of a 
 
 ## Working data and release history
 
-Working analysis uses current data and definitions, refreshing caches as needed. Each release is frozen: it retains its exact exported results and records its Git commit SHA, input provenance, and analytical parameters, so later workbench changes cannot alter what an earlier release represents.
+Working analysis uses current data and definitions, refreshing caches as needed. Each release is frozen: it retains its exact exported results and records its Git commit SHA, input provenance, analytical parameters, and the runtime of each represented result, so later workbench changes cannot alter what an earlier release represents.
 
 Preserving enough data for exact reruns is an explicit choice, rather than a default full database snapshot for every release. Code is tracked in Git; delivery packages currently are not.
 
