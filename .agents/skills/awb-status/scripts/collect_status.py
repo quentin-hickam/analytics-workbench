@@ -198,7 +198,7 @@ def collect(root):
     # after, which an escape or entity could render as one.
     link_text = re.compile(r"\[[^\[\]\\<`]+\]\(")
     angle_destination = re.compile(r"<[^<>\\\n]+>\)")
-    retained = re.compile(r"`[^`\n]*[^`\s][^`\n]*`,\s*sha-?256:?\s*[0-9a-f]{64}(?![0-9A-Za-z_\\&])", re.I)
+    retained = re.compile(r"`[^`\n]*[^`\s][^`\n]*`,\s*sha-?256:?\s*[0-9a-f]{64}(?![\w\\&])", re.I)
     label = re.compile(r"\s*reference:\s*", re.I)
     line_break = re.compile(r"<br\s*/?>", re.I)
     entity = re.compile(r"&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")

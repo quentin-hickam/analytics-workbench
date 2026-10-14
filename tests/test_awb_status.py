@@ -295,7 +295,7 @@ def test_acquisitions_and_storage_risks(workbench):
 
 SHA = "ab12" * 16
 # Notes probes for the two reference forms foundation/sources.md defines: (source ID, Notes, whether
-# it counts as a reference, where the probe came from). Every reviewer probe from PR 38 rounds 1-6
+# it counts as a reference, where the probe came from). Every reviewer probe from PR 38 rounds 1-7
 # is a row, in both directions; rows marked "limit" pin Markdown that renders as a reference but is
 # outside the grammar foundation/sources.md states, or what a syntax-only check cannot tell apart.
 REFERENCE_PROBES = [
@@ -371,6 +371,9 @@ REFERENCE_PROBES = [
     ("kept-letter", f"reference: `/secure/kept-letter/manual.pdf`, sha256 {SHA}g", False, "Codex r6 #2, Opus r6 #2"),
     ("kept-suffix", f"reference: `/secure/kept-suffix/manual.pdf`, sha256 {SHA}xyz123", False, "Codex r6 #2"),
     ("kept-underscore", f"reference: `/secure/kept-underscore/manual.pdf`, sha256 {SHA}_v2", False, "worker r6"),
+    ("kept-unicode-letter", f"reference: `/secure/kept-unicode-letter/manual.pdf`, sha256 {SHA}\u00e9", False, "Codex r7 #2"),
+    ("kept-fullwidth-digit", f"reference: `/secure/kept-fullwidth-digit/manual.pdf`, sha256 {SHA}\uff19", False, "Codex r7 #2"),
+    ("kept-arabic-digit", f"reference: `/secure/kept-arabic-digit/manual.pdf`, sha256 {SHA}\u0663", False, "Opus r7 #1"),
     ("kept-then-text", f"reference: `/secure/kept-then-text/manual.pdf`, sha256 {SHA}. Verified", True, "worker r6"),
     ("kept-escape-after", f"reference: `/secure/kept-escape-after/manual.pdf`, sha256 {SHA}\\_v2", False, "worker r6 (renders an attached _)"),
     ("kept-entity-after", f"reference: `/secure/kept-entity-after/manual.pdf`, sha256 {SHA}&#x67;", False, "worker r6 (renders an attached g)"),
