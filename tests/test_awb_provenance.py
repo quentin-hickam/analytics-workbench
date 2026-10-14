@@ -341,6 +341,7 @@ def test_compare_evidence_resolves_landing_helper_layout(project):
         "converted_at": "2026-10-07T00:00:02+00:00",
         "files": [{"path": name, "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
                   for name, content in sorted(parts.items())],
+        "checks": [],
         "notes": None,
     }
     write(project, "data/raw/crm/a2/provenance.json", (json.dumps(landed_provenance, indent=2) + "\n").encode())
