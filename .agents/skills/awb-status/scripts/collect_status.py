@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import string
 import subprocess
+import unicodedata
 from email.utils import parsedate_to_datetime
 import http.client
 import importlib.util
@@ -197,6 +198,152 @@ def collect(root, *, probe_upstream=False):
     sources = read(sources_path)
     acquisitions = table(section(sources, "Acquisitions", sources_path), ["Acquisition ID", "Source ID", "Acquired at", "Source version, query, or request", "Landed directory", "Retained copy", "Integrity or completeness check", "Restrictions", "Notes"], sources_path)
     result["acquisitions"] = None if acquisitions is None else {"count": len(acquisitions), "without_retained_copy": sum(not row["Retained copy"] or row["Retained copy"].strip("`").strip().lower() == "this checkout only" for row in acquisitions)}
+    registered = table(section(sources, "Sources", sources_path), ["Source ID", "System or provider", "Contents and grain", "Owner or contact", "Acquisition method", "Relevance and fitness", "Status", "Notes"], sources_path)
+
+    def documentation_basis(row):
+        """Whether Relevance and fitness begins with the `from documentation` basis; an unlabelled assessment is uncertain."""
+        basis = re.match(r"\s*`?from (documentation|landed records)\b", row["Relevance and fitness"], re.I)
+        if basis is None and row["Relevance and fitness"]:
+            uncertain(sources_path, f"Source {row['Source ID']}: Relevance and fitness does not begin with its basis")
+        return basis is not None and basis.group(1).lower() == "documentation"
+
+    # The two reference forms foundation/sources.md defines, exactly as it states them; any other
+    # spelling, valid Markdown or not, counts as no reference. Form 1 is `[text](destination)`: non-empty
+    # text without `[`, `]`, `\`, `<` or a backtick, then a destination in angle brackets without `<`, `>`,
+    # `\` or a line break, or a bare one without whitespace, control characters, `<` or `\` whose
+    # parentheses balance at any depth. Form 2 is a location in single backticks, a comma, then
+    # `sha256` (also `SHA-256`, `sha256:`) and exactly 64 hex digits with no letter, digit, `_`, `\` or `&`
+    # after, which an escape or entity could render as one.
+    link_text = re.compile(r"\[[^\[\]\\<`]+\]\(")
+    angle_destination = re.compile(r"<[^<>\\\n]+>\)")
+    retained = re.compile(r"`[^`\n]*[^`\s][^`\n]*`,\s*sha-?256:?\s*[0-9a-f]{64}(?![\w\\&])", re.I)
+    label = re.compile(r"\s*reference:\s*", re.I)
+    line_break = re.compile(r"<br\s*/?>", re.I)
+    entity = re.compile(r"&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
+    # Raw HTML and autolinks, which CommonMark reads before code spans and links. These patterns are
+    # looser than CommonMark's and markdown-it's: reading stops at anything that may be raw HTML other
+    # than `<br>`, and an autolink is never read shorter than a renderer reads it.
+    attribute = r"""\s+[\w:.-]+(?:\s*=\s*(?:[^"'=<>`\x00-\x20]+|'[^']*'|"[^"]*"))?"""
+    html = [re.compile(pattern, re.S) for pattern in (
+        rf"</?\w[\w-]*(?:{attribute})*\s*/?>", r"<!---?>", r"<!--.*?-->", r"<!--(?:[^-]|-[^-]|--[^>])*-->",
+        r"<\?.*?\?>", r"<!\[CDATA\[.*?\]\]>", r"<![A-Za-z][^>]*>")]
+    autolink = re.compile(r"<[^<>\x00-\x20]*[:@][^<>\x00-\x20]*>")
+
+    def flanking(notes, start, end):
+        """Whether the delimiter run notes[start:end] is left- and right-flanking, and the characters around it."""
+        before, after = notes[start - 1:start] or " ", notes[end:end + 1] or " "
+        punctuation = lambda char: char in string.punctuation or unicodedata.category(char)[0] in "PS"
+        left = not after.isspace() and (not punctuation(after) or before.isspace() or punctuation(before))
+        right = not before.isspace() and (not punctuation(before) or after.isspace() or punctuation(after))
+        return left, right, punctuation(before), punctuation(after)
+
+    def can_open(notes, start, end):
+        left, right, before, _ = flanking(notes, start, end)
+        return left and (notes[start] != "_" or not right or before)
+
+    def can_close(notes, start, end):
+        left, right, _, after = flanking(notes, start, end)
+        return right and (notes[start] != "_" or not left or after)
+
+    def bare_destination(notes, start):
+        """Where the link's `)` closes a bare destination starting at `start`, or None."""
+        depth = 0
+        for position in range(start, len(notes)):
+            char = notes[position]
+            if char.isspace() or char in "<\\\x7f" or char < " ":
+                return None
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                if depth == 0:
+                    return position + 1 if position > start else None
+                depth -= 1
+        return None
+
+    def destination(notes, start):
+        """Where `)` closes an angle or bare destination starting at `start`, or None."""
+        angled = angle_destination.match(notes, start)
+        return angled.end() if angled else bare_destination(notes, start)
+
+    def link(notes, start):
+        """Where a form-1 link starting at `start` ends, or None."""
+        opened = link_text.match(notes, start)
+        return opened and destination(notes, opened.end())
+
+    def referenced(notes):
+        """Whether a Notes clause in plain text opens with `reference:` directly followed by one of the two forms."""
+        # Read left to right as CommonMark does. A clause opens the cell or follows `;`, `,`, `.` or a
+        # `<br>`, outside code spans, raw HTML, autolinks, emphasis, strikethrough, links and brackets;
+        # only what directly follows the label counts, so `reference: pending. See [x](y)` records no
+        # reference. Where a clause could sit inside an element (any raw HTML but `<br>`, or emphasis or
+        # strikethrough that may hold a backtick, bracket or `<`, or holds an opening run of another
+        # delimiter character) or the reading is uncertain (a backtick, bracket or `<` inside an
+        # autolink, or a link whose destination this does not read), the rest of the cell counts as
+        # no reference.
+        position, clause, brackets = 0, True, 0
+        # A backslash escapes the punctuation after it, read left to right as the loop below reads it,
+        # and an escaped delimiter is literal, so only the unescaped rest of a run opens or closes.
+        escaped = {found.end() - 1 for found in re.finditer(rf"\\[{re.escape(string.punctuation)}]", notes)}
+        runs = [(start, found.end()) for found in re.finditer(r"\*+|_+|~+", notes)
+                for start in [found.start() + (found.start() in escaped)] if start < found.end()]
+        last_closer = {char: max((run for run in runs if notes[run[0]] == char and can_close(notes, *run)), default=(0, 0)) for char in "*_~"}
+        while position < len(notes):
+            labelled = clause and not brackets and label.match(notes, position)
+            if labelled and (retained.match(notes, labelled.end()) or link(notes, labelled.end())):
+                return True
+            clause = False
+            char = notes[position]
+            if char == "\\" and notes[position + 1:position + 2] in tuple(string.punctuation):
+                position += 2
+            elif char == "`":
+                run = re.match(r"`+", notes[position:]).group()
+                closer = re.compile(rf"(?<!`){run}(?!`)").search(notes, position + len(run))
+                position = closer.end() if closer else position + len(run)
+            elif char == "<":
+                broken = line_break.match(notes, position)
+                if not broken and any(pattern.match(notes, position) for pattern in html):
+                    return False  # Where the element ends, and so whether a clause is inside it, is not read.
+                linked = autolink.match(notes, position)
+                end = broken.end() if broken else linked and linked.end()
+                if end and any(inner in "`[]<" for inner in notes[position + 1:end]):
+                    return False  # Renderers may split this construct differently.
+                position = end or position + 1
+                clause = bool(broken)
+            elif char in "*_~":
+                # Emphasis or strikethrough: whatever this run opens closes by the last run of the same
+                # character that can close, so the span to there is skipped, unless it may hold a clause
+                # or holds a run of another of the three characters that can open, which may close later.
+                end = re.compile(rf"\{char}+").match(notes, position).end()
+                closer_start, closer_end = last_closer[char]
+                if closer_start >= end and can_open(notes, position, end):
+                    if any(inner in "`[]<" for inner in notes[position:closer_end]) or any(
+                            end <= start < closer_start and notes[start] != char and can_open(notes, start, stop) for start, stop in runs):
+                        return False
+                    end = closer_end
+                position = end
+            elif char == "[":
+                closed = link(notes, position)
+                brackets += closed is None
+                position = closed or position + 1
+            elif char == "]" and brackets:
+                brackets -= 1
+                if notes.startswith("(", position + 1):
+                    closed = destination(notes, position + 2)
+                    if closed is None:
+                        return False
+                    position = closed
+                else:
+                    position += 1
+            elif entity.match(notes, position):
+                position = entity.match(notes, position).end()  # Its `;` ends the entity, not a clause.
+            else:
+                clause = char in ";,."
+                position += 1
+        return False
+
+    # foundation/sources.md states the basis and reference forms these read.
+    result["sources"] = None if registered is None else {"count": len(registered), "documentation_without_reference": [
+        row["Source ID"] for row in registered if documentation_basis(row) and not referenced(row["Notes"])]}
     result["landed_data_storage"] = storage(field(readme, "Landed data is kept at", readme_path, optional=True))
     result["release_storage"] = storage(field(readme, "Released packages are kept at", readme_path, optional=True))
     result["upstream"] = upstream(root, probe_upstream, uncertain, entries)
