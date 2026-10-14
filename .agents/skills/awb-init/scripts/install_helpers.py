@@ -20,7 +20,9 @@ Prints one line of JSON:
   customized         each customized file -> the installed asset to compare it with
   retired            (--upgrade) files the skills no longer ship: unmodified, removed, or customized (kept)
   requirements, python, packages, install   the third-party packages the helpers and the run.py
-                     template need, where they are declared, and whether this interpreter imports them
+                     template need, where they are declared, and whether this interpreter imports them;
+                     requirements.unread lists the requirements.txt lines and includes the provenance
+                     helper's reader could not read, which may declare a package listed as missing
 Package formats stay absent until awb-package copies them with --package-formats.
 The project's install receipt, .awb-receipt.json, maps each file this script installed or replaced to
 its SHA-256: a file matching its entry is unmodified. A file without an entry is customized unless
@@ -78,7 +80,7 @@ def _distribution(requirement):
     return requirement.split(";")[0].strip()
 
 
-def _requirement_names():
+def _requirements_reader():
     """The provenance helper's requirements file reader, so runtime records and this check agree;
     None when the skills directory lacks that asset."""
     asset = COPIED.get("src/provenance.py")
@@ -87,7 +89,7 @@ def _requirement_names():
     spec = importlib.util.spec_from_file_location("awb_asset_provenance", SKILLS / asset)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.requirement_names
+    return module.read_requirements
 
 
 def _copies():
@@ -96,16 +98,17 @@ def _copies():
 
 
 def _declared(root):
-    """(dependency files present, normalized names they declare, or None when unreadable or the
-    requirements.txt parser is missing)."""
-    files, names = [], set()
+    """(dependency files present, normalized names they declare or None when a file is unreadable
+    or the requirements.txt reader is missing, requirements lines or includes that reader could not read)."""
+    files, names, unread = [], set(), []
     requirements = root / "requirements.txt"
     if requirements.is_file():
         files.append("requirements.txt")
-        read = _requirement_names()
+        read = _requirements_reader()
         if read is None:
-            return files, None
-        names |= set(read(requirements))
+            return files, None, unread
+        found, unread = read(requirements)
+        names |= set(found)
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
         files.append("pyproject.toml")
@@ -113,7 +116,7 @@ def _declared(root):
             import tomllib
             data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
         except (ImportError, ValueError):
-            return files, None
+            return files, None, unread
         project = data.get("project", {})
         specs = list(project.get("dependencies", []))
         for group in [*project.get("optional-dependencies", {}).values(), *data.get("dependency-groups", {}).values()]:
@@ -123,7 +126,7 @@ def _declared(root):
         for group in poetry.get("group", {}).values():
             specs += list(group.get("dependencies", {}))
         names |= {_normalize(re.match(r"\s*([A-Za-z0-9._-]*)", spec).group(1)) for spec in specs}
-    return files, names
+    return files, names, unread
 
 
 def _copy(asset, target):
@@ -206,7 +209,7 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
         (root / RECEIPT).write_text(json.dumps(dict(sorted(written.items())), indent=2) + "\n")
 
     requirements = sorted(REQUIREMENTS.values(), key=str.lower)
-    declared_in, declared = _declared(root)
+    declared_in, declared, unread = _declared(root)
     declared_in = ", ".join(declared_in)
     if not declared_in:
         if not check:
@@ -220,7 +223,8 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
     else:
         missing = [item for item in requirements if _normalize(_distribution(item)) not in declared]
         result["requirements"] = {"path": declared_in, "status": "incomplete" if missing else "declared",
-                                  **({"missing": missing} if missing else {})}
+                                  **({"missing": missing} if missing else {}),
+                                  **({"unread": unread} if unread else {})}
 
     packages, absent = {}, []
     for name, requirement in REQUIREMENTS.items():

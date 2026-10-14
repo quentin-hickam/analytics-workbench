@@ -23,7 +23,7 @@
 # test_export_display_stub_names_each_gap_once: missing display names on chart and dataset paths give one quoted [columns] line each, deduplicated, a dotted column kept as one key; a blank name gets its own error and no stub line, so the stub pastes as valid TOML.
 # test_release_refuses_failed_check_or_pending_disposition: a failing verify, an unmatched flag, or a none/revalidate disposition creates no release; a missing or unknown disposition or malformed places fail the check's flag_entries; represented_in none needs no disposition.
 # test_release_reports_fields_for_the_report: datasets, dispositions marked new against the prior release's manifest (unknown when it is unreadable), provenance gaps, checkout-only acquisitions, and a clean local verify.
-# test_release_manifest_lists_runtime_per_result: export copies each represented result's runtime block into its results entry, unknown when the evidence has none or a null one, as stale reads it, and the release manifest keeps them.
+# test_release_manifest_lists_runtime_per_result: export copies each represented result's runtime block into its results entry, unknown when the evidence has none or a null one, as stale reads it, and the release manifest keeps them; each unread requirements line is a provenance gap.
 # test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy compared.
 # test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
@@ -639,7 +639,7 @@ def test_release_reports_fields_for_the_report(project, capsys):
 def test_release_manifest_lists_runtime_per_result(project, capsys):
     evidence = project / "investigations/inv/evidence"
     first = json.loads((evidence / "r-001.json").read_text())["runtime"]
-    assert set(first) == {"python", "platform", "packages"}
+    assert set(first) == {"python", "platform", "packages", "unread_requirements"}
     second = json.loads((evidence / "r-002.json").read_text())
     second["runtime"]["packages"]["duckdb"] = "0.0.1-fixture"
     (evidence / "r-002.json").write_text(json.dumps(second))
@@ -650,6 +650,14 @@ def test_release_manifest_lists_runtime_per_result(project, capsys):
     assert code == 0 and report["released"] and report["provenance_gaps"] == []
     assert [(r["result_id"], r["runtime"]) for r in manifest(project, "released/001")["results"]] == [
         ("r-001", first), ("r-002", second["runtime"])]
+    second["runtime"]["unread_requirements"] = ["requirements.txt:2: -e ."]
+    (evidence / "r-002.json").write_text(json.dumps(second))
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    run(project, capsys, "check-draft", "inv", "pkg")
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 0 and report["released"] and report["provenance_gaps"] == [
+        {"field": "results[1].runtime.unread_requirements[0]",
+         "reason": "requirements not read, packages unrecorded: requirements.txt:2: -e ."}]
     del second["runtime"]
     (evidence / "r-002.json").write_text(json.dumps(second))
     run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
@@ -657,7 +665,7 @@ def test_release_manifest_lists_runtime_per_result(project, capsys):
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["provenance_gaps"] == [
         {"field": "results[1].runtime", "reason": "evidence lacks runtime"}]
-    assert manifest(project, "released/002")["results"][1]["runtime"] == {"unknown": "evidence lacks runtime"}
+    assert manifest(project, "released/003")["results"][1]["runtime"] == {"unknown": "evidence lacks runtime"}
     second["runtime"] = None
     (evidence / "r-002.json").write_text(json.dumps(second))
     run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")

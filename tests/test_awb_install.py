@@ -5,7 +5,7 @@
 # test_receipt_alone_decides_earlier: a file matching its receipt entry is earlier; a file whose entry differs, or without an entry such as one installed before receipts, is customized.
 # test_package_formats_install_on_request: --package-formats installs missing formats into the receipt; without it present formats go unreported.
 # test_check_writes_nothing: --check reports missing helpers and the absent requirements file without writing.
-# test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited; a wheel URL declares its package, not its scheme; a UTF-16 file and its -r include are read, and a wheel path with extras declares its package.
+# test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited; a wheel URL declares its package, not its scheme; a UTF-16 file and its quoted -r include are read, and a wheel path with extras declares its package; lines and includes the reader cannot read are listed as unread beside the status.
 # test_missing_packages_get_an_install_command: a package that fails to import is reported with a pip command for this interpreter.
 # test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks; without the provenance asset an existing requirements.txt is reported unchecked, not a crash.
 # test_refuses_non_workbench_old_python_and_unreadable_receipt: none of these writes anything.
@@ -19,6 +19,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -176,14 +177,18 @@ def test_existing_dependency_files_are_only_reported(project, imports_ok):
     before = snapshot(project)
     result = installer.install(project)
     assert (project / "requirements.txt").read_bytes() == before[project / "requirements.txt"]
-    assert result["requirements"] == {"path": "requirements.txt", "status": "declared"}
-    (project / "requirements.txt").write_bytes("Pandas>=2.0\n-r more.txt\n".encode("utf-16"))
-    (project / "more.txt").write_text("tomli>=2\n./wheels/duckdb-1.0-py3-none-any.whl[all]\n")
+    assert result["requirements"] == {"path": "requirements.txt", "status": "declared",
+                                      "unread": ["requirements.txt:4: -r more.txt (No such file or directory)"]}
+    (project / "requirements.txt").write_bytes("Pandas>=2.0\n-r \"deps/more reqs.txt\"\n".encode("utf-16"))
+    (project / "deps").mkdir()
+    (project / "deps/more reqs.txt").write_text("tomli>=2\n./wheels/duckdb-1.0-py3-none-any.whl[all]\n")
     assert installer.install(project)["requirements"] == {"path": "requirements.txt", "status": "declared"}
-    (project / "more.txt").unlink()
-    (project / "requirements.txt").write_text("Pandas>=2.0\ntomli>=2\n")
+    shutil.rmtree(project / "deps")
+    (project / "requirements.txt").write_text("Pandas>=2.0\ntomli>=2\n-e .\n-r deps/gone.txt\n")
     result = installer.install(project)
-    assert result["requirements"] == {"path": "requirements.txt", "status": "incomplete", "missing": ["duckdb"]}
+    assert result["requirements"] == {
+        "path": "requirements.txt", "status": "incomplete", "missing": ["duckdb"],
+        "unread": ["requirements.txt:3: -e .", "requirements.txt:4: -r deps/gone.txt (No such file or directory)"]}
     (project / "requirements.txt").unlink()
     (project / "pyproject.toml").write_text(
         '[project]\nname = "x"\ndependencies = ["pandas[parquet]>=2"]\n'

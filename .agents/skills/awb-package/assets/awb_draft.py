@@ -1181,7 +1181,8 @@ def _runtime(evidence):
 
 
 def provenance_gaps(record: dict) -> list[dict]:
-    """Each manifest value recorded as unknown, by its dotted field path, with the reason."""
+    """Each manifest value recorded as unknown, by its dotted field path, with the reason, and each
+    requirements line a result's runtime could not read, whose packages' versions went unrecorded."""
     gaps = []
 
     def walk(value, path):
@@ -1191,7 +1192,12 @@ def provenance_gaps(record: dict) -> list[dict]:
             gaps.append({"field": path, "reason": value})
         elif isinstance(value, dict):
             for key, item in value.items():
-                walk(item, f"{path}.{key}")
+                if key == "unread_requirements" and isinstance(item, list):
+                    gaps.extend({"field": f"{path}.{key}[{index}]",
+                                 "reason": f"requirements not read, packages unrecorded: {entry}"}
+                                for index, entry in enumerate(item))
+                else:
+                    walk(item, f"{path}.{key}")
         elif isinstance(value, list):
             for index, item in enumerate(value):
                 walk(item, f"{path}[{index}]")

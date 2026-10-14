@@ -25,12 +25,13 @@
 # test_views_read_follows_view_references: views read by FROM/JOIN/comma, transitively; a column alias is not a read.
 # test_finding_row_reuses_state_text_and_names_check_gaps: the row keeps existing finding text, escapes pipes, names failed and unassessed checks.
 # test_cli_stale_lists_changed_results_with_their_findings: stale lists failing results with state.md rows, missing linked evidence, skips non-evidence JSON, rejects an unknown investigation.
-# test_record_evidence_records_runtime: the runtime block holds this interpreter's Python and platform and the versions of duckdb, pandas, and each requirements.txt name, null when not installed.
-# test_requirement_name_reads_names_and_direct_references: every line the review rounds probed: names with extras, versions, markers, or @ URL; #egg= and wheel or sdist file names of direct references (URL, POSIX or Windows path), -e included, with or without trailing extras, with trailing --hash or other per-requirement options and a continuation backslash ignored; options, comments, and references naming no package give none.
-# test_requirement_names_follow_includes_and_byte_order_marks: -r and --requirement includes are read relative to the including file, once each; a URL include, a missing include and -c constraints add nothing; a UTF-8, UTF-16 or UTF-32 BOM is decoded.
-# test_runtime_records_a_wheel_url_package_and_its_drift: a requirements.txt wheel URL or path, hash-pinned or with extras, continued or not, records its package's installed version, and a changed recorded version is a runtime mismatch.
+# test_record_evidence_records_runtime: the runtime block holds this interpreter's Python and platform, the versions of duckdb, pandas, and each requirements.txt name, null when not installed, and the requirements lines it could not read.
+# test_requirement_name_reads_names_and_direct_references: every line the review rounds 1-4 probed: names with extras, versions, markers, or @ URL; #egg= and wheel or sdist file names of direct references (URL, percent-encoded or holding a ";", POSIX or Windows path), -e included, attached, quoted, or after =, with or without trailing extras, with trailing --hash or other per-requirement options and a continuation backslash ignored; options, comments, and references naming no package give none.
+# test_read_requirements_follows_includes_and_byte_order_marks: -r and --requirement includes, quoted or not, are read relative to the including file, once each; -c constraints add nothing; a UTF-8, UTF-16 or UTF-32 BOM is decoded; a URL include and a missing include are unread, an absent file is neither.
+# test_read_requirements_lists_every_line_it_cannot_read: each line naming no package, an unknown or malformed option, an unbalanced quote, and an unreadable file are unread with file and line; recognised option lines are not; continued lines are joined.
+# test_runtime_records_a_wheel_url_package_and_its_drift: a requirements.txt wheel URL or path, hash-pinned or with extras, continued or not, percent-encoded or holding a ";", a compact -e, and a quoted include record their package's installed version, and a changed recorded version is a runtime mismatch.
 # test_runtime_records_missing_version_metadata_as_unknown: an installed distribution whose metadata has no Version is unknown, not null (not installed).
-# test_cli_stale_reports_runtime_mismatch_as_a_warning: a changed recorded duckdb or Python version, or no runtime block, is listed under runtime_mismatches with its findings rows, never under results, and compare_evidence still passes.
+# test_cli_stale_reports_runtime_mismatch_as_a_warning: a changed recorded duckdb or Python version, an unread requirements line, or no runtime block, is listed under runtime_mismatches with its findings rows, never under results, and compare_evidence still passes.
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
 # test_producing_paths_follow_the_result: run.py, the result's queries, other investigation code, src/ minus awb.py, provenance.py and packaging/, plus code_paths; other results' queries and the excluded helpers never stale it.
 # test_settings_fall_back_to_tomli: without tomllib, settings parse through tomli, and without either the content is unknown.
@@ -40,6 +41,7 @@ import hashlib
 import importlib.metadata
 import importlib.util
 import json
+import os
 from pathlib import Path
 import platform
 import shutil
@@ -593,13 +595,16 @@ def test_record_evidence_records_runtime(project):
     evidence = json.loads(record(project).read_text())
     interpreter = {"python": platform.python_version(), "platform": f"{platform.system()}-{platform.machine()}"}
     assert evidence["runtime"] == {**interpreter, "packages": {"duckdb": installed("duckdb"),
-                                                               "pandas": installed("pandas")}}
+                                                               "pandas": installed("pandas")},
+                                   "unread_requirements": []}
     write(project, "requirements.txt", b"# comment\nPyTest>=7  # the runner\n-r other.txt\n"
                                        b"awb_fixture.absent; python_version < '4'\nduckdb\n")
-    packages = json.loads(record(project).read_text())["runtime"]["packages"]
+    runtime = json.loads(record(project).read_text())["runtime"]
+    packages = runtime["packages"]
     assert packages == {"awb-fixture-absent": None, "duckdb": installed("duckdb"),
                         "pandas": installed("pandas"), "pytest": installed("pytest")}
     assert packages["pytest"] is not None
+    assert runtime["unread_requirements"] == ["requirements.txt:3: -r other.txt (No such file or directory)"]
 
 
 def test_requirement_name_reads_names_and_direct_references():
@@ -621,12 +626,22 @@ def test_requirement_name_reads_names_and_direct_references():
         "-e git+https://example.invalid/r.git#subdirectory=x&egg=baz": "baz",
         "-e git+https://example.invalid/r.git#egg=ed": "ed", "--editable=./src/x#egg=edx": "edx",
         "-e git+https://example.invalid/r.git#egg=cfg --config-settings k=v": "cfg",
+        "--editable git+ssh://git@example.invalid/r.git#egg=sshpkg": "sshpkg",
+        # Round 4: -e with its value attached or quoted, as pip's option parser reads it.
+        "-egit+https://example.invalid/repo.git#egg=requests": "requests",
+        '-e "git+https://example.invalid/r.git#egg=quoted"': "quoted",
         # Wheel and sdist file names: URL, file URL, bare, relative, and Windows paths.
         "https://example.invalid/wheels/otherpkg-1.0-py3-none-any.whl": "otherpkg",
         "https://example.invalid/scipy-1.14.1-py3-none-any.whl": "scipy",
         "https://example.invalid/scipy-1.14.1-py3-none-any.whl#sha256=ab": "scipy",
         "file:///tmp/foo-1.0-py3-none-any.whl": "foo", "file:///tmp/foo-1.0.tar.gz": "foo",
         "https://example.invalid/foo-1.0.zip?x=1": "foo",
+        # Round 4: a ";" inside a URL is part of it (pip ends a URL's marker only at "; "), and the
+        # file name is percent-decoded.
+        "https://example.invalid/path;param/requests-2.32.3-py3-none-any.whl": "requests",
+        "https://example.invalid/requests%2D2.32.3%2Dpy3%2Dnone%2Dany.whl": "requests",
+        'https://example.invalid/foo-1.0-py3-none-any.whl ; python_version < "4"': "foo",
+        "proj-name-1.0.tar.gz": "proj-name",
         "numpy-1.26.0-cp312-cp312-macosx_11_0_arm64.whl": "numpy", "./dist/foo_bar-2.0.tar.gz": "foo-bar",
         "foo-bar_baz-1.0rc1.tar.gz": "foo-bar-baz",
         r"C:\wheels\foo-1.0-py3-none-any.whl": "foo", r"C:\dist\win_sdist-2.0.tar.gz": "win-sdist",
@@ -646,8 +661,9 @@ def test_requirement_name_reads_names_and_direct_references():
         "https://example.invalid/o/r/archive/refs/tags/release-1.0.tar.gz": "release",
         # References naming no package, option lines, continued hashes, and comments.
         "src/mypkg": None, "-e .": None, "-e ./local": None, "git+https://example.invalid/r.git": None,
-        "https://example.invalid/x/foo.whl": None,
-        "-r other.txt": None, "-c constraints.txt": None, "--index-url https://example.invalid": None,
+        "https://example.invalid/x/foo.whl": None, "jaraco.zip": None,
+        "https://example.invalid/o/r/archive/main.zip": None,
+        "-r other.txt": None, '-r "deps/base.txt"': None, "--pre": None, "--no-binary :all:": None, "-c constraints.txt": None, "--index-url https://example.invalid": None,
         "-i https://example.invalid": None, "--extra-index-url=https://example.invalid": None,
         "-f ./wheels": None, "--only-binary :all:": None,
         "    --hash=sha256:ab": None, f"    {digest} \\": None, "    # via pandas": None,
@@ -656,17 +672,47 @@ def test_requirement_name_reads_names_and_direct_references():
     assert {line: provenance.requirement_name(line) for line in cases} == cases
 
 
-def test_requirement_names_follow_includes_and_byte_order_marks(project):
+def test_read_requirements_follows_includes_and_byte_order_marks(project):
     write(project, "requirements.txt", b"\xef\xbb\xbfscipy\n-r deps/base.txt\n--requirement=missing.txt\n"
-                                       b"-r https://example.invalid/remote.txt\n-c constraints.txt\n")
+                                       b"-r https://example.invalid/remote.txt\n-c constraints.txt\n"
+                                       b"-r \"deps/a b.txt\"\n--requirement 'deps/quoted.txt'\n")
     write(project, "deps/base.txt", b"-rmore.txt\nnumpy  # base\n-r ../requirements.txt\n")
     write(project, "deps/more.txt", "pandas\nrequests[security]\n".encode("utf-16"))
+    write(project, "deps/a b.txt", b"tomli\n")
+    write(project, "deps/quoted.txt", b"pyarrow\n")
     write(project, "constraints.txt", b"constrained==1\n")
-    assert provenance.requirement_names(project / "requirements.txt") == ["scipy", "pandas", "requests", "numpy"]
+    assert provenance.read_requirements(project / "requirements.txt") == (
+        ["scipy", "pandas", "requests", "numpy", "tomli", "pyarrow"],
+        ["requirements.txt:3: --requirement=missing.txt (No such file or directory)",
+         "requirements.txt:4: -r https://example.invalid/remote.txt (a URL include is not fetched)"])
     for encoding in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"):
         write(project, "requirements.txt", "\ufeffscipy\nnumpy\n".encode(encoding))
-        assert provenance.requirement_names(project / "requirements.txt") == ["scipy", "numpy"], encoding
-    assert provenance.requirement_names(project / "absent.txt") == []
+        assert provenance.read_requirements(project / "requirements.txt") == (["scipy", "numpy"], []), encoding
+    assert provenance.read_requirements(project / "absent.txt") == ([], [])
+
+
+def test_read_requirements_lists_every_line_it_cannot_read(project):
+    write(project, "requirements.txt", (
+        "# options and comments are not unread\n-i https://example.invalid\n--pre --no-index\n"
+        "-c constraints.txt\n    --hash=sha256:ab\n\n"
+        "-e .\nsrc/mypkg\ngit+https://example.invalid/r.git\n--unknown-option x\n-r \"unbalanced.txt\n"
+        "\"requests\"\n-e\n--pre=1\n"
+        "pkg==1.0 \\\n    --hash=sha256:ab\n-r deps/inner.txt\n").encode())
+    write(project, "deps/inner.txt", b"named\n./local/dir\n")
+    names, unread = provenance.read_requirements(project / "requirements.txt")
+    assert names == ["pkg", "named"]
+    assert unread == [
+        "requirements.txt:7: -e .", "requirements.txt:8: src/mypkg",
+        "requirements.txt:9: git+https://example.invalid/r.git", "requirements.txt:10: --unknown-option x",
+        'requirements.txt:11: -r "unbalanced.txt', 'requirements.txt:12: "requests"',
+        "requirements.txt:13: -e", "requirements.txt:14: --pre=1", "deps/inner.txt:2: ./local/dir"]
+    if sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)() != 0:
+        (project / "requirements.txt").chmod(0)
+        try:
+            assert provenance.read_requirements(project / "requirements.txt") == (
+                [], ["requirements.txt (Permission denied)"])
+        finally:
+            (project / "requirements.txt").chmod(0o644)
 
 
 def test_runtime_records_a_wheel_url_package_and_its_drift(project, capsys):
@@ -687,6 +733,25 @@ def test_runtime_records_a_wheel_url_package_and_its_drift(project, capsys):
         f"iniconfig 0.0.1-fixture recorded, {installed('iniconfig')} now; "
         f"pluggy 0.0.1-fixture recorded, {installed('pluggy')} now; "
         f"pytest 0.0.1-fixture recorded, {installed('pytest')} now.")
+    # Round 4's forms: a compact -e, a URL holding ";" or percent-encoding, and a quoted include.
+    write(project, "requirements.txt", (
+        "-egit+https://example.invalid/repo.git#egg=pytest\n"
+        "https://example.invalid/path;param/pluggy-0.0.1-py3-none-any.whl\n"
+        "https://example.invalid/iniconfig%2D0.0.1%2Dpy3%2Dnone%2Dany.whl\n"
+        '-r "deps/more reqs.txt"\n').encode())
+    write(project, "deps/more reqs.txt", b"packaging\n")
+    path = record(project)
+    evidence = json.loads(path.read_text())
+    assert evidence["runtime"]["unread_requirements"] == []
+    assert set(evidence["runtime"]["packages"]) == {"duckdb", "iniconfig", "packaging", "pandas", "pluggy", "pytest"}
+    for name in ("iniconfig", "packaging", "pluggy", "pytest"):
+        assert evidence["runtime"]["packages"][name] == installed(name) is not None
+        evidence["runtime"]["packages"][name] = "0.0.1-fixture"
+    path.write_text(json.dumps(evidence))
+    provenance.cli_stale(project, [])
+    assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["detail"] == "; ".join(
+        f"{name} 0.0.1-fixture recorded, {installed(name)} now"
+        for name in ("iniconfig", "packaging", "pluggy", "pytest")) + "."
 
 
 @pytest.mark.filterwarnings("ignore:Implicit None:DeprecationWarning")
@@ -724,6 +789,15 @@ def test_cli_stale_reports_runtime_mismatch_as_a_warning(project, capsys):
     provenance.cli_stale(project, [])
     detail = json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["detail"]
     assert detail.startswith(f"python 2.7.18 recorded, {platform.python_version()} now; duckdb 0.0.1-fixture")
+    # A requirements line the runtime could not read is reported, never dropped.
+    write(project, "requirements.txt", b"-e .\n")
+    path = record(project)
+    assert json.loads(path.read_text())["runtime"]["unread_requirements"] == ["requirements.txt:1: -e ."]
+    provenance.cli_stale(project, [])
+    out = json.loads(capsys.readouterr().out)
+    assert out["stale"] == 0 and out["runtime_mismatches"][0]["detail"] == (
+        "requirements not read, packages unrecorded: requirements.txt:1: -e ..")
+    evidence = json.loads(path.read_text())
     del evidence["runtime"]
     path.write_text(json.dumps(evidence))
     provenance.cli_stale(project, [])
