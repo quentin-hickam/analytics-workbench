@@ -40,6 +40,7 @@
 # test_a_timestamp_column_takes_date_time_range_bounds: date-time bounds keep a TIMESTAMP's last day inside the range, where a date max ends at its midnight.
 # test_a_check_that_declares_no_values_fails_to_run_without_the_values_hint: a check that cannot run for another reason names the error's kind without pointing at declared values.
 # test_declared_columns_and_types_hold_in_every_parquet_file: columns and types are checked in each Parquet file, so a second file with another type or without a declared column fails; files differing only in column order pass.
+# test_a_partition_column_is_typed_from_every_path_together: a hive partition column, stored in no file, is typed as the files read together type it, so a NULL partition or mixed '1'/'A' partition values pass their declared type and another type fails.
 # test_temporal_checks_compare_in_utc_whatever_the_host_zone: date and date-time bounds and values compare with plain and zoned timestamps in UTC, giving the same records under two host time zones.
 # test_range_bounds_may_mix_local_and_offset_date_times: a local and an offset date-time bound one range, ordered and compared in UTC.
 # test_a_null_key_is_not_also_counted_as_a_repeated_key: a key check counts rows with a null key column once, and repeats among complete keys only.

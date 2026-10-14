@@ -161,6 +161,14 @@ def _load_provenance(root):
     return module
 
 
+def _code(text):
+    """text as one single-line Markdown code span, its characters JSON-escaped so distinct texts stay distinct."""
+    escaped = "".join(c if c.isprintable() else json.dumps(c)[1:-1] for c in json.dumps(text, ensure_ascii=False)[1:-1])
+    fence = "`" * (max(map(len, re.findall("`+", escaped)), default=0) + 1)
+    pad = " " if escaped.startswith("`") or escaped.endswith("`") else ""
+    return f"{fence}{pad}{escaped}{pad}{fence}"
+
+
 def _citation(root, check):
     """Return the text citing a check that a publication's publication.json records."""
     if (not isinstance(check, dict) or set(check) != {"publication", "name"}
@@ -184,7 +192,8 @@ def _citation(root, check):
     if not found:
         names = ", ".join(str(c.get("name")) for c in recorded if isinstance(c, dict)) or "none"
         raise RecordError(f"{publication}/publication.json records no check {check['name']}; it records {names}")
-    return f"check `{check['name']}` {found[0].get('outcome')} in `{publication}/publication.json`"
+    # A name may hold any character a column can: render it faithfully on one line, as the dedupe compares it.
+    return f"check {_code(check['name'])} {found[0].get('outcome')} in `{publication}/publication.json`"
 
 
 def record(project_root, scan_name, decisions, *, dry_run=False, today=None):

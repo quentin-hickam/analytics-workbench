@@ -24,6 +24,7 @@
 # test_old_provenance_refuses_before_writes: a project helper without flag_findings refuses with an awb-init repair hint, including dry runs.
 # test_flag_retry_keeps_original_quality_id: a phase B failure followed by another issue allocation keeps the original Q-ID on retry and records its correction exactly once; running the finished call again reports it as corrections_unchanged and leaves quality.md as it was.
 # test_record_cites_a_declared_publication_check: a decision's check is confirmed in that publication.json and appended once to Current treatment, on a new row and on a recorded row with an escaped pipe; a `./`, doubled-slash, or absolute spelling of the publication cites the same root-relative path, once; an unknown check or publication, or a path that is not data/parquet/<dataset>/<publication-id> in the project, refuses and writes nothing.
+# test_record_cites_a_check_name_faithfully_on_one_line: a check name with a newline, a backtick, or a line separator is cited JSON-escaped in one code span, so citing it twice appends it once and a name differing only by a space is cited too.
 # test_dry_run_prints_flag_rows_and_writes_nothing: a dry run lists the rendered flagged rows beside the quality rows and writes nothing.
 # test_renamed_quality_headers_keep_template_positions: with every Active header renamed, a new row is written in the template's positions, scans read it as recorded, and a reopen sets its status.
 # test_quality_json_is_written_only_when_links_change: a call that changes no link leaves quality.json absent or byte-identical.
@@ -781,3 +782,19 @@ def test_record_cites_a_declared_publication_check(tmp_path):
         recorder.record(tmp_path, "orders", decisions, today=TODAY)
     text = (tmp_path / "foundation/quality.md").read_text()
     assert text.count(citation) == 2 and text.count("publication.json") == 2 and str(tmp_path) not in text
+
+
+def test_record_cites_a_check_name_faithfully_on_one_line(tmp_path):
+    scan_file(tmp_path, delta=False)
+    names = ["not_null:order\nid", "not_null:order id", "not_null:a`b", "not_null:x y"]
+    write(tmp_path, "data/parquet/orders/p2/publication.json", json.dumps({"checks": [
+        {"name": name, "outcome": "pass", "detail": "No nulls in 45 rows."} for name in names]}))
+    quality_rows(tmp_path, ["| Q-001 | view `orders` | Spaces (2 of 45); `orders#whitespace:dept` scanned 2026-10-01 "
+                            "| Splits counts | Open | open |"])
+    cite = lambda name: {"issues": {"S1": {"check": {"publication": "data/parquet/orders/p2", "name": name}}}}
+    for name in [names[0], *names]:  # the first name twice: its citation is appended once
+        recorder.record(tmp_path, "orders", cite(name), today=TODAY)
+    published = "pass in `data/parquet/orders/p2/publication.json`"
+    assert (f"| Splits counts | Open; check `not_null:order\\nid` {published}; check `not_null:order id` {published}; "
+            f"check ``not_null:a`b`` {published}; check `not_null:x\\u2028y` {published} | open |"
+            ) in (tmp_path / "foundation/quality.md").read_text()
