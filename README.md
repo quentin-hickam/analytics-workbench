@@ -58,7 +58,9 @@ If you ask without a question, `awb-init` asks for one; say there is no question
 
 Each investigation keeps a question ledger, `questions.md`, of every question it has raised and who can answer it. A question about the data is answered only by a recorded result that declares it. To widen the inquiry:
 
-> Use awb-brainstorm — what else should we ask? Continue analytical work normally using the generated AGENTS.md instructions. The default data flow is independent source landing, validated Parquet datasets, and DuckDB views loaded into separate analytical sessions. Data gathering never writes directly into the canonical database as its only retained representation.
+> Use awb-brainstorm — what else should we ask?
+
+Continue analytical work normally using the generated AGENTS.md instructions. The default data flow is independent source landing, validated Parquet datasets, and DuckDB views loaded into separate analytical sessions. Data gathering never writes directly into the canonical database as its only retained representation.
 
 `awb-init` installs the project helpers under `src/` with its installer, `scripts/install_helpers.py`, and writes a `requirements.txt` when the project declares no dependencies; it records what it installs in a receipt, `.awb-receipt.json`, so its `--upgrade` can bring unmodified earlier copies up to date. Mechanical work then runs as single commands whose output the agent reports verbatim, and computation runs as saved queries rather than scratch scripts: `python3 src/awb.py --help` lists the commands (`sql`, `profile`, `land`, `retain`, `publish`, `state`, `questions`, `stale`, `export`, `review-rules`, `check-draft`, `release`, `copy-releases`). Each investigation's run script, `run.py`, produces, validates, and records its results in one run and writes their `state.md` rows; `state` prints the active investigation's brief and state to resume, and records finding wording and status, with history where due, and issues and next steps.
 

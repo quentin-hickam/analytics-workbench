@@ -9,7 +9,7 @@ Propose questions; the user chooses. This skill reads records, runs no queries, 
 
 ## 1. Read
 
-Use the investigation the user names, otherwise the README's active one. From the project root:
+Use the investigation the user names, otherwise the README's active one; for one other than the active one, pass `--investigation <name>` to every `awb.py state` and `awb.py questions` command in this skill. From the project root:
 
 ```sh
 python3 src/awb.py state
@@ -41,7 +41,7 @@ Present five to eight, numbered and ranked by how much an answer could change th
 
 From the project root, with `--origin brainstorm`:
 
-- **Kept, in scope**: `python3 src/awb.py questions add "<question>" --kind <kind> --answerer <answerer> --origin brainstorm --unblocks "<what it serves>"`.
+- **Kept, in scope**: `python3 src/awb.py questions add "<question>" --kind <kind> --answerer <answerer> --origin brainstorm --unblocks "<what it serves>"`. A re-proposed parked or declined question the user keeps is reopened instead, keeping its ID: `python3 src/awb.py questions status Q-NNN --set open`.
 - **Parked or declined**: the same command with `--status parked` or `--status declined` and `--reason "<the user's reason>"`. Record every in-scope proposal the user did not keep as declined with the reason `not chosen`, so later brainstorms do not repeat it, and say so in the report.
 - **Needing a scope change or a new investigation**: add nothing; suggest `awb-scope` with the question.
 
