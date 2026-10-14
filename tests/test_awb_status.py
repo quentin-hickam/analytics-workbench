@@ -593,7 +593,11 @@ def test_an_unusable_server_validator_is_unknown_and_the_probe_continues(workben
         "h-text-dates-same.csv": ({"last_modified": "build 7"}, {"Last-Modified": "build 7"}, "unchanged", "last_modified"),
         "i-text-dates-differ.csv": ({"last_modified": "build 7"}, {"Last-Modified": "build 8"}, "changed", "last_modified"),
         "j-recorded-text-served-date.csv": ({"last_modified": "build 7"}, {"Last-Modified": date}, "unknown",
-                                            "the server's Last-Modified is not a usable validator"),
+                                            "the recorded Last-Modified is not a date to compare with the server's"),
+        "j2-recorded-text-blank-etag.csv": ({"etag": '"abc"', "last_modified": "build 7"},
+                                            {"ETag": "", "Last-Modified": date}, "unknown",
+                                            "the server's ETag is not a usable validator, and "
+                                            "the recorded Last-Modified is not a date to compare with the server's"),
         "k-next.csv": ({"last_modified": date}, {"Last-Modified": date}, "unchanged", "last_modified"),
     }
     land_with_upstream(workbench, "batch-1", {path: {"url": url + path, **recorded}

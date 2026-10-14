@@ -536,7 +536,7 @@ def probe_file(recorded, opener, unresponsive):
             unresponsive.add(request.endpoints[-1])
             return {"result": "unknown", "reason": f"no response from {request.endpoints[-1]} within {PROBE_TIMEOUT} s"}
         return {"result": "unknown", "reason": f"{type(error).__name__}: {error}"}
-    compared, unusable = {}, []
+    compared, unusable, recorded_undated = {}, [], False
     for name, header in (("etag", "ETag"), ("last_modified", "Last-Modified")):
         before, now = recorded.get(name), headers.get(header)
         if not isinstance(before, str) or now is None:
@@ -554,15 +554,23 @@ def probe_file(recorded, opener, unresponsive):
             if then is None and current is None:
                 # A recorded value that is not a date is compared as text with one that is not either.
                 same = before.strip() == now.strip()
-            elif then is None or current is None:
+            elif then is None:
+                recorded_undated = True
+                continue
+            elif current is None:
                 unusable.append(header)
                 continue
             else:
                 same = then == current
         compared[name] = (same, before, now)
-    if not compared and unusable:
-        verb = "is not a usable validator" if len(unusable) == 1 else "are not usable validators"
-        return {"result": "unknown", "reason": f"the server's {' and '.join(unusable)} {verb}"}
+    if not compared and (unusable or recorded_undated):
+        reasons = []
+        if unusable:
+            verb = "is not a usable validator" if len(unusable) == 1 else "are not usable validators"
+            reasons.append(f"the server's {' and '.join(unusable)} {verb}")
+        if recorded_undated:
+            reasons.append("the recorded Last-Modified is not a date to compare with the server's")
+        return {"result": "unknown", "reason": ", and ".join(reasons)}
     if not compared:
         return {"result": "unknown", "reason": "the server sent neither recorded validator"}
     name = "etag" if "etag" in compared else "last_modified"
