@@ -26,6 +26,9 @@
 # test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy compared.
 # test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do.
 # test_check_draft_refuses_causal_wording_above_claim_strength: causal wording on an association finding's slide fails with a row naming the phrase, line, and claim; a causal finding's slide and the Answer slide under a causal represented finding pass; method and caveat slides, code, comments, and hyphenated words are not read; release refuses on the row.
+# test_review_probes_read_markdown_as_it_renders: every reviewer probe of the claim check, one row each: headlines, caveat bullets, fences, comments open or closed, declarations hidden, ambiguous, in a code span, or naming another design, emphasis and other inline markup, commented-out, duplicated, and indented headings, and heading forms the slides cannot take.
+# test_names_and_charts_read_the_same_rendered_text: the names scan and the chart check skip comments as CommonMark scopes them.
+# test_claim_check_reads_headlines_and_cited_designs: a causal ### headline fails check-draft with a row to reword both files; cited causal results of different designs are refused; a whitespace design is unrecognized.
 # test_claim_strength_follows_cited_results_and_records: a slide citing several results takes the weakest claim; one citing none takes the weakest represented; with no causal finding the Answer slide fails too; a missing Claim, a missing results list, and a missing or differing methodology Claim strength line each fail.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
 
@@ -836,50 +839,180 @@ def test_check_draft_refuses_causal_wording_above_claim_strength(project, capsys
     assert code == 0 and report["passed"] and report["claims"] == []
 
 
-def test_claim_check_reads_headlines_and_only_rendered_declarations(project, capsys):
+CLEAN_FINDINGS = CLAIM_FINDINGS.replace("The new carrier drives the rise", "Late orders rose")
+WEST = "### Late orders rose in the west"
+HEADLINE = "The new carrier drives late orders up in the west"
+WEST_BULLET = "- Late orders rose to 21%, a data-driven view."
+WEST_CLAIM = "**Claim strength:** association"
+DISCOUNT_CLAIM = "**Claim strength:** causal (experiment: randomized discount test)"
+DISCOUNT_RESULT = "Result `r-002`."
+WEST_DISCOUNT = "Late orders rose in the west"
+DISCOUNT = "Discounts cut late orders by 4 points"
+NO_LINE = "methodology.md's section has no **Claim strength:** line; its results support association"
+UNRECOGNIZED = ("methodology.md's **Claim strength:** line is not descriptive, association, or causal with its "
+                "design basis; its results support association")
+NO_SECTION = ("methodology.md has no ### section with this heading, so no **Claim strength:** line; its results "
+              "support association")
+STATES_CAUSAL = "methodology.md states causal on its **Claim strength:** line; its results support association"
+NESTED = ("a heading inside a list item or block quote, or indented four or more spaces; start each heading at the "
+          "beginning of its line")
+SETEXT = "text underlined with = or - renders as a heading; write headings with #, or leave a blank line before a rule"
+EMPHASIS = ["Price **leads** to sales", "Price **leads to** sales", "Price _leads_ to sales", "Price le**ad**s to sales",
+            "Price ~~leads~~ to sales", "Price &#108;eads to sales", "Price lea​ds to sales",
+            "Price lea<!-- -->ds to sales", "Price <b>leads</b> to sales", "Price leads<br>to sales",
+            "Price \\*leads\\* to sales", "Price \\_leads\\_ to sales", "Price ｌｅａｄｓ ｔｏ sales"]
+
+# Every probe a reviewer ran against the claim check in rounds 1 and 2, and each Markdown form the shared
+# reader closes with them: (findings edits, methodology edits, represented results, claims rows, headings rows).
+# A claims row is (phrase, line) or its section and problem; a headings row is (heading or file:line, problem).
+PROBES = {
+    # Round 1: a ### headline is read with its slide (Opus 1, Codex 1).
+    "headline": ([(WEST, f"### {HEADLINE}")], [(WEST, f"### {HEADLINE}")], ("r-009", "r-002"), [("drives", 10)], []),
+    "headline on the only result": ([(WEST, "### Discounts drive fewer late orders")],
+                                    [(WEST, "### Discounts drive fewer late orders")], ("r-009",),
+                                    [("drive", 6), ("drive", 10), (DISCOUNT, STATES_CAUSAL), ("led to", 19)], []),
+    # Round 1: "contribute to" is causal; the noun "result in" and "affected" are not (Opus 2).
+    "contribute to": ([(WEST_BULLET, "- The carrier contribute to late orders.\n- The result in June affected "
+                                     "stores.")], [], ("r-009", "r-002"), [("contribute to", 12)], []),
+    # Round 1: a **Caveat:** bullet on a finding slide is read (Opus 3).
+    "caveat bullet": ([(WEST_BULLET, "- **Caveat:** the rise is due to holiday volume.")], [], ("r-009", "r-002"),
+                      [("due to", 12)], []),
+    # Round 1: a ~~~ line inside a backtick fence does not close it (Opus 4).
+    "tilde in a backtick fence": ([("**Chart 1.**", "```\n~~~\n```\n- The carrier contribute to late orders.\n\n"
+                                                    "**Chart 1.**")], [], ("r-009", "r-002"),
+                                  [("contribute to", 18)], []),
+    # Round 1: only a rendered declaration counts, and it names one strength (Codex 2, 4).
+    "declaration in a comment": ([], [(WEST_CLAIM, f"<!--\n{WEST_CLAIM}\n-->")], ("r-009", "r-002"),
+                                 [(WEST_DISCOUNT, NO_LINE)], []),
+    "declaration in a fence": ([], [(WEST_CLAIM, f"```markdown\n{WEST_CLAIM}\n```")], ("r-009", "r-002"),
+                               [(WEST_DISCOUNT, NO_LINE)], []),
+    "declaration indented as code": ([], [(WEST_CLAIM, f"    {WEST_CLAIM}")], ("r-009", "r-002"),
+                                     [(WEST_DISCOUNT, NO_LINE)], []),
+    "two strengths on one line": ([], [(WEST_CLAIM, "**Claim strength:** association / causal")],
+                                  ("r-009", "r-002"), [(WEST_DISCOUNT, UNRECOGNIZED)], []),
+    "whitespace design": ([], [(WEST_CLAIM, "**Claim strength:** causal (experiment:  )")], ("r-009", "r-002"),
+                          [(WEST_DISCOUNT, UNRECOGNIZED)], []),
+    "two declarations": ([], [(WEST_CLAIM, f"{WEST_CLAIM}\n\n**Claim strength:** causal (experiment: a test)")],
+                         ("r-009", "r-002"), [(WEST_DISCOUNT, "methodology.md's section has 2 **Claim strength:** "
+                                                              "lines; its results support association")], []),
+    # Round 1: a result ID in a comment is not a citation (Codex 3), nor in a comment left open (round 2 closure).
+    "citation in a comment": ([("Randomized discounts led to", "Randomized discounts drive")],
+                              [(DISCOUNT_RESULT, "<!-- TODO: compare with r-002 -->")], ("r-009", "r-002"),
+                              [(DISCOUNT, STATES_CAUSAL), ("drive", 19)], []),
+    "citation in an unclosed comment": ([("Randomized discounts led to", "Randomized discounts drive")],
+                                        [(DISCOUNT_RESULT, "<!-- TODO: compare with r-002")], ("r-009", "r-002"),
+                                        [(DISCOUNT, STATES_CAUSAL), ("drive", 19)], []),
+    # Round 2: the declared design must be the one state.md records (Opus 1).
+    "other design": ([], [(DISCOUNT_CLAIM, "**Claim strength:** causal (experiment: some unrelated survey)")],
+                     ("r-009", "r-002"),
+                     [(DISCOUNT, "methodology.md states causal (experiment: some unrelated survey) on its **Claim "
+                                 "strength:** line; state.md records causal (experiment: randomized discount test) "
+                                 "for r-002; its results support causal")], []),
+    "same design, other spacing and emphasis": ([], [(DISCOUNT_CLAIM, "**Claim strength:** *causal (experiment:  "
+                                                                      "randomized discount test)*")],
+                                                ("r-009", "r-002"), [], []),
+    # Round 2: verbs of change with an agent are a known limit of the list, stated in the contract (Opus 2).
+    "verb of change": ([(WEST_BULLET, "- The carrier raised late orders 4 points.")], [], ("r-009", "r-002"), [], []),
+    # Round 2: a value in a code span reads as the value (Opus 3).
+    "value in a code span": ([], [(WEST_CLAIM, "**Claim strength:** `association`")], ("r-009", "r-002"), [], []),
+    # Round 2: emphasis and other inline markup do not hide a phrase (Codex 1).
+    **{f"inline markup: {text}": ([(WEST_BULLET, f"- {text}.")], [], ("r-009", "r-002"), [("leads to", 12)], [])
+       for text in EMPHASIS},
+    # Round 2: a section commented out whole is no section (Codex 2, both closures).
+    "methodology section commented out": (
+        [], [(f"{WEST}\n", f"<!--\n{WEST}\n"), ("../../../../investigations/inv/evidence/r-009.json).",
+                                                "../../../../investigations/inv/evidence/r-009.json).\n-->")],
+        ("r-009", "r-002"), [(WEST_DISCOUNT, NO_SECTION)],
+        [(WEST_DISCOUNT, "methodology.md has no ### section with this exact heading")]),
+    # Round 2: sections sharing a heading pool their evidence and are refused (Codex 3).
+    "duplicate methodology heading": (
+        [], [(DISCOUNT_RESULT, f"{DISCOUNT_RESULT}\n\n### {DISCOUNT}\n\n{WEST_CLAIM}\n\nResult `r-009`.")],
+        ("r-009", "r-002"),
+        [(DISCOUNT, "methodology.md's section has 2 **Claim strength:** lines; its results support association"),
+         ("led to", 19)],
+        [(DISCOUNT, "methodology.md has 2 ### sections with this exact heading; merge them into one")]),
+    "duplicate findings heading": ([("## How we know", f"### {DISCOUNT}\n\n- Discounts led to it.\n\n## How we know")],
+                                   [], ("r-009", "r-002"), [],
+                                   [(DISCOUNT, "findings.md has 2 ### slides with this heading; give each finding "
+                                               "its own")]),
+    # Round 2: a heading indented up to three spaces is a heading in both files (Codex 4, both closures).
+    "indented headline": ([(WEST, f"   ### {HEADLINE}")], [(WEST, f"  ### {HEADLINE}")], ("r-009", "r-002"),
+                          [("drives", 10)], []),
+    # The reader's other forms: comments as CommonMark scopes them, and headings the slides cannot take.
+    "comment open across a blank line": ([(WEST_BULLET, "- Late orders rose <!-- note\n\n- The carrier drives "
+                                                        "them -->")], [], ("r-009", "r-002"), [("drives", 14)], []),
+    "comment opener in a code span": ([(WEST_BULLET, "- See `<!--`, the carrier drives them `-->`.")], [],
+                                      ("r-009", "r-002"), [("drives", 12)], []),
+    "text after a comment block": ([(WEST_BULLET, "<!-- note --> The carrier drives them.")], [],
+                                   ("r-009", "r-002"), [("drives", 12)], []),
+    "heading in a quote or list": ([(WEST_BULLET, f"> ### {HEADLINE}\n- # of stores rose")], [],
+                                   ("r-009", "r-002"), [("drives", 12)],
+                                   [("findings.md:12", NESTED), ("findings.md:13", NESTED)]),
+    "heading indented as code": ([(WEST_BULLET, "\n    ### The carrier rose")], [], ("r-009", "r-002"), [],
+                                 [("findings.md:13", NESTED)]),
+    "setext heading after an unchecked slide": ([("- June is short", "The carrier drives late orders\n---\n\n"
+                                                                     "- June is short")], [], ("r-009", "r-002"), [],
+                                                [("findings.md:26", SETEXT)]),
+    "title heading after an unchecked slide": ([("## Limitations", "# The carrier drives late orders\n\n"
+                                                                   "## Limitations")], [], ("r-009", "r-001"),
+                                               [("drive", 6), (DISCOUNT, STATES_CAUSAL), ("led to", 19),
+                                                ("drives", 27)], []),
+}
+
+
+@pytest.mark.parametrize("probe", PROBES)
+def test_review_probes_read_markdown_as_it_renders(project, probe):
+    findings_edits, methodology_edits, results, claims_rows, headings_rows = PROBES[probe]
+    findings, methodology = CLEAN_FINDINGS, CLAIM_METHODOLOGY
+    for old, new in findings_edits:
+        assert old in findings, old
+        findings = findings.replace(old, new, 1)
+    for old, new in methodology_edits:
+        assert old in methodology, old
+        methodology = methodology.replace(old, new, 1)
+    claim_draft(project, findings, methodology, results)
+    draft = load(project / "src/packaging/draft.py", "draft_probes")
+    directory = project / "deliveries/inv/pkg/draft"
+    rows = draft.claim_problems(directory, list(results), draft.state_claims(project, "inv"))
+    assert [(r["phrase"], r["line"]) if "phrase" in r else (r["section"], r["problem"]) for r in rows] == claims_rows
+    assert [(r.get("heading") or f"{r['file']}:{r['line']}", r["problem"])
+            for r in draft.heading_problems(directory)] == headings_rows
+
+
+def test_names_and_charts_read_the_same_rendered_text(project):
+    draft = load(project / "src/packaging/draft.py", "draft_rendered")
+    path = project / "deliveries/inv/pkg/draft/findings.md"
+    # A comment opened mid-paragraph ends with the paragraph, so its text shows; one opening a line runs to
+    # its -->, here the end of the file, hiding the chart specification.
+    path.write_text("# T\n\nSee orders_view <!-- open\n\nThen regions_table -->\n\n<!-- orders_view\n\n"
+                    "**Chart 1.** Bar\n")
+    assert draft.check_findings(path, names=["orders_view", "regions_table"]) == [
+        {"line": 3, "kind": "name", "text": "orders_view"}, {"line": 5, "kind": "name", "text": "regions_table"}]
+    assert draft.check_charts(path, path.parent / "charts") == [
+        {"chart": "Chart 1", "problem": "chart file has no specification in findings"}]
+
+
+def test_claim_check_reads_headlines_and_cited_designs(project, capsys):
     draft = load(project / "src/packaging/draft.py", "draft_headlines")
     claims = draft.state_claims(project, "inv")
     directory = project / "deliveries/inv/pkg/draft"
-    clean = CLAIM_FINDINGS.replace("The new carrier drives the rise", "Late orders rose")
-    # A finding slide's ### heading is its headline, read with the slide.
-    causal_heading = "The new carrier drives late orders up in the west"
-    claim_draft(project, clean.replace("### Late orders rose in the west", f"### {causal_heading}"),
-                CLAIM_METHODOLOGY.replace("### Late orders rose in the west", f"### {causal_heading}"))
+    # A finding slide's ### heading is its headline, read with the slide; the row says to reword both files.
+    claim_draft(project, CLEAN_FINDINGS.replace(WEST, f"### {HEADLINE}"), CLAIM_METHODOLOGY.replace(WEST, f"### {HEADLINE}"))
     code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
     assert code == 1 and not report["passed"]
     assert report["claims"] == [{
-        "line": 10, "section": causal_heading, "phrase": "drives", "claim": "association", "results": ["r-009"],
+        "line": 10, "section": HEADLINE, "phrase": "drives", "claim": "association", "results": ["r-009"],
         "problem": "causal wording above the association claim strength; reword it, since only an experiment or an "
                    "identified natural experiment supports a causal claim; reword the methodology.md heading to match"}]
-    # A ~~~ line inside a backtick fence does not close it, so the prose after the fence is read.
-    # "contribute to" is causal; the noun "result in" and "affected" are not on the phrase list.
-    claim_draft(project, clean.replace("**Chart 1.**", "```\n~~~\n```\n- The carrier contribute to late "
-                                                     "orders.\n- The result in June affected stores.\n\n**Chart 1.**"))
-    rows = draft.claim_problems(directory, ["r-009", "r-002"], claims)
-    assert [(r["section"], r["phrase"], r["line"]) for r in rows] == [
-        ("Late orders rose in the west", "contribute to", 18)]
-    # A declaration in a comment or a fence is not rendered, and one must name a single strength.
-    unrecognized = ("methodology.md's **Claim strength:** line is not descriptive, association, or causal with its "
-                    "design basis")
-    for hidden, problem in [
-            ("<!--\n**Claim strength:** association\n-->", "methodology.md's section has no **Claim strength:** line"),
-            ("```markdown\n**Claim strength:** association\n```",
-             "methodology.md's section has no **Claim strength:** line"),
-            ("**Claim strength:** association / causal", unrecognized),
-            ("**Claim strength:** causal (experiment:  )", unrecognized),
-            ("**Claim strength:** association\n\n**Claim strength:** causal (experiment: a test)",
-             "methodology.md's section has 2 **Claim strength:** lines")]:
-        claim_draft(project, clean, CLAIM_METHODOLOGY.replace("**Claim strength:** association", hidden))
-        rows = draft.claim_problems(directory, ["r-009", "r-002"], claims)
-        assert rows == [{"section": "Late orders rose in the west",
-                         "problem": problem + "; its results support association"}], hidden
-    # A result ID in a comment is not a citation: the section cites nothing and takes the weakest claim.
-    claim_draft(project, clean.replace("Randomized discounts led to", "Randomized discounts drive"),
-                CLAIM_METHODOLOGY.replace("Result `r-002`.", "<!-- TODO: compare with r-002 -->"))
-    rows = draft.claim_problems(directory, ["r-009", "r-002"], claims)
-    assert [(r["section"], r.get("phrase"), r.get("results")) for r in rows] == [
-        ("Discounts cut late orders by 4 points", None, None),
-        ("Discounts cut late orders by 4 points", "drive", ["r-009", "r-002"])]
+    # Causal results recorded with different designs cannot share one causal finding.
+    claim_draft(project, CLEAN_FINDINGS, CLAIM_METHODOLOGY.replace(DISCOUNT_RESULT, "Results `r-002` and `r-003`."),
+                results=("r-009", "r-002", "r-003"))
+    rows = draft.claim_problems(directory, ["r-009", "r-002", "r-003"],
+                                {**claims, "r-003": "causal (natural experiment: border policy change)"})
+    assert rows == [{"section": DISCOUNT, "problem": (
+        "the results it cites record different causal designs (causal (experiment: randomized discount test) for "
+        "r-002; causal (natural experiment: border policy change) for r-003); give each design its own finding; its "
+        "results support causal")}]
     # A causal Claim cell needs design text, not just spaces.
     state = project / "investigations/inv/state.md"
     state.write_text(state.read_text().replace("(experiment: randomized discount test)", "(experiment:  )"))
@@ -889,7 +1022,8 @@ def test_claim_check_reads_headlines_and_only_rendered_declarations(project, cap
 def test_claim_strength_follows_cited_results_and_records(project, capsys):
     draft = load(project / "src/packaging/draft.py", "draft_claims")
     claims = draft.state_claims(project, "inv")
-    assert claims == {"r-009": "association", "r-001": "association", "r-002": "causal"}
+    assert claims == {"r-009": "association", "r-001": "association",
+                      "r-002": "causal (experiment: randomized discount test)"}
     directory = project / "deliveries/inv/pkg/draft"
     clean = CLAIM_FINDINGS.replace("The new carrier drives the rise", "Late orders rose")
     # Citing r-009 too holds the discount slide to the weaker association claim.

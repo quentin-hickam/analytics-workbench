@@ -14,12 +14,15 @@ are CSV. Standard library only; `export` also needs the project's `src/provenanc
 import argparse
 import csv
 import hashlib
+import html
 import importlib.util
 import json
 import os
 import re
 import shutil
 import subprocess
+import unicodedata
+from collections import Counter
 from datetime import datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
@@ -132,18 +135,38 @@ def _evidence_files(root, investigation):
             yield path, None, f"{_rel(root, path)}: {_UNUSABLE}"
 
 
-# ---------------------------------------------------------------- internal names in findings.md
+# ---------------------------------------------------------------- Markdown as it renders
+#
+# Every draft check reads findings.md and methodology.md through this one reading of what renders,
+# so a form that hides text from the reader hides it from every check, and a form that shows text
+# shows it to every check. `_source_lines` removes what never renders (comments, scoped as CommonMark
+# scopes them) and marks fenced code; `_view` adds each line's rendered inline text and its heading.
 
 _FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")
-_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)")
 _LINK_TARGET = re.compile(r"\]\([^)]*\)")
 _TOKEN = re.compile(r"\S+")
-
-
-def _uncomment(text):
-    """Blank HTML comments, keeping their line breaks so line numbers hold."""
-    return _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
+# A comment block opens on a line starting `<!--` and ends on the line holding `-->`, or at the end of
+# the file. Anywhere else a comment must close within its paragraph, or its `<!--` shows as text. A code
+# span that opens first is code, so a `<!--` inside one opens nothing.
+_BLOCK_COMMENT = re.compile(r" {0,3}<!--")
+_INLINE_COMMENT = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)|<!--(?:-?>|.*?-->)", re.DOTALL)
+# A line that starts a new block, ending the paragraph an inline comment must close in.
+_BLOCK_START = re.compile(r"[ \t]*$| {0,3}(?:#{1,6}(?:[ \t]|$)|>|[-*+](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|\|)")
+_ATX = re.compile(r" {0,3}(#{1,6})(?=[ \t]|$)(.*)")
+# Heading forms the slide structure does not take: inside a list item or quote, or indented as code.
+_NESTED_HEADING = re.compile(r"[ \t]*(?:(?:>|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t]))[ \t]*)+#{1,6}(?:[ \t]|$)"
+                             r"|(?: {4,}| {0,3}\t)[ \t]*#{1,6}(?:[ \t]|$)")
+_UNDERLINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*$")
+# Inline markup that renders as no text of its own. Code spans, link targets, and autolinks are kept whole.
+_PROTECTED = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)|\]\([^)]*\)|<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>")
+_BREAK_TAG = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
+# Emphasis and strikethrough: every `*` and `~`, and each `_` run not inside a word, as in CommonMark, so
+# `r_009` keeps its underscore while `_leads_` renders as leads. An escaped marker goes too: "\*leads\*
+# to" shows the phrase with stars around a word, and the phrase is what is checked.
+_EMPHASIS = re.compile(r"\\?[*~]|(?<![^\W_])(?<!_)\\?_+(?!_)|(?<!_)\\?_+(?!_)(?![^\W_])")
+_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 
 
 def _fenced(line, fence):
@@ -161,6 +184,112 @@ def _fenced(line, fence):
     if marker and not (marker.group(1)[0] == "`" and "`" in line[marker.end():]):
         return marker.group(1), True
     return None, False
+
+
+def _uncomment(text):
+    return _INLINE_COMMENT.sub(
+        lambda match: match.group(0) if match.group(1) else "\n" * match.group(0).count("\n"), text)
+
+
+def _source_lines(text):
+    """Each source line with what never renders removed: [(number, line, kind)].
+
+    kind is "fence" (a code fence's opening marker), "code" (inside a fence, its closing marker
+    included), "html" (what follows a comment block's end on its line: shown, but starting no
+    heading or list), or "text". A comment is removed, keeping its line breaks, so a comment inside
+    a word joins the word as the reader sees it.
+    """
+    lines, fence, comment = [], None, False
+    for number, line in enumerate(text.splitlines(), start=1):
+        if comment:
+            end = line.find("-->")
+            comment = end < 0
+            lines.append([number, "" if comment else line[end + 3:], "html"])
+            continue
+        outside = fence is None
+        fence, code = _fenced(line, fence)
+        if code:
+            lines.append([number, line, "fence" if outside else "code"])
+        elif opened := _BLOCK_COMMENT.match(line):
+            end = line.find("-->", opened.end() - 2)
+            comment = end < 0
+            lines.append([number, "" if comment else line[end + 3:], "html"])
+        else:
+            lines.append([number, line, "text"])
+
+    paragraph = []
+
+    def close():
+        if paragraph:
+            parts = _uncomment("\n".join(lines[i][1] for i in paragraph)).split("\n")
+            for i, part in zip(paragraph, parts):
+                lines[i][1] = part
+            paragraph.clear()
+
+    for index, (_, line, kind) in enumerate(lines):
+        if kind != "text" or _BLOCK_START.match(line) or (paragraph and _ATX.match(lines[paragraph[-1]][1])):
+            close()
+        if kind == "html":
+            lines[index][1] = _uncomment(line)
+        elif kind == "text" and line.strip():
+            paragraph.append(index)
+    close()
+    return [tuple(line) for line in lines]
+
+
+def _rendered(segment):
+    segment = _TAG.sub("", _BREAK_TAG.sub(" ", segment))
+    segment = html.unescape(_ESCAPE.sub(r"\1", _EMPHASIS.sub("", segment)))
+    segment = "".join(c for c in segment if unicodedata.category(c) != "Cf")  # zero-width characters
+    return unicodedata.normalize("NFKC", segment)
+
+
+def _inline(line):
+    """A line's rendered text twice: with code spans and link targets kept, and with them blanked."""
+    plain, prose, last = [], [], 0
+    for match in _PROTECTED.finditer(line):
+        text = _rendered(line[last:match.start()])
+        plain += [text, match.group(0)]
+        prose += [text, " " * len(match.group(0))]
+        last = match.end()
+    text = _rendered(line[last:])
+    return "".join(plain + [text]), "".join(prose + [text])
+
+
+def _collapse(text):
+    return " ".join(text.split())
+
+
+def _view(text):
+    """Markdown as it renders, one entry per source line, and the heading forms the checks refuse.
+
+    Each entry is (number, level, title, plain, prose). An ATX heading indented at most three spaces
+    has its level and its title's rendered text, whitespace collapsed; any other line has level 0.
+    plain is the rendered line with code spans and link targets, prose the same with them blanked;
+    fenced code renders neither. A refused form is (number, problem): a heading inside a list item
+    or quote or indented as code, or paragraph text underlined with = or - (a setext heading).
+    """
+    view, forms, paragraph = [], [], False
+    for number, line, kind in _source_lines(text):
+        level, title = 0, None
+        heading = _ATX.match(line) if kind == "text" else None
+        if heading:
+            level = len(heading[1])
+            title = _collapse(_inline(re.sub(r"(?:^|[ \t])#+[ \t]*$", "", heading[2]))[0])
+        elif kind == "text" and _NESTED_HEADING.match(line):
+            forms.append((number, "a heading inside a list item or block quote, or indented four or more spaces; "
+                                  "start each heading at the beginning of its line"))
+        elif kind == "text" and paragraph and _UNDERLINE.match(line):
+            forms.append((number, "text underlined with = or - renders as a heading; write headings with #, or "
+                                  "leave a blank line before a rule"))
+        paragraph = (kind == "text" and not heading and not _BLOCK_START.match(line)
+                     and not _UNDERLINE.match(line))
+        plain, prose = _inline(line) if kind in ("text", "html") else ("", "")
+        view.append((number, level, title, plain, prose))
+    return view, forms
+
+
+# ---------------------------------------------------------------- internal names in findings.md
 
 # Wrapping punctuation and Markdown emphasis around a token; leading dots stay so `./x` is a path.
 # Underscores are stripped only in matching pairs (`_word_`), so `__init__.py` keeps its own.
@@ -254,20 +383,15 @@ def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]
     A slash token with any of `names` or `roots` as a segment is a path; `roots` may be plain words,
     which never match alone.
     """
-    text = _uncomment(Path(path).read_text(encoding="utf-8"))
     pattern = _name_pattern(names)
     roots = set(names) | set(roots)
 
     rows = []
-    fence = None
-    for number, line in enumerate(text.splitlines(), start=1):
-        outside = fence is None
-        fence, code = _fenced(line, fence)
-        if code:
-            if outside:  # the opening marker line
-                rows.append({"line": number, "kind": "code", "text": line.strip()})
-            continue
-        rows.extend(_scan_line(number, line, roots, pattern))
+    for number, line, kind in _source_lines(Path(path).read_text(encoding="utf-8")):
+        if kind == "fence":
+            rows.append({"line": number, "kind": "code", "text": line.strip()})
+        elif kind != "code":
+            rows.extend(_scan_line(number, line, roots, pattern))
     return rows
 
 
@@ -491,20 +615,45 @@ def flag_entry_problems(record: dict) -> list[dict]:
     return problems
 
 
-def _headings(path):
-    headings, fence = [], None
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        fence, code = _fenced(line, fence)
-        if not code and line.startswith("### "):
-            headings.append(line[4:].strip().rstrip("#").strip())
-    return headings
+def _read_view(path):
+    return _view(Path(path).read_text(encoding="utf-8"))
+
+
+def _regions(view):
+    """Split a view into [level, title, first line number, plain lines, prose lines] at level 1 to 3 headings.
+
+    Level 0 is the text before the first heading; every other region's lines open with its heading
+    line, so a slide's headline is read with its body.
+    """
+    regions = [[0, None, 1, [], []]]
+    for number, level, title, plain, prose in view:
+        if 1 <= level <= 3:
+            regions.append([level, title, number, [], []])
+        regions[-1][3].append(plain)
+        regions[-1][4].append(prose)
+    return regions
 
 
 def heading_problems(draft) -> list[dict]:
-    """List each `###` finding heading in findings.md that no methodology.md heading repeats exactly."""
-    methodology = set(_headings(Path(draft) / "methodology.md"))
-    return [{"heading": heading, "problem": "methodology.md has no ### section with this exact heading"}
-            for heading in _headings(Path(draft) / "findings.md") if heading not in methodology]
+    """List each `###` finding heading in findings.md that not exactly one methodology.md section repeats,
+    or that findings.md repeats, then each heading in either file written in a form the checks refuse."""
+    draft = Path(draft)
+    views = {name: _read_view(draft / name) for name in ("findings.md", "methodology.md")}
+    findings, methodology = (Counter(title for _, level, title, _, _ in views[name][0] if level == 3)
+                             for name in ("findings.md", "methodology.md"))
+    rows = []
+    for heading, count in findings.items():
+        if count > 1:
+            rows.append({"heading": heading, "problem": f"findings.md has {count} ### slides with this heading; "
+                                                        "give each finding its own"})
+        if heading not in methodology:
+            rows.append({"heading": heading, "problem": "methodology.md has no ### section with this exact heading"})
+        elif methodology[heading] > 1:
+            rows.append({"heading": heading, "problem": f"methodology.md has {methodology[heading]} ### sections "
+                                                        "with this exact heading; merge them into one"})
+    for name, (_, forms) in views.items():
+        rows += [{"file": name, "line": number, "problem": problem} for number, problem in forms]
+    return rows
 
 
 # ---------------------------------------------------------------- claim strength
@@ -513,7 +662,8 @@ def heading_problems(draft) -> list[dict]:
 # helper owns the values. Only causal wording is checked: it exceeds descriptive and association.
 _CLAIMS = ("descriptive", "association", "causal")
 _CLAIM_CELL = re.compile(r"(descriptive|association)|(causal) \((?:experiment|natural experiment): \S.*\)")
-_CLAIM_LINE = re.compile(r"\*\*Claim strength:\*\*(.*)")
+# Read from rendered text, so emphasis is gone; four spaces in, a line may be code, so it never counts.
+_CLAIM_LINE = re.compile(r" {0,3}Claim strength:(.*)")
 # Causal wording as whole words, so "data-driven" or "causality" is not one. Bare "because" and
 # "cause" are left out: they also give reasons for analytical choices and state disclaimers. So are
 # "result(s) in" and "affect": "Results in the North", "the result in June", and "affected stores"
@@ -529,8 +679,20 @@ _UNCHECKED = {"How we know", "Limitations and open caveats", "What changed since
               "Supporting datasets"}
 
 
+def _level(cell):
+    match = _CLAIM_CELL.fullmatch(cell) if isinstance(cell, str) else None
+    return (match[1] or match[2]) if match else None
+
+
+def _claim_text(value):
+    """A rendered Claim value for comparison: whitespace collapsed, a code span around it all unwrapped."""
+    value = _collapse(value)
+    span = _CODE_SPAN.fullmatch(value)
+    return _collapse(span[2]) if span else value
+
+
 def state_claims(root, investigation) -> dict:
-    """Map each result state.md's findings table links to its claim strength, or None when unrecognized."""
+    """Map each result state.md's findings table links to its Claim cell, or None when unrecognized."""
     path = Path(root) / "investigations" / investigation / "state.md"
     try:
         table = _section_table(path.read_text(encoding="utf-8"), "Current findings")
@@ -541,35 +703,10 @@ def state_claims(root, investigation) -> dict:
                          "Evidence and Claim columns")
     claims = {}
     for row in table[1]:
-        match = _CLAIM_CELL.fullmatch(row.get("Claim", ""))
+        cell = row.get("Claim", "")
         for result_id in _EVIDENCE_LINK.findall(row.get("Evidence", "")):
-            claims[result_id] = (match[1] or match[2]) if match else None
+            claims[result_id] = cell if _level(cell) else None
     return claims
-
-
-def _regions(text, *, prose=True):
-    """Split Markdown into (level, heading, first line number, lines) at `##` and `###` headings.
-
-    Level 0 is the text before the first heading; every other region's lines open with its heading
-    line, so a slide's headline is read with its body. Headings inside fences, as `_headings` reads
-    them, do not split. With `prose`, comments, fenced lines, code spans, and link targets are blanked.
-    """
-    if prose:
-        text = _uncomment(text)
-    regions, fence = [[0, None, 1, []]], None
-    for number, line in enumerate(text.splitlines(), start=1):
-        fence, code = _fenced(line, fence)
-        if code:
-            line = "" if prose else line
-        else:
-            if line.startswith(("## ", "### ")):
-                level = 2 if line.startswith("## ") else 3
-                regions.append([level, line[level + 1:].strip().rstrip("#").strip(), number, []])
-            if prose:
-                for pattern in (_CODE_SPAN, _LINK_TARGET):
-                    line = pattern.sub(lambda match: " " * len(match.group(0)), line)
-        regions[-1][3].append(line)
-    return regions
 
 
 def _cited(text, represented):
@@ -579,53 +716,76 @@ def _cited(text, represented):
     return [r for r in represented if r in found]
 
 
-def _weakest(results, claims):
-    known = [claims[r] for r in results if claims.get(r)]
+def _weakest(results, levels):
+    known = [levels[r] for r in results if levels.get(r)]
     return min(known, key=_CLAIMS.index) if known else _CLAIMS[0]
+
+
+def _declaration_problem(section, cited, ceiling, claims):
+    """Why a finding's methodology section does not state its claim as state.md records it, or None."""
+    if section is None:
+        return "methodology.md has no ### section with this heading, so no **Claim strength:** line"
+    declared = section["declared"]
+    if not declared:
+        return "methodology.md's section has no **Claim strength:** line"
+    if len(declared) > 1:
+        return f"methodology.md's section has {len(declared)} **Claim strength:** lines"
+    level = _level(declared[0])
+    if not level:
+        return ("methodology.md's **Claim strength:** line is not descriptive, association, or causal with its "
+                "design basis")
+    if level != ceiling:
+        return f"methodology.md states {level} on its **Claim strength:** line"
+    if level == "causal":
+        records = {}
+        for result in cited:
+            if _level(claims.get(result)) == "causal":
+                records.setdefault(_claim_text(_inline(claims[result])[0]), []).append(result)
+        recorded = "; ".join(f"{cell} for {', '.join(results)}" for cell, results in records.items())
+        if len(records) > 1:
+            return (f"the results it cites record different causal designs ({recorded}); give each design its "
+                    "own finding")
+        if declared[0] not in records:
+            return f"methodology.md states {declared[0]} on its **Claim strength:** line; state.md records {recorded}"
+    return None
 
 
 def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
     """List causal wording in findings.md above its claim strength, and claim records that are missing.
 
-    A `###` finding slide is held to the weakest claim among the results its methodology.md namesake
-    cites, or among all represented results when it cites none; the title, Answer, Implications,
-    and any other slide that states conclusions, to the strongest represented claim. Each finding's
-    methodology section states its strength on a `**Claim strength:**` line.
+    `claims` maps result IDs to state.md Claim cells, as `state_claims` returns them. A `###` finding
+    slide is held to the weakest claim among the results its methodology.md namesake cites, or among
+    all represented results when it cites none; the title, Answer, Implications, and any other slide
+    that states conclusions, to the strongest represented claim. Each finding's methodology section
+    states its strength on one `**Claim strength:**` line, a causal one as its results' Claim cell.
+    Both files are read as they render (`_view`).
     """
     draft = Path(draft)
+    levels = {result: _level(cell) for result, cell in claims.items()}
     rows = [{"result": r, "problem": "state.md has no findings row with a claim strength for this result"
              if r not in claims else "state.md's Claim cell is not descriptive, association, or causal "
-             "with its design basis"} for r in represented if not claims.get(r)]
-    text = (draft / "methodology.md").read_text(encoding="utf-8")
-    cites, stated = {}, {}
-    # Citations keep code spans and evidence links, where result IDs sit, but not comments.
-    for level, heading, _, lines in _regions(_uncomment(text), prose=False):
+             "with its design basis"} for r in represented if not levels.get(r)]
+    # Sections sharing a heading pool their citations and declarations, so none is dropped.
+    sections = {}
+    for level, heading, _, plain, _ in _regions(_read_view(draft / "methodology.md")[0]):
         if level == 3:
-            cites.setdefault(heading, "\n".join(lines))
-    # A declaration counts only as rendered prose, outside comments and fences.
-    for level, heading, _, lines in _regions(text):
-        if level == 3:
-            stated.setdefault(heading, [m[1].strip() for line in lines if (m := _CLAIM_LINE.match(line))])
-    known = [claims[r] for r in represented if claims.get(r)]
+            section = sections.setdefault(heading, {"text": [], "declared": []})
+            section["text"] += plain
+            section["declared"] += [_claim_text(m[1]) for line in plain if (m := _CLAIM_LINE.match(line))]
+    known = [levels[r] for r in represented if levels.get(r)]
     deck = max(known, key=_CLAIMS.index) if known else _CLAIMS[0]
-    for level, heading, first, lines in _regions((draft / "findings.md").read_text(encoding="utf-8")):
+    declared = set()
+    for level, heading, first, _, lines in _regions(_read_view(draft / "findings.md")[0]):
         if level == 2 and heading in _UNCHECKED:
             continue
         if level == 3:
-            cited = _cited(cites.get(heading, ""), represented) or list(represented)
-            ceiling = _weakest(cited, claims)
-            if heading in stated:
-                declared = stated[heading]
-                match = _CLAIM_CELL.fullmatch(declared[0]) if len(declared) == 1 else None
-                problem = (
-                    "methodology.md's section has no **Claim strength:** line" if not declared
-                    else f"methodology.md's section has {len(declared)} **Claim strength:** lines" if len(declared) > 1
-                    else "methodology.md's **Claim strength:** line is not descriptive, association, or causal "
-                         "with its design basis" if not match
-                    else f"methodology.md states {match[1] or match[2]} on its **Claim strength:** line"
-                    if (match[1] or match[2]) != ceiling else None)
-                if problem:
-                    rows.append({"section": heading, "problem": f"{problem}; its results support {ceiling}"})
+            section = sections.get(heading)
+            cited = _cited("\n".join(section["text"]) if section else "", represented) or list(represented)
+            ceiling = _weakest(cited, levels)
+            problem = None if heading in declared else _declaration_problem(section, cited, ceiling, claims)
+            declared.add(heading)
+            if problem:
+                rows.append({"section": heading, "problem": f"{problem}; its results support {ceiling}"})
         else:
             cited, ceiling = list(represented), deck
         if ceiling == "causal":
@@ -779,8 +939,9 @@ def write_charts(charts_dir: str | os.PathLike, charts: list) -> list[Path]:
 
 def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike) -> list[dict]:
     """Match the chart specifications in findings.md with the chart files."""
-    numbers = [int(match.group(1)) for match in _CHART_SPEC.finditer(
-        Path(findings_path).read_text(encoding="utf-8"))]
+    text = "\n".join(line for _, line, kind in _source_lines(Path(findings_path).read_text(encoding="utf-8"))
+                     if kind in ("text", "html"))
+    numbers = [int(match.group(1)) for match in _CHART_SPEC.finditer(text)]
     rows = []
     for position, number in enumerate(numbers, start=1):
         if number != position:
@@ -920,8 +1081,11 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "when it cites none), and the title and other slides that state conclusions to the strongest; "
                "How we know, Limitations and open caveats, What changed since the last version, and Supporting "
                "datasets are not read. It also lists a represented result without a recognized Claim, and a "
-               "methodology finding section whose **Claim strength:** line is missing, repeated, unrecognized, or "
-               "differs."
+               "finding whose methodology.md section is missing or whose **Claim strength:** line is missing, "
+               "repeated, unrecognized, or differs from state.md, a causal design included.\nheadings lists a ### "
+               "finding heading without exactly one methodology.md section or repeated in findings.md, and a "
+               "heading form neither file may use. Every check reads the Markdown as it renders: comments, fenced "
+               "code, and inline markup neither hide text nor add it."
                "\nunmatched_flags lists each finding state.md flags whose exact finding "
                "and reason the manifest's revalidation_flags does not record.\nflag_entries lists a missing or "
                "malformed revalidation_flags, an entry without text finding and reason, represented_in that is "
