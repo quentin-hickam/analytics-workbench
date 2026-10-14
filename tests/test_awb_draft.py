@@ -886,7 +886,11 @@ LINKS_AND_BREAKS = {"Price leads [to](https://example.com) sales": "leads to",
                     "The carrier [dri](https://x.io)ves late orders": "drives",
                     "Price [leads to](https://example.com) sales": "leads to",
                     "Price leads\\\n  to sales": "leads to",
-                    "Price led\\\n  to churn": "led to"}
+                    "Price led\\\n  to churn": "led to",
+                    # Round 4: a reference link never resolves, so its label shows; the phrase is found with the
+                    # label read (Codex 2 nit in the Opus review) and with it dropped.
+                    "See [a][drives] sales": "drives",
+                    "Price [leads][x] to sales": "leads to"}
 
 # Every probe a reviewer ran against the claim check in rounds 1 to 3, and each Markdown form the shared
 # reader refuses or reads with them: (findings edits, methodology edits, represented results, claims rows,
@@ -933,6 +937,14 @@ PROBES = {
                                         [(DISCOUNT_RESULT, "<!-- TODO: compare with r-002")], ("r-009", "r-002"),
                                         [(DISCOUNT, STATES_CAUSAL), ("drive", 19)], [],
                                         [("methodology.md:15", COMMENT_OPEN)]),
+    # Round 4: a reference link renders as written, since its definition is refused, so its label is a
+    # citation (both closures); a plain citation is the control.
+    "citation in a reference label": ([("Randomized discounts led to", "Randomized discounts drive")],
+                                      [(DISCOUNT_RESULT, "Result r-002; also see [carrier comparison][r-009].")],
+                                      ("r-009", "r-002"), [(DISCOUNT, STATES_CAUSAL), ("drive", 19)], [], []),
+    "citation in plain text": ([("Randomized discounts led to", "Randomized discounts drive")],
+                               [(DISCOUNT_RESULT, "Result r-002; also see carrier comparison r-009.")],
+                               ("r-009", "r-002"), [(DISCOUNT, STATES_CAUSAL), ("drive", 19)], [], []),
     "citation in a comment in a list item": ([("Randomized discounts led to", "Randomized discounts drive")],
                                              [(DISCOUNT_RESULT, "- <!-- TODO: compare with r-002")], ("r-009", "r-002"),
                                              [], [], [("methodology.md:15", COMMENT_IN_LIST)]),
@@ -979,6 +991,14 @@ PROBES = {
         [(DISCOUNT, "methodology.md has 2 ### sections with this exact heading; merge them into one")], []),
     "duplicate methodology heading with a link": (
         [], [(DISCOUNT_RESULT, f"{DISCOUNT_RESULT}\n\n### Discounts cut late orders [by 4 points](https://example.com)"
+                               f"\n\n{WEST_CLAIM}\n\nResult `r-009`.")],
+        ("r-009", "r-002"),
+        [(DISCOUNT, "methodology.md's section has 2 **Claim strength:** lines; its results support association"),
+         ("led to", 19)],
+        [(DISCOUNT, "methodology.md has 2 ### sections with this exact heading; merge them into one")], []),
+    # Round 4: a code span in one heading does not set it apart either (Codex closure).
+    "duplicate methodology heading with a code span": (
+        [], [(DISCOUNT_RESULT, f"{DISCOUNT_RESULT}\n\n### Discounts cut late orders by `4` points"
                                f"\n\n{WEST_CLAIM}\n\nResult `r-009`.")],
         ("r-009", "r-002"),
         [(DISCOUNT, "methodology.md's section has 2 **Claim strength:** lines; its results support association"),
@@ -1123,6 +1143,15 @@ def test_names_and_charts_read_the_same_rendered_text(project):
     assert draft.check_findings(path, names=["orders_view", "r-009"]) == (
         [{"line": 1, "kind": "name", "text": "orders_view"}] * 4 + [{"line": 2, "kind": "name", "text": "r-009"}] * 3)
     assert draft.check_charts(path, path.parent / "charts") == []
+    # A reference link renders as written, since its definition is refused, so its label is visible (round 4,
+    # both reviews); a code span crossing a line break is code, reported at its opening line (round 4, Codex 2).
+    path.write_text("See [the view][orders_view] and [calculation][orders_view].\n\n"
+                    "The calculation `COUNT(*)\nFILTER (WHERE late)` rose, and so did `x`.\n")
+    assert draft.check_findings(path, names=["orders_view"]) == [
+        {"line": 1, "kind": "name", "text": "orders_view"}, {"line": 1, "kind": "name", "text": "orders_view"},
+        {"line": 3, "kind": "code", "text": "`COUNT(*) FILTER (WHERE late)`"}, {"line": 4, "kind": "code", "text": "`x`"}]
+    path.write_text("The calculation `COUNT(*) FILTER (WHERE late)` rose.\n")
+    assert draft.check_findings(path) == [{"line": 1, "kind": "code", "text": "`COUNT(*) FILTER (WHERE late)`"}]
 
 
 def test_claim_check_reads_headlines_and_cited_designs(project, capsys):

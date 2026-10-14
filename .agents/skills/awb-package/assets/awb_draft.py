@@ -148,12 +148,16 @@ def _evidence_files(root, investigation):
 # autolinks kept for the names scan; prose is the same with them blanked, for wording, and spaced is
 # prose with markup characters read as word breaks (see `_inline`). Link targets
 # are in neither, so a link's text joins the words around it; links lists the targets opened on the
-# line. start: the line opens a paragraph. declares: it opens a top-level paragraph at column 0, the
-# only place a **Claim strength:** line counts.
-_Line = namedtuple("_Line", "number kind level title plain prose spaced links start declares")
+# line. title: a heading's text as it shows, code spans and autolinks unwrapped, so formatting never sets
+# two headings apart. group: the paragraph or heading the line belongs to, None for blank, fence, and
+# hidden lines. start: the line opens a paragraph. declares: it opens a top-level paragraph at column 0,
+# the only place a **Claim strength:** line counts.
+_Line = namedtuple("_Line", "number kind level title plain prose spaced links group start declares")
 
 _FENCE = re.compile(r"( {0,3})(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
+_URI = r"[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*"
+_AUTOLINK = re.compile(rf"<({_URI})>")
 _TOKEN = re.compile(r"\S+")
 _QUOTE = re.compile(r" {0,3}> ?")
 _ITEM = re.compile(r"( {0,3})([-*+]|(\d{1,9})[.)])(?=[ \t]|$)( *)(.*)")
@@ -180,10 +184,14 @@ _OPEN_COMMENT = re.compile(_SPAN + r"|(?<!\\)<!--", re.DOTALL)
 # An inline HTML tag other than a line break: its attributes can hide the text it wraps.
 _INLINE_TAG = re.compile(_SPAN + r"|(?<!\\)<(?!br\s*/?>)/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>",
                          re.DOTALL | re.IGNORECASE)
-# Code spans and autolinks render as themselves; a link's target or reference label renders as nothing.
+# Code spans and autolinks render as themselves; an inline link's target renders as nothing. A reference
+# link `[text][label]` never resolves, since every definition is refused, so it renders as written, label
+# included (group 4); the claims check's spaced reading also drops the label, as the link would render if
+# a definition were added, so a phrase is found either way.
 _PIECE = re.compile(
-    _SPAN + r"|(?<!\\)(<[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*>)"
-    r"|\]\(\s*(<[^<>\n]*>|(?:[^()\s]|\([^()\s]*\))*)(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^()]*\)))?\s*\)|\]\[[^\]]*\]",
+    _SPAN + rf"|(?<!\\)(<{_URI}>)"
+    r"|\]\(\s*(<[^<>\n]*>|(?:[^()\s]|\([^()\s]*\))*)(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^()]*\)))?\s*\)"
+    r"|(?<!\\)\]\[([^\]]*)\]",
     re.DOTALL)
 _BREAK_TAG = re.compile(r"(?<!\\)<br\s*/?>", re.IGNORECASE)
 _TAG = re.compile(r"(?<!\\)</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
@@ -235,6 +243,10 @@ def _inline(text):
             plain.append(piece)
             prose.append(re.sub(r"[^\n]", " ", piece))
             spaced.append(prose[-1])
+        elif match.group(4) is not None:
+            plain.append(" " + _rendered(match.group(4)))
+            prose.append(plain[-1])
+            spaced.append(" " + "\n" * piece.count("\n"))
         else:
             if match.group(3) is not None:
                 links.append((text.count("\n", 0, match.start()), match.group(3).strip("<>")))
@@ -246,6 +258,11 @@ def _inline(text):
     prose.append(plain[-1])
     spaced.append(_rendered(text[last:], " "))
     return "".join(plain), "".join(prose), "".join(spaced), links
+
+
+def _shown(plain):
+    """plain text as it shows: a code span's content without its backticks, an autolink without its brackets."""
+    return _AUTOLINK.sub(r"\1", _CODE_SPAN.sub(lambda match: match[2], plain))
 
 
 def _collapse(text):
@@ -442,8 +459,8 @@ def _view(text):
             refuse(entry["number"], f"a **Claim strength:** line {where}",
                    "its own paragraph at the start of its line, outside lists and quotes")
         view.append(_Line(entry["number"], entry["kind"], entry["level"],
-                          _collapse(entry["plain"]) if entry["kind"] == "heading" else None,
-                          entry["plain"], entry["prose"], entry["spaced"], entry["links"], entry["start"], declares))
+                          _collapse(_shown(entry["plain"])) if entry["kind"] == "heading" else None, entry["plain"],
+                          entry["prose"], entry["spaced"], entry["links"], entry["group"], entry["start"], declares))
     return view, sorted(forms)
 
 
@@ -508,12 +525,25 @@ def _name_pattern(names):
     )
 
 
-def _scan_line(number, line, roots, pattern):
-    found = []
-    for match in _CODE_SPAN.finditer(line):
-        found.append((match.start(), "code", match.group(0)))
-        line = _blank(line, match.start(), match.end())
+def _scan_paragraph(lines, roots, pattern):
+    """Scan one paragraph's lines. A code span is found in the joined paragraph, since it can cross a line
+    break, and reported at its opening line with each line break read as a space, as it renders."""
+    joined = "\n".join(line.plain for line in lines)
+    spans = []
+    for match in _CODE_SPAN.finditer(joined):
+        start = joined.rfind("\n", 0, match.start()) + 1
+        spans.append((joined.count("\n", 0, match.start()), match.start() - start, match.group(0).replace("\n", " ")))
+    joined = _keep_lines(_CODE_SPAN, joined, " ")
+    rows = []
+    for offset, (line, text) in enumerate(zip(lines, joined.split("\n"))):
+        code = [(column, "code", span) for at, column, span in spans if at == offset]
+        rows.extend(_scan_line(line.number, text, roots, pattern, code))
+    return rows
 
+
+def _scan_line(number, line, roots, pattern, found):
+    """Scan one line whose code spans are already blanked and listed in `found` as (column, "code", text)."""
+    found = list(found)
     taken = []
     if pattern is not None:
         for match in pattern.finditer(line):
@@ -542,13 +572,15 @@ def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]
     pattern = _name_pattern(names)
     roots = set(names) | set(roots)
 
-    rows = []
+    rows, paragraphs = [], {}
     for line in _read_view(path)[0]:
         if line.kind == "fence":
             rows.append({"line": line.number, "kind": "code", "text": line.plain.strip()})
-        elif line.plain:
-            rows.extend(_scan_line(line.number, line.plain, roots, pattern))
-    return rows
+        elif line.group is not None:
+            paragraphs.setdefault(line.group, []).append(line)
+    for lines in paragraphs.values():
+        rows.extend(_scan_paragraph(lines, roots, pattern))
+    return sorted(rows, key=lambda row: row["line"])
 
 
 # ---------------------------------------------------------------- the names set
