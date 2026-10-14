@@ -705,6 +705,6 @@ def test_guides_state_the_credentials_convention():
         assert fact in rule
     reference = (ASSET.parents[1] / "references/landing.md").read_text(encoding="utf-8")
     for fact in ("environment variables", "gitignored `.env`", "`workbench-guides/data.md` (**Assess and acquire**)",
-                 "name a credential's variable, as `$NAME`, never its value",
+                 "refers to a credential, it names the variable, as `$NAME`, never its value",
                  "`land()` records both as given, without checking them"):
         assert fact in reference
