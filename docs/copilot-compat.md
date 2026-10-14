@@ -17,7 +17,7 @@ Researched 2026-10-14, against VS Code 1.142 and the MCP specification revision 
 | Write tools are few and coarse. | Each tool asks on first use unless the user trusts the whole server, and in the Copilot harness an approval lasts only one session. |
 | The server speaks the legacy `2025-11-25` protocol, and answers any other method, including `server/discover`, with an immediate `-32601` error. | VS Code Local negotiates `2025-11-25`. The spec requires dual-era clients to fall back to `initialize` on any non-modern error, but Copilot CLI builds before 1.0.88 treated some `server/discover` errors as fatal ([§5](#5-protocol)). |
 | The project root comes from an explicit argument, then from MCP roots, then from the working directory. It is validated as a workbench before anything is written. | Roots are deprecated in the spec. A user-level server's working directory isn't documented, and a plugin server's is its install folder. |
-| Tool results are bounded text, with no `structuredContent`. | VS Code Local passes `structuredContent` to the model *instead of* the text when both are present. Large results spill to disk or are truncated. |
+| Tool results are bounded text, with no `structuredContent`. | VS Code Local passes `structuredContent` to the model *instead of* the text when both are present. Copilot CLI moves a result over 20 KiB to a file and shows the model a preview. |
 | Skills install to `~/.agents/skills` (VS Code and Codex) or `~/.claude/skills` (Claude Code). | Discovery locations below. |
 | The package reviewer is a custom agent whose `tools` list holds only read tools and the server's read-only tools. | VS Code custom agents restrict tools by `server/tool` name, and a subagent run under a named custom agent takes that agent's tools. |
 
@@ -26,11 +26,10 @@ Researched 2026-10-14, against VS Code 1.142 and the MCP specification revision 
 VS Code now runs agent sessions in two Copilot harnesses with different engines:
 
 - **Local**, the original VS Code agent. Native MCP integration, approvals in `languageModelToolsConfirmationService`.
-- **Copilot**, which runs the Copilot SDK in VS Code's Agent Host process. It shares its runtime with Copilot CLI.
+- **Copilot**, which runs the Copilot SDK in VS Code's Agent Host process. The SDK "exposes the same engine behind Copilot CLI" ([copilot-sdk](https://github.com/github/copilot-sdk)), though VS Code notes a shared runtime does not imply identical tools, permissions, or customizations (documented, [agent harnesses](https://code.visualstudio.com/docs/agents/run/agent-harnesses)).
 
-From 1.142, Copilot is being rolled out progressively as the default harness for new sessions (documented, [1.142](https://code.visualstudio.com/updates/v1_142)). The rollout has four consequences:
-- Opening an existing, unarchived Local chat moves it to Copilot.
-- When an organization configures a nonempty managed `permissions` object, or sets `sandbox.enabled` to `true`, VS Code requires the Copilot harness for full chat sessions.
+From 1.142, Copilot is being rolled out progressively as the default harness for new sessions (documented, [1.142](https://code.visualstudio.com/updates/v1_142)). The rollout has three consequences:
+- When an organization configures a nonempty managed `permissions` object, or sets `sandbox.enabled` to `true`, VS Code requires the Copilot harness for full chat sessions, and opening an existing, unarchived Local chat moves it to Copilot. An empty `permissions` object or a legacy policy alone does not trigger this.
 - Administrators can keep Local with `vscode.temporaryDefaultToLocalHarness`, which also overrides that routing.
 - The `ChatToolsAutoApprove` policy does not trigger the routing by itself ([manage AI settings](https://code.visualstudio.com/docs/enterprise/manage-ai-settings)).
 
@@ -43,6 +42,7 @@ A user picks the harness from the **Session Target** control in a new chat, whic
 **VS Code Local**:
 - **Read-only tools.** A tool marked `readOnlyHint` runs without confirmation, and every other tool shows the confirmation dialog (documented, [MCP developer guide](https://code.visualstudio.com/api/extension-guides/ai/mcp)).
 - **Approval scopes.** A confirmation can approve once, for the session, for the workspace, or for all future calls. **Chat: Manage Tool Approval** can trust every tool of one server (documented, [approvals](https://code.visualstudio.com/docs/agents/run/approvals)).
+- **Sandboxed servers.** A stdio server with `"sandboxEnabled": true` (macOS and Linux only) has its tool confirmations auto-approved, and can write only to the paths its `sandbox.filesystem.allowWrite` lists (documented, [configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration); code). A workbench server sandboxed this way needs the project folder in that list.
 
 Policies that change this ([manage AI settings](https://code.visualstudio.com/docs/enterprise/manage-ai-settings), [policy reference](https://code.visualstudio.com/docs/enterprise/policies)):
 
@@ -61,7 +61,7 @@ Policies that change this ([manage AI settings](https://code.visualstudio.com/do
 
 **Copilot CLI** (tertiary):
 - **Every call needs permission.** "All MCP tool invocations require explicit permission", read-only ones included ([CLI reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)).
-- **Whole-server grants.** `--allow-tool='<server>'` allows a whole server for the session, and `permissions-config.json` saves a whole-server approval per location with `"toolName": null` ([allowing tools](https://docs.github.com/en/copilot/how-tos/copilot-cli/use-copilot-cli/allowing-tools)).
+- **Whole-server grants.** `--allow-tool='<server>'` allows a whole server for the session ([CLI reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)), and `permissions-config.json` saves a whole-server approval per location with `"toolName": null` (documented, [configuration directory reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference)).
 
 ## 3. Server configuration
 
@@ -74,17 +74,17 @@ VS Code lists four places to configure a server ([MCP servers](https://code.visu
 | Workspace | `.vscode/mcp.json` | `servers` | Listed as deprecated; kept for VS Code-only features such as `${input:…}` |
 | User profile | profile `mcp.json` | `servers` | Listed as deprecated |
 
-- **Copilot harness.** It reads `.mcp.json` and `~/.copilot/mcp-config.json` directly. VS Code forwards eligible servers from other sources, except those that need interactive input.
-- **Trust.** Workspace servers inherit Workspace Trust. A server from any other source shows a trust dialog when it first starts and whenever its configuration changes.
-- **Stdio keys:** `type: "stdio"`, `command`, `args`, `env`, `envFile`, `cwd` ([configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration)).
-- **Copilot CLI** passes only `PATH` to a server, so every other variable must be set in its configuration.
+- **Copilot harness.** It reads `.mcp.json` and the user-level `mcp-config.json` above directly. VS Code forwards eligible servers from other sources, except those that need interactive input (documented, same page).
+- **Trust.** Workspace servers inherit Workspace Trust. A server from any other source shows a trust dialog when it first starts and whenever its configuration changes (documented, same page).
+- **Stdio keys:** `type: "stdio"`, `command`, `args`, `env`, `envFile`, `cwd`, plus `sandboxEnabled` and `sandbox` ([§2](#2-tool-approval)) ([configuration reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration)).
+- **Copilot CLI** passes only `PATH` to a server, so every other variable must be set in its configuration (documented, [adding MCP servers](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers)).
 - **Managed allowlists** match a local server by its exact command and arguments ([managed settings](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#allowedmcpservers)). An install guide should therefore produce one stable command line.
 
-**Install target:** one user-level entry in `~/.copilot/mcp-config.json`, which serves every workspace and both Copilot harnesses. Claude Code and Codex get their own user-level entries.
+**Install target:** one user-level entry in `$COPILOT_HOME/mcp-config.json`, or `~/.copilot/mcp-config.json` when `COPILOT_HOME` is unset, which serves every workspace and both Copilot harnesses. Claude Code and Codex get their own user-level entries. The install guide requires Copilot CLI 1.0.88 or later ([§5](#5-protocol)).
 
 ## 4. Project root
 
-- **VS Code Local** gives servers the workspace root folders as MCP roots, and sends `notifications/roots/list_changed` (documented, [MCP developer guide](https://code.visualstudio.com/api/extension-guides/ai/mcp); code).
+- **VS Code Local** gives servers the workspace root folders as MCP roots (documented, [MCP developer guide](https://code.visualstudio.com/api/extension-guides/ai/mcp)), and sends `notifications/roots/list_changed` (code).
 - **Working directory.** A stdio server's `cwd` defaults to the workspace folder "when run in a workspace". For a user-level server, the code passes no workspace folder, so the process probably runs in VS Code's own directory (inferred).
 - **Roots are deprecated** as of `2026-07-28`, with the migration path "Pass directories or files via tool parameters, resource URIs, or server configuration". Removal can come no earlier than the first revision on or after 2027-07-28 ([deprecated features](https://modelcontextprotocol.io/specification/2026-07-28/deprecated)).
 - **Copilot CLI** advertises no roots, doesn't expand `${workspaceFolder}`, and starts plugin servers in the plugin's install folder ([copilot-cli#4234](https://github.com/github/copilot-cli/issues/4234), v1.0.73).
@@ -110,10 +110,10 @@ Each candidate is accepted only if it holds `src/awb.py`, except for the tool th
 
 ## 6. Tools and results
 
-- **Name length.** VS Code exposes MCP tools under a collision-resolved `mcp_` server prefix, capped at 64 characters in total (code). The CLI uses `serverName-toolName`, also capped at 64 (documented). Short names fit both.
+- **Name length.** VS Code exposes MCP tools under a collision-resolved `mcp_` server prefix, capped at 64 characters in total (code). The CLI uses `serverName-toolName`, also capped at 64 (documented, [CLI reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)). Short names fit both.
 - **Tool cap.** VS Code allows at most 128 enabled tools per request, counting every source ([tools](https://code.visualstudio.com/docs/agents/run/tools)). A small tool set leaves room for the user's other servers.
 - **Structured content.** VS Code Local appends `structuredContent` as JSON and uses it in place of the text items for the model (code). `outputSchema` enforcement by either host is not established.
-- **Large output.** Large tool output is written to disk in VS Code 1.110 and later. The CLI caps output sent straight to the model at 20 KiB, and truncates very long single lines.
+- **Large output.** From 1.110, "Large tool output is written to disk instead of stuffed into context" (documented, [1.110 changelog](https://github.blog/changelog/2026-03-06-github-copilot-in-visual-studio-code-v1-110-february-release/)). The changelog doesn't say which tools this covers, so whether MCP results get it is unknown (inferred). Copilot CLI saves output from any tool, MCP tools included, to a temporary file above 20 KiB (`COPILOT_LARGE_OUTPUT_THRESHOLD_BYTES`), and gives the model the path and a preview (documented, [context management](https://docs.github.com/en/copilot/concepts/agents/copilot-cli/context-management)).
 
 ## 7. Skills
 
@@ -124,30 +124,32 @@ Each candidate is accepted only if it holds `src/awb.py`, except for the tool th
 
 Sources: [VS Code skills](https://code.visualstudio.com/docs/agent-customization/agent-skills), [GitHub skills](https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/add-skills).
 
-- **Enabled by default.** Skills are generally available and on by default from VS Code 1.109 (`chat.useAgentSkills`).
-- **Names.** A skill's name must match its folder, use lowercase letters, digits and hyphens, and fit in 64 characters. "Names with invalid characters cause the skill to silently fail to load." Descriptions fit in 1,024 characters. Every `awb-*` name complies.
-- **Frontmatter.** VS Code honors `name`, `description`, `argument-hint`, `user-invocable` (default true) and `disable-model-invocation` (default false). It does not list `allowed-tools`. Skills appear as `/name` commands.
-- **Bundled files.** A skill can link files relative to its folder and tell the agent to run bundled scripts. Running a script still goes through terminal approval, which is why helper execution goes through MCP.
+- **Enabled by default.** Skills are generally available and on by default from VS Code 1.109 (`chat.useAgentSkills`) (documented, [1.109](https://code.visualstudio.com/updates/v1_109)).
+- **Names.** A skill's name must match its folder, use lowercase letters, digits and hyphens, and fit in 64 characters. "Names with invalid characters cause the skill to silently fail to load." Descriptions fit in 1,024 characters (documented, VS Code skills). Every `awb-*` name complies.
+- **Frontmatter.** VS Code honors `name`, `description`, `argument-hint`, `user-invocable` (default true) and `disable-model-invocation` (default false). It does not list `allowed-tools`. Skills appear as `/name` commands (documented, VS Code skills).
+- **Bundled files.** A skill can link files relative to its folder, and the agent runs bundled scripts through the terminal tool and its approval controls (documented, VS Code skills). That is why helper execution goes through MCP.
 
 ## 8. Instructions
 
 - **Root `AGENTS.md`.** VS Code Local reads it when `chat.useAgentsMdFile` is on, which is the default. Nested `AGENTS.md` files need the experimental `chat.useNestedAgentsMdFiles`, which is off by default ([custom instructions](https://code.visualstudio.com/docs/agent-customization/custom-instructions)). The workbench's `AGENTS.md` therefore loads only when the workbench folder is the workspace root.
-- **Combining with other instruction files.** Instruction sources are additive, with no general precedence, so a project with `.github/copilot-instructions.md` gets both. Conflicts between them are not resolved by order.
+- **Combining with other instruction files.** Instruction sources are additive, with no general precedence, so a project with `.github/copilot-instructions.md` gets both. Conflicts between them are not resolved by order (documented, same page).
 
 ## 9. Subagents and the reviewer
 
 - **Subagents.** VS Code Local starts subagents with `runSubagent`. A subagent inherits the main agent's instructions and tools "unless you specify a custom agent" ([subagents](https://code.visualstudio.com/docs/agents/run/subagents)). It does not inherit the conversation.
-- **Custom agent locations.** Custom agents live in `.github/agents` or `.claude/agents` in the workspace, or at user level: in profile storage for Local, and in `~/.copilot/agents` for Copilot.
-- **Restricting tools.** `tools` takes individual `server/tool` names, `server/*`, or `[]` ([custom agent configuration](https://docs.github.com/en/copilot/reference/custom-agents-configuration#tools)). In the Copilot harness, the SDK enforces the list as an allowlist.
-- **Copilot CLI custom agents** skip repository instructions unless they set `include-custom-instructions: true`.
+- **Custom agent locations.** Custom agents live in `.github/agents` or `.claude/agents` in the workspace, or at user level: in profile storage for Local, and in `~/.copilot/agents` for Copilot (documented, [custom agents](https://code.visualstudio.com/docs/agent-customization/custom-agents)).
+- **Restricting tools.** `tools` takes individual `server/tool` names, `server/*`, or `[]` ([custom agent configuration](https://docs.github.com/en/copilot/reference/custom-agents-configuration#tools)). The list filters which tools the agent gets, and unrecognized names are ignored (documented, same page).
+- **Copilot CLI subagents.** A custom agent that runs as a subagent gets no repository instruction files unless it sets `include-custom-instructions: true` (documented, [CLI reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference)).
 
 **Reviewer:** a user-level custom agent whose `tools` list holds `read`, `search`, and the server's read-only tools, with no edit, terminal, or write tool. The reviewer reads its brief from the skill's `review.md` rather than from `AGENTS.md`.
 
 ## 10. What can block the package outright
 
 - **`ChatStrictPluginOnlyCustomization`** blocks standalone user and workspace skills, agents, instructions, hooks, and MCP servers, while allowing plugin-provided ones ([policy reference](https://code.visualstudio.com/docs/enterprise/policies)). Agent Plugins are the packaging route through it, and are a contingency, not a current target.
-- **The "MCP servers in Copilot" organization policy** must allow MCP.
-- **Managed MCP allowlists** must list the server's exact command line.
+- **The "MCP servers in Copilot" policy** "defines whether MCP servers can run at all across Copilot clients" (documented, [MCP management](https://docs.github.com/en/copilot/concepts/mcp-management)).
+- **VS Code's own MCP policies** act on the device whatever the GitHub policy says: `ChatMCP` controls access to installed servers, `ChatAllowedMcpServers` and `ChatAllowManagedMcpServersOnly` restrict which servers may run, and `ChatDeniedMcpServers` blocks matching servers, taking precedence over any allow rule (documented, [policy reference](https://code.visualstudio.com/docs/enterprise/policies)).
+- **Managed MCP allowlists** must list the server's exact command line ([§3](#3-server-configuration)).
+- **A managed sandbox** with `sandboxMcpServers: true` requires local MCP servers to run in the sandbox, in Copilot CLI and VS Code's Agent Host. The sandbox's path rules may then block the server's writes to the project ([managed settings](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings); documented, except that the path rules apply to MCP servers, which is inferred).
 
 ## Field-test checklist
 
@@ -170,3 +172,4 @@ There's no Copilot host here, so the first real run is a field test in VS Code. 
 - How `${workspaceFolder}` resolves in user-level VS Code configuration in multi-root and empty windows.
 - Whether VS Code Local honors a skill's `allowed-tools`.
 - A formal Copilot CLI protocol support matrix.
+- Whether the Copilot harness sends MCP roots. Copilot CLI advertises none ([§4](#4-project-root)), so a user-level server there may depend on the `project` argument.
