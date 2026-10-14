@@ -27,7 +27,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -134,13 +134,18 @@ def _number_or_date(bound):
     return isinstance(bound, (int, date)) and not isinstance(bound, bool)
 
 
+def _in_utc(bound):
+    """bound, a local date-time taken as UTC, as the checks' UTC connection compares it."""
+    return bound.replace(tzinfo=timezone.utc) if isinstance(bound, datetime) and bound.tzinfo is None else bound
+
+
 def _bounds(value, accepts):
     """{min, max}, either optional, each accepted, with min no greater than max."""
     if not (isinstance(value, dict) and value and set(value) <= {"min", "max"}
             and all(accepts(bound) for bound in value.values())):
         return False
     try:
-        return "min" not in value or "max" not in value or value["min"] <= value["max"]
+        return "min" not in value or "max" not in value or _in_utc(value["min"]) <= _in_utc(value["max"])
     except TypeError:  # bounds of different kinds, such as a number and a date
         return False
 

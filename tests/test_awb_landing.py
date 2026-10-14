@@ -30,7 +30,7 @@
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
 # test_publish_records_validate_detail_and_no_checks_by_default: without declared checks publication.json records no declared check; a string validate returns is its check's detail; another dataset's declaration does not apply.
-# test_declared_checks_refuse_a_malformed_declaration_before_conversion: unknown and malformed keys, an empty columns list, range bounds other than numbers or dates, a min above its max, two checks sharing a name, a column repeated within a key or unique entry, one unique column set declared twice, a non-checks key, an unknown top-level table, another dataset's malformed entry, and invalid TOML refuse before any partial directory exists.
+# test_declared_checks_refuse_a_malformed_declaration_before_conversion: unknown and malformed keys, an empty columns list, range bounds other than numbers or dates, a min above its max (date-times compared in UTC), two checks sharing a name, a column repeated within a key or unique entry, one unique column set declared twice, a non-checks key, an unknown top-level table, another dataset's malformed entry, and invalid TOML refuse before any partial directory exists.
 # test_a_dotted_dataset_name_is_declared_quoted_and_refused_unquoted: [datasets.orders.v1.checks] refuses publishing orders.v1, naming the quoted spelling, before conversion; [datasets."orders.v1".checks] declares its checks.
 # test_declared_checks_accept_the_shipped_template_and_its_example: the shipped commented template declares nothing, and its example, uncommented, is a valid declaration.
 # test_publish_refuses_declared_checks_without_duckdb_before_conversion: declared checks without the duckdb package refuse before any partial directory exists.
@@ -41,6 +41,7 @@
 # test_a_check_that_declares_no_values_fails_to_run_without_the_values_hint: a check that cannot run for another reason names the error's kind without pointing at declared values.
 # test_declared_columns_and_types_hold_in_every_parquet_file: columns and types are checked in each Parquet file, so a second file with another type or without a declared column fails; files differing only in column order pass.
 # test_temporal_checks_compare_in_utc_whatever_the_host_zone: date and date-time bounds and values compare with plain and zoned timestamps in UTC, giving the same records under two host time zones.
+# test_range_bounds_may_mix_local_and_offset_date_times: a local and an offset date-time bound one range, ordered and compared in UTC.
 # test_unreadable_or_missing_parquet_fails_every_declared_check: a file that is not Parquet, or no Parquet file, fails every declared check with ChecksFailed rather than a DuckDB error.
 # test_a_declaration_that_plans_no_check_needs_neither_duckdb_nor_parquet: empty check lists plan nothing, so publish needs no duckdb and no Parquet output.
 # test_cli_publish_records_declared_checks: the publish command records declared checks with its --check outcome, counts them in its output and catalog_row, and prints failed_checks on refusal.
@@ -699,6 +700,10 @@ def test_publish_records_validate_detail_and_no_checks_by_default(tmp_path):
     ('[datasets.events.checks]\nrange = { amount = { max = nan } }\n', "checks.range is malformed"),
     ('[datasets.events.checks]\nrange = { amount = { min = 10, max = 0 } }\n', "checks.range is malformed"),
     ('[datasets.events.checks]\nrange = { day = { min = 0, max = 2024-01-01 } }\n', "checks.range is malformed"),
+    ('[datasets.events.checks]\nrange = { ts = { min = 2024-01-01, max = 2024-01-02T00:00:00 } }\n',
+     "checks.range is malformed"),
+    ('[datasets.events.checks]\nrange = { ts = { min = 2024-01-01T08:00:00, max = 2024-01-01T09:00:00+02:00 } }\n',
+     "checks.range is malformed"),
     ('[datasets.events.checks]\nrow_count = { min = -1 }\n', "checks.row_count is malformed"),
     ('[datasets.events.checks]\nrow_count = { min = 5, max = 1 }\n', "checks.row_count is malformed"),
     ('[dataset.events.checks]\nnot_null = ["id"]\n', "unknown table dataset"),
@@ -962,6 +967,23 @@ def test_temporal_checks_compare_in_utc_whatever_the_host_zone(tmp_path, monkeyp
         monkeypatch.setattr(landing, "_duckdb", lambda: Zoned(duckdb, zone))
         with pytest.raises(landing.ChecksFailed, match=r"range:ts \(1 of 1 rows fall outside"):
             landing.publish(tmp_path, "events", publication, parquet_convert(duckdb, rows), acquisitions=[original])
+
+
+def test_range_bounds_may_mix_local_and_offset_date_times(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    original = acquisition(tmp_path)
+    rows = ("SELECT * FROM (VALUES (TIMESTAMP '2024-01-01 00:30', TIMESTAMPTZ '2024-01-01 00:30:00+00:00')) "
+            "AS t(ts, tz)")
+    # The max reads earlier than the min on the wall clock but is 01:00 UTC, after the local min.
+    bounds = "{ min = 2024-01-01T00:00:00, max = 2023-12-31T20:00:00-05:00 }"
+    declare(tmp_path, f"[datasets.events.checks]\nrange = {{ ts = {bounds}, tz = {bounds} }}\n")
+    final = landing.publish(tmp_path, "events", "v1", parquet_convert(duckdb, rows), acquisitions=[original])
+    checks = json.loads((final / "publication.json").read_text())["checks"]
+    assert [(check["name"], check["outcome"]) for check in checks] == [("range:ts", "pass"), ("range:tz", "pass")]
+    declare(tmp_path, "[datasets.events.checks]\n"
+                      "range = { ts = { min = 2024-01-01T00:31:00Z, max = 2024-01-02T00:00:00 } }\n")
+    with pytest.raises(landing.ChecksFailed, match=r"range:ts \(1 of 1 rows fall outside"):
+        landing.publish(tmp_path, "events", "v2", parquet_convert(duckdb, rows), acquisitions=[original])
 
 
 def test_unreadable_or_missing_parquet_fails_every_declared_check(tmp_path):
