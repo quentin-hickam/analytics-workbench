@@ -36,6 +36,9 @@
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
 # test_producing_paths_follow_the_result: run.py, the result's queries, other investigation code, src/ minus awb.py, provenance.py and packaging/, plus code_paths; other results' queries and the excluded helpers never stale it.
 # test_settings_fall_back_to_tomli: without tomllib, settings parse through tomli, and without either the content is unknown.
+# test_record_evidence_copies_question_and_inputs_verbatim: the settings question and inputs land in the evidence unchanged, and editing the question stales only the settings comparison.
+# test_record_evidence_refuses_a_result_without_its_question: a missing, blank, or multi-line question, or inputs that are not a list of names, raise and write no evidence.
+# test_run_template_refuses_results_without_a_question: run.py exits 2 naming every wanted result that lacks a question, before opening a session or writing anything; without duckdb.
 # test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: prior_result checks the state before unlink; the run.py template records a result and writes its state.md row, keeps it on an identical rerun, and refuses before touching evidence when state.md is missing or drifts; a run failing after the table is rewritten leaves no evidence.
 
 import hashlib
@@ -72,7 +75,8 @@ def write(root, path, content):
     target.write_bytes(content)
 
 
-SETTINGS = b"[parameters]\nthreshold = 5\n\n[results.r1]\n\n[results.r2]\n"
+SETTINGS = (b'[parameters]\nthreshold = 5\n\n[results.r1]\nquestion = "How many orders cleared the threshold?"\n\n'
+            b'[results.r2]\nquestion = "Which regions grew?"\n')
 
 
 @pytest.fixture
@@ -124,7 +128,7 @@ def test_record_evidence_records_clean_producing_state(project):
     raw = path.read_text()
     evidence = json.loads(raw)
     assert list(evidence) == [
-        "schema", "investigation", "result_id", "recorded_at", "producing_commit",
+        "schema", "investigation", "result_id", "question", "inputs", "recorded_at", "producing_commit",
         "producing_paths", "producing_uncommitted_changes", "views", "publications",
         "acquisitions", "settings", "runtime", "checks", "notes",
     ]
@@ -136,7 +140,9 @@ def test_record_evidence_records_clean_producing_state(project):
     assert evidence["views"][0]["publications"] == ["data/parquet/orders/p1"]
     assert evidence["checks"] == CHECKS
     assert evidence["settings"]["result"] == "r1"
-    assert evidence["settings"]["content"] == {"parameters": {"threshold": 5}, "results": {"r1": {}}}
+    assert evidence["settings"]["content"] == {
+        "parameters": {"threshold": 5}, "results": {"r1": {"question": "How many orders cleared the threshold?"}}}
+    assert (evidence["question"], evidence["inputs"]) == ("How many orders cleared the threshold?", [])
     assert evidence["publications"][0]["files"] == [{"path": "part-0.parquet", "bytes": 13,
         "sha256": hashlib.sha256(b"parquet bytes").hexdigest()}]
     assert evidence["acquisitions"][0]["status"] == "complete"
@@ -202,7 +208,8 @@ def test_compare_evidence_names_changed_setting(project):
     assert "parameters" in settings["detail"]
 
 
-SCOPED = (b'[parameters]\nstart = 2026-01-01\n\n[results.r1]\nqueries = ["queries/r1.sql"]\n'
+SCOPED = (b'[parameters]\nstart = 2026-01-01\n\n[results.r1]\nquestion = "How many orders each month?"\n'
+          b'queries = ["queries/r1.sql"]\n'
           b'[results.r1.validation]\nrequired_columns = ["month"]\n')
 
 
@@ -352,6 +359,7 @@ def test_compare_evidence_resolves_landing_helper_layout(project):
         "converted_at": "2026-10-07T00:00:02+00:00",
         "files": [{"path": name, "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
                   for name, content in sorted(parts.items())],
+        "checks": [],
         "notes": None,
     }
     write(project, "data/raw/crm/a2/provenance.json", (json.dumps(landed_provenance, indent=2) + "\n").encode())
@@ -511,6 +519,40 @@ def test_record_evidence_requires_the_results_table(project, settings, reason):
     assert not (project / "investigations/inv/evidence/r1.json").exists()
 
 
+QUESTION = "Did returns rise after the \u201cspring\u201d price change: yes or no?  "
+
+
+def test_record_evidence_copies_question_and_inputs_verbatim(project):
+    write(project, "investigations/inv/settings.toml", SETTINGS.replace(
+        b'question = "How many orders cleared the threshold?"',
+        f'question = "{QUESTION}"\ninputs = ["orders", "regions_view"]'.encode()))
+    path = record(project)
+    evidence = json.loads(path.read_text())
+    assert (evidence["question"], evidence["inputs"]) == (QUESTION, ["orders", "regions_view"])
+    assert evidence["settings"]["content"]["results"]["r1"]["question"] == QUESTION
+    text = (project / "investigations/inv/settings.toml").read_text()
+    write(project, "investigations/inv/settings.toml", text.replace("spring", "summer").encode())
+    comparisons = provenance.compare_evidence(project, path)
+    assert [c["outcome"] for c in comparisons] == ["pass"] * 4 + ["fail"]
+    assert "results.r1" in comparisons[4]["detail"]
+
+
+@pytest.mark.parametrize("table, problem", [
+    (b"", "[results.r1] has no question; add question = "),
+    (b'question = "   "\n', "[results.r1] has no question"),
+    (b'question = 5\n', "[results.r1] has no question"),
+    (b'question = """How many\norders?"""\n', "[results.r1] question spans several lines"),
+    (b'question = "How many?"\ninputs = "orders"\n', "[results.r1] inputs must be a list of dataset or view names"),
+    (b'question = "How many?"\ninputs = ["orders", ""]\n', "[results.r1] inputs must be a list"),
+])
+def test_record_evidence_refuses_a_result_without_its_question(project, table, problem):
+    write(project, "investigations/inv/settings.toml", b"[parameters]\nthreshold = 5\n\n[results.r1]\n" + table)
+    with pytest.raises(ValueError, match="investigations/inv/settings.toml: ") as error:
+        record(project)
+    assert problem in str(error.value)
+    assert not (project / "investigations/inv/evidence/r1.json").exists()
+
+
 def test_producing_paths_follow_the_result(project):
     write(project, "investigations/inv/lib.py", b"y = 1\n")
     for path in ("src/awb.py", "src/provenance.py", "src/packaging/draft.py"):
@@ -542,6 +584,28 @@ def test_settings_fall_back_to_tomli(project, monkeypatch):
     assert "install tomli" in content["unknown"]
 
 
+def test_run_template_refuses_results_without_a_question(project):
+    assets = ASSET.parent
+    write(project, "src/provenance.py", (assets / "awb_provenance.py").read_bytes())
+    # Stand-ins for the duckdb and pandas helpers: opening a session would leave a marker.
+    write(project, "src/exploration/validate.py", b"profile = validate = None\n")
+    write(project, "src/preparation/landing.py",
+          b"from pathlib import Path\n\ndef session(root):\n    Path(root, 'opened').touch()\n    raise SystemExit(9)\n")
+    write(project, "investigations/inv/run.py", (assets / "workbench/investigation/run.py").read_bytes())
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS + b'\n[results.r3]\n\n[results.r4]\nquestion = "Two\\nlines?"\n')
+    run = [sys.executable, str(project / "investigations/inv/run.py")]
+    for argv, named in (([], ["r3", "r4"]), (["r1", "r3"], ["r3"])):
+        done = subprocess.run(run + argv, capture_output=True, text=True)
+        assert (done.returncode, done.stdout) == (2, "")
+        assert [line.split("]")[0] for line in done.stderr.splitlines()] == [
+            f"settings.toml: [results.{r}" for r in named]
+    assert "[results.r3] has no question" in done.stderr
+    assert not any((project / p).exists() for p in ("opened", "investigations/inv/results", "investigations/inv/evidence"))
+    done = subprocess.run(run + ["r1"], capture_output=True, text=True)
+    assert done.returncode == 9 and (project / "opened").exists()  # a result with its question runs
+
+
 def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(project):
     pytest.importorskip("duckdb")
     pytest.importorskip("pandas")
@@ -559,6 +623,7 @@ def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(p
     assert (line["state"], line["status"]) == ("added", "provisional") and "state_row" not in line
     assert list(provenance.finding_rows(project / "investigations/inv/state.md")) == ["r1"]
     evidence = json.loads((project / line["evidence"]).read_text())
+    assert evidence["question"] == "How many orders cleared the threshold?"
     assert "investigations/inv/queries/r1.sql" in evidence["producing_paths"]
     assert evidence["views"][0]["path"] == "foundation/views/orders.sql"
     state = (project / "investigations/inv/state.md").read_bytes()

@@ -5,6 +5,7 @@
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten, revised_at stamped only when it changes, other manifest fields kept; nothing is written outside the draft.
 # test_evidence_older_than_scoped_3_is_reported_for_rerun: check-draft and export --result refuse awb-evidence/1 and unscoped /3 with a rerun instruction.
 # test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
+# test_check_draft_requires_each_question_in_methodology: export's questions pass once methodology repeats them; a question methodology lacks or rewords, a results entry without a question, and a manifest without results fail check-draft's questions, and release refuses on the check.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
 # test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
@@ -54,10 +55,14 @@ CREATE OR REPLACE VIEW orders_view AS
 WITH recent AS (SELECT * FROM read_parquet('data/parquet/orders/p1/*.parquet'))
 SELECT r.*, EXTRACT(year FROM r.ordered_at) AS y FROM recent r JOIN main.regions_table g USING (region);
 """
-SETTINGS = b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n[results.r-001]\n\n[results.r-002]\n"
+SETTINGS = (b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n"
+            b'[results.r-001]\nquestion = "How many claims closed late?"\n\n'
+            b'[results.r-002]\nquestion = "Which regions close claims late?"\n')
 STALE_SETTINGS = SETTINGS.replace(b"minimum_count = 5", b"minimum_count = 6")
 FINDINGS = "# Order quality\n\n### Late orders rose in the west\n\n**Chart 1.** Bar: late share by region\n"
-METHODOLOGY = "# Methodology\n\n## Findings\n\n### Late orders rose in the west\n"
+QUESTIONS = {"r-001": "How many claims closed late?", "r-002": "Which regions close claims late?"}
+METHODOLOGY = ("# Methodology\n\n## Findings\n\n### Late orders rose in the west\n\n"
+               "Question (r-001): How many claims closed late?\nQuestion (r-002): Which regions close\nclaims late?\n")
 STATE = """# Current investigation state
 
 Last updated: 2026-10-01
@@ -148,7 +153,9 @@ def project(tmp_path):
     write(draft, "charts/chart-1.csv", "Region,Late (%)\nWest,21\n")
     write(draft, "manifest.json", json.dumps({
         "investigation": "inv", "package": "pkg", "status": "draft",
-        "revalidation_flags": "none", "inventory": []}))
+        "revalidation_flags": "none", "inventory": [],
+        "results": [{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json", "question": q}
+                    for r, q in QUESTIONS.items()]}))
     return tmp_path
 
 
@@ -181,7 +188,8 @@ def test_toml_keys_fall_back_to_tomli_then_key_lines(project, monkeypatch):
     monkeypatch.setitem(sys.modules, "tomllib", None)
     monkeypatch.setitem(sys.modules, "tomli", tomllib)
     assert draft._toml_keys(text) == {"parameters", "parameters.minimum_count", "parameters.start",
-                                      "results", "results.r-001", "results.r-002"}
+                                      "results", "results.r-001", "results.r-001.question",
+                                      "results.r-002", "results.r-002.question"}
     monkeypatch.setitem(sys.modules, "tomli", None)
     assert {"parameters", "results.r-001", "minimum_count"} <= draft._toml_keys(text)
     write(project, "foundation/display.toml", "[columns]\n")
@@ -193,6 +201,7 @@ def test_check_draft_rewrites_inventory_and_passes(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["passed"] and "record" not in report
     assert (report["findings"], report["charts"], report["verify"], report["errors"]) == ([], [], [], [])
+    assert report["questions"] == []  # r-002's question is wrapped across two lines and still matches
     assert report["inventory"] == {"rows": 4, "source": "rewritten"}
     record = manifest(project)
     assert [row["path"] for row in record["inventory"]] == [
@@ -226,6 +235,46 @@ def test_check_draft_reports_each_helper_problem(project, capsys):
     assert report["names_problems"] == [
         "no settings found: investigations/inv/settings.toml is absent and no evidence records a settings file"]
     assert report["verify"] == []
+
+
+def set_results(project, results):
+    path = project / "deliveries/inv/pkg/draft/manifest.json"
+    record = json.loads(path.read_text())
+    if results is None:
+        record.pop("results")
+    else:
+        record["results"] = results
+    path.write_text(json.dumps(record))
+
+
+def test_check_draft_requires_each_question_in_methodology(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    write(draft, "methodology.md", METHODOLOGY.split("Question (r-002)")[0])
+    code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001")
+    assert code == 0 and report["questions"] == {"r-001": QUESTIONS["r-001"]}
+    assert run(project, capsys, "check-draft", "inv", "pkg")[1]["passed"]
+    assert run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")[1]["written"]
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and not report["passed"] and report["questions"] == [
+        {"result_id": "r-002", "question": QUESTIONS["r-002"],
+         "problem": "methodology.md does not repeat this question verbatim"}]
+    write(draft, "methodology.md", METHODOLOGY.replace("Which regions close", "Which regions closed"))
+    assert run(project, capsys, "check-draft", "inv", "pkg")[1]["questions"][0]["result_id"] == "r-002"
+    write(draft, "methodology.md", METHODOLOGY)
+    run(project, capsys, "check-draft", "inv", "pkg")
+    no_question = "the manifest records no question for this result; run export, or copy its question " \
+                  "from settings into a hand-added entry"
+    for results, problems in (
+            ([{"result_id": "r-001", "evidence": "investigations/inv/evidence/r-001.json"}],
+             [{"result_id": "r-001", "problem": no_question}]),
+            ([{"result_id": "r-001", "question": {"unknown": "evidence lacks question"}}],
+             [{"result_id": "r-001", "problem": no_question}]),
+            (None, [{"result_id": None, "problem": "the manifest records no results list; run export"}])):
+        set_results(project, results)
+        code, report = run(project, capsys, "release", "inv", "pkg")
+        assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
+        assert report["check"]["questions"] == problems
+    assert not (project / "deliveries/inv/pkg/released").exists()
 
 
 def set_flags(project, flags):
@@ -331,11 +380,13 @@ def test_export_results_records_provenance_only(project, capsys):
         (["r-002"], {"minimum_count": 5, "start": "2026-01-01"})]
     assert record["packaging_commit"] == head and record["packaging_uncommitted_changes"] == "none"
     assert record["export_checks"] == "none" and "charts" not in record and "dataset_selection" not in record
-    # A result represented without serialization is still listed with its evidence, for status.
+    # A result represented without serialization is still listed with its evidence, for status, the
+    # question its evidence recorded, verbatim, for methodology.md, and the runtime it recorded.
     assert record["results"] == [
-        {"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json",
+        {"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json", "question": QUESTIONS[r],
          "runtime": json.loads((project / f"investigations/inv/evidence/{r}.json").read_text())["runtime"]}
         for r in ("r-001", "r-002")]
+    assert report["questions"] == QUESTIONS
     assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes() == chart
 
 
