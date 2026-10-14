@@ -302,7 +302,9 @@ def _option_values(line):
 
 
 def _reference_name(requirement, editable=False):
-    """The package a requirement or direct reference names, or None; see requirement_name()."""
+    """(package, conflict): the package a requirement or direct reference names, or None; and the
+    #egg= name of a wheel or sdist whose file name names another package, else None. See
+    requirement_name()."""
     url = _is_url(requirement)
     # pip ends a URL's marker only at "; ", so a ";" inside the URL stays part of it.
     reference = requirement.split("; " if url else ";")[0].strip()
@@ -312,26 +314,29 @@ def _reference_name(requirement, editable=False):
     # A bare archive file name, such as pkg-1.0-py3-none-any.whl, is a path, not a name.
     if match and not url and not editable and not (match.end() == len(reference)
                                                     and reference.lower().endswith(_ARCHIVES)):
-        return _package(match[1])
+        return _package(match[1]), None
     egg = re.search(r"[#&]egg=([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)", reference)
-    if egg:
-        return _package(egg[1])
+    egg = _package(egg[1]) if egg else None
     if url:  # The URL path's last segment, percent-decoded, as pip names a link's file.
         archive = urllib.parse.unquote(urllib.parse.urlsplit(reference).path.rstrip("/").rsplit("/", 1)[-1])
     else:
         archive = re.split(r"[/\\]", reference.split("#")[0].split("?")[0].rstrip("/\\"))[-1]
-    lower = archive.lower()
+    lower, name = archive.lower(), None
     if lower.endswith(".whl"):
-        return _package(archive.split("-")[0]) if "-" in archive else None
-    for suffix in _ARCHIVES:
-        if lower.endswith(suffix) and "-" in archive:
-            return _package(archive[:-len(suffix)].rsplit("-", 1)[0])
-    return None
+        name = _package(archive.split("-")[0]) if "-" in archive else None
+    else:
+        suffix = next((s for s in _ARCHIVES if lower.endswith(s)), None)
+        name = _package(archive[:-len(suffix)].rsplit("-", 1)[0]) if suffix and "-" in archive else None
+    if name is None:
+        return egg, None
+    # The file name wins, as pip installs what the archive is; a disagreeing #egg= is a conflict.
+    return name, egg if egg not in (None, name) else None
 
 
 def _read_line(line):
-    """What one requirements line holds: ("name", package), ("include", path), ("none", None) for a
-    blank line, a comment, or an option line that installs nothing, or ("unread", None)."""
+    """What one requirements line holds: ("name", package), ("conflict", (package, egg name)) for an
+    archive whose #egg= names another package, ("include", path), ("none", None) for a blank line,
+    a comment, or an option line that installs nothing, or ("unread", None)."""
     line = _COMMENT.sub("", line).strip().rstrip("\\").strip()
     if not line:
         return "none", None
@@ -340,13 +345,17 @@ def _read_line(line):
         if options is None:
             return "unread", None
         if "editable" in options:  # pip installs the first -e on a line and ignores its -r.
-            name = _reference_name(options["editable"][0], editable=True)
-            return ("name", name) if name else ("unread", None)
+            return _named(*_reference_name(options["editable"][0], editable=True))
         if "include" in options:
             return "include", options["include"][0]
         return "none", None
     # Per-requirement options, such as --hash, follow the requirement.
-    name = _reference_name(re.split(r"\s+-", line, maxsplit=1)[0])
+    return _named(*_reference_name(re.split(r"\s+-", line, maxsplit=1)[0]))
+
+
+def _named(name, conflict):
+    if conflict:
+        return "conflict", (name, conflict)
     return ("name", name) if name else ("unread", None)
 
 
@@ -354,9 +363,11 @@ def requirement_name(line):
     """The normalized package name a requirements.txt line installs, or None when it names none.
 
     A name with optional extras, versions, markers, or `@ URL` gives that name. A direct reference,
-    alone or after -e, gives its #egg= name or its wheel or sdist file name's package (a POSIX or
-    Windows path, or a URL, whose path is percent-decoded and may hold a ";"; with or without
-    trailing [extras]). Option values are read with shell quoting, as pip reads them, and -e takes
+    alone or after -e, gives its wheel or sdist file name's package (a POSIX or Windows path, or a
+    URL, whose path is percent-decoded and may hold a ";"; with or without trailing [extras]), else
+    its #egg= name. When an archive's #egg= names another package, the file name's package is
+    given, as pip installs what the archive is, and read_requirements() also lists the line as
+    unread. Option values are read with shell quoting, as pip reads them, and -e takes
     its value attached (-eVALUE), after a space, or after = (--editable=VALUE). Per-requirement
     options after the requirement, such as --hash, and a trailing line-continuation backslash are
     ignored. read_requirements() reads a whole file through this function and returns every
@@ -367,12 +378,13 @@ def requirement_name(line):
     - A direct reference is named only by #egg= or a name-version file name; pip builds it to learn
       the name. A local directory or a VCS URL without #egg= is unread, and an archive whose file
       name is not name-version gives a wrong name: a forge tag archive such as
-      .../archive/refs/tags/release-1.0.tar.gz gives `release`.
+      .../archive/refs/tags/release-1.0.tar.gz gives `release`, and with an #egg= naming another
+      package it is a conflict; NAME @ URL names it.
     - A requirement is named whether or not its marker matches this interpreter.
     - Options are matched by their full names, so an abbreviated long option pip would accept is unread.
     """
     kind, value = _read_line(line)
-    return value if kind == "name" else None
+    return value if kind == "name" else value[0] if kind == "conflict" else None
 
 
 # Byte order marks pip honours when it reads a requirements file; UTF-32 LE starts like UTF-16 LE.
@@ -403,9 +415,10 @@ def read_requirements(path) -> tuple[list[str], list[str]]:
     with those of each file it includes by -r or --requirement (a path relative to the including
     file, read once); and each line it cannot read, as "<file>:<line>: <text>", which is every
     non-blank, non-comment line requirement_name() cannot name other than an option line installing
-    nothing, and every include that cannot be read, with the reason in parentheses. An absent file
-    gives neither; one that exists but cannot be read is unread as "<file> (<reason>)". Lines
-    continued by a backslash are joined. -c constraint files declare no package and are not read.
+    nothing, and, with the reason in parentheses, every include that cannot be read and every
+    archive whose #egg= names another package than its file name (declared by the file name). An
+    absent file gives neither; one that exists but cannot be read is unread as "<file> (<reason>)".
+    Lines continued by a backslash are joined. -c constraint files declare no package and are not read.
     A BOM-marked UTF-8, UTF-16, or UTF-32 file is decoded by its mark; one without a BOM is read as
     UTF-8 (pip falls back to a coding line or the locale encoding). An include that is a URL is not
     fetched, and environment variables are not expanded, so either include is unread.
@@ -430,6 +443,9 @@ def read_requirements(path) -> tuple[list[str], list[str]]:
             entry = f"{label}:{number}: {_COMMENT.sub('', line).strip()}"
             if kind == "name":
                 names.append(value)
+            elif kind == "conflict":
+                names.append(value[0])
+                unread.append(f"{entry} (#egg={value[1]} disagrees with the file name; recorded {value[0]})")
             elif kind == "unread":
                 unread.append(entry)
             elif kind == "include" and _is_url(value):

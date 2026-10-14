@@ -26,9 +26,9 @@
 # test_finding_row_reuses_state_text_and_names_check_gaps: the row keeps existing finding text, escapes pipes, names failed and unassessed checks.
 # test_cli_stale_lists_changed_results_with_their_findings: stale lists failing results with state.md rows, missing linked evidence, skips non-evidence JSON, rejects an unknown investigation.
 # test_record_evidence_records_runtime: the runtime block holds this interpreter's Python and platform, the versions of duckdb, pandas, and each requirements.txt name, null when not installed, and the requirements lines it could not read.
-# test_requirement_name_reads_names_and_direct_references: every line the review rounds 1-4 probed: names with extras, versions, markers, or @ URL; #egg= and wheel or sdist file names of direct references (URL, percent-encoded or holding a ";", POSIX or Windows path), -e included, attached, quoted, or after =, with or without trailing extras, with trailing --hash or other per-requirement options and a continuation backslash ignored; options, comments, and references naming no package give none.
+# test_requirement_name_reads_names_and_direct_references: every line the review rounds 1-5 probed: names with extras, versions, markers, or @ URL; wheel or sdist file names, winning over a disagreeing #egg=, and #egg= of other direct references (URL, percent-encoded or holding a ";", POSIX or Windows path), -e included, attached, quoted, or after =, with or without trailing extras, with trailing --hash or other per-requirement options and a continuation backslash ignored; options, comments, and references naming no package give none.
 # test_read_requirements_follows_includes_and_byte_order_marks: -r and --requirement includes, quoted or not, are read relative to the including file, once each; -c constraints add nothing; a UTF-8, UTF-16 or UTF-32 BOM is decoded; a URL include and a missing include are unread, an absent file is neither.
-# test_read_requirements_lists_every_line_it_cannot_read: each line naming no package, an unknown or malformed option, an unbalanced quote, and an unreadable file are unread with file and line; recognised option lines are not; continued lines are joined.
+# test_read_requirements_lists_every_line_it_cannot_read: each line naming no package, an unknown or malformed option, an unbalanced quote, an archive whose #egg= disagrees with its file name (declared by the file name), and an unreadable file are unread with file and line; recognised option lines are not; continued lines are joined.
 # test_runtime_records_a_wheel_url_package_and_its_drift: a requirements.txt wheel URL or path, hash-pinned or with extras, continued or not, percent-encoded or holding a ";", a compact -e, and a quoted include record their package's installed version, and a changed recorded version is a runtime mismatch.
 # test_runtime_records_missing_version_metadata_as_unknown: an installed distribution whose metadata has no Version is unknown, not null (not installed).
 # test_cli_stale_reports_runtime_mismatch_as_a_warning: a changed recorded duckdb or Python version, an unread requirements line, or no runtime block, is listed under runtime_mismatches with its findings rows, never under results, and compare_evidence still passes.
@@ -657,8 +657,17 @@ def test_requirement_name_reads_names_and_direct_references():
         "./dist/requests-2.32.3-py3-none-any.whl[security]": "requests",
         "./dist/requests-2.32.3.tar.gz[security]": "requests",
         f"./dist/requests-2.32.3-py3-none-any.whl[security] {digest}": "requests",
+        # Round 5: an archive's file name wins over an #egg= naming another package, as pip installs
+        # what the archive is; a matching #egg= or one on a non-archive reference is read as before.
+        "https://example.invalid/requests-2.32.3-py3-none-any.whl#egg=urllib3": "requests",
+        "https://example.invalid/requests-2.32.3-py3-none-any.whl#egg=Requests": "requests",
+        "./dist/requests-2.32.3.tar.gz#egg=urllib3": "requests",
+        "-e ./dist/requests-2.32.3.tar.gz#egg=urllib3": "requests",
+        "https://example.invalid/o/r/archive/main.zip#egg=foo": "foo",
         # A limit requirement_name() documents: a forge tag archive's file name is not name-version.
         "https://example.invalid/o/r/archive/refs/tags/release-1.0.tar.gz": "release",
+        "https://example.invalid/o/r/archive/refs/tags/release-1.0.tar.gz#egg=foo": "release",
+        "foo @ https://example.invalid/o/r/archive/refs/tags/release-1.0.tar.gz": "foo",
         # References naming no package, option lines, continued hashes, and comments.
         "src/mypkg": None, "-e .": None, "-e ./local": None, "git+https://example.invalid/r.git": None,
         "https://example.invalid/x/foo.whl": None, "jaraco.zip": None,
@@ -698,14 +707,17 @@ def test_read_requirements_lists_every_line_it_cannot_read(project):
         "-e .\nsrc/mypkg\ngit+https://example.invalid/r.git\n--unknown-option x\n-r \"unbalanced.txt\n"
         "\"requests\"\n-e\n--pre=1\n"
         "pkg==1.0 \\\n    --hash=sha256:ab\n-r deps/inner.txt\n").encode())
-    write(project, "deps/inner.txt", b"named\n./local/dir\n")
+    write(project, "deps/inner.txt", b"named\n./local/dir\n"
+                                     b"https://example.invalid/requests-2.32.3-py3-none-any.whl#egg=urllib3\n")
     names, unread = provenance.read_requirements(project / "requirements.txt")
-    assert names == ["pkg", "named"]
+    assert names == ["pkg", "named", "requests"]
     assert unread == [
         "requirements.txt:7: -e .", "requirements.txt:8: src/mypkg",
         "requirements.txt:9: git+https://example.invalid/r.git", "requirements.txt:10: --unknown-option x",
         'requirements.txt:11: -r "unbalanced.txt', 'requirements.txt:12: "requests"',
-        "requirements.txt:13: -e", "requirements.txt:14: --pre=1", "deps/inner.txt:2: ./local/dir"]
+        "requirements.txt:13: -e", "requirements.txt:14: --pre=1", "deps/inner.txt:2: ./local/dir",
+        "deps/inner.txt:3: https://example.invalid/requests-2.32.3-py3-none-any.whl#egg=urllib3 "
+        "(#egg=urllib3 disagrees with the file name; recorded requests)"]
     if sys.platform != "win32" and getattr(os, "geteuid", lambda: 1)() != 0:
         (project / "requirements.txt").chmod(0)
         try:
