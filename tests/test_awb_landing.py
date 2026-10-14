@@ -30,7 +30,7 @@
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
 # test_gitignore_template_tracks_env_example: in a fresh repository with the template .gitignore, .env.example is tracked while .env and .env.local stay ignored.
-# test_repair_check_ignore_catches_a_misplaced_env_example_exception: repair's check-ignore command prints .env and .env.local but not .env.example for the template, and also .env.example when !.env.example precedes .env.*; repair asks before re-adding a dropped rule.
+# test_repair_check_ignore_follows_the_env_rules_the_project_keeps: repair's check-ignore command agrees with each kept .env rule for the template and for each declined restoration of .env, .env.*, or !.env.example, and disagrees when !.env.example precedes .env.*; repair asks before re-adding a dropped rule and reports each one kept dropped.
 # test_guides_state_the_credentials_convention: the data guide and landing reference state where credentials live, where they never go, that records name the variable, and that land() records request and notes unchecked.
 
 import hashlib
@@ -668,20 +668,31 @@ def test_gitignore_template_tracks_env_example(tmp_path):
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
-def test_repair_check_ignore_catches_a_misplaced_env_example_exception(tmp_path):
+def test_repair_check_ignore_follows_the_env_rules_the_project_keeps(tmp_path):
     repair = (ASSET.parents[1] / "references/repair.md").read_text(encoding="utf-8")
-    command = re.search(r"run `(git check-ignore --no-index [^`]+)`: it must print `\.env` and "
-                        r"`\.env\.local` but not `\.env\.example`", repair).group(1)
-    assert "ask before re-adding it" in repair
-    assert "step 3's `git check-ignore` prints `.env` and `.env.local` but not `.env.example`" in repair
+    command = re.search(r"run `(git check-ignore --no-index [^`]+)`\. Its output must agree with each of "
+                        r"these rules the project keeps: ", repair).group(1)
+    assert "ask before re-adding it, and report each rule the user keeps dropped as an exception" in repair
+    assert "step 3's `git check-ignore` output agrees with each `.env` rule the project keeps" in repair
+    # Each kept rule: the file it decides, and whether the check must print that file.
+    rules = {".env": (".env", True), ".env.*": (".env.local", True), "!.env.example": (".env.example", False)}
+    for rule, (name, printed) in rules.items():
+        assert f"{'prints' if printed else 'omits'} `{name}` if the `{rule}` rule is kept" in repair
     template = (WORKBENCH / ".gitignore").read_text(encoding="utf-8").splitlines()
     misplaced = ["!.env.example"] + [line for line in template if line != "!.env.example"]
-    for lines, expected in ((template, [".env", ".env.local"]),
-                            (misplaced, [".env.example", ".env", ".env.local"])):
+    layouts = [(template, [".env", ".env.local"], True),
+               (misplaced, [".env.example", ".env", ".env.local"], False)]
+    # A restoration the user declines leaves that rule out; the check still passes on the rest.
+    for dropped, expected in ((".env.*", [".env"]), ("!.env.example", [".env.example", ".env", ".env.local"]),
+                              (".env", [".env.local"])):
+        layouts.append(([line for line in template if line != dropped], expected, True))
+    for lines, expected, done in layouts:
         subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
         (tmp_path / ".gitignore").write_text("\n".join(lines) + "\n", encoding="utf-8")
-        printed = subprocess.run(shlex.split(command), cwd=tmp_path, capture_output=True, text=True)
-        assert printed.stdout.splitlines() == expected
+        output = subprocess.run(shlex.split(command), cwd=tmp_path, capture_output=True, text=True)
+        assert output.stdout.splitlines() == expected
+        agrees = all((name in expected) == printed for rule, (name, printed) in rules.items() if rule in lines)
+        assert agrees == done
 
 
 def test_guides_state_the_credentials_convention():
