@@ -17,7 +17,7 @@
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
-# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by one of the two forms foundation/sources.md defines, a link in its stated grammar or a backticked location with its sha256, in plain text outside code, HTML, links and brackets; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
+# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by one of the two forms foundation/sources.md defines, a link in its stated grammar or a backticked location with its sha256, in plain text outside code, HTML, emphasis, strikethrough, links and brackets; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
 # test_absent_project_and_unsafe_active_pointer: a missing project is not a workbench; an unsafe pointer is an uncertainty.
 # test_standard_active_state_pointer: link, path, and backticked pointer forms resolve to the investigation.
 # test_other_state_reader_stops_before_conclusions: another investigation's state is read only up to its first section.
@@ -295,7 +295,7 @@ def test_acquisitions_and_storage_risks(workbench):
 
 SHA = "ab12" * 16
 # Notes probes for the two reference forms foundation/sources.md defines: (source ID, Notes, whether
-# it counts as a reference, where the probe came from). Every reviewer probe from PR 38 rounds 1-5
+# it counts as a reference, where the probe came from). Every reviewer probe from PR 38 rounds 1-6
 # is a row, in both directions; rows marked "limit" pin Markdown that renders as a reference but is
 # outside the grammar foundation/sources.md states, or what a syntax-only check cannot tell apart.
 REFERENCE_PROBES = [
@@ -327,7 +327,9 @@ REFERENCE_PROBES = [
     ("link-in-code", "reference: `[codebook](references/link-in-code/codebook.pdf)`", False, "worker r3"),
     ("link-titled", 'reference: [codebook](references/link-titled/codebook.pdf "Codebook")', False, "limit: link titles are not read"),
     ("link-placeholder", "reference: [none](none)", True, "limit: syntax only"),
-    # What the label sits in: a clause counts only in plain text, outside code, HTML, links and brackets.
+    ("link-empty-text", "reference: [](references/link-empty-text/manual.pdf)", False, "Opus r6 #1; limit: link text is not empty"),
+    # What the label sits in: a clause counts only in plain text, outside code, HTML, emphasis,
+    # strikethrough, links and brackets.
     ("code-span-after", "Owner `HR`; reference: [codebook](references/code-span-after/codebook.pdf)", True, "worker r5"),
     ("code-span-label", "No reference kept. Attempted note: `status pending; reference: [manual](references/code-span-label/manual.pdf)`", False, "Codex r5 #2"),
     ("code-span-double", "``draft; reference: [manual](references/code-span-double/manual.pdf)``", False, "worker r5"),
@@ -335,6 +337,18 @@ REFERENCE_PROBES = [
     ("code-span-after-escape", "\\`a` b; reference: [manual](references/code-span-after-escape/manual.pdf)`", False, "worker r5"),
     ("html-attribute", "<span title='draft; reference: [manual](references/html-attribute/manual.pdf)'>x</span>", False, "worker r5"),
     ("html-comment", "<!-- draft; reference: [manual](references/html-comment/manual.pdf) -->", False, "worker r5"),
+    ("html-code", "<code>draft; reference: [manual](references/html-code/manual.pdf)</code>", False, "Codex r6 #1"),
+    ("html-hidden", "<span hidden>draft; reference: [manual](references/html-hidden/manual.pdf)</span>", False, "Codex r6 #1"),
+    ("html-del", "<del>old; reference: [manual](references/html-del/manual.pdf)</del>", False, "Opus r6 closure"),
+    ("html-before", "<b>Owner</b>; reference: [manual](references/html-before/manual.pdf)", False, "worker r6; limit: reading stops at raw HTML other than <br>"),
+    ("strikethrough", "~~old note; reference: [manual](references/strikethrough/manual.pdf)~~", False, "Opus r6 #3"),
+    ("emphasis", "*draft; reference: [manual](references/emphasis/manual.pdf)*", False, "Opus r6 #3"),
+    ("emphasis-underscore", "_draft; reference: [manual](references/emphasis-underscore/manual.pdf)_", False, "worker r6"),
+    ("emphasis-before", "**Owner**: HR; reference: [manual](references/emphasis-before/manual.pdf)", True, "worker r6"),
+    ("emphasis-unclosed", "*draft; reference: [manual](references/emphasis-unclosed/manual.pdf)", True, "worker r6: an unclosed * is literal"),
+    ("emphasis-after", "reference: [manual](references/emphasis-after/manual.pdf); *draft*", True, "worker r6"),
+    ("emphasis-around", "**Owner**; reference: [manual](references/emphasis-around/manual.pdf). **Checked**", False, "worker r6; limit: reading stops at emphasis that may hold a bracket"),
+    ("underscore-intraword", "Owner hr_team; reference: [manual](references/hr_data/underscore-intraword.pdf)", True, "worker r6: an intraword _ opens no emphasis"),
     ("autolink-before", "Owner <https://example.org/hr>; reference: [manual](references/autolink-before/manual.pdf)", True, "worker r5"),
     ("entity-before", "AT&amp;T; reference: [manual](references/entity-before/manual.pdf)", True, "worker r5"),
     ("image-alt", "![scan; reference: [manual](references/image-alt/manual.pdf)](scan.png)", False, "worker r5"),
@@ -354,6 +368,12 @@ REFERENCE_PROBES = [
     ("kept-none-kept", f"reference: none kept, sha256 {SHA}", False, "Opus r3 closure"),
     ("kept-short", "reference: `/secure/kept-short/manual.pdf`, sha256 ab12", False, "worker r1"),
     ("kept-long", f"reference: `/secure/kept-long/manual.pdf`, sha256 {SHA}a", False, "worker r3"),
+    ("kept-letter", f"reference: `/secure/kept-letter/manual.pdf`, sha256 {SHA}g", False, "Codex r6 #2, Opus r6 #2"),
+    ("kept-suffix", f"reference: `/secure/kept-suffix/manual.pdf`, sha256 {SHA}xyz123", False, "Codex r6 #2"),
+    ("kept-underscore", f"reference: `/secure/kept-underscore/manual.pdf`, sha256 {SHA}_v2", False, "worker r6"),
+    ("kept-then-text", f"reference: `/secure/kept-then-text/manual.pdf`, sha256 {SHA}. Verified", True, "worker r6"),
+    ("kept-escape-after", f"reference: `/secure/kept-escape-after/manual.pdf`, sha256 {SHA}\\_v2", False, "worker r6 (renders an attached _)"),
+    ("kept-entity-after", f"reference: `/secure/kept-entity-after/manual.pdf`, sha256 {SHA}&#x67;", False, "worker r6 (renders an attached g)"),
     ("kept-no-sum", "reference: `/secure/kept-no-sum/manual.pdf`", False, "worker r3"),
     ("kept-no-comma", f"reference: `/secure/kept-no-comma/manual.pdf` sha256 {SHA}", False, "worker r3"),
     ("kept-placeholder", f"reference: `none`, sha256 {SHA}", True, "limit: syntax only"),

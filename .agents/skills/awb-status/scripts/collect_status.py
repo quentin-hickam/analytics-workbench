@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import string
 import subprocess
+import unicodedata
 
 DISPOSITIONS = {"none", "revalidate", "omit", "release_with_caveat"}
 BLOCKING = {"none", "revalidate"}
@@ -189,24 +190,42 @@ def collect(root):
         return basis is not None and basis.group(1).lower() == "documentation"
 
     # The two reference forms foundation/sources.md defines, exactly as it states them; any other
-    # spelling, valid Markdown or not, counts as no reference. Form 1 is `[text](destination)`: text
-    # without `[`, `]`, `\`, `<` or a backtick, then a destination in angle brackets without `<`, `>`,
+    # spelling, valid Markdown or not, counts as no reference. Form 1 is `[text](destination)`: non-empty
+    # text without `[`, `]`, `\`, `<` or a backtick, then a destination in angle brackets without `<`, `>`,
     # `\` or a line break, or a bare one without whitespace, control characters, `<` or `\` whose
     # parentheses balance at any depth. Form 2 is a location in single backticks, a comma, then
-    # `sha256` (also `SHA-256`, `sha256:`) and exactly 64 hex digits.
-    link_text = re.compile(r"\[[^\[\]\\<`]*\]\(")
+    # `sha256` (also `SHA-256`, `sha256:`) and exactly 64 hex digits with no letter, digit, `_`, `\` or `&`
+    # after, which an escape or entity could render as one.
+    link_text = re.compile(r"\[[^\[\]\\<`]+\]\(")
     angle_destination = re.compile(r"<[^<>\\\n]+>\)")
-    retained = re.compile(r"`[^`\n]*[^`\s][^`\n]*`,\s*sha-?256:?\s*[0-9a-f]{64}(?![0-9a-f])", re.I)
+    retained = re.compile(r"`[^`\n]*[^`\s][^`\n]*`,\s*sha-?256:?\s*[0-9a-f]{64}(?![0-9A-Za-z_\\&])", re.I)
     label = re.compile(r"\s*reference:\s*", re.I)
     line_break = re.compile(r"<br\s*/?>", re.I)
     entity = re.compile(r"&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
-    # Raw HTML and autolinks, which CommonMark reads before code spans and links and whose contents are
-    # not Markdown. These patterns are looser than CommonMark's and markdown-it's, and the longest match
-    # is taken, so a construct is never read shorter than a renderer reads it.
+    # Raw HTML and autolinks, which CommonMark reads before code spans and links. These patterns are
+    # looser than CommonMark's and markdown-it's: reading stops at anything that may be raw HTML other
+    # than `<br>`, and an autolink is never read shorter than a renderer reads it.
     attribute = r"""\s+[\w:.-]+(?:\s*=\s*(?:[^"'=<>`\x00-\x20]+|'[^']*'|"[^"]*"))?"""
-    angle_constructs = [re.compile(pattern, re.S) for pattern in (
+    html = [re.compile(pattern, re.S) for pattern in (
         rf"</?\w[\w-]*(?:{attribute})*\s*/?>", r"<!---?>", r"<!--.*?-->", r"<!--(?:[^-]|-[^-]|--[^>])*-->",
-        r"<\?.*?\?>", r"<!\[CDATA\[.*?\]\]>", r"<![A-Za-z][^>]*>", r"<[^<>\x00-\x20]*[:@][^<>\x00-\x20]*>")]
+        r"<\?.*?\?>", r"<!\[CDATA\[.*?\]\]>", r"<![A-Za-z][^>]*>")]
+    autolink = re.compile(r"<[^<>\x00-\x20]*[:@][^<>\x00-\x20]*>")
+
+    def flanking(notes, start, end):
+        """Whether the delimiter run notes[start:end] is left- and right-flanking, and the characters around it."""
+        before, after = notes[start - 1:start] or " ", notes[end:end + 1] or " "
+        punctuation = lambda char: char in string.punctuation or unicodedata.category(char)[0] in "PS"
+        left = not after.isspace() and (not punctuation(after) or before.isspace() or punctuation(before))
+        right = not before.isspace() and (not punctuation(before) or after.isspace() or punctuation(after))
+        return left, right, punctuation(before), punctuation(after)
+
+    def can_open(notes, start, end):
+        left, right, before, _ = flanking(notes, start, end)
+        return left and (notes[start] != "_" or not right or before)
+
+    def can_close(notes, start, end):
+        left, right, _, after = flanking(notes, start, end)
+        return right and (notes[start] != "_" or not left or after)
 
     def bare_destination(notes, start):
         """Where the link's `)` closes a bare destination starting at `start`, or None."""
@@ -236,11 +255,15 @@ def collect(root):
     def referenced(notes):
         """Whether a Notes clause in plain text opens with `reference:` directly followed by one of the two forms."""
         # Read left to right as CommonMark does. A clause opens the cell or follows `;`, `,`, `.` or a
-        # `<br>`, outside code spans, raw HTML, autolinks, links and brackets; only what directly
-        # follows the label counts, so `reference: pending. See [x](y)` records no reference. Where
-        # the reading is uncertain (a backtick, bracket or `<` inside raw HTML or an autolink, or a link
-        # whose destination this does not read), the rest of the cell counts as no reference.
+        # `<br>`, outside code spans, raw HTML, autolinks, emphasis, strikethrough, links and brackets;
+        # only what directly follows the label counts, so `reference: pending. See [x](y)` records no
+        # reference. Where a clause could sit inside an element (any raw HTML but `<br>`, or emphasis or
+        # strikethrough that may hold a backtick, bracket or `<`) or the reading is uncertain (a
+        # backtick, bracket or `<` inside an autolink, or a link whose destination this does not
+        # read), the rest of the cell counts as no reference.
         position, clause, brackets = 0, True, 0
+        last_closer = {char: max((found.span() for found in re.finditer(rf"\{char}+", notes)
+                                  if can_close(notes, *found.span())), default=(0, 0)) for char in "*_~"}
         while position < len(notes):
             labelled = clause and not brackets and label.match(notes, position)
             if labelled and (retained.match(notes, labelled.end()) or link(notes, labelled.end())):
@@ -255,12 +278,24 @@ def collect(root):
                 position = closer.end() if closer else position + len(run)
             elif char == "<":
                 broken = line_break.match(notes, position)
-                end = broken.end() if broken else max(
-                    (found.end() for pattern in angle_constructs if (found := pattern.match(notes, position))), default=None)
+                if not broken and any(pattern.match(notes, position) for pattern in html):
+                    return False  # Where the element ends, and so whether a clause is inside it, is not read.
+                linked = autolink.match(notes, position)
+                end = broken.end() if broken else linked and linked.end()
                 if end and any(inner in "`[]<" for inner in notes[position + 1:end]):
                     return False  # Renderers may split this construct differently.
                 position = end or position + 1
                 clause = bool(broken)
+            elif char in "*_~":
+                # Emphasis or strikethrough: whatever this run opens closes by the last run of the same
+                # character that can close, so the span to there is skipped, unless it may hold a clause.
+                end = re.compile(rf"\{char}+").match(notes, position).end()
+                closer_start, closer_end = last_closer[char]
+                if closer_start >= end and can_open(notes, position, end):
+                    if any(inner in "`[]<" for inner in notes[position:closer_end]):
+                        return False
+                    end = closer_end
+                position = end
             elif char == "[":
                 closed = link(notes, position)
                 brackets += closed is None
