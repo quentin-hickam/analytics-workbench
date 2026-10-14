@@ -176,9 +176,10 @@ SHAPES = {
     "types": lambda v: isinstance(v, dict) and all(isinstance(t, str) and t.strip() and ";" not in t
                                                    for t in v.values()),
     "not_null": _names,
-    "key": lambda v: _names(v) and v,
+    "key": lambda v: _names(v) and v and len(set(v)) == len(v),
     "unique": lambda v: isinstance(v, list) and all(
-        (isinstance(item, str) and item) or (_names(item) and item) for item in v),
+        (isinstance(item, str) and item) or (_names(item) and item and len(set(item)) == len(item))
+        for item in v),
     "accepted_values": lambda v: isinstance(v, dict) and all(
         isinstance(values, list) and values for values in v.values()),
     "range": lambda v: isinstance(v, dict) and all(_bounds(bounds, _number_or_date) for bounds in v.values()),
@@ -236,6 +237,11 @@ def _validated(name, entry):
     if repeated:  # such as unique = ["a,b", ["a", "b"]]; a name must identify one check
         raise ValueError(f"{where}: more than one declared check is named {', '.join(repeated)}; "
                          "declare each check once (a check's name joins its columns with commas)")
+    column_sets = [frozenset(arguments[0]) for _, kind, arguments in _planned(spec) if kind == "unique"]
+    repeated = sorted({",".join(sorted(columns)) for columns in column_sets if column_sets.count(columns) > 1})
+    if repeated:  # unique = [["a", "b"], ["b", "a"]] declares one check under two names
+        raise ValueError(f"{where}: checks.unique declares the columns {'; '.join(repeated)} more than once, "
+                         "in different orders; declare each check once")
     return spec
 
 
@@ -279,18 +285,39 @@ def _span(bounds):
 
 
 def _run_checks(directory, spec):
-    """Run spec's checks over the Parquet files under directory; return [{name, outcome, detail}]."""
+    """Run spec's checks over the Parquet files under directory; return [{name, outcome, detail}].
+
+    columns and types hold in every Parquet file, since a reader takes the first file's schema.
+    Temporal values compare in UTC. When the files cannot be read, every check fails.
+    """
     duckdb = _duckdb()
-    files = [directory / path for path in _files(directory) if path.endswith(".parquet")]
-    if not files:
-        raise ValueError("Declared checks need the publication's Parquet files; none were written")
+    planned = _planned(spec)
+
+    def unread(detail):
+        return [{"name": name, "outcome": "fail", "detail": detail} for name, _, _ in planned]
+
+    paths = [path for path in _files(directory) if path.endswith(".parquet")]
+    if not paths:
+        return unread("The publication holds no Parquet file.")
     connection = duckdb.connect()
     try:
-        connection.execute("CREATE VIEW awb_publication AS SELECT * FROM read_parquet(["
-                           + ", ".join(_literal(path) for path in files) + "])")
-        types = dict(connection.execute("SELECT column_name, column_type FROM "
-                                        "(DESCRIBE awb_publication)").fetchall())
-        rows = connection.execute("SELECT count(*) FROM awb_publication").fetchone()[0]
+        # DuckDB takes its zone from the host; a date or date-time compared with the other kind of
+        # timestamp casts through it, so pin it for an outcome that is the same on every machine.
+        connection.execute("SET TimeZone = 'UTC'")
+        schemas = []
+        for path in paths:
+            try:
+                schemas.append(dict(connection.execute(
+                    "SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_parquet("
+                    + _literal(directory / path) + "))").fetchall()))
+            except duckdb.Error as error:  # name the file and the error's kind, never DuckDB's message
+                return unread(f"{path} could not be read as Parquet ({type(error).__name__}).")
+        try:
+            connection.execute("CREATE VIEW awb_publication AS SELECT * FROM read_parquet(["
+                               + ", ".join(_literal(directory / path) for path in paths) + "])")
+            rows = connection.execute("SELECT count(*) FROM awb_publication").fetchone()[0]
+        except duckdb.Error as error:
+            return unread(f"The Parquet files could not be read together ({type(error).__name__}).")
 
         def count(condition, parameters=()):
             return connection.execute(f"SELECT count(*) FROM awb_publication WHERE {condition}",
@@ -302,7 +329,9 @@ def _run_checks(directory, spec):
                                       f"FROM awb_publication WHERE {where} GROUP BY {listed})").fetchone()[0]
 
         def columns_present(columns):
-            missing = [column for column in columns if column not in types]
+            lacking = {column: sum(column not in schema for schema in schemas) for column in columns}
+            missing = [column if files == len(schemas) else f"{column} (from {files} of {len(schemas)} Parquet files)"
+                       for column, files in lacking.items() if files]
             return f"Missing column{'s' * (len(missing) > 1)}: {', '.join(missing)}." if missing else None
 
         # Each measure returns (failure or None, pass detail); every detail is counts, never values.
@@ -317,9 +346,11 @@ def _run_checks(directory, spec):
                 expected = connection.execute(f"SELECT typeof(CAST(NULL AS {declared}))").fetchone()[0]
             except duckdb.Error:
                 return f"Declared type {declared} is not a DuckDB type.", ""
-            actual = types[column]
-            failure = None if actual == expected else f"{column} is {actual}, declared {expected}."
-            return failure, f"{column} is {actual}."
+            wrong = [schema[column] for schema in schemas if schema[column] != expected]
+            if not wrong:
+                return None, f"{column} is {expected}."
+            files = "" if len(wrong) == len(schemas) else f" in {len(wrong)} of {len(schemas)} Parquet files"
+            return f"{column} is {' or '.join(sorted(set(wrong)))}{files}, declared {expected}.", ""
 
         def measure_not_null(column):
             missing = columns_present([column])
@@ -374,7 +405,7 @@ def _run_checks(directory, spec):
                     "key": measure_key, "unique": measure_unique, "accepted_values": measure_accepted,
                     "range": measure_range, "row_count": measure_rows}
         checks = []
-        for name, kind, arguments in _planned(spec):
+        for name, kind, arguments in planned:
             try:
                 failure, detail = measures[kind](*arguments)
             except duckdb.Error as error:
@@ -435,7 +466,7 @@ def publish(project_root: str | Path, dataset: str, publication_id: str,
     _check_name(publication_id)
     root = Path(project_root)
     spec = declared_checks(root, dataset)  # a malformed declaration refuses before any output
-    if spec:
+    if _planned(spec):
         _duckdb()  # and so does a missing duckdb
     if not acquisitions:
         raise ValueError("At least one completed acquisition is required")
@@ -453,7 +484,7 @@ def publish(project_root: str | Path, dataset: str, publication_id: str,
     _refuse_existing(final, partial)
     partial.mkdir(parents=True)
     convert(partial)
-    checks = _run_checks(partial, spec) if spec else []
+    checks = _run_checks(partial, spec) if _planned(spec) else []
     if any(check["outcome"] == "fail" for check in checks):
         raise ChecksFailed(checks)
     if validate is not None:
