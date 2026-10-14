@@ -9,8 +9,8 @@ Interview the user until the investigation knows what it must answer, for whom, 
 
 ## 1. Find the investigation
 
-1. Use the project the user names, otherwise the current directory. A workbench has `src/awb.py` and `investigations/`; without them, stop and suggest `awb-init`, which sets one up and hands the question back here.
-2. Run `python3 src/awb.py state` for the active investigation's brief, state, and open ledger questions, and `python3 src/awb.py questions list --all` for its whole ledger; pass `--investigation <name>` to either for another.
+1. Use the project the user names, otherwise the current directory. A workbench has `src/awb.py`; without it, stop and suggest `awb-init`, which sets one up and hands the question back here. A workbench `awb-init` has just set up has no `investigations/` yet; the New branch creates it.
+2. Run `python3 src/awb.py state` for the active investigation's brief, state, and open ledger questions, and `python3 src/awb.py questions list --all` for its whole ledger; pass `--investigation <name>` to either for another. When `state` reports no active investigation and none holds the question, skip the ledger listing and take the New branch.
 3. Choose the branch:
    - **New**: no investigation holds this question.
    - **Sharpen**: the user wants to dig into an investigation's question or answer its open questions.
