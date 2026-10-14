@@ -7,6 +7,7 @@
 # test_check_writes_nothing: --check reports missing helpers and the absent requirements file without writing.
 # test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited; a wheel URL declares its package, not its scheme; a UTF-16 file and its quoted -r include are read, and a wheel path with extras declares its package; lines and includes the reader cannot read are listed as unread beside the status.
 # test_unreadable_requirements_are_unchecked: a requirements.txt that exists but cannot be read is unchecked, not incomplete with every package missing.
+# test_unchecked_requirements_keep_unread: when pyproject.toml cannot be parsed, for want of tomllib or as malformed TOML, the unchecked status still lists the requirements.txt lines the reader could not read.
 # test_missing_packages_get_an_install_command: a package that fails to import is reported with a pip command for this interpreter.
 # test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks; without the provenance asset an existing requirements.txt is reported unchecked, not a crash.
 # test_refuses_non_workbench_old_python_and_unreadable_receipt: none of these writes anything.
@@ -211,6 +212,18 @@ def test_unreadable_requirements_are_unchecked(project, imports_ok):
     finally:
         (project / "requirements.txt").chmod(0o644)
     assert result["requirements"] == {"path": "requirements.txt", "status": "unchecked", "packages": PACKAGES}
+
+
+def test_unchecked_requirements_keep_unread(project, imports_ok, monkeypatch):
+    (project / "requirements.txt").write_text("duckdb\n-e .\n-r missing.txt\n")
+    (project / "pyproject.toml").write_text('[project]\nname = "x"\ndependencies = ["pandas"]\n')
+    expected = {"path": "requirements.txt, pyproject.toml", "status": "unchecked", "packages": PACKAGES,
+                "unread": ["requirements.txt:2: -e .", "requirements.txt:3: -r missing.txt (No such file or directory)"]}
+    with monkeypatch.context() as patch:
+        patch.setitem(sys.modules, "tomllib", None)  # As on Python 3.10.
+        assert installer.install(project, check=True)["requirements"] == expected
+    (project / "pyproject.toml").write_text("[project\n")
+    assert installer.install(project, check=True)["requirements"] == expected
 
 
 def test_missing_packages_get_an_install_command(project, monkeypatch):

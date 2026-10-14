@@ -223,7 +223,8 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
         result["requirements"] = {"path": "requirements.txt", "status": "absent" if check else "written",
                                   "packages": requirements}
     elif declared is None:
-        result["requirements"] = {"path": declared_in, "status": "unchecked", "packages": requirements}
+        result["requirements"] = {"path": declared_in, "status": "unchecked", "packages": requirements,
+                                  **({"unread": unread} if unread else {})}
     else:
         missing = [item for item in requirements if _normalize(_distribution(item)) not in declared]
         result["requirements"] = {"path": declared_in, "status": "incomplete" if missing else "declared",
