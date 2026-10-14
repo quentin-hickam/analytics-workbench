@@ -34,7 +34,7 @@ Read the **Audience** section of the investigation's `brief.md`: who will see or
 
 Recover the business question, intended decision or exploratory purpose, audience, usefulness criteria, and evidence the contract needs, with the data limitations and errors that affect interpretation.
 
-When a brief section names a ledger question ID, resolve it with `python3 src/awb.py questions list --all` (add `--investigation <name>` for another investigation). An answered question supplies the value; any other status leaves the element unsettled. Handle it as missing: ask the user where required above; otherwise ask or state it as unsettled in both narratives, including any unsettled usefulness criterion, never as settled.
+When a brief section names a ledger question ID, resolve it with `python3 src/awb.py questions list --all` and `python3 src/awb.py state` (pass `--investigation <name>` to commands for another investigation). An `answered` question supplies its recorded text or linked result's value only when absent from `state`'s answers resting only on unsettled findings; `list` prints each linked finding's status. Any other status, missing ID, or failed lookup leaves the element unsettled. When unsettled, ask only if the question is open and its answerer is `user`, recording the answer with `python3 src/awb.py questions answer Q-NNN --text "<answer>" --by "<the user>"` before writing; otherwise carry the unsettled element, including any usefulness criterion, in both narratives: in `findings.md` in the audience's words, naming its owner; its ID only in `methodology.md`'s **What makes the answer useful:** (or matching) line. Never present it as settled.
 
 ## 3. Write the draft
 
