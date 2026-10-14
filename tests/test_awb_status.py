@@ -32,7 +32,7 @@
 # test_a_relanded_url_is_checked_only_in_its_latest_acquisition: after a changed upstream is landed again, only the newest acquisition of that source and URL is probed and the earlier one counts as superseded, even when the newer one records no validator.
 # test_a_host_that_times_out_is_not_requested_again: after a connect or read timeout, the host's remaining files are unknown without a request, and other hosts are still probed.
 # test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
-# test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including an upstream field land() would refuse, is named under uncertainties and makes probeable_files null, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
+# test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including any upstream field land() refuses (by land()'s own check: an invalid or credential-bearing URL among them), is named under uncertainties with or without the probe and makes probeable_files null, nothing is requested for it, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
 # test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key is valid and counts as without upstream.
 # test_unreadable_acquisition_inventory_is_unknown_not_zero: an unreadable data/raw or source directory is an uncertainty and makes probeable_files null, never zero.
 # test_probe_follows_redirects_only_to_http_and_only_as_head: through urllib's own redirect processing, a redirect to ftp is refused before any FTP call and an https redirect is followed as HEAD.
@@ -646,14 +646,22 @@ def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench
     ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [{"path": 7, "upstream": null}]}',
      "Malformed acquisition provenance: a file entry has no path"),
     ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": ["a.csv"]}', "Malformed acquisition provenance: a file entry has no path"),
-    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [{"path": "a.csv", "upstream": "https://example.test/a"}]}',
-     "Malformed acquisition provenance: a file's upstream is not an object or null"),
-    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "lastModified": "x"}}]}',
-     "Malformed acquisition provenance: a file's upstream has a field other than url, etag, last_modified, version_id"),
-    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "etag": 7}}]}',
-     "Malformed acquisition provenance: a file's upstream field is not null or a nonblank string"),
-    ('{"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00", "files": [{"path": "a.csv", "upstream": {"url": "https://example.test/a", "etag": " "}}]}',
-     "Malformed acquisition provenance: a file's upstream field is not null or a nonblank string"),
+    *[(json.dumps({"status": "complete", "completed_at": "2026-10-13T08:00:00+00:00",
+                   "files": [{"path": "a.csv", "upstream": upstream}]}), "Malformed acquisition provenance: " + reason)
+      for upstream, reason in [
+          ("https://example.test/a", "upstream fields of a.csv must be a dictionary of url, etag, last_modified, version_id"),
+          ({"url": "https://example.test/a", "lastModified": "x"},
+           "upstream fields of a.csv must be a dictionary of url, etag, last_modified, version_id"),
+          ({"url": "https://example.test/a", "etag": 7}, "upstream fields of a.csv must be nonblank strings or None"),
+          ({"url": "https://example.test/a", "etag": " "}, "upstream fields of a.csv must be nonblank strings or None"),
+          ({"url": "https://[", "etag": '"v1"'}, "upstream url of a.csv is not a valid URL"),
+          ({"url": "https://example.test/d?api_key=SECRET", "etag": '"v1"'},
+           "upstream url of a.csv carries credential parameters (api_key); record it without credentials"),
+          ({"url": "https://example.test/x;format=csv&access_token=SECRET", "etag": '"v1"'},
+           "upstream url of a.csv carries credential parameters (access_token); record it without credentials"),
+          ({"url": "user:SECRET@example.test/x", "etag": '"v1"'},
+           "upstream url of a.csv carries a user name or password; record it without credentials"),
+      ]],
     (None, "Missing acquisition provenance"),
 ])
 def test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown(workbench, monkeypatch, text, reason):
@@ -664,13 +672,19 @@ def test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown(wo
         write(workbench, "data/raw/api/broken/provenance.json", text)
     write(workbench, "data/raw/api/batch-2.partial/provenance.json", "{")
     write(workbench, "data/raw/api/notes.txt", "not an acquisition")
-    serve(monkeypatch, FakeServer({"https://example.test/a": {"ETag": '"v1"'}}))
+    server = FakeServer({"https://example.test/a": {"ETag": '"v1"'}})
+    serve(monkeypatch, server)
+    uncertainties = [{"path": "data/raw/api/broken/provenance.json", "reason": reason}]
+    default = status.collect(workbench)
+    assert (default["uncertainties"], default["upstream"]) == (uncertainties, {"probeable_files": None})
     result = status.collect(workbench, probe_upstream=True)
-    assert result["uncertainties"] == [{"path": "data/raw/api/broken/provenance.json", "reason": reason}]
+    assert result["uncertainties"] == uncertainties
     assert result["upstream"] == {
         "probeable_files": None,
         "files": [{"source": "api", "acquisition_id": "batch-1", "path": "a.csv", "result": "unchanged", "compared": "etag"}],
         "not_probeable": [], "superseded": 0, "without_upstream": 0}
+    assert [url for _, url, _ in server.requests] == ["https://example.test/a"]
+    assert "SECRET" not in json.dumps(result)
 
 
 def test_provenance_without_upstream_keys_counts_as_without_upstream(workbench, monkeypatch):

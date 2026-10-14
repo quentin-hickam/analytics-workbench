@@ -17,6 +17,7 @@ import re
 import subprocess
 from email.utils import parsedate_to_datetime
 import http.client
+import importlib.util
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -27,8 +28,12 @@ BLOCKING = {"none", "revalidate"}
 
 PROBE_TIMEOUT = 10
 TIMED_OUT = f"no response within {PROBE_TIMEOUT} s"
-# The fields land() records per file as upstream, each null or a nonblank string (awb_landing.py).
-UPSTREAM_FIELDS = ("url", "etag", "last_modified", "version_id")
+# land()'s own module from the awb-init skill beside this one: an upstream field it refuses to
+# record is malformed provenance here, by the same check.
+_LANDING = importlib.util.spec_from_file_location(
+    "awb_status_landing", Path(__file__).resolve().parents[2] / "awb-init/assets/awb_landing.py")
+landing = importlib.util.module_from_spec(_LANDING)
+_LANDING.loader.exec_module(landing)
 
 
 def collect(root, *, probe_upstream=False):
@@ -194,7 +199,7 @@ def collect(root, *, probe_upstream=False):
     result["acquisitions"] = None if acquisitions is None else {"count": len(acquisitions), "without_retained_copy": sum(not row["Retained copy"] or row["Retained copy"].strip("`").strip().lower() == "this checkout only" for row in acquisitions)}
     result["landed_data_storage"] = storage(field(readme, "Landed data is kept at", readme_path, optional=True))
     result["release_storage"] = storage(field(readme, "Released packages are kept at", readme_path, optional=True))
-    result["upstream"] = upstream(root, probe_upstream, uncertain)
+    result["upstream"] = upstream(root, probe_upstream, uncertain, entries)
 
     def manifest(directory, *, release=False):
         """Read manifest.json, recording an uncertainty when it is absent, unreadable, or not a JSON object."""
@@ -302,27 +307,22 @@ def collect(root, *, probe_upstream=False):
     return result
 
 
-def upstream(root, probe, uncertain):
+def upstream(root, probe, uncertain, entries):
     """Count landed files a HEAD request can check; with probe, check each and report the rest.
 
     Only the latest acquisition of a source to record a URL is checked, by completed_at: a file of
     an earlier acquisition of the same source and URL counts as superseded, since landing again is
     how a changed upstream is taken up. probeable_files is null when an acquisition directory or
     provenance.json could not be read; an uncertainty names each one, and the files that were read
-    are still counted and probed.
+    are still counted and probed. entries is collect()'s directory listing, None when unreadable.
     """
     recorded_files, latest, without, complete = [], {}, 0, True
 
     def directories(path):
         nonlocal complete
-        try:
-            return sorted(p for p in path.iterdir() if p.is_dir())
-        except FileNotFoundError:
-            return []
-        except OSError as error:
-            uncertain(path, f"Cannot enumerate directory: {type(error).__name__}")
-            complete = False
-            return []
+        found = entries(path, directories=True)
+        complete = complete and found is not None
+        return found or []
 
     for source in directories(root / "data/raw"):
         for directory in directories(source):
@@ -332,21 +332,21 @@ def upstream(root, probe, uncertain):
             if acquisition is None:
                 complete = False
                 continue
-            completed_at, files = acquisition
-            for file in files:
+            order = acquisition[0]
+            for file in acquisition[1]:
                 recorded = file.get("upstream")
                 if recorded is None:
                     without += 1
                     continue
                 entry = {"source": source.name, "acquisition_id": directory.name, "path": file["path"]}
-                recorded_files.append((entry, recorded, completed_at))
+                recorded_files.append((entry, recorded, order))
                 if recorded.get("url") is not None:
                     key = (source.name, recorded["url"])
-                    latest[key] = max(latest.get(key, completed_at), completed_at)
+                    latest[key] = max(latest.get(key, order), order)
     probeable, not_probeable, superseded = [], [], 0
-    for entry, recorded, completed_at in recorded_files:
+    for entry, recorded, order in recorded_files:
         url = recorded.get("url")
-        if url is not None and completed_at < latest[(entry["source"], url)]:
+        if url is not None and order < latest[(entry["source"], url)]:
             superseded += 1
         elif not (isinstance(url, str) and url.split(":", 1)[0].lower() in {"http", "https"}):
             not_probeable.append({**entry, "reason": "no HTTP URL recorded"})
@@ -373,7 +373,8 @@ def upstream(root, probe, uncertain):
 
 def acquisition_files(path, uncertain):
     """Return a completed acquisition's completed_at and its file entries sorted by path,
-    else record an uncertainty and return None."""
+    else record an uncertainty and return None. An upstream field is checked by land()'s own
+    check, so what land() refuses to record is malformed here."""
     try:
         provenance = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -394,15 +395,15 @@ def acquisition_files(path, uncertain):
         defect = "files is not a list"
     elif not all(isinstance(f, dict) and isinstance(f.get("path"), str) and f["path"] for f in files):
         defect = "a file entry has no path"
-    elif not all(f.get("upstream") is None or isinstance(f["upstream"], dict) for f in files):
-        defect = "a file's upstream is not an object or null"
-    elif not all(set(f.get("upstream") or {}) <= set(UPSTREAM_FIELDS) for f in files):
-        defect = f"a file's upstream has a field other than {', '.join(UPSTREAM_FIELDS)}"
-    elif not all(value is None or (isinstance(value, str) and value.strip())
-                 for f in files for value in (f.get("upstream") or {}).values()):
-        defect = "a file's upstream field is not null or a nonblank string"
     else:
-        return completed_at, sorted(files, key=lambda f: f["path"])
+        try:
+            # land()'s refusals name the file and parameter, never a value.
+            landing._upstream({f["path"]: f["upstream"] for f in files if f.get("upstream") is not None},
+                              [f["path"] for f in files])
+        except ValueError as error:
+            defect = str(error)
+        else:
+            return completed_at, sorted(files, key=lambda f: f["path"])
     uncertain(path, f"Malformed acquisition provenance: {defect}")
     return None
 
