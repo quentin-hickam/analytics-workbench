@@ -489,7 +489,8 @@ def _shown(version):
     return f"unknown ({version['unknown']})" if _is_unknown(version) else str(version)
 
 
-# How stale and export name a requirements line the runtime block could not read.
+# How stale names a requirements line the runtime block could not read; release's provenance_gaps
+# (awb_draft.py) repeats this literal, as it cannot load the project's copy of this module.
 UNREAD = "requirements not read, packages unrecorded: "
 
 
@@ -1647,7 +1648,9 @@ def cli_stale(root: Path, argv: list[str]) -> int:
                "package versions differ from the interpreter running stale, or whose runtime records "
                "requirements lines it could not read: investigation, result_id, evidence, details, a list "
                "with one string per difference or unread line (an unread line is '" + UNREAD.rstrip() +
-               " <file>:<line>: <text>', the line's text verbatim), and findings. A runtime mismatch is "
+               " <file>:<line>: <text>', the line as read: comment removed, continued lines joined, and "
+               "for an include or a disagreeing #egg= a reason in parentheses; an unreadable "
+               "requirements.txt is '<file> (<reason>)'), and findings. A runtime mismatch is "
                "a warning to decide on a rerun, not stale, and flags nothing; an unread line's packages "
                "are recorded once it names them, as with #egg=NAME or NAME @ REFERENCE. Run stale with the interpreter that runs run.py: a "
                "version mismatch on every result at once usually means a different interpreter, not an "

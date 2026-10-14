@@ -1193,6 +1193,7 @@ def provenance_gaps(record: dict) -> list[dict]:
         elif isinstance(value, dict):
             for key, item in value.items():
                 if key == "unread_requirements" and isinstance(item, list):
+                    # The reason's prefix is UNREAD in awb_provenance.py, which stale reports; keep the two equal.
                     gaps.extend({"field": f"{path}.{key}[{index}]",
                                  "reason": f"requirements not read, packages unrecorded: {entry}"}
                                 for index, entry in enumerate(item))
