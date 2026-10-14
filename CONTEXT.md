@@ -82,6 +82,9 @@ The user's choice for a flagged finding that a draft represents: revalidate it, 
 **Review rule**:
 A numbered rule, `R-<area>-NNN`, recorded from a correction the user made while reviewing a package draft, which every later review of a draft checks. Its ID is never renumbered or reused.
 
+**Question ledger**:
+An investigation's record of every question it has raised, answered or not, with who can answer each: the user, a stakeholder, or the data. It lives in `questions.json`, rendered whole to `questions.md`. A data question is answered only by a recorded result whose settings declare it; a question is never deleted, and a scope change supersedes an answered one. Data problems, actions, and settled decisions are not questions and stay in the state and brief.
+
 **Investigation state**:
 The current understanding of an investigation, including its active question, findings, unresolved issues, and next steps.
 

@@ -9,7 +9,7 @@ Explore one canonical view or publication at a time, within the investigation's 
 
 ## 1. Frame
 
-Use the investigation the user names, otherwise the README's active one. If its `brief.md` and `state.md` are not loaded, read them in one call. Say in a sentence or two which dataset you will explore and why it bears on the question. If several datasets fit, start with the one that holds the question's measure.
+Use the investigation the user names, otherwise the README's active one. If its brief, state, and open ledger questions are not loaded, print them with `python3 src/awb.py state`. Say in a sentence or two which dataset you will explore and why it bears on the question. If several datasets fit, start with the one that holds the question's measure.
 
 ## 2. Scan
 
@@ -36,16 +36,17 @@ Read [reading the scan](references/reading-the-scan.md) for an anomaly kind's co
 
 ## 4. Follow up with saved queries
 
-Run one follow-up for each anomaly you are confirming as a shared data problem and each candidate explanation the user's question turns on; leave the rest as Next steps. The step is done when every observation you report is either settled by a saved query or recorded as a Next step.
+Run one follow-up for each anomaly you are confirming as a shared data problem and each candidate explanation the user's question turns on; leave the rest as ledger questions. The step is done when every observation you report is either settled by a saved query or recorded as a ledger question.
 
 Write each follow-up as `investigations/<name>/exploration/<topic>.sql` and run it from the project root with `python3 src/awb.py sql <path>`. Start each file with a comment naming the question it serves and its scope, and copy every printed scope filter, period included, into its `WHERE`. Aggregate, order, and limit in SQL so the printed table stays short. To separate mix from within-group change, compute each group's share and mean per period in one query; a moving overall mean over stable group means is a mix shift. Revise and rerun the same file rather than adding variants; save even a one-off, since the report cites its path. Draw an exploratory chart only on request, saved under `exploration/`.
 
 ## 5. Record what was learned
 
-- **State.** Under Unresolved issues, add each confirmed shared data problem or coverage limitation, naming the scan path; under Next steps, add each consequential pattern or candidate explanation not yet tested through `run.py`, as a question for it — a pattern becomes a finding only there. Replace items they supersede, each list in one call: `python3 src/awb.py state issues --add "<text>"` and `state next --add "<text>" --drop <number>`.
+- **Questions.** Add each consequential pattern or candidate explanation not yet tested through `run.py` to the ledger as a data question, unless an open one already asks it: `python3 src/awb.py questions add "<question>" --kind analytical --answerer data --origin eda --unblocks "<what it bears on>"`. A pattern becomes a finding, and its question answered, only through `run.py`. A question only the user or a stakeholder can settle, such as whether a pattern is expected, takes `--answerer user` or `stakeholder` and `--kind context`.
+- **State.** Under Unresolved issues, add each confirmed shared data problem or coverage limitation, naming the scan path; under Next steps, add the action that tests each new question, citing its ID. Replace items they supersede, each list in one call: `python3 src/awb.py state issues --add "<text>"` and `state next --add "<text>" --drop <number>`.
 - **History.** An entry only for a limitation or decision that affects the question; a routine scan gets none.
 - **Vocabulary.** A term the data settled goes where AGENTS.md records meanings; a term still open is an unresolved issue.
 - **Shared data problems.** Except for coverage limitations recorded below, hand confirmed shared data problems to awb-clean: "Use awb-clean on <dataset> for <problem>". Leave canonical views to awb-clean. When exploration must exclude affected rows, or a question-specific exclusion stays local, do it in a saved query whose comment gives the reason, and say so; an exclusion `run.py` needs goes into settings.
 - **Coverage limitations.** Record a confirmed shared limitation in time coverage or field availability as an `open` row in `foundation/quality.md`, citing the scan; it needs no awb-clean pass.
 
-Report the dataset and scope, the printed tables cut to the rows that bear on the question, the observations, each anomaly's disposition, the saved query paths, the records changed, and the scan path.
+Report the dataset and scope, the printed tables cut to the rows that bear on the question, the observations, each anomaly's disposition, the saved query paths, the ledger questions added, the records changed, and the scan path.

@@ -16,7 +16,8 @@ when not installed; unknown when its metadata records no version), and each requ
 include it could not read. read_requirements() reads requirements.txt and the files it includes
 with -r and returns what it cannot read; requirement_name() states which lines name a package.
 Settings are scoped: the settings file must hold a [results.<id>] table for the result, with a
-one-line question and optionally inputs, a list of dataset or view names; settings
+one-line question and optionally inputs, a list of dataset or view names, and answers, a list of
+question ledger IDs, which links questions and is left out of every settings comparison; settings
 carries "result", content holds only [parameters] and that table, and the settings file is left
 out of producing_paths, so other results' tables and other top-level tables never make this
 result stale. Producing paths are the investigation's code (run.py and other files outside its
@@ -234,11 +235,23 @@ def _settings(root, path, result_id=None):
 
 
 def _settings_keys(content, result_id):
-    """Top-level settings keys to compare, naming a scoped result's table results.<id>."""
+    """Top-level settings keys to compare, naming a scoped result's table results.<id>, without its answers."""
     if result_id is None:
         return content
     return {**{k: v for k, v in content.items() if k != "results"},
-            f"results.{result_id}": content.get("results", {}).get(result_id)}
+            f"results.{result_id}": _unannotated(content.get("results", {}).get(result_id))}
+
+
+def _unannotated(table):
+    """A result's settings table without `answers`, which links ledger questions and computes nothing."""
+    return {k: v for k, v in table.items() if k != "answers"} if isinstance(table, dict) else table
+
+
+def _comparable(content):
+    """Scoped settings content with each result table's `answers` removed, for exact-rerun baselines."""
+    if not isinstance(content, dict) or not isinstance(content.get("results"), dict):
+        return content
+    return {**content, "results": {k: _unannotated(v) for k, v in content["results"].items()}}
 
 
 # Packages every runtime block records; the project's requirements.txt adds its own.
@@ -512,10 +525,12 @@ def _runtime_mismatches(recorded) -> list[str]:
     return found + ([UNREAD + str(entry) for entry in unread] if isinstance(unread, list) else [])
 
 
-def result_problems(result_id: str, table) -> list[str]:
-    """What a [results.<id>] table lacks: a one-line question, and inputs, when given, as a list of names.
+def result_problems(result_id: str, table, questions: set[str] | None = None) -> list[str]:
+    """What a [results.<id>] table lacks: a one-line question, inputs, when given, as a list of names, and
+    answers, when given, as a list of ledger question IDs, each in `questions` when that set is given.
 
-    record_evidence refuses a table with problems; run.py checks every wanted result before running any.
+    record_evidence refuses a table with problems, checking answers against the ledger; run.py checks
+    every wanted result before running any.
     """
     where = f"[results.{result_id}]"
     if not isinstance(table, dict):
@@ -530,11 +545,19 @@ def result_problems(result_id: str, table) -> list[str]:
     inputs = table.get("inputs", [])
     if not isinstance(inputs, list) or not all(isinstance(name, str) and name.strip() for name in inputs):
         problems.append(f"{where} inputs must be a list of dataset or view names")
+    answers = table.get("answers", [])
+    if not isinstance(answers, list) or not all(isinstance(q, str) and _QID.fullmatch(q) for q in answers):
+        problems.append(f'{where} answers must be a list of question IDs, as answers = ["Q-001"]')
+    elif questions is not None and any(q not in questions for q in answers):
+        missing = ", ".join(q for q in answers if q not in questions)
+        problems.append(f"{where} answers {missing}, which questions.json does not hold; add the question "
+                        "with `awb.py questions add` first")
     return problems
 
 
 # Investigation entries that are records or outputs, or that other results own, not producing code.
-_NOT_CODE = {"brief.md", "state.md", "findings.json", "history.md", "evidence", "exploration", "results", "queries"}
+_NOT_CODE = {"brief.md", "state.md", "findings.json", "history.md", "questions.json", "questions.md", "evidence",
+             "exploration", "results", "queries"}
 # Helpers that dispatch, record evidence, or package; replacing them changes no result.
 _NOT_PRODUCING = ("src/awb.py", "src/provenance.py", "src/packaging/")
 
@@ -564,7 +587,7 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
         reason = settings["content"]["unknown"] if _is_unknown(settings["content"]) else "no such table"
         raise ValueError(f"{settings_path} must hold [results.{result_id}]: {reason}")
     table = settings["content"]["results"][result_id]
-    problems = result_problems(result_id, table)
+    problems = result_problems(result_id, table, ledger_ids(root, investigation) if table.get("answers") else None)
     if problems:
         raise ValueError(f"{settings_path}: " + "; ".join(problems))
     queries = table.get("queries", [f"queries/{result_id}.sql"])
@@ -1248,7 +1271,7 @@ def _cite(citation):
 
 def _baseline(table, checks, settings):
     """What an exact-match rerun compares: the table's sha256, the full checks list, scoped settings."""
-    return {"table": table, "checks": json.loads(json.dumps(checks)), "settings": settings}
+    return {"table": table, "checks": json.loads(json.dumps(checks)), "settings": _comparable(settings)}
 
 
 def prior_result(project_root, investigation: str, result_id: str) -> dict:
@@ -1297,7 +1320,8 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
     provisional unless superseded, and history.md records a rerun of a supported row. A flagged row
     returns to superseded if it was superseded, else provisional, with its notes kept, its flag reason
     dropped, and a history entry naming that reason. When findings.json is not replaced, the evidence just recorded is removed before raising.
-    Returns {action: added|kept|refreshed|flag cleared, status, claim, history (bool)}.
+    Returns {action: added|kept|refreshed|flag cleared, status, claim, history (bool)}, with questions
+    {answered, linked, skipped} from link_answers, or {error}, when the settings table declares answers.
     """
     root = Path(project_root).resolve()
     today = today or _today()
@@ -1341,11 +1365,19 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
         return {"action": action, "status": entry["status"], "claim": entry["claim"], "history": history is not None}
 
     try:
-        return _write_findings(root, investigation, mutate, replaced=replaced)
+        result = _write_findings(root, investigation, mutate, replaced=replaced)
     except BaseException:
         if base / "findings.json" not in replaced:
             evidence_path.unlink(missing_ok=True)
         raise
+    # Questions the result's settings declare: a ledger failure leaves the finding recorded and says so.
+    if _declared_answers(root, investigation, result_id):
+        try:
+            result["questions"] = link_answers(root, investigation, result_id, today=today)
+        except StateError as error:
+            result["questions"] = {"error": f"{error}; link with `awb.py questions answer <Q-NNN> "
+                                            f"--result {result_id}`"}
+    return result
 
 
 def update_findings(project_root, investigation: str, result_ids: list[str], *, status: str | None = None,
@@ -1530,6 +1562,440 @@ def edit_list(project_root, investigation: str, which: str, *, add: list[str] = 
     return {"added": added, "dropped": [item[2] for item in chosen]}
 
 
+# The question ledger: questions.json holds every question an investigation has raised, and
+# questions.md is rendered from it whole, so a hand edit is drift. IDs are never reused or renumbered.
+_LEDGER_SCHEMA = "awb-questions/1"
+_QID = re.compile(r"Q-\d{3,}")
+_KINDS = ("context", "decision", "analytical")
+_ANSWERERS = ("user", "stakeholder", "data")
+_ORIGINS = ("scope", "brainstorm", "eda", "analysis")
+_QSTATUSES = ("open", "answered", "parked", "declined", "superseded")
+_QUESTION_KEYS = {"id", "text", "kind", "answerer", "unblocks", "origin", "status", "answer", "by", "results",
+                  "reason", "updated"}
+_LEDGER_HEADER = [
+    "# Question ledger", "",
+    "Every question this investigation has raised, answered or not. Rendered from `questions.json`: change it "
+    "only through `python3 src/awb.py questions` and `run.py`; a hand edit is refused as drift.", "",
+    "A data question is answered only by a recorded result: its settings table declares `answers = [\"Q-NNN\"]` "
+    "and `run.py` links it here. `python3 src/awb.py questions list` shows each linked finding's current status.",
+    ""]
+_LEDGER_COLUMNS = ["ID", "Question", "Kind", "Answerer", "Unblocks", "Status", "Answer or reason"]
+
+
+class _Ledger:
+    def __init__(self, root, investigation, *, render=False):
+        base = root / "investigations" / investigation
+        if not base.is_dir():
+            raise StateError(f"investigations/{investigation} does not exist")
+        self.root, self.investigation = root, investigation
+        self.path, self.md_path = base / "questions.json", base / "questions.md"
+        self.label = f"investigations/{investigation}/questions.json"
+        self.md_label = f"investigations/{investigation}/questions.md"
+        if not self.path.exists():
+            if self.md_path.exists() and not render:
+                raise StateError(f"{self.md_label} exists without {self.label}; restore questions.json from Git")
+            self.entries = []
+            return
+        try:
+            content = json.loads(self.path.read_text(encoding="utf-8"))
+            if content["schema"] != _LEDGER_SCHEMA or not isinstance(content["questions"], list):
+                raise ValueError(f"expected {_LEDGER_SCHEMA} questions list")
+            self.entries, seen = content["questions"], set()
+            for entry in self.entries:
+                problem = _question_problem(entry)
+                if problem or entry["id"] in seen:
+                    raise ValueError(f"invalid question {entry.get('id') if isinstance(entry, dict) else entry!r}: "
+                                     f"{problem or 'repeated ID'}")
+                seen.add(entry["id"])
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise StateError(f"{self.label}: {error}") from error
+
+    def get(self, question_id):
+        entry = next((e for e in self.entries if e["id"] == question_id), None)
+        if entry is None:
+            raise StateError(f"{self.label}: no question {question_id}")
+        return entry
+
+    def rendered(self):
+        lines = _LEDGER_HEADER + [_row(_LEDGER_COLUMNS), _row(["---"] * len(_LEDGER_COLUMNS))]
+        lines += [_row(_question_cells(e)) for e in self.entries]
+        return "\n".join(lines) + "\n"
+
+    def drift(self):
+        """Whether questions.md differs from its render; a missing file with no questions is not drift."""
+        try:
+            disk = self.md_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return bool(self.entries)
+        except (OSError, UnicodeError) as error:
+            raise StateError(f"{self.md_label} is unreadable: {error}") from None
+        return disk != self.rendered()
+
+    def refuse_drift(self):
+        if self.drift():
+            raise StateError(f"questions drift: {self.md_label} differs from its render from questions.json; "
+                             f"python3 src/awb.py questions render --investigation {self.investigation} discards "
+                             "the hand edit; then re-apply the intended change with a questions subcommand")
+
+    def write(self):
+        content = json.dumps({"schema": _LEDGER_SCHEMA, "questions": self.entries}, indent=2, ensure_ascii=False)
+        _commit([_Text(self.path, self.label, content + "\n"), _Text(self.md_path, self.md_label, self.rendered())])
+
+
+class _Text:
+    """A whole generated file for _commit."""
+
+    def __init__(self, path, label, text):
+        self.path, self.label, self.lines = path, label, [text]
+
+
+def _question_problem(entry):
+    """Why a ledger entry is malformed, or None."""
+    if not isinstance(entry, dict) or set(entry) != _QUESTION_KEYS:
+        return f"needs exactly the keys {', '.join(sorted(_QUESTION_KEYS))}"
+    if not isinstance(entry["id"], str) or not _QID.fullmatch(entry["id"]):
+        return "id must be Q-NNN"
+    if not all(isinstance(entry[k], str) for k in _QUESTION_KEYS - {"results"}):
+        return "every field but results must be a string"
+    if not entry["text"].strip():
+        return "text is empty"
+    for key, allowed in (("kind", _KINDS), ("answerer", _ANSWERERS), ("origin", _ORIGINS), ("status", _QSTATUSES)):
+        if entry[key] not in allowed:
+            return f"{key} must be one of {', '.join(allowed)}"
+    if not isinstance(entry["results"], list) or not all(isinstance(r, str) and _ID.fullmatch(r)
+                                                         for r in entry["results"]):
+        return "results must be a list of result IDs"
+    if entry["status"] == "answered" and not (entry["results"] or entry["answer"].strip() and entry["by"].strip()):
+        return "an answered question needs linked results, or an answer with who gave it"
+    if entry["status"] in ("parked", "declined", "superseded") and not entry["reason"].strip():
+        return f"a {entry['status']} question needs a reason"
+    return None
+
+
+def _question_cells(entry):
+    if entry["status"] == "answered":
+        parts = [f"[{r}](evidence/{r}.json)" for r in entry["results"]]
+        if entry["answer"]:
+            parts.append(f"{entry['answer']} ({entry['by']}, {entry['updated']})")
+        answer = "; ".join(parts)
+    else:
+        answer = entry["reason"]
+    return [entry["id"], _cell(entry["text"]), entry["kind"], entry["answerer"], _cell(entry["unblocks"]),
+            entry["status"], _cell(answer)]
+
+
+def ledger_ids(project_root, investigation: str) -> set[str]:
+    """Every question ID in an investigation's ledger; empty when it has none."""
+    return {e["id"] for e in _Ledger(Path(project_root).resolve(), investigation).entries}
+
+
+def _declared_answers(root, investigation, result_id):
+    """The question IDs a result's settings table declares it answers."""
+    settings = _settings(root, f"investigations/{investigation}/settings.toml", result_id)
+    if settings.get("result") != result_id:
+        return []
+    answers = settings["content"]["results"][result_id].get("answers", [])
+    return answers if isinstance(answers, list) else []
+
+
+def _finding_statuses(root, investigation):
+    """Each recorded result's displayed findings status, from findings.json."""
+    try:
+        content = json.loads((root / "investigations" / investigation / "findings.json").read_text(encoding="utf-8"))
+        return {e["result"]: _finding_cells(e)[2] for e in content["findings"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+
+
+def add_question(project_root, investigation: str, text: str, *, kind: str, answerer: str, origin: str,
+                 unblocks: str = "", status: str = "open", reason: str = "", today: str | None = None) -> dict:
+    """Append the next numbered question; a parked or declined one needs a reason. Returns the entry."""
+    root = Path(project_root).resolve()
+    text = " ".join((text or "").split())
+    if not text:
+        raise ValueError("the question text is empty")
+    for name, value, allowed in (("kind", kind, _KINDS), ("answerer", answerer, _ANSWERERS),
+                                 ("origin", origin, _ORIGINS), ("status", status, ("open", "parked", "declined"))):
+        if value not in allowed:
+            raise ValueError(f"{name} must be one of {', '.join(allowed)}")
+    reason = " ".join((reason or "").split())
+    if status != "open" and not reason:
+        raise ValueError(f"a {status} question needs --reason")
+    if status == "open" and reason:
+        raise ValueError("--reason goes only with --status parked or declined")
+    ledger = _Ledger(root, investigation)
+    ledger.refuse_drift()
+    number = max((int(e["id"][2:]) for e in ledger.entries), default=0) + 1
+    entry = {"id": f"Q-{number:03d}", "text": text, "kind": kind, "answerer": answerer,
+             "unblocks": " ".join((unblocks or "").split()), "origin": origin, "status": status, "answer": "",
+             "by": "", "results": [], "reason": reason, "updated": today or _today()}
+    ledger.entries.append(entry)
+    ledger.write()
+    return entry
+
+
+def answer_question(project_root, investigation: str, question_id: str, *, text: str | None = None,
+                    by: str | None = None, results: list[str] = (), today: str | None = None) -> dict:
+    """Record a person's answer (text and who gave it) or link recorded results that declare the question.
+
+    A data question takes results only. A result must have a findings row and declare the question
+    in its settings table's `answers`. Only an open, parked, or answered question can be answered.
+    """
+    root = Path(project_root).resolve()
+    text, by = " ".join((text or "").split()), " ".join((by or "").split())
+    if not text and not results:
+        raise ValueError("give --text with --by, or --result")
+    if bool(text) != bool(by):
+        raise ValueError("--text and --by go together: the answer and who gave it")
+    ledger = _Ledger(root, investigation)
+    ledger.refuse_drift()
+    entry = ledger.get(question_id)
+    if entry["status"] in ("declined", "superseded"):
+        raise StateError(f"{question_id} is {entry['status']}; add a new question instead")
+    if entry["answerer"] == "data" and text:
+        raise StateError(f"{question_id} is a data question; only a recorded result answers it (--result)")
+    statuses = _finding_statuses(root, investigation)
+    for result_id in results:
+        if result_id not in statuses:
+            raise StateError(f"{result_id} has no findings row; record it with run.py first")
+        if question_id not in _declared_answers(root, investigation, result_id):
+            raise StateError(f"[results.{result_id}] does not declare answers = [\"{question_id}\"] in settings.toml; "
+                             "add it there first")
+    linked = [r for r in dict.fromkeys(results) if r not in entry["results"]]
+    if not linked and (not text or (text, by) == (entry["answer"], entry["by"])) and entry["status"] == "answered":
+        return {**entry, "changed": False}
+    entry["results"] += linked
+    if text:
+        entry["answer"], entry["by"] = text, by
+    entry.update(status="answered", reason="", updated=today or _today())
+    ledger.write()
+    return {**entry, "changed": True}
+
+
+def set_question(project_root, investigation: str, question_ids: list[str], status: str, *, reason: str = "",
+                 today: str | None = None) -> list[str]:
+    """Park, decline, supersede, or reopen questions, checking each first. Returns the IDs changed.
+
+    An answered question can only be superseded, keeping its answer; open reopens a parked or
+    declined question.
+    """
+    root = Path(project_root).resolve()
+    reason = " ".join((reason or "").split())
+    if status not in ("open", "parked", "declined", "superseded"):
+        raise ValueError("status must be open, parked, declined, or superseded")
+    if status != "open" and not reason:
+        raise ValueError(f"--reason is required for {status}")
+    ledger = _Ledger(root, investigation)
+    ledger.refuse_drift()
+    changed = []
+    for question_id in dict.fromkeys(question_ids):
+        entry = ledger.get(question_id)
+        if entry["status"] == status:
+            continue
+        if entry["status"] == "superseded" or (entry["status"] == "answered" and status != "superseded") \
+                or (status == "open" and entry["status"] not in ("parked", "declined")):
+            raise StateError(f"{question_id} is {entry['status']}; it cannot become {status}"
+                             + ("; supersede it and add a new question" if entry["status"] == "answered" else ""))
+        changed.append(entry)
+    for entry in changed:
+        entry.update(status=status, reason=reason if status != "open" else "", updated=today or _today())
+    if changed:
+        ledger.write()
+    return [e["id"] for e in changed]
+
+
+def edit_question(project_root, investigation: str, question_id: str, *, text: str | None = None,
+                  kind: str | None = None, answerer: str | None = None, unblocks: str | None = None,
+                  today: str | None = None) -> bool:
+    """Reword or reclassify an open or parked question. Returns whether it changed."""
+    root = Path(project_root).resolve()
+    if text is not None and not text.strip():
+        raise ValueError("the question text is empty")
+    if kind is not None and kind not in _KINDS:
+        raise ValueError(f"kind must be one of {', '.join(_KINDS)}")
+    if answerer is not None and answerer not in _ANSWERERS:
+        raise ValueError(f"answerer must be one of {', '.join(_ANSWERERS)}")
+    ledger = _Ledger(root, investigation)
+    ledger.refuse_drift()
+    entry = ledger.get(question_id)
+    if entry["status"] not in ("open", "parked"):
+        raise StateError(f"{question_id} is {entry['status']}; only an open or parked question is edited")
+    new = {k: " ".join(v.split()) for k, v in (("text", text), ("kind", kind), ("answerer", answerer),
+                                                ("unblocks", unblocks)) if v is not None}
+    if all(entry[k] == v for k, v in new.items()):
+        return False
+    entry.update(new, updated=today or _today())
+    ledger.write()
+    return True
+
+
+def link_answers(project_root, investigation: str, result_id: str, today: str | None = None) -> dict:
+    """Mark the questions a just-recorded result declares; record_finding calls this.
+
+    An open or parked question becomes answered with the result linked; an answered one gains the
+    link. A declined or superseded question is left as it is and reported.
+    """
+    root = Path(project_root).resolve()
+    declared = _declared_answers(root, investigation, result_id)
+    if not declared:
+        return {"answered": [], "linked": [], "skipped": []}
+    ledger = _Ledger(root, investigation)
+    ledger.refuse_drift()
+    answered, linked, skipped = [], [], []
+    for question_id in dict.fromkeys(declared):
+        entry = ledger.get(question_id)
+        if entry["status"] in ("declined", "superseded"):
+            skipped.append(f"{question_id} ({entry['status']})")
+            continue
+        if result_id in entry["results"] and entry["status"] == "answered":
+            continue
+        (linked if entry["status"] == "answered" else answered).append(question_id)
+        if result_id not in entry["results"]:
+            entry["results"].append(result_id)
+        entry.update(status="answered", reason="", updated=today or _today())
+    if answered or linked:
+        ledger.write()
+    return {"answered": answered, "linked": linked, "skipped": skipped}
+
+
+def question_lines(project_root, investigation: str, statuses=("open",)) -> list[str]:
+    """One line per question in the given statuses, a data answer with its findings' current status."""
+    root = Path(project_root).resolve()
+    findings = _finding_statuses(root, investigation)
+    lines = []
+    for entry in _Ledger(root, investigation).entries:
+        if entry["status"] not in statuses:
+            continue
+        line = f"{entry['id']} {entry['status']} [{entry['answerer']}, {entry['kind']}] {entry['text']}"
+        if entry["status"] == "answered":
+            line += " -> " + "; ".join([f"{r} ({findings.get(r, 'no findings row')})" for r in entry["results"]]
+                                       + ([f"{entry['answer']} ({entry['by']})"] if entry["answer"] else []))
+        elif entry["reason"]:
+            line += f" -- {entry['reason']}"
+        lines.append(line)
+    return lines
+
+
+def _answered_by_unsettled(root, investigation):
+    """Answered questions whose every linked result is flagged or superseded, and no person answered."""
+    findings = _finding_statuses(root, investigation)
+    try:
+        entries = _Ledger(root, investigation).entries
+    except StateError:
+        return []
+    return [f"{e['id']} answered by " + ", ".join(f"{r} ({findings.get(r, 'no findings row')})" for r in e["results"])
+            for e in entries if e["status"] == "answered" and e["results"] and not e["answer"]
+            and all(not findings.get(r, "").startswith(("provisional", "supported")) for r in e["results"])]
+
+
+_QUESTIONS_EXIT = ("Exit status: 0 done; 1 a record is missing or malformed, a guard refused, or a write failed; "
+                   "2 unusable arguments or an unknown investigation.")
+
+
+def cli_questions(root: Path, argv: list[str]) -> int:
+    """List, add, answer, edit, or set the status of an investigation's ledger questions."""
+    root = Path(root).resolve()
+    actions = {
+        "list": "print questions by status, a data answer with its findings' current status; writes nothing",
+        "add": "append the next numbered question",
+        "answer": "record a person's answer, or link recorded results that declare the question",
+        "status": "park, decline, supersede, or reopen questions",
+        "edit": "reword or reclassify an open or parked question",
+        "render": "restore questions.md from questions.json, discarding hand edits",
+    }
+    action = argv[0] if argv and argv[0] in actions else None
+    parser = argparse.ArgumentParser(
+        prog="awb.py questions" + (f" {action}" if action else ""),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=actions[action] if action else
+        "Keep an investigation's question ledger, questions.json, rendered whole to questions.md. IDs Q-NNN "
+        "are never reused. A data question is answered only by recorded results whose settings tables declare "
+        "it (answers = [\"Q-NNN\"]); run.py links them when it records the result.",
+        epilog=("" if action else "subcommands:\n" + "\n".join(f"  {n:<7} {s}" for n, s in actions.items())
+                + "\nRun `awb.py questions <subcommand> --help` for its arguments.\n")
+        + "Writers refuse a hand-edited questions.md as drift; render restores it. " + _QUESTIONS_EXIT)
+    if action is None:
+        parser.print_help() if argv and argv[0] in ("-h", "--help") else parser.print_usage(sys.stderr)
+        return 0 if argv and argv[0] in ("-h", "--help") else 2
+    parser.add_argument("--investigation", metavar="NAME", help="use this investigation, not README's active one")
+    if action == "list":
+        parser.add_argument("--status", action="append", choices=_QSTATUSES,
+                            help="statuses to list (repeatable; default open)")
+        parser.add_argument("--all", action="store_true", help="list every question")
+    elif action == "add":
+        parser.add_argument("text", help="the question, one line")
+        parser.add_argument("--kind", required=True, choices=_KINDS,
+                            help="context (a fact about the business), decision (a choice someone owns), or "
+                                 "analytical (a question about the data)")
+        parser.add_argument("--answerer", required=True, choices=_ANSWERERS, help="who can answer it")
+        parser.add_argument("--origin", required=True, choices=_ORIGINS, help="what raised it")
+        parser.add_argument("--unblocks", default="", help="what an answer unblocks or decides")
+        parser.add_argument("--status", default="open", choices=("open", "parked", "declined"),
+                            help="parked or declined records a proposal not pursued now (needs --reason)")
+        parser.add_argument("--reason", default="", help="why it is parked or declined")
+    elif action == "answer":
+        parser.add_argument("question_id", metavar="Q-NNN")
+        parser.add_argument("--text", help="a person's answer, one line")
+        parser.add_argument("--by", help="who gave it: the user or a named stakeholder")
+        parser.add_argument("--result", action="append", default=[], metavar="RESULT-ID",
+                            help="a recorded result whose settings table declares this question (repeatable)")
+    elif action == "status":
+        parser.add_argument("question_ids", nargs="+", metavar="Q-NNN")
+        parser.add_argument("--set", required=True, choices=("open", "parked", "declined", "superseded"),
+                            dest="status")
+        parser.add_argument("--reason", default="", help="why; required except for open")
+    elif action == "edit":
+        parser.add_argument("question_id", metavar="Q-NNN")
+        parser.add_argument("--text")
+        parser.add_argument("--kind", choices=_KINDS)
+        parser.add_argument("--answerer", choices=_ANSWERERS)
+        parser.add_argument("--unblocks")
+    try:
+        args = parser.parse_args(argv[1:])
+    except SystemExit as stop:
+        return stop.code
+    name = args.investigation
+    if name is not None and not (_ID.fullmatch(name) and (root / "investigations" / name).is_dir()):
+        print(f"awb.py questions: no investigation named {name!r} under investigations/", file=sys.stderr)
+        return 2
+    try:
+        if name is None:
+            _, _, (name, _) = _readme_pointer(root)
+            if name == "none":
+                raise ValueError("README.md names no active investigation; pass --investigation")
+        if action == "list":
+            statuses = _QSTATUSES if args.all else tuple(args.status or ("open",))
+            lines = question_lines(root, name, statuses)
+            print("\n".join(lines) if lines else f"no {'' if args.all else '/'.join(statuses) + ' '}questions")
+        elif action == "add":
+            entry = add_question(root, name, args.text, kind=args.kind, answerer=args.answerer, origin=args.origin,
+                                 unblocks=args.unblocks, status=args.status, reason=args.reason)
+            print(f"{entry['id']} {entry['status']}: {entry['text']}")
+        elif action == "answer":
+            entry = answer_question(root, name, args.question_id, text=args.text, by=args.by, results=args.result)
+            print(("" if entry["changed"] else "unchanged: ") + _row(_question_cells(entry)))
+        elif action == "status":
+            changed = set_question(root, name, args.question_ids, args.status, reason=args.reason)
+            print(f"{args.status}: {', '.join(changed) or 'none changed'}")
+        elif action == "edit":
+            changed = edit_question(root, name, args.question_id, text=args.text, kind=args.kind,
+                                    answerer=args.answerer, unblocks=args.unblocks)
+            print(("edited: " if changed else "unchanged: ") + args.question_id)
+        else:
+            ledger = _Ledger(root, name, render=True)
+            drifted = ledger.drift()
+            if drifted or not ledger.md_path.exists():
+                ledger.write()
+            print("questions.md restored" if drifted else "questions.md matches questions.json")
+    except StateError as error:
+        print(f"awb.py questions: {error}", file=sys.stderr)
+        return 1
+    except ValueError as error:
+        print(f"awb.py questions: {error}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def _pointer(value):
     """Parse an Active investigation value: (slug or 'none', rewrite function), or None if customized."""
     value = value.strip()
@@ -1559,8 +2025,9 @@ def _readme_pointer(root):
 
 
 def state_view(project_root, investigation: str) -> str:
-    """The resume view: brief.md and state.md verbatim, the question each row's evidence records, then
-    a warning per row with missing evidence."""
+    """The resume view: brief.md and state.md verbatim, the question each row's evidence records, the
+    ledger's open questions and those answered only by flagged or superseded findings, then a warning
+    per row with missing evidence."""
     root = Path(project_root).resolve()
     base = root / "investigations" / investigation
     out = []
@@ -1587,6 +2054,12 @@ def state_view(project_root, investigation: str) -> str:
             questions.append(f"{result_id}: {question}")
     if questions:
         out.append("==> questions the findings answer, by result <==\n" + "\n".join(questions) + "\n")
+    try:
+        ledger = question_lines(root, investigation) + _answered_by_unsettled(root, investigation)
+    except StateError as error:
+        ledger = [f"warning: {error}"]
+    if ledger:
+        out.append("==> open ledger questions <==\n" + "\n".join(ledger) + "\n")
     out += [f"warning: {result_id} links evidence/{result_id}.json, which does not exist"
             for result_id in rows if not (base / "evidence" / f"{result_id}.json").is_file()]
     return "\n".join(out)
@@ -1651,7 +2124,8 @@ def cli_state(root: Path, argv: list[str]) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=actions[action] if action else
         "Show an investigation for resuming: brief.md and state.md verbatim, the question each finding's "
-        "evidence records, and a warning for each finding whose evidence file is missing. Changes nothing. Uses README's Active investigation line unless "
+        "evidence records, the question ledger's open questions and those answered only by flagged or "
+        "superseded findings, and a warning for each finding whose evidence file is missing. Changes nothing. Uses README's Active investigation line unless "
         "--investigation is given; with no active investigation it lists the investigations.",
         epilog=epilog[action] + _STATE_EXIT)
     if action != "switch":

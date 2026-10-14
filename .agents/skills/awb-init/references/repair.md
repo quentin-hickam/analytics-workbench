@@ -12,4 +12,4 @@
 
 Repair is done when the last installer output shows every file `installed`, `current`, `replaced`, or kept or merged by the user's choice, every retired file `removed` or kept by choice, each customized retired helper is ported or removed, each `run.py` matches its template apart from the investigation's adaptations, both root files match their templates apart from project content, `.gitignore` holds every template rule apart from those the user chose to keep dropped, each reported as an exception, and step 3's `git check-ignore` output agrees with each `.env` rule the project keeps.
 
-Report also each investigation without `run.py`, which gets one before its next rerun.
+Report also each investigation without `run.py`, which gets one before its next rerun, and each without `questions.json`, whose Material unknowns and question-shaped Next steps `awb-scope` moves into a new question ledger when it next runs on it. Repair leaves investigation records as they are.

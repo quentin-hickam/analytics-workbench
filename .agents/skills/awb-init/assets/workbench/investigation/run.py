@@ -10,8 +10,10 @@ line with the paths, failed and unassessed checks, and what it did to the row, w
 status and claim strength.
 
 Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml,
-with the question it answers, and its query in queries/<id>.sql. Add a producer below only when
-a result needs more than its query, and put reusable operations in src/. Requires duckdb and pandas.
+with the question it answers, and its query in queries/<id>.sql. A result whose table declares
+answers = ["Q-NNN"] marks those question ledger rows answered, and its output line lists them.
+Add a producer below only when a result needs more than its query, and put reusable operations in
+src/. Requires duckdb and pandas.
 """
 
 import json
@@ -100,6 +102,7 @@ def produce_result(connection, result_id, config, parameters):
         "table": table.relative_to(ROOT).as_posix(),
         "profile": profile_path.relative_to(ROOT).as_posix(),
         "state": state["action"], "status": state["status"], "claim": state["claim"], "history": state["history"],
+        **({"questions": state["questions"]} if "questions" in state else {}),
     }
 
 

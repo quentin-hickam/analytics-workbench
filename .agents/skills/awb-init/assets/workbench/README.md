@@ -13,7 +13,7 @@ Released packages are kept at: not yet recorded
 ## Where work belongs
 
 - `foundation/` records sources, canonical datasets and views, shared data quality, common vocabulary, and the review rules every package review checks. `foundation/references/` keeps the third-party documentation those records rely on.
-- `investigations/` keeps each question's brief, current state, meaningful history, settings, `run.py`, and local exploration.
+- `investigations/` keeps each question's brief, current state, question ledger (`questions.md`, rendered from `questions.json`), meaningful history, settings, `run.py`, and local exploration.
 - `src/awb.py` runs the workbench helpers under `src/` as commands: `python3 src/awb.py --help` lists them. `requirements.txt` names the packages they need unless the project declares dependencies elsewhere. `.awb-receipt.json` records the shipped files the installer wrote, so an upgrade can tell them from customized copies.
 - `src/preparation/` holds acquisition, landing, conversion, session-loading, and reusable normalization and correction code when such code exists.
 - `src/exploration/` holds neutral analytical operations when such code exists.
@@ -31,13 +31,15 @@ Acquired records are landed durably before canonical ingestion. Completed landed
 
 ## Resume work
 
-Run `python3 src/awb.py state` to print the active investigation's `brief.md` (scope and purpose) and `state.md` (current and flagged findings, unresolved issues, and next steps). Its `history.md` holds meaningful analytical decisions and superseded conclusions. Findings come from the investigation's `run.py` run with its `settings.toml`, so a rerun is running `run.py` again; saved queries live in the investigation's `exploration/` and are rerun by path.
+Run `python3 src/awb.py state` to print the active investigation's `brief.md` (scope and purpose), `state.md` (current and flagged findings, unresolved issues, and next steps), and its open ledger questions; `python3 src/awb.py questions list --all` prints every question it has raised, answered or not. Its `history.md` holds meaningful analytical decisions and superseded conclusions. Findings come from the investigation's `run.py` run with its `settings.toml`, so a rerun is running `run.py` again; saved queries live in the investigation's `exploration/` and are rerun by path.
 
 ## Asking for things
 
 Name the workbench skill in a plain request:
 
-- `awb-init` sets up the workbench and starts an investigation: "Use awb-init to start an investigation into why overtime rose in Q3."
+- `awb-init` sets up the workbench for a first question: "Use awb-init to set up this project. The question is why overtime rose in Q3."
+- `awb-scope` starts an investigation, digs into its question and the open questions behind it, or changes its scope: "Use awb-scope to start an investigation into why overtime rose in Q3." or "Use awb-scope — let's work through the open questions."
+- `awb-brainstorm` proposes new questions from those already asked and answered: "Use awb-brainstorm — what else should we ask?"
 - `awb-status` reports where things stand and what can be asked for next: "Use awb-status — where are we?"
 - `awb-package` creates or revises a package's working draft: "Use awb-package to draft a package for this investigation."
 - `awb-release` preserves a numbered release from the draft: "Use awb-release — mark the package delivered."

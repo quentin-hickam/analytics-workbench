@@ -25,7 +25,7 @@ Keep the report to one screen, in this order. Report the collector's values as g
 
 - **Question and state.** `active.question` and `active.last_updated`, then `git.state_status`; for `out of date`, add `days_after_state` and `latest_change`. Add `git.commit_comparison` when present. Modification dates use the host timezone: convert `latest_change.date` only when the user's timezone differs and the conversion moves the date.
 - **Findings.** `active.counts`, then every flagged finding in `active.findings` with its `reason`. Read a `foundation/quality.md` correction row only when a reason cites one that needs explaining.
-- **Open work.** `unresolved_issues` and `next_steps`. Report an open decision only when the brief or state records it as one; list `material_unknowns` as unknowns.
+- **Open work.** `unresolved_issues` and `next_steps`. Report an open decision only when the brief or state records it as one. From `questions`: its `counts`, each `open` question grouped by answerer, and each `answered_by_unsettled` entry as an answer that rests on a flagged or superseded finding. A null `questions` means the investigation has no ledger yet; then list `material_unknowns` as unknowns.
 - **Other investigations.** Each name and `last_updated`.
 - **Packages.** For each: `revised_at`, `latest_release` with `released_at`, and `draft_vs_release`. Then what blocks its next release: `confirmed_without_disposition`, flags the manifest records whose disposition is still `none` or `revalidate`; `unmatched_flags`, flagged findings the manifest does not record with the same finding and reason, which awb-package resolves; and `rerun_since_draft`, represented results rerun after the draft was last revised, so the package still shows their earlier run.
 - **Storage.** `landed_data_storage` and `release_storage` by `availability`, and `acquisitions.without_retained_copy` as acquisitions held only in this checkout. `unrecorded` or `unreachable` is a risk once acquisitions or releases exist. `none chosen` is the user's recorded decision: report that this checkout holds the only copy. For `unknown`, check through the project's established access method or say "not verified".
@@ -47,8 +47,12 @@ Finish with up to five requests whose state applies, risk rows first, then progr
 | `sources.documentation_without_reference` lists a source | "Keep the documentation behind the <source> assessment" | `workbench-guides/data.md` | risk |
 | `git.state_status` is `out of date` | "Update the investigation state" | `python3 src/awb.py state` | risk |
 | An `uncertainties` entry names a missing standard record, or the user mentions newer workbench skills | "Bring the workbench up to date" | `awb-init` | risk |
-| No active investigation | "Start an investigation into <question>" | `awb-init` | progress |
-| The brief or state records an open scope or purpose decision | "Resolve the <topic> scope change" | `awb-init` | progress |
+| No active investigation | "Start an investigation into <question>" | `awb-scope` | progress |
+| The brief or state records an open scope or purpose decision | "Resolve the <topic> scope change" | `awb-scope` | progress |
+| `questions` is null for the active investigation | "Start the question ledger for <investigation>" | `awb-scope` | progress |
+| `questions.open_by_answerer` counts `user` or `stakeholder` questions | "Work through the open questions" | `awb-scope` | progress |
+| `questions.open_by_answerer` counts `data` questions | "Explore <dataset> for Q-NNN" | `awb-eda` | progress |
+| `questions.counts` has answered questions and at most two open ones | "What else should we ask?" | `awb-brainstorm` | progress |
 | A dataset the investigation uses has no row in the quality record, or unresolved issues or next steps name data errors | "Clean the <dataset> data" | `awb-clean` | progress |
 | No findings yet, or a next step calls for exploring a dataset | "Explore <dataset> for this investigation" | `awb-eda` | progress |
 | Supported findings and no draft | "Prepare a draft package" | `awb-package` | progress |
