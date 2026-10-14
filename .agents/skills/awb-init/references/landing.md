@@ -10,6 +10,8 @@ For an API or other fetched source, call `land()` from a script with a `fetch` c
 
 Record `upstream` whenever the fetch has these values: with an HTTP URL and an ETag or Last-Modified, `awb-status` can report on request whether the upstream file has changed since. A changed upstream is landed again under a new acquisition ID; `land()` never replaces an acquisition.
 
+The fetch script reads credentials from environment variables, with local values in the gitignored `.env`; the project's `workbench-guides/data.md` (**Assess and acquire**) holds the full rule. Where `request` or `notes` refers to a credential, it names the variable, as `$NAME`, never its value; `land()` records both as given, without checking them.
+
 ## Convert with `publish()`
 
 For a conversion a select cannot express, call `publish()` with a `convert` callable.

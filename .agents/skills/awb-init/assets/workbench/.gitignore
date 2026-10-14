@@ -1,6 +1,7 @@
-# Local environments and editor state
+# Local environments and editor state; .env.example lists credential names only
 .env
 .env.*
+!.env.example
 .venv/
 venv/
 __pycache__/
