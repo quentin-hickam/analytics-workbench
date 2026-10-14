@@ -7,6 +7,7 @@
 # test_wrapped_field_line_is_reported: a line inside a rule section that is not a field, such as a wrapped Rule, is a problem rather than lost text.
 # test_line_starting_with_hash_never_cuts_a_rule_short: after the first rule, a wrapped line starting with # or a heading that is not a rule's is a problem; check exits 1 and add refuses, so no rule is silently truncated.
 # test_match_lines_count_only_newlines: a U+2028 or form feed in a narrative does not shift the reported line numbers away from the editor's.
+# test_check_through_the_dispatcher_writes_nothing: run as a script with bytecode writes enabled, review-rules check leaves every project file, __pycache__ included, unchanged.
 # test_add_to_an_empty_rule_file_writes_the_header: add to an empty rule file writes the header before the first rule.
 # test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes or blank, an unknown severity, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
 # test_pattern_round_trips_through_backticks: a pattern holding backticks, or the word none, is written in backticks and read back as the same expression.
@@ -14,7 +15,10 @@
 
 import importlib.util
 import json
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -64,9 +68,11 @@ def add(project, capsys, area="periods", severity="error", rule="Compare only co
     return run(project, capsys, *argv, *(["--pattern", pattern] if pattern is not None else []))
 
 
-def snapshot(root):
+def snapshot(root, *, caches=False):
+    # In-process runs load src/awb.py through the test's own import, which may cache it; the dispatcher
+    # itself writes no cache, which test_check_through_the_dispatcher_writes_nothing checks with caches.
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*")
-            if p.is_file() and "__pycache__" not in p.parts}
+            if p.is_file() and (caches or "__pycache__" not in p.parts)}
 
 
 def test_correction_becomes_a_numbered_rule(project, capsys):
@@ -225,6 +231,17 @@ def test_match_lines_count_only_newlines(project, capsys):
     add(project, capsys, pattern="partial month")
     row = run(project, capsys, "review-rules", "check", "inv", "pkg")[1]["rules"][0]
     assert [(m["file"], m["line"]) for m in row["matches"]] == [("findings.md", 5), ("methodology.md", 3)]
+
+
+def test_check_through_the_dispatcher_writes_nothing(project, capsys):
+    add(project, capsys, pattern="partial month")
+    before = snapshot(project, caches=True)
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONDONTWRITEBYTECODE"}
+    result = subprocess.run([sys.executable, str(project / "src/awb.py"), "review-rules", "check", "inv", "pkg"],
+                            cwd=project, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["rules"][0]["status"] == "matched"
+    assert snapshot(project, caches=True) == before
 
 
 def test_add_to_an_empty_rule_file_writes_the_header(project, capsys):
