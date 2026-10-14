@@ -84,7 +84,7 @@ The workbench must use consistent logical locations across projects. It must not
 
 Canonical, reusable views are preferred. DuckDB querying external Parquet datasets is the default. A project may select a different backend for a concrete need, including incremental workloads, while retaining independent source landing and the preparation/EDA boundary. Source conversion to Parquet is a deliberate storage boundary, not a requirement to materialize every transformation. Accumulating materialized results without an explicit reason violates the workflow.
 
-All analytical code is tracked in Git. Delivery packages are not part of the code history under the current convention; each package manifest identifies the Git commit that produced the represented results. A commit identifies code, not input data, so the manifest also records input provenance and analytical settings. Each result's evidence is a JSON file in the investigation's `evidence/` directory, written and compared by a shipped provenance helper copied into `src/`; `state.md` links to it.
+All analytical code is tracked in Git. Delivery packages are not part of the code history under the current convention; each package manifest identifies the Git commit that produced the represented results. A commit identifies code, not input data, so the manifest also records input provenance and analytical settings. Each result's evidence is a JSON file in the investigation's `evidence/` directory, written and compared by a shipped provenance helper copied into `src/`; `state.md` links to it. It records, verbatim, the question the result answers as the user framed it, which the methodology reference repeats.
 
 ## Records and vocabulary
 
@@ -151,6 +151,7 @@ project-root/
 │   ├── catalog.md                # Canonical datasets, views, and deliberate caches
 │   ├── quality.md                # Limitations, errors, and correction rationale
 │   ├── quality.json              # Links from cleaning-scan issues to quality rows (written by awb-clean)
+│   ├── datasets.toml             # Declared checks each dataset's publications must pass
 │   ├── scans/                    # Cleaning scans; Git-ignored because they quote source values
 │   ├── glossary.md               # Shared business and analytical vocabulary
 │   └── views/                    # Version-controlled canonical definitions, if used

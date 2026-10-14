@@ -485,6 +485,28 @@ def _headings(path):
     return headings
 
 
+def question_problems(draft, record: dict) -> list[dict]:
+    """List each manifest `results` entry whose question methodology.md does not repeat verbatim.
+
+    Runs of whitespace compare equal, so a wrapped line still matches.
+    """
+    methodology = " ".join((Path(draft) / "methodology.md").read_text(encoding="utf-8").split())
+    entries = record.get("results")
+    if not isinstance(entries, list):
+        return [{"result_id": None, "problem": "the manifest records no results list; run export"}]
+    problems = []
+    for entry in entries:
+        result_id = entry.get("result_id") if isinstance(entry, dict) else None
+        question = entry.get("question") if isinstance(entry, dict) else None
+        if not isinstance(question, str) or not question.strip():
+            problems.append({"result_id": result_id, "problem": "the manifest records no question for this "
+                             "result; run export, or copy its question from settings into a hand-added entry"})
+        elif " ".join(question.split()) not in methodology:
+            problems.append({"result_id": result_id, "question": question,
+                             "problem": "methodology.md does not repeat this question verbatim"})
+    return problems
+
+
 def heading_problems(draft) -> list[dict]:
     """List each `###` finding heading in findings.md that no methodology.md heading repeats exactly."""
     methodology = set(_headings(Path(draft) / "methodology.md"))
@@ -663,7 +685,8 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
 
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
-            and report["charts"] == [] and report["headings"] == [] and report["verify"] == []
+            and report["charts"] == [] and report["headings"] == [] and report["questions"] == []
+            and report["verify"] == []
             and report["flag_entries"] == [])
 
 
@@ -672,7 +695,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
-              "charts": None, "headings": None, "inventory": None, "verify": None,
+              "charts": None, "headings": None, "questions": None, "inventory": None, "verify": None,
               "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
@@ -718,6 +741,10 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             raise ValueError(f"no manifest at {_rel(root, path)}; run export first")
         record = _read_json(path)
         report["flag_entries"] = flag_entry_problems(record)
+        try:
+            report["questions"] = question_problems(draft, record)
+        except (OSError, UnicodeError) as error:
+            report["errors"].append(f"questions check: {error}")
         if not verify_only:
             rows = inventory(draft)
             if rows != record.get("inventory"):
@@ -747,14 +774,17 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py check-draft", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Run every mechanical draft check (internal names in findings.md, chart files, "
-                    "matching finding headings, the manifest inventory, and state.md's current flags) "
+                    "matching finding headings, each represented result's question in methodology.md, "
+                    "the manifest inventory, and state.md's current flags) "
                     "and rewrite the manifest inventory, stamping revised_at when it changes; "
                     "--verify-only checks a release candidate and writes nothing.",
         epilog="Prints one JSON line.\nunmatched_flags lists each finding state.md flags whose exact finding "
                "and reason the manifest's revalidation_flags does not record.\nflag_entries lists a missing or "
                "malformed revalidation_flags, an entry without text finding and reason, represented_in that is "
-               "neither none nor a list of places, and an unknown disposition.\nExit 0 only when names_problems, "
-               "findings, charts, headings, verify, flag_entries, unmatched_flags, and errors are all empty.")
+               "neither none nor a list of places, and an unknown disposition.\nquestions lists each manifest "
+               "results entry without a question, or whose question methodology.md does not repeat verbatim.\n"
+               "Exit 0 only when names_problems, findings, charts, headings, questions, verify, flag_entries, "
+               "unmatched_flags, and errors are all empty.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
                         help="verify against the recorded inventory without rewriting it (the release gate)")
@@ -1044,8 +1074,11 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     kept = {c.get("result_id"): c for c in previous if isinstance(c, dict)}
     entries = [checks.get(r) or kept.get(r) for r in represented]
     record["export_checks"] = [e for e in entries if e] or "none"
-    # Every represented result with its evidence, serialized or not, so status can see a later rerun.
-    record["results"] = [{"result_id": r, "evidence": evidence_paths[r]} for r in represented]
+    # Every represented result with its evidence, serialized or not, so status can see a later rerun,
+    # and the question it answers, which methodology.md repeats verbatim.
+    questions = {r: evidence[r].get("question", {"unknown": "evidence lacks question"}) for r in represented}
+    record["results"] = [{"result_id": r, "evidence": evidence_paths[r], "question": questions[r]}
+                         for r in represented]
     fields = producing_state(evidence)
     fields["packaging_commit"], fields["packaging_uncommitted_changes"] = packaging_state(root)
     record.update(fields)
@@ -1056,6 +1089,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     report["written"] = True
     commits, changes = fields["producing_commit"], fields["producing_uncommitted_changes"]
     report["results"] = represented
+    report["questions"] = questions
     report["producing_commit"] = "differs by result" if isinstance(commits, list) else commits
     report["producing_uncommitted_changes"] = len(changes) if isinstance(changes, list) else 0
     report["packaging_commit"] = fields["packaging_commit"]
@@ -1082,7 +1116,9 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "state.md's flags (none when it flags nothing), keeping an entry whose finding and reason match "
                "exactly and adding others with represented_in [] and disposition none; flags_pending lists "
                "each entry that needs represented_in or, once represented, a disposition. When state.md "
-               "cannot be read, flags_error says why and revalidation_flags is left as it was.\nExit 0 only "
+               "cannot be read, flags_error says why and revalidation_flags is left as it was.\nquestions maps "
+               "each represented result to the question its evidence records, for methodology.md to repeat "
+               "verbatim; the manifest's results entries record it.\nExit 0 only "
                "when written and check_charts is empty.")
     _package_arguments(parser)
     parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS]",
