@@ -105,6 +105,10 @@ def _declared(root):
     if requirements.is_file():
         files.append("requirements.txt")
         read = _requirements_reader()
+        try:
+            requirements.read_bytes()
+        except OSError:
+            read = None
         if read is None:
             return files, None, unread
         found, unread = read(requirements)

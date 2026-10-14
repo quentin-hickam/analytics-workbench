@@ -6,6 +6,7 @@
 # test_package_formats_install_on_request: --package-formats installs missing formats into the receipt; without it present formats go unreported.
 # test_check_writes_nothing: --check reports missing helpers and the absent requirements file without writing.
 # test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited; a wheel URL declares its package, not its scheme; a UTF-16 file and its quoted -r include are read, and a wheel path with extras declares its package; lines and includes the reader cannot read are listed as unread beside the status.
+# test_unreadable_requirements_are_unchecked: a requirements.txt that exists but cannot be read is unchecked, not incomplete with every package missing.
 # test_missing_packages_get_an_install_command: a package that fails to import is reported with a pip command for this interpreter.
 # test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks; without the provenance asset an existing requirements.txt is reported unchecked, not a crash.
 # test_refuses_non_workbench_old_python_and_unreadable_receipt: none of these writes anything.
@@ -19,6 +20,7 @@ import ast
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -197,6 +199,18 @@ def test_existing_dependency_files_are_only_reported(project, imports_ok):
     assert result["requirements"] == {"path": "pyproject.toml", "status": "incomplete",
                                       "missing": ['tomli; python_version < "3.11"']}
     assert not (project / "requirements.txt").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32" or getattr(os, "geteuid", lambda: 1)() == 0,
+                    reason="file modes do not stop this user reading")
+def test_unreadable_requirements_are_unchecked(project, imports_ok):
+    (project / "requirements.txt").write_text('duckdb\npandas\ntomli; python_version < "3.11"\n')
+    (project / "requirements.txt").chmod(0)
+    try:
+        result = installer.install(project, check=True)
+    finally:
+        (project / "requirements.txt").chmod(0o644)
+    assert result["requirements"] == {"path": "requirements.txt", "status": "unchecked", "packages": PACKAGES}
 
 
 def test_missing_packages_get_an_install_command(project, monkeypatch):
