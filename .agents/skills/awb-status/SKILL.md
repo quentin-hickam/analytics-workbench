@@ -23,6 +23,8 @@ When `workbench` is false, stop and suggest `awb-init`. Treat `null`, `unknown`,
 
 Keep the report to one screen, in this order. Report the collector's values as given, in the investigation's wording shortened, and omit empty items.
 
+When a reported brief element names a ledger question ID, look it up in the investigation's `questions.json` and report its status with the ID, using its answer as the value only when answered.
+
 - **Question and state.** `active.question` and `active.last_updated`, then `git.state_status`; for `out of date`, add `days_after_state` and `latest_change`. Add `git.commit_comparison` when present. Modification dates use the host timezone: convert `latest_change.date` only when the user's timezone differs and the conversion moves the date.
 - **Findings.** `active.counts`, then every flagged finding in `active.findings` with its `reason`. Read a `foundation/quality.md` correction row only when a reason cites one that needs explaining.
 - **Open work.** `unresolved_issues` and `next_steps`. Report an open decision only when the brief or state records it as one. From `questions`: its `counts`, each `open` question grouped by answerer, and each `answered_by_unsettled` entry as an answer that rests on a flagged or superseded finding. A null `questions` with an `uncertainties` entry for the ledger means it could not be read: report that entry. Otherwise a null `questions` means the investigation has no ledger yet; then list `material_unknowns` as unknowns.

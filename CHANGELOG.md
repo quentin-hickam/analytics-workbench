@@ -14,6 +14,7 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ### Changed
 
+- `awb-package` resolves brief sections held open by ledger question ID, using answered values and treating other statuses as unsettled; `awb-scope` allows those IDs in new briefs, and `awb-status` reports their question status.
 - `awb-eda` records untested candidate explanations as open data questions in the ledger instead of Next steps. The brief's Material unknowns section points to the ledger, Unresolved issues holds data problems and blockers, and Next steps holds actions. Repair reports investigations without a ledger; `awb-scope` moves their unknowns and question-shaped next steps into one when it next runs on them.
 
 - Investigation `findings.json` owns the rendered Current findings table. State writers refuse hand-edit drift; `state render` restores it, `state flag` records flags through the project helper, and draft checks report drift.

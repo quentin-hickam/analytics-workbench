@@ -34,6 +34,8 @@ Read the **Audience** section of the investigation's `brief.md`: who will see or
 
 Recover the business question, intended decision or exploratory purpose, audience, usefulness criteria, and evidence the contract needs, with the data limitations and errors that affect interpretation.
 
+When a brief section names a ledger question ID, resolve it with `python3 src/awb.py questions list --all` (add `--investigation <name>` for another investigation). An answered question supplies the value; any other status leaves the element unsettled. Handle it as missing: ask the user where required above; otherwise ask or state it as unsettled in both narratives, including any unsettled usefulness criterion, never as settled.
+
 ## 3. Write the draft
 
 Create the draft at the contract's paths, or revise the same files. A draft in an earlier format is rewritten whole in the current format on its next revision; releases stay frozen.
