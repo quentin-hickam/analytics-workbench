@@ -179,6 +179,9 @@ def test_land_refuses_malformed_upstream_unpublished(tmp_path, upstream, message
     "https://api.example.test/x?compass=north&passage=2&signal=1",
     "https://[::1]:8443/x",
     "s3://bucket/x.csv",
+    # Only a name=value piece is a parameter (landing.md), so an anchor named like a credential is recorded.
+    "https://api.example.test/x#session",
+    "https://api.example.test/x?page=2#token",
 ])
 def test_land_records_a_url_whose_parameters_name_no_credential(tmp_path, url):
     final = landing.land(tmp_path, "api", "batch-1", lambda directory: (directory / "page.json").write_bytes(b"abc"),

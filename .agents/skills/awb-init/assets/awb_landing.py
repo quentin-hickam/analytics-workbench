@@ -101,11 +101,12 @@ def _check_url(path, url):
         raise ValueError(f"upstream url of {path} carries a user name or password; "
                          "record it without credentials")
     # Query and fragment parameters, and the path parameters after the first ; in a segment,
-    # are each split on & or ;.
+    # are each split on & or ;. Only a name=value piece is a parameter, so a #section anchor is not.
     pieces = [piece for part in (parts.query, parts.fragment) for piece in re.split(r"[&;]", part)]
     pieces += [piece for segment in parts.path.split("/") if ";" in segment
                for piece in re.split(r"[&;]", segment.split(";", 1)[1])]
-    names = sorted({name for name in (urllib.parse.unquote_plus(piece.split("=", 1)[0]) for piece in pieces)
+    names = sorted({name for name in (urllib.parse.unquote_plus(piece.split("=", 1)[0])
+                                      for piece in pieces if "=" in piece)
                     if CREDENTIAL_PARAMETER.search(re.sub(r"[^a-z0-9]", "", name.lower()))})
     if names:
         raise ValueError(f"upstream url of {path} carries credential parameters ({', '.join(names)}); "
