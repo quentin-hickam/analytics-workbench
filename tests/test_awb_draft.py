@@ -11,7 +11,9 @@
 # test_check_draft_traces_narrative_numbers: numbers in both narratives trace to a represented result's table cells within rounding, check details, settings, and profile rates as percents; an untraced number fails with its file, line, and text in both modes and refuses release; allowed_numbers accepts it and export keeps that field; dropping a result from the represented set untraces its numbers.
 # test_check_draft_reports_number_problems: a malformed allowed_numbers value or entry, a malformed results value or result_id, a missing result table, and an unreadable profile are numbers_problems that fail the check.
 # test_check_numbers_reads_formats: thousands separators, percents of fractions, scales, multipliers, scientific notation, ranges, and rounding trace; dates, years in a year's context, times with am or pm, codes, glued names and hashes, chart number lists, list markers, footnotes, code, comments, and link targets are skipped; a count beside a month name or a bare year-like count is read; allowed texts pass.
-# test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's digits add nothing; evidence text adds scaled and scientific values a narrative can write in full.
+# test_check_numbers_reviewed_probes: every narrative line probed in review is reported or skipped as intended: a skip never takes a count after a chart reference, a date, or a year list, paths and hyphenated names are skipped whole, comma groups that are not thousands grouping are read and never trace, and non-quantities such as a comparison year, a version, or a week number are reported.
+# test_check_numbers_allowed_phrases_and_precision: an allowed phrase covers only the number it is written around, a bare allowed text every occurrence; a number traces at every written digit beyond 28 significant digits and not one unit of a further place outside its rounding.
+# test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's or a path's digits add nothing; evidence text and parsed settings content add scaled and scientific values a narrative can write in full, without dates, booleans, or the settings file's size.
 # test_verify_only_never_writes: a changed file is reported against the recorded inventory; the manifest stays byte-identical.
 # test_missing_manifest_runs_other_checks: without manifest.json the findings and chart checks still run; verify is not run and the check fails.
 # test_export_results_records_provenance_only: --result alone writes shared commit, inputs, settings, and packaging state, creates the manifest with its identity fields, leaves chart files untouched, and is not gated by a changed setting.
@@ -399,14 +401,65 @@ def test_check_numbers_reads_formats(tmp_path):
                                                       "77", "31", "1950"}) == []
 
 
+# Each narrative line a review probed, with the numbers check_numbers reports for it; [] is skipped.
+REVIEWED_PROBES = [
+    ("Probability is 1e-5.", ["1e-5"]), ("Revenue is 1.5e6.", ["1.5e6"]), ("Revenue is 1.5E+06.", ["1.5E+06"]),
+    ("12e3 orders", []),  # a two-digit mantissa is a glued name, as a hash is
+    ("In June 77 orders were lost.", ["77"]), ("in June 31 orders", ["31"]), ("June 5, 77 orders", ["77"]),
+    ("on June 5 77 orders", ["77"]), ("5 June 77 orders", ["77"]),
+    ("As shown in Chart 1, 77 orders were late.", ["77"]), ("As shown in Chart 1; 77 orders were late.", ["77"]),
+    ("Chart 1, 2 regions led.", ["2"]), ("See Chart 2 and 40 stores.", ["40"]), ("Chart 3 - 12 regions", ["12"]),
+    ("Chart 1: 77 orders", ["77"]), ("Charts 1 and 4 show 77 orders", ["77"]), ("Charts 1 and 4 show it", []),
+    ("Charts 1, 2, and 3 show it", []), ("Charts 2-3 show it", []), ("Charts 1, 40 stores", ["40"]),
+    ("Charts 1 and 2, 40 stores", ["40"]), ("Charts 4,5 show it", ["4,5"]),
+    ("in 2025, 2030 orders shipped", ["2030"]), ("since 2019, and 2020", []), ("between 2023 and 2024", []),
+    ("in 2023, 2024 and 2025", []), ("We reviewed 1950 orders and 2,000 stores", ["1950", "2,000"]),
+    ("Late orders rose 3 points over 2025.", ["3", "2025"]), ("compared with 2024", ["2024"]),
+    ("the 2025 baseline", ["2025"]), ("2026 H1", ["2026"]), ("Week 23", ["23"]),
+    ("Python 3.12 and DuckDB 1.1.3", ["3.12"]), ("Python 3.11", ["3.11"]), ("?id=42", ["42"]),
+    ("## 2. Sources", []), ("opened at 9:30am", []), ("-21.3%", ["21.3%"]), ("10–15 percent", ["10", "15 percent"]),
+    ("values 1,2,3 and 4, 5", ["1,2,3", "4", "5"]), ("21,3%", ["21,3%"]),
+    ("Source: results/r-001-77.csv.", []), ("file data/run-2-45.parquet", []), ("**results/r-001-77.csv**", []),
+    ("./run-2-45.csv and results/12-45.csv", []), ("ORD-123-45 and ORD-123", []),
+    ("COVID-19-related 77 orders", ["77"]), ("45/day", ["45"]),
+]
+
+
+def test_check_numbers_reviewed_probes(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_probes")
+    path = tmp_path / "findings.md"
+    path.write_text("".join(line + "\n" for line, _ in REVIEWED_PROBES))
+    rows = draft.check_numbers(path, [Decimal("0.5")])
+    assert {line: [row["text"] for row in rows if row["line"] == number]
+            for number, (line, _) in enumerate(REVIEWED_PROBES, start=1)} == dict(REVIEWED_PROBES)
+
+
+def test_check_numbers_allowed_phrases_and_precision(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_phrases")
+    path = tmp_path / "methodology.md"
+    path.write_text("Week 23 ran on Python 3.12, up 3 points over 2025; 23 stores and 2025 orders.\n")
+    assert [row["text"] for row in draft.check_numbers(path, [], allowed={"Week 23", "Python 3.12", "over 2025"})] \
+        == ["3", "23", "2025"]
+    assert [row["text"] for row in draft.check_numbers(path, [], allowed={"23", "3.12", "3", "2025"})] == []
+    path.write_text("Share 0.12345678901234567890123456789, or 1.2345678901234567890123456789e-1.\n")
+    assert draft.check_numbers(path, [Decimal("0.12345678901234567890123456789")]) == []
+    assert [row["text"] for row in draft.check_numbers(path, [Decimal("0.1234567890123456789012345679")])] == [
+        "0.12345678901234567890123456789", "1.2345678901234567890123456789e-1"]  # 1E-29 away: outside the rounding
+
+
 def test_recorded_values_reads_whole_cells_and_quantities(tmp_path):
     draft = load(ASSETS["src/packaging/draft.py"], "draft_recorded")
-    write(tmp_path, "investigations/inv/results/r-001.csv", "customer_hash,orders,label\n4e1234567,3,ORD-123\n")
+    write(tmp_path, "investigations/inv/results/r-001.csv",
+          "customer_hash,orders,label,source\n4e1234567,3,ORD-123,results/r-001-77.csv\n")
+    # settings content is parsed TOML, as awb_provenance records it.
     write(tmp_path, "investigations/inv/evidence/r-001.json", json.dumps(
-        {"checks": [{"detail": "Revenue is $4.2M on 2026-06-30"}], "settings": {"content": "threshold = 1e-5\n"}}))
+        {"checks": [{"detail": "Revenue is $4.2M on 2026-06-30"}], "producing_commit": "1234567", "notes": "run 9",
+         "settings": {"path": "settings.toml", "bytes": 120, "content": {
+             "parameters": {"threshold": 1e-5, "start": "2026-01-01", "flag": True},
+             "results": {"r-001": {"window_days": 30}}}}}))
     values, problems = draft.recorded_values(tmp_path, "inv", [{"result_id": "r-001"}])
-    assert problems == [] and values == sorted(
-        Decimal(v) for v in ("3", "4e1234567", "4.2", "4.2e6", "0.00001"))  # no 123 from ORD-123, no overflow
+    assert problems == [] and values == sorted(  # no 123 from ORD-123, no 77 from the path, no overflow
+        Decimal(v) for v in ("3", "4e1234567", "4.2", "4.2e6", "0.00001", "30"))
     path = tmp_path / "findings.md"
     path.write_text("Revenue was 4,200,000 against a threshold of 0.00001.\n")
     assert draft.check_numbers(path, values) == []

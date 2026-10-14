@@ -22,7 +22,7 @@ import re
 import shutil
 import subprocess
 from datetime import datetime
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, ROUND_HALF_UP, Context, Decimal, InvalidOperation, localcontext
 from pathlib import Path
 
 MANIFEST = "manifest.json"
@@ -509,14 +509,19 @@ _MONTH = (r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July
 _DAY = r"(?:3[01]|[12][0-9]|0?[1-9])"  # a calendar day, so "June 77 orders" stays a count
 _DAYS = rf"{_DAY}(?:\s*(?:[-–—]|to|through)\s*{_DAY})?"
 _YEAR = r"(?:19|20)[0-9]{2}"
-_YEARS = rf"{_YEAR}(?:\s*(?:[-–—,]|and|or|to|through|vs\.?)\s*{_YEAR})*"
+# Years listed after a year: a range, or a comma list that "and" or "or" closes, so a count after a
+# comma ("in 2025, 2030 orders") is still read.
+_YEARS = (rf"{_YEAR}(?:\s*(?:[-–—]|to|through|vs\.?)\s*{_YEAR}"
+          rf"|(?:\s*,\s*{_YEAR})*,?\s+(?:and|or)\s+{_YEAR})?")
 # A day beside a month name is a date after one of these words or before a year or punctuation.
 _ON = (r"(?i:\b(?:on|by|to|from|until|till|since|through|before|after|between|as\s+of"
        r"|(?:mon|tues|wednes|thurs|fri|satur|sun)day,?))\s+")
 # A year is a year after one of these words, a month name, or a quarter or half, or in parentheses.
 _IN = (rf"(?:(?i:\b(?:in|from|since|during|until|till|through|before|after|between|early|mid|late|fiscal"
        rf"|calendar|year|FY|CY))\s+|{_MONTH}\s+|\b[QH][1-4]\s+)")
-# Dates, times, chart numbers, list markers, and footnote marks are blanked before numbers are read.
+# Dates, times, chart numbers, list and heading markers, and footnote marks are blanked before
+# numbers are read. A single chart takes one number and only "Charts" takes a list, closed the way a
+# year list is, so a count after "Chart 1," is still read.
 _NOT_QUANTITY = re.compile(
     r"(?<![\w.])(?:[0-9]{4}-[0-9]{1,2}(?:-[0-9]{1,2})?(?:T[0-9:.]+(?:Z|[+-][0-9:]+)?)?"
     r"|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?(?:\s?(?i:[ap]\.?m\.?))?"
@@ -524,26 +529,39 @@ _NOT_QUANTITY = re.compile(
     rf"|{_MONTH}\s+{_DAYS}(?:,?\s+{_YEAR}|(?=\s*(?:[,.;:)|]|$)))"
     rf"|{_DAYS}\s+{_MONTH}(?:,?\s+{_YEAR})?"
     rf"|{_IN}{_YEARS}|\(\s*{_YEARS}\s*\)"
-    r"|[Cc]harts?\s+[0-9]+(?:(?:\s*,\s*(?:and\s+|or\s+)?|\s+(?:and|or|to|through)\s+|\s*[-–—]\s*)[0-9]+)*)"
+    r"|[Cc]hart\s+[0-9]+|[Cc]harts\s+[0-9]+(?:\s*(?:[-–—]|to|through)\s*[0-9]+"
+    r"|(?:\s*,\s*[0-9]+)*,?\s+(?:and|or)\s+[0-9]+)?)"
     r"(?![\w%]|[.,][0-9])"
-    r"|^\s*[0-9]+[.)]\s|\[\^[^\]]*\]", re.MULTILINE)
+    r"|^\s*(?:#{1,6}\s+)?[0-9]+[.)]\s|\[\^[^\]]*\]", re.MULTILINE)
+# Paths and names are blanked whole, so no digit inside them is read (results/r-001-77.csv, ORD-123-45):
+# a slash token that starts with a letter, tilde, underscore, or ./ or ../; a file name with a lowercase
+# extension; and a hyphenated name that starts with a letter. A rate such as 45/day starts with its number.
+_NAME_TOKEN = re.compile(
+    r"(?<![^\s(\[<\"'*_])(?:[A-Za-z_~][^\s,;|()\[\]<>\"']*|\.{1,2})[/\\][^\s,;|()\[\]<>\"']*"
+    r"|(?<![\w.,/\\-])[\w-]*\w\.[a-z][a-z0-9]{0,7}(?![\w/\\])"
+    r"|(?<![\w.-])[A-Za-z_]\w*(?:-\w+)+")
 # A number not glued to a word, path, version, or hyphenated name (Q-3, chart-1), with its unit.
 # Scientific notation needs a one-digit mantissa and an exponent of at most three digits, so an
-# all-digit hash with one e (12345e6) stays a glued name.
+# all-digit hash with one e (12345e6) stays a glued name. Digits joined by commas are read as one
+# number; unless they are thousands grouping (1,2,3 or a decimal comma 21,3) it never traces.
 _NUMBER = re.compile(
     r"(?<![\w.,/\\])(?<![A-Za-z_]-)"
-    r"([0-9](?:\.[0-9]+)?[eE][-+]?[0-9]{1,3}|[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?|\.[0-9]+)"
+    r"([0-9](?:\.[0-9]+)?[eE][-+]?[0-9]{1,3}|[0-9]+(?:,[0-9]+)+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?|\.[0-9]+)"
     r"(\s?%|\s?(?:per\s?cent|percentage\s+points?|pp)(?!\w)|(?:mn|bn|tn|[kKmMbB])(?!\w)"
     r"|\s(?:thousand|million|billion|trillion)(?!\w)|[x×](?!\w))?"
     r"(?!\w|[.,/][0-9])")
+_GROUPED = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[^,]*")
 _RANGE = re.compile(r"\s?(?:[-–—]|to|and)\s?")
 _SCALES = {"k": 3, "thousand": 3, "m": 6, "mn": 6, "million": 6, "b": 9, "bn": 9, "billion": 9,
            "tn": 12, "trillion": 12}
 
 
 def _quantities(line):
-    """Yield (text, body, unit) for each number a line states, after the skips check_numbers names."""
-    for pattern in (_CODE_SPAN, _NOT_QUANTITY):
+    """Yield (text, body, unit, column) for each number a line states, after the skips check_numbers names.
+
+    Every skip blanks with spaces, so a column indexes the line as written.
+    """
+    for pattern in (_CODE_SPAN, _NAME_TOKEN, _NOT_QUANTITY):
         line = pattern.sub(lambda match: " " * len(match.group(0)), line)
     line = _LINK_TARGET.sub(lambda match: "]" + " " * (len(match.group(0)) - 1), line)
     matches = list(_NUMBER.finditer(line))
@@ -552,15 +570,20 @@ def _quantities(line):
         if not unit and index + 1 < len(matches) and _RANGE.fullmatch(line[match.end():matches[index + 1].start()]):
             unit = matches[index + 1].group(2) or ""  # 10-15%: the lower bound takes the upper's unit
         if not re.fullmatch(r"0[0-9]+", body):  # a zero-padded code such as release 002
-            yield match.group(0).strip(), body, " ".join(unit.lower().split())
+            yield match.group(0).strip(), body, " ".join(unit.lower().split()), match.start()
+
+
+# Arithmetic on written numbers never rounds: every digit a narrative or a record writes is kept.
+_EXACT = Context(prec=MAX_PREC, Emax=MAX_EMAX, Emin=MIN_EMIN)
 
 
 def _value(body):
-    """Return a number's value and half a unit of its last written place."""
+    """Return a number's value and half a unit of its last written place, both exact."""
     mantissa, _, exponent = body.replace(",", "").lower().partition("e")
     exponent = int(exponent or 0)
-    return (Decimal(mantissa).scaleb(exponent),
-            Decimal(5).scaleb(exponent - len(mantissa.partition(".")[2]) - 1))
+    with localcontext(_EXACT):
+        return (Decimal(mantissa).scaleb(exponent),
+                Decimal(5).scaleb(exponent - len(mantissa.partition(".")[2]) - 1))
 
 
 def _magnitudes(value, into, *, text=True):
@@ -589,11 +612,13 @@ def _magnitudes(value, into, *, text=True):
     except InvalidOperation:
         found = []
         for line in value.splitlines():
-            for _, body, unit in _quantities(line):
+            for _, body, unit, _ in _quantities(line):
+                if not _GROUPED.fullmatch(body):
+                    continue
                 number = _value(body)[0]
                 found.append(number)
                 if unit in _SCALES:
-                    found.append(number.scaleb(_SCALES[unit]))
+                    found.append(number.scaleb(_SCALES[unit], _EXACT))
     into.update(number.copy_abs() for number in found)  # copy_abs never rounds, so 4e1234567 cannot overflow
 
 
@@ -667,28 +692,36 @@ def _within(values, low, high):
 
 def _traces(body, unit, values):
     # Written to d places, the number stands for any value within half a unit of its last place.
+    if not _GROUPED.fullmatch(body):
+        return False  # 1,2,3 or 21,3 has no one value
     number, half = _value(body)
-    windows = [(number - half, number + half)]
-    if unit.startswith(("%", "per", "pp")):
-        windows.append(((number - half) / 100, (number + half) / 100))
-    elif unit in _SCALES:
-        windows.append(((number - half).scaleb(_SCALES[unit]), (number + half).scaleb(_SCALES[unit])))
+    with localcontext(_EXACT):
+        low, high = number - half, number + half
+        windows = [(low, high)]
+        if unit.startswith(("%", "per", "pp")):
+            windows.append((low.scaleb(-2), high.scaleb(-2)))
+        elif unit in _SCALES:
+            windows.append((low.scaleb(_SCALES[unit]), high.scaleb(_SCALES[unit])))
     return any(_within(values, low, high) for low, high in windows)
 
 
 def check_numbers(path: str | os.PathLike, values, *, allowed=()) -> list[dict]:
-    """List each number in a narrative file that no recorded value rounds to and `allowed` lacks.
+    """List each number in a narrative file that no recorded value rounds to and `allowed` does not cover.
 
-    `values` are sorted magnitudes from recorded_values(). Code, comments, link targets, dates, times,
-    years in a year's context, chart numbers, list markers, slash-joined numbers, and zero-padded codes
-    are not read.
+    `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
+    text is written around it on the line: a bare `40` covers every 40, and `Week 23` only that 23. Code,
+    comments, link targets, paths and names, dates, times, years in a year's context, chart numbers, list
+    and heading markers, slash-joined numbers, and zero-padded codes are not read.
     """
     rows = []
     for number, line, opens in _unfenced(path):
         if opens:
             continue
-        for text, body, unit in _quantities(line):
-            if text not in allowed and not _traces(body, unit, values):
+        spans = [(found.start(), found.end()) for text in allowed if text
+                 for found in re.finditer(re.escape(text), line)]
+        for text, body, unit, column in _quantities(line):
+            covered = any(start <= column and column + len(text) <= end for start, end in spans)
+            if not covered and not _traces(body, unit, values):
                 rows.append({"file": Path(path).name, "line": number, "text": text})
     return rows
 
@@ -965,8 +998,9 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                     "changes; --verify-only checks a release candidate and writes nothing.",
         epilog="Prints one JSON line.\nnumbers lists, as file, line, and text, each number in findings.md or "
                "methodology.md that no represented result's table, profile, check details, or settings round to "
-               "and the manifest's allowed_numbers does not list; numbers_problems names a missing table, an "
-               "unreadable table, profile, or evidence file, or a malformed results or allowed_numbers.\n"
+               "and the manifest's allowed_numbers does not cover by its text or a phrase around it; "
+               "numbers_problems names a missing table, an unreadable table, profile, or evidence file, or a "
+               "malformed results or allowed_numbers.\n"
                "unmatched_flags lists each finding state.md flags whose exact finding and reason the manifest's "
                "revalidation_flags does not record.\nflag_entries lists a "
                "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
