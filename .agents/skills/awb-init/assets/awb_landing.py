@@ -150,6 +150,11 @@ def _bounds(value, accepts):
         return False
 
 
+def _by_column(value, accepts):
+    """{column: entry}, each column named and each entry accepted."""
+    return isinstance(value, dict) and all(column and accepts(entry) for column, entry in value.items())
+
+
 def _duckdb():
     try:
         import duckdb
@@ -178,16 +183,14 @@ def _nested_checks(value, path=()):
 
 SHAPES = {
     "columns": lambda v: _names(v) and v,
-    "types": lambda v: isinstance(v, dict) and all(isinstance(t, str) and t.strip() and ";" not in t
-                                                   for t in v.values()),
+    "types": lambda v: _by_column(v, lambda t: isinstance(t, str) and t.strip() and ";" not in t),
     "not_null": _names,
     "key": lambda v: _names(v) and v and len(set(v)) == len(v),
     "unique": lambda v: isinstance(v, list) and all(
         (isinstance(item, str) and item) or (_names(item) and item and len(set(item)) == len(item))
         for item in v),
-    "accepted_values": lambda v: isinstance(v, dict) and all(
-        isinstance(values, list) and values for values in v.values()),
-    "range": lambda v: isinstance(v, dict) and all(_bounds(bounds, _number_or_date) for bounds in v.values()),
+    "accepted_values": lambda v: _by_column(v, lambda values: isinstance(values, list) and values),
+    "range": lambda v: _by_column(v, lambda bounds: _bounds(bounds, _number_or_date)),
     "row_count": lambda v: _bounds(v, lambda bound: type(bound) is int and bound >= 0),
 }
 
@@ -369,7 +372,7 @@ def _run_checks(directory, spec):
             if missing:
                 return missing, ""
             nulls = count(" OR ".join(f"{_quote(column)} IS NULL" for column in columns))
-            repeated = repeats(columns)
+            repeated = repeats(columns, " AND ".join(f"{_quote(column)} IS NOT NULL" for column in columns))
             failures = ([f"{nulls} of {rows} rows have a null key column"] if nulls else []) + (
                 [f"{repeated} of {rows} rows repeat a key"] if repeated else [])
             return ("; ".join(failures) + "." if failures else None), f"{rows} rows, each key complete and unique."
@@ -1035,7 +1038,8 @@ def cli_publish(root: Path, argv: list[str]) -> int:
     quality = f"`{notes['check']}` returns no rows" if notes["check"] else "nonzero row count"
     declared = len(publication["checks"]) - 1  # the last check is the validate callable's
     if declared:
-        quality = f"{declared} declared check{'s' * (declared > 1)} in `{DATASETS}` pass; {quality}"
+        verb = "pass" if declared > 1 else "passes"
+        quality = f"{declared} declared check{'s' * (declared > 1)} in `{DATASETS}` {verb}; {quality}"
     result = {
         "published": location, "rows": notes["rows"],
         "bytes": sum(file["bytes"] for file in publication["files"]),

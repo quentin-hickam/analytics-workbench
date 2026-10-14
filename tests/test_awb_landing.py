@@ -30,7 +30,7 @@
 # test_cli_publish_requires_from_to_name_exactly_what_the_select_reads: --from naming other or extra acquisitions exits 2 before conversion.
 # test_cli_options_take_one_value_each_and_may_precede_positionals: repeated --records and --from flags parse in any position, as the usage line prints them.
 # test_publish_records_validate_detail_and_no_checks_by_default: without declared checks publication.json records no declared check; a string validate returns is its check's detail; another dataset's declaration does not apply.
-# test_declared_checks_refuse_a_malformed_declaration_before_conversion: unknown and malformed keys, an empty columns list, range bounds other than numbers or dates, a min above its max (date-times compared in UTC), two checks sharing a name, a column repeated within a key or unique entry, one unique column set declared twice, a non-checks key, an unknown top-level table, another dataset's malformed entry, and invalid TOML refuse before any partial directory exists.
+# test_declared_checks_refuse_a_malformed_declaration_before_conversion: unknown and malformed keys, an empty columns list, range bounds other than numbers or dates, a min above its max (date-times compared in UTC), an empty column name in a table form, two checks sharing a name, a column repeated within a key or unique entry, one unique column set declared twice, a non-checks key, an unknown top-level table, another dataset's malformed entry, and invalid TOML refuse before any partial directory exists.
 # test_a_dotted_dataset_name_is_declared_quoted_and_refused_unquoted: [datasets.orders.v1.checks] refuses publishing orders.v1, naming the quoted spelling, before conversion; [datasets."orders.v1".checks] declares its checks.
 # test_declared_checks_accept_the_shipped_template_and_its_example: the shipped commented template declares nothing, and its example, uncommented, is a valid declaration.
 # test_publish_refuses_declared_checks_without_duckdb_before_conversion: declared checks without the duckdb package refuse before any partial directory exists.
@@ -42,9 +42,10 @@
 # test_declared_columns_and_types_hold_in_every_parquet_file: columns and types are checked in each Parquet file, so a second file with another type or without a declared column fails; files differing only in column order pass.
 # test_temporal_checks_compare_in_utc_whatever_the_host_zone: date and date-time bounds and values compare with plain and zoned timestamps in UTC, giving the same records under two host time zones.
 # test_range_bounds_may_mix_local_and_offset_date_times: a local and an offset date-time bound one range, ordered and compared in UTC.
+# test_a_null_key_is_not_also_counted_as_a_repeated_key: a key check counts rows with a null key column once, and repeats among complete keys only.
 # test_unreadable_or_missing_parquet_fails_every_declared_check: a file that is not Parquet, or no Parquet file, fails every declared check with ChecksFailed rather than a DuckDB error.
 # test_a_declaration_that_plans_no_check_needs_neither_duckdb_nor_parquet: empty check lists plan nothing, so publish needs no duckdb and no Parquet output.
-# test_cli_publish_records_declared_checks: the publish command records declared checks with its --check outcome, counts them in its output and catalog_row, and prints failed_checks on refusal.
+# test_cli_publish_records_declared_checks: the publish command records declared checks with its --check outcome, counts them in its output and catalog_row (one check passes, several pass), and prints failed_checks on refusal.
 
 import hashlib
 import importlib.util
@@ -704,6 +705,9 @@ def test_publish_records_validate_detail_and_no_checks_by_default(tmp_path):
      "checks.range is malformed"),
     ('[datasets.events.checks]\nrange = { ts = { min = 2024-01-01T08:00:00, max = 2024-01-01T09:00:00+02:00 } }\n',
      "checks.range is malformed"),
+    ('[datasets.events.checks]\ntypes = { "" = "INTEGER" }\n', "checks.types is malformed"),
+    ('[datasets.events.checks]\naccepted_values = { "" = [1] }\n', "checks.accepted_values is malformed"),
+    ('[datasets.events.checks]\nrange = { "" = { min = 0 } }\n', "checks.range is malformed"),
     ('[datasets.events.checks]\nrow_count = { min = -1 }\n', "checks.row_count is malformed"),
     ('[datasets.events.checks]\nrow_count = { min = 5, max = 1 }\n', "checks.row_count is malformed"),
     ('[dataset.events.checks]\nnot_null = ["id"]\n', "unknown table dataset"),
@@ -986,6 +990,16 @@ def test_range_bounds_may_mix_local_and_offset_date_times(tmp_path):
         landing.publish(tmp_path, "events", "v2", parquet_convert(duckdb, rows), acquisitions=[original])
 
 
+def test_a_null_key_is_not_also_counted_as_a_repeated_key(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    declare(tmp_path, '[datasets.events.checks]\nkey = ["id"]\n')
+    rows = "SELECT * FROM (VALUES (1), (NULL), (NULL), (2), (2)) AS t(id)"
+    with pytest.raises(landing.ChecksFailed) as error:
+        landing.publish(tmp_path, "events", "v1", parquet_convert(duckdb, rows), acquisitions=[acquisition(tmp_path)])
+    assert error.value.checks == [{"name": "key:id", "outcome": "fail",
+                                   "detail": "2 of 5 rows have a null key column; 1 of 5 rows repeat a key."}]
+
+
 def test_unreadable_or_missing_parquet_fails_every_declared_check(tmp_path):
     pytest.importorskip("duckdb")
     original = acquisition(tmp_path)
@@ -1036,3 +1050,8 @@ def test_cli_publish_records_declared_checks(tmp_path, capsys):
     assert out["failed_checks"] == [{"name": "range:doubled", "detail": "1 of 2 rows fall outside [-inf, 30]."}]
     assert out["partial"] == "data/parquet/orders/v2.partial"
     assert not (root / "data/parquet/orders/v2").exists()
+    declare(root, '[datasets.orders.checks]\nrange = { doubled = { min = 0 } }\n')
+    status, out = run(capsys, landing.cli_publish, root, "orders", "v3", "--from", "data/raw/orders/r1",
+                      "--sql", "prep/orders.sql")
+    assert status == 0
+    assert "| 1 declared check in `foundation/datasets.toml` passes; nonzero row count |" in out["catalog_row"]
