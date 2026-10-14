@@ -43,7 +43,7 @@ Say the provenance locates the producing state; never call a package reproducibl
 ## Numbers
 
 - `allowed_numbers`: `none`, or each narrative number that no represented result records as `{text, reason}`. An absent field is `none`.
-  - `text` is the row's `text` exactly as `check-draft` reports it, or a phrase around it on that line, such as `Week 23` or `over 2025`. Prefer the phrase: a bare text is accepted wherever it is written in either narrative, a phrase only where that phrase is.
+  - `text` is the row's `text` exactly as `check-draft` reports it, or a phrase around it, such as `Week 23` or `over 2025`; a space in it matches any whitespace or line wrap the narrative has there. Prefer the phrase: a bare text is accepted wherever it is written in either narrative, a phrase only where that phrase is.
   - `reason` is one of two kinds. For a number the records support from elsewhere, name the record, such as the earlier release it comes from or the `history.md` entry recording the fact the user supplied. For a text that is not a quantity, say what it is: a comparison year, a tool version, a week or section number, or an identifier.
   - Never for a number from a recorded result the draft relies on: pass that result to `export` instead, so `results` and the producing state record it. Never for a number computed from results that none records.
 

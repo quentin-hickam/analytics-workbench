@@ -578,13 +578,14 @@ def _blank_names(text):
 # other join but thousands grouping or one decimal point never traces (1,2,3, 21,3, 3/4, 14:05, 1.234.567, 1 000).
 _NUMBER = re.compile(
     r"(?<![^\W_])(?<![^\W_]_)(?<![0-9][.,/:])"
-    r"([0-9]+(?:\.[0-9]+)?[eE][-+]?[0-9]+|[0-9]{1,3}(?:[ \u00a0\u202f][0-9]{3})+(?:\.[0-9]+)?"
+    r"((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)[eE][-+]?[0-9]+|[0-9]{1,3}(?:[ \u00a0\u202f][0-9]{3})+(?:\.[0-9]+)?"
     r"|[0-9]+(?:[.,/:][0-9]+)*|\.[0-9]+)"
     r"(\s*%|\s*(?:per\s*cent|percentage\s+points?|pp|thousand|million|billion|trillion|mn|bn|tn)(?!\w)"
     r"|(?:[kKmMbB]|[x×])(?!\w))?"
     r"((?<=[0-9])[^\W\d_]+)?"
     r"(?![^\W_]|_[^\W_]|[.,/:][0-9])")
-_GROUPED = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?")
+_GROUPED = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?"
+                      r"|[0-9]+\.[eE][-+]?[0-9]+")
 _VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){2,}")
 _RANGE = re.compile(r"\s*(?:[-–—]|to|and)\s*")
 _SCALES = {"k": 3, "thousand": 3, "m": 6, "mn": 6, "million": 6, "b": 9, "bn": 9, "billion": 9,
@@ -592,11 +593,12 @@ _SCALES = {"k": 3, "thousand": 3, "m": 6, "mn": 6, "million": 6, "b": 9, "bn": 9
 
 
 def _quantities(line, before="", after="", *, marker=True):
-    """Yield (text, body, unit, column) for each number a line states, after the skips check_numbers names.
+    """Yield (text, body, unit, start, end) for each number a line states, after the skips check_numbers names.
 
     `before` and `after` are the lines of the same paragraph around `line`, read only so that a context or a
     unit a line wrap splits from its number is still seen. `marker` is false where a leading number cannot
-    be a list marker. Every skip blanks with spaces, so a column indexes the line as written.
+    be a list marker. Every skip blanks with spaces, so `start` and `end` index the line as written; `end`
+    passes the line's length when a unit stands after the wrap.
     """
     offset = len(before) + 1 if before else 0
     if marker and (found := _LIST_MARKER.match(line)):
@@ -619,7 +621,8 @@ def _quantities(line, before="", after="", *, marker=True):
             continue  # a zero-padded code such as release 002, or a version; 1.234.567 is read
         if letters and not letters.isalpha():
             body += letters  # 5½ has no one value
-        yield " ".join(match.group(0).split()), body, " ".join(unit.lower().split()), match.start() - offset
+        yield (" ".join(match.group(0).split()), body, " ".join(unit.lower().split()), match.start() - offset,
+               match.end() - offset)
 
 
 # Arithmetic on written numbers never rounds: every digit a narrative or a record writes is kept.
@@ -664,7 +667,7 @@ def _magnitudes(value, into, *, text=True):
     except InvalidOperation:
         found = []
         for line in value.splitlines():
-            for _, body, unit, _ in _quantities(line):
+            for _, body, unit, _, _ in _quantities(line):
                 if not _GROUPED.fullmatch(body):
                     continue
                 try:
@@ -784,24 +787,32 @@ def _unquoted(line):
 def _continues(previous, line):
     """Whether `line` wraps the paragraph `previous` ends, so a context or a unit may span the two.
 
-    A numbered line continues plain paragraph text unless it numbers 1, the only number that starts a
-    list there; so "rose to\\n77. Orders" reads 77. Two quoted lines are compared inside the quote.
+    A numbered line continues paragraph text unless it numbers 1, the only number that starts a list
+    there; so "rose to\\n77. Orders" reads 77. An unindented one also starts a list after a list item or an
+    indented line; an indented one only after a list item at its own indentation, so "- rose to\\n  77. Orders",
+    where 77 wraps the item's text, reads 77. Two quoted lines are compared inside the quote.
     """
     if _QUOTE.match(previous) and _QUOTE.match(line):
         previous, line = _QUOTE.sub("", previous, count=1), _QUOTE.sub("", line, count=1)
     if _OPENS_BLOCK.match(previous) and not re.match(r"\s*[-*+>]\s", previous) or _OPENS_BLOCK.match(line):
         return False
     numbered = _LIST_MARKER.match(line)
-    return not numbered or (int(numbered.group(1)) != 1 and not re.match(r"\s|[-*+>]\s|[0-9]+[.)]\s", previous))
+    if not numbered:
+        return True
+    indent = line[:len(line) - len(line.lstrip(" \t"))]
+    starts = r"\s|[-*+>]\s|[0-9]+[.)]\s" if not indent else re.escape(indent) + r"(?:[-*+]|[0-9]+[.)])\s"
+    return int(numbered.group(1)) != 1 and not re.match(starts, previous)
 
 
 def check_numbers(path: str | os.PathLike, values, *, allowed=()) -> list[dict]:
     """List each number in a narrative file that no recorded value rounds to and `allowed` does not cover.
 
     `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
-    text is written around it on the line: a bare `40` covers every 40, and `Week 23` only that 23. A
-    number is skipped only in a context references/helpers.md lists; every other number is read.
+    text is written around it, matched on the text the number is read from, so any whitespace or a line
+    wrap matches a space: a bare `40` covers every 40, and `Week 23` only that 23. A number is skipped
+    only in a context references/helpers.md lists; every other number is read.
     """
+    patterns = [re.compile(r"\s+".join(map(re.escape, text.split()))) for text in allowed if text.strip()]
     rows, lines = [], list(_unfenced(path))
     for index, (number, line, opens) in enumerate(lines):
         if opens:
@@ -812,11 +823,13 @@ def check_numbers(path: str | os.PathLike, values, *, allowed=()) -> list[dict]:
         before = previous[1] if wraps else ""
         after = following[1] if following is not None and not following[2] and _continues(line, following[1]) \
             else ""
-        spans = [(found.start(), found.end()) for text in allowed if text
-                 for found in re.finditer(re.escape(text), line)]
-        for text, body, unit, column in _quantities(_unquoted(line), _unquoted(before), _unquoted(after),
-                                                     marker=not wraps):
-            covered = any(start <= column and column + len(text) <= end for start, end in spans)
+        before, line, after = _unquoted(before), _unquoted(line), _unquoted(after)
+        # The text _quantities reads, so an allowed text and a row's text match across the same wrap.
+        offset = len(before) + 1 if before else 0
+        joined = (before + "\n" if before else "") + line + ("\n" + after if after else "")
+        spans = [found.span() for pattern in patterns for found in pattern.finditer(joined)]
+        for text, body, unit, start, end in _quantities(line, before, after, marker=not wraps):
+            covered = any(low <= offset + start and offset + end <= high for low, high in spans)
             if not covered and not _traces(body, unit, values):
                 rows.append({"file": Path(path).name, "line": number, "text": text})
     return rows
