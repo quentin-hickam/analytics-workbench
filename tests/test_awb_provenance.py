@@ -26,8 +26,9 @@
 # test_finding_row_reuses_state_text_and_names_check_gaps: the row keeps existing finding text, escapes pipes, names failed and unassessed checks.
 # test_cli_stale_lists_changed_results_with_their_findings: stale lists failing results with state.md rows, missing linked evidence, skips non-evidence JSON, rejects an unknown investigation.
 # test_record_evidence_records_runtime: the runtime block holds this interpreter's Python and platform and the versions of duckdb, pandas, and each requirements.txt name, null when not installed.
-# test_requirement_name_reads_names_and_direct_references: names with extras, versions, markers, or @ URL; #egg= and wheel or sdist file names of direct references (URL, POSIX or Windows path), -e included, with trailing --hash or other per-requirement options and a continuation backslash ignored; options, comments, and references naming no package give none.
-# test_runtime_records_a_wheel_url_package_and_its_drift: a hash-pinned requirements.txt wheel URL or path, continued or not, records its package's installed version, and a changed recorded version is a runtime mismatch.
+# test_requirement_name_reads_names_and_direct_references: every line the review rounds probed: names with extras, versions, markers, or @ URL; #egg= and wheel or sdist file names of direct references (URL, POSIX or Windows path), -e included, with or without trailing extras, with trailing --hash or other per-requirement options and a continuation backslash ignored; options, comments, and references naming no package give none.
+# test_requirement_names_follow_includes_and_byte_order_marks: -r and --requirement includes are read relative to the including file, once each; a URL include, a missing include and -c constraints add nothing; a UTF-8, UTF-16 or UTF-32 BOM is decoded.
+# test_runtime_records_a_wheel_url_package_and_its_drift: a requirements.txt wheel URL or path, hash-pinned or with extras, continued or not, records its package's installed version, and a changed recorded version is a runtime mismatch.
 # test_runtime_records_missing_version_metadata_as_unknown: an installed distribution whose metadata has no Version is unknown, not null (not installed).
 # test_cli_stale_reports_runtime_mismatch_as_a_warning: a changed recorded duckdb or Python version, or no runtime block, is listed under runtime_mismatches with its findings rows, never under results, and compare_evidence still passes.
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
@@ -602,41 +603,88 @@ def test_record_evidence_records_runtime(project):
 
 
 def test_requirement_name_reads_names_and_direct_references():
+    # Every requirements.txt line the review rounds probed, with the package it names or None.
+    digest = "--hash=sha256:" + "0" * 64
     cases = {
+        # Names, with extras, versions, markers, @ URL, comments, and trailing options.
         "PyTest>=7  # the runner": "pytest", "pkg[extra]==1 ; python_version < '4'": "pkg",
-        "pkg --hash=sha256:ab": "pkg", "foo (>=1.0)": "foo", "Name @ https://example.invalid/y.zip": "name",
+        "awb_fixture.absent; python_version < '4'": "awb-fixture-absent",
+        "pkg --hash=sha256:ab": "pkg", "pkg>=1 --hash=sha256:ab": "pkg", "pkg\t--hash=sha256:ab": "pkg",
+        "pkg==1.0 \\": "pkg", "pkg\t# c": "pkg", "foo (>=1.0)": "foo",
+        "pkg===1.0": "pkg", "pkg~=1.4": "pkg", "pkg==1.0+local.1": "pkg",
+        "Name @ https://example.invalid/y.zip": "name", "pkg@git+https://example.invalid/r.git": "pkg",
+        "requests[security] @ https://example.invalid/r.whl": "requests",
+        "requests[security] @ https://example.invalid/requests-2.32.3-py3-none-any.whl": "requests",
+        # VCS references by #egg=, wherever it sits in the fragment.
         "git+https://example.invalid/org/realpkg.git#egg=Real_Pkg": "real-pkg",
-        "https://example.invalid/wheels/otherpkg-1.0-py3-none-any.whl": "otherpkg",
-        "https://example.invalid/scipy-1.14.1-py3-none-any.whl#sha256=ab": "scipy",
-        "numpy-1.26.0-cp312-cp312-macosx_11_0_arm64.whl": "numpy", "./dist/foo_bar-2.0.tar.gz": "foo-bar",
+        "git+https://example.invalid/r.git@v1#egg=bar&subdirectory=x": "bar",
+        "-e git+https://example.invalid/r.git#subdirectory=x&egg=baz": "baz",
         "-e git+https://example.invalid/r.git#egg=ed": "ed", "--editable=./src/x#egg=edx": "edx",
+        "-e git+https://example.invalid/r.git#egg=cfg --config-settings k=v": "cfg",
+        # Wheel and sdist file names: URL, file URL, bare, relative, and Windows paths.
+        "https://example.invalid/wheels/otherpkg-1.0-py3-none-any.whl": "otherpkg",
+        "https://example.invalid/scipy-1.14.1-py3-none-any.whl": "scipy",
+        "https://example.invalid/scipy-1.14.1-py3-none-any.whl#sha256=ab": "scipy",
+        "file:///tmp/foo-1.0-py3-none-any.whl": "foo", "file:///tmp/foo-1.0.tar.gz": "foo",
+        "https://example.invalid/foo-1.0.zip?x=1": "foo",
+        "numpy-1.26.0-cp312-cp312-macosx_11_0_arm64.whl": "numpy", "./dist/foo_bar-2.0.tar.gz": "foo-bar",
+        "foo-bar_baz-1.0rc1.tar.gz": "foo-bar-baz",
+        r"C:\wheels\foo-1.0-py3-none-any.whl": "foo", r"C:\dist\win_sdist-2.0.tar.gz": "win-sdist",
+        # Archives with --hash, other per-requirement options, or a continuation backslash.
         "numpy-1.26.0-cp312-cp312-macosx_11_0_arm64.whl --hash=sha256:ab": "numpy",
         "./dist/numpy-1.26.0.tar.gz --hash=sha256:ab": "numpy",
         "https://example.invalid/numpy-1.26.0.tar.gz --hash=sha256:ab --hash=sha256:cd": "numpy",
+        "https://example.invalid/numpy-1.26.0-py3-none-any.whl --hash=sha256:ab": "numpy",
         "https://example.invalid/numpy-1.26.0-py3-none-any.whl --hash=sha256:ab \\": "numpy",
-        "-e git+https://example.invalid/r.git#egg=cfg --config-settings k=v": "cfg",
-        r"C:\wheels\winpkg-1.0-py3-none-any.whl": "winpkg", r"C:\dist\win_sdist-2.0.tar.gz": "win-sdist",
-        "    --hash=sha256:ab": None,
-        "src/mypkg": None, "-e .": None, "git+https://example.invalid/r.git": None, "-r other.txt": None,
-        "--index-url https://example.invalid": None, "# comment": None, "": None,
+        f"https://example.invalid/scipy-1.14.1-py3-none-any.whl {digest}": "scipy",
+        # Archives with extras.
+        "requests-2.32.3-py3-none-any.whl[security]": "requests",
+        "./dist/requests-2.32.3-py3-none-any.whl[security]": "requests",
+        "./dist/requests-2.32.3.tar.gz[security]": "requests",
+        f"./dist/requests-2.32.3-py3-none-any.whl[security] {digest}": "requests",
+        # A limit requirement_name() documents: a forge tag archive's file name is not name-version.
+        "https://example.invalid/o/r/archive/refs/tags/release-1.0.tar.gz": "release",
+        # References naming no package, option lines, continued hashes, and comments.
+        "src/mypkg": None, "-e .": None, "-e ./local": None, "git+https://example.invalid/r.git": None,
+        "https://example.invalid/x/foo.whl": None,
+        "-r other.txt": None, "-c constraints.txt": None, "--index-url https://example.invalid": None,
+        "-i https://example.invalid": None, "--extra-index-url=https://example.invalid": None,
+        "-f ./wheels": None, "--only-binary :all:": None,
+        "    --hash=sha256:ab": None, f"    {digest} \\": None, "    # via pandas": None,
+        "# comment": None, "": None,
     }
     assert {line: provenance.requirement_name(line) for line in cases} == cases
+
+
+def test_requirement_names_follow_includes_and_byte_order_marks(project):
+    write(project, "requirements.txt", b"\xef\xbb\xbfscipy\n-r deps/base.txt\n--requirement=missing.txt\n"
+                                       b"-r https://example.invalid/remote.txt\n-c constraints.txt\n")
+    write(project, "deps/base.txt", b"-rmore.txt\nnumpy  # base\n-r ../requirements.txt\n")
+    write(project, "deps/more.txt", "pandas\nrequests[security]\n".encode("utf-16"))
+    write(project, "constraints.txt", b"constrained==1\n")
+    assert provenance.requirement_names(project / "requirements.txt") == ["scipy", "pandas", "requests", "numpy"]
+    for encoding in ("utf-16-le", "utf-16-be", "utf-32-le", "utf-32-be"):
+        write(project, "requirements.txt", "\ufeffscipy\nnumpy\n".encode(encoding))
+        assert provenance.requirement_names(project / "requirements.txt") == ["scipy", "numpy"], encoding
+    assert provenance.requirement_names(project / "absent.txt") == []
 
 
 def test_runtime_records_a_wheel_url_package_and_its_drift(project, capsys):
     digest = "--hash=sha256:" + "0" * 64
     write(project, "requirements.txt", (
         f"https://example.invalid/pytest-0.0.1-py3-none-any.whl {digest}\n"
-        f"./wheels/pluggy-0.0.1-py3-none-any.whl {digest} \\\n    {digest}\n").encode())
+        f"./wheels/pluggy-0.0.1-py3-none-any.whl[dev] {digest} \\\n    {digest}\n"
+        f"iniconfig-0.0.1-py3-none-any.whl[dev]\n").encode())
     path = record(project)
     evidence = json.loads(path.read_text())
-    assert set(evidence["runtime"]["packages"]) == {"duckdb", "pandas", "pluggy", "pytest"}
-    for name in ("pytest", "pluggy"):
+    assert set(evidence["runtime"]["packages"]) == {"duckdb", "iniconfig", "pandas", "pluggy", "pytest"}
+    for name in ("iniconfig", "pytest", "pluggy"):
         assert evidence["runtime"]["packages"][name] == installed(name) is not None
         evidence["runtime"]["packages"][name] = "0.0.1-fixture"
     path.write_text(json.dumps(evidence))
     provenance.cli_stale(project, [])
     assert json.loads(capsys.readouterr().out)["runtime_mismatches"][0]["detail"] == (
+        f"iniconfig 0.0.1-fixture recorded, {installed('iniconfig')} now; "
         f"pluggy 0.0.1-fixture recorded, {installed('pluggy')} now; "
         f"pytest 0.0.1-fixture recorded, {installed('pytest')} now.")
 

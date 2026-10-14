@@ -11,8 +11,8 @@ settings (path/bytes/sha256/[result]/content), runtime (python/platform/packages
 (name/outcome/detail), notes (text or null). Unknowns are {"unknown": reason}.
 runtime is the recording interpreter's Python version, system-machine platform, and the installed
 version of duckdb, pandas, and each package requirements.txt names (null when not installed;
-unknown when its metadata records no version). requirement_name() reads each requirements.txt line; a
-direct reference that names no package, such as a local directory, is not recorded.
+unknown when its metadata records no version). requirement_names() reads requirements.txt and the
+files it includes with -r; requirement_name() states which lines name a package and what is missed.
 Settings are scoped: the settings file must hold a [results.<id>] table for the result; settings
 carries "result", content holds only [parameters] and that table, and the settings file is left
 out of producing_paths, so other results' tables and other top-level tables never make this
@@ -41,6 +41,7 @@ writers add the history.md entries for reruns and status changes that matter.
 """
 
 import argparse
+import codecs
 import hashlib
 import importlib.metadata
 import json
@@ -250,9 +251,21 @@ def requirement_name(line):
 
     A name with optional extras, versions, markers, or `@ URL` gives that name. A direct reference,
     alone or after -e, gives its #egg= name or its wheel or sdist file name's package (a POSIX or
-    Windows path, or a URL); one naming no package, such as a local directory or a VCS URL without
-    #egg=, and every other option line give None. Per-requirement options after the requirement, such
-    as --hash, and a trailing line-continuation backslash are ignored.
+    Windows path, or a URL, with or without trailing [extras]); one naming no package, such as a
+    local directory or a VCS URL without #egg=, and every other option line give None. Per-requirement
+    options after the requirement, such as --hash, and a trailing line-continuation backslash are
+    ignored. requirement_names() reads a whole file through this function.
+
+    Limits, where this reading and pip's differ:
+    - A direct reference is named only by #egg= or a name-version file name; pip builds it to learn
+      the name. A local directory or a VCS URL without #egg= gives None, and an archive whose file
+      name is not name-version gives a wrong name: a forge tag archive such as
+      .../archive/refs/tags/release-1.0.tar.gz gives `release`.
+    - Each line is read alone, so a name or reference split across a continuation backslash is not
+      joined.
+    - A requirement is named whether or not its marker matches this interpreter.
+    - A -r include that is a URL is not fetched, environment variables are not expanded, and a file
+      without a BOM is read as UTF-8 (pip falls back to a coding line or the locale encoding).
     """
     line = re.sub(r"(^|\s)#.*", "", line).strip()
     line = re.split(r"\s+-", line.rstrip("\\").strip(), maxsplit=1)[0]
@@ -263,7 +276,8 @@ def requirement_name(line):
         return None
     if not line:
         return None
-    reference = line.split(";")[0].strip()
+    # Trailing extras, as in pkg-1.0-py3-none-any.whl[extra], are not part of a reference's file name.
+    reference = re.sub(r"\[[^\]]*\]$", "", line.split(";")[0].strip()).rstrip()
     match = re.match(r"([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)(?=$|\s|[\[(;@<>=!~])", reference)
     # A bare archive file name, such as pkg-1.0-py3-none-any.whl, is a path, not a name.
     if match and not editable and not (match.end() == len(reference) and reference.lower().endswith(_ARCHIVES)):
@@ -281,13 +295,42 @@ def requirement_name(line):
     return None
 
 
+# Byte order marks pip honours when it reads a requirements file; UTF-32 LE starts like UTF-16 LE.
+_BOMS = ((codecs.BOM_UTF32_LE, "utf-32"), (codecs.BOM_UTF32_BE, "utf-32"), (codecs.BOM_UTF8, "utf-8-sig"),
+         (codecs.BOM_UTF16_LE, "utf-16"), (codecs.BOM_UTF16_BE, "utf-16"))
+
+
+def requirement_names(path, _seen=None) -> list[str]:
+    """Normalized package names a requirements file declares, in order, with those of each file it
+    includes by -r or --requirement (a path relative to the including file, read once); none when
+    the file is absent or unreadable. -c constraint files declare no package and are not read. A
+    BOM-marked UTF-8, UTF-16, or UTF-32 file is decoded by its mark. requirement_name() reads each
+    line and states the limits of both."""
+    path = Path(path)
+    seen = set() if _seen is None else _seen
+    try:
+        key = path.resolve()
+        if key in seen:
+            return []
+        seen.add(key)
+        data = path.read_bytes()
+    except (OSError, RuntimeError):
+        return []
+    encoding = next((name for bom, name in _BOMS if data.startswith(bom)), "utf-8")
+    names = []
+    for line in data.decode(encoding, errors="replace").splitlines():
+        include = re.match(r"(?:-r|--requirement)(?:\s*=\s*|\s+|(?=[^\s=]))(\S+)",
+                           re.sub(r"(^|\s)#.*", "", line).strip())
+        if include and not re.match(r"[A-Za-z][A-Za-z0-9+.-]*://", include[1]):
+            names += requirement_names(path.parent / include[1], seen)
+        elif name := requirement_name(line):
+            names.append(name)
+    return names
+
+
 def _required(root):
     """Normalized package names requirements.txt declares; none when it is absent or unreadable."""
-    try:
-        lines = (root / "requirements.txt").read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return []
-    return [name for name in map(requirement_name, lines) if name]
+    return requirement_names(root / "requirements.txt")
 
 
 def _version(name):
