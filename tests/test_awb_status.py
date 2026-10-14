@@ -295,7 +295,7 @@ def test_acquisitions_and_storage_risks(workbench):
 
 SHA = "ab12" * 16
 # Notes probes for the two reference forms foundation/sources.md defines: (source ID, Notes, whether
-# it counts as a reference, where the probe came from). Every reviewer probe from PR 38 rounds 1-3
+# it counts as a reference, where the probe came from). Every reviewer probe from PR 38 rounds 1-4
 # is a row, in both directions; rows marked "limit" pin what a syntax-only check cannot tell apart.
 REFERENCE_PROBES = [
     # The link form.
@@ -304,9 +304,18 @@ REFERENCE_PROBES = [
     ("link-after-br", "Owner confirmed<br>reference: [codebook](references/link-after-br/codebook.pdf)", True, "Opus r2 #2 (p6)"),
     ("link-after-br-slash", "Owner confirmed<br/>reference: [codebook](references/link-after-br-slash/codebook.pdf)", True, "worker r3"),
     ("link-parens", "reference: [codebook](references/link-parens/manual(v1).pdf)", True, "worker r3"),
+    ("link-parens-2", "reference: [manual](references/link-parens-2/manual(v1(2026)).pdf)", True, "Codex r4 #1"),
+    ("link-parens-3", "reference: [manual](references/link-parens-3/manual(v1(2026(a))).pdf)", True, "worker r4"),
+    ("link-parens-escaped", "reference: [manual](references/link-parens-escaped/manual\\(v1.pdf)", True, "worker r4"),
+    ("link-escaped-backslash", "reference: [manual](references/link-escaped-backslash/manual(v1\\\\).pdf)", True, "worker r4"),
     ("link-angle", "reference: [codebook](<references/link-angle/data dictionary.pdf>)", True, "template example"),
+    ("link-angle-parens-2", "reference: [manual](<references/link-angle-parens-2/manual(v1(2026)).pdf>)", True, "Codex r4 #1"),
     ("link-unclosed", "reference: [codebook](references/link-unclosed/codebook.pdf", False, "Codex r2 #1"),
     ("link-unclosed-parens", "reference: [codebook](references/link-unclosed-parens/manual(v1).pdf", False, "Codex r3 #1"),
+    ("link-unclosed-parens-2", "reference: [manual](references/link-unclosed-parens-2/manual(v1(2026).pdf)", False, "worker r4"),
+    ("link-unclosed-parens-3", "reference: [manual](references/link-unclosed-parens-3/manual(v1(2026(a)).pdf)", False, "worker r4"),
+    ("link-extra-open", "reference: [manual](references/link-extra-open/manual((v1).pdf)", False, "worker r4"),
+    ("link-extra-close", "reference: [manual](references/link-extra-close/manual(v1)).pdf)", True, "limit: CommonMark ends the destination at the first unmatched )"),
     ("link-unclosed-angle", "reference: [codebook](<references/link-unclosed-angle/manual.pdf)", False, "Codex r3 #1"),
     ("link-spaced-bare", "reference: [codebook](references/link-spaced-bare/data dictionary.pdf)", False, "worker r3"),
     ("link-in-code", "reference: `[codebook](references/link-in-code/codebook.pdf)`", False, "worker r3"),

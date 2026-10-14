@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import string
 import subprocess
 
 DISPOSITIONS = {"none", "revalidate", "omit", "release_with_caveat"}
@@ -189,17 +190,45 @@ def collect(root):
 
     # The two reference forms foundation/sources.md defines, and nothing else. A complete Markdown link:
     # bracketed text without brackets, then a destination in angle brackets, or one without spaces or
-    # `<` whose parentheses are balanced (one level deep). Or a backticked retained location, a comma,
-    # then `sha256` (also `SHA-256`, `sha256:`) and exactly 64 hex digits.
-    link = r"\[[^\[\]]*\]\((?:<[^<>\n]+>|(?:[^\s()<]|\([^\s()<]*\))+)\)"
-    retained = r"`[^`\n]*[^`\s][^`\n]*`,\s*sha-?256:?\s*[0-9a-f]{64}(?![0-9a-f])"
-    reference = re.compile(r"(?:^|[;,.]|<br\s*/?>)\s*reference:\s*(?:" + link + "|" + retained + ")", re.I)
+    # `<` whose unescaped parentheses balance at any depth, as CommonMark allows. Or a backticked
+    # retained location, a comma, then `sha256` (also `SHA-256`, `sha256:`) and exactly 64 hex digits.
+    label = re.compile(r"(?:^|[;,.]|<br\s*/?>)\s*reference:\s*", re.I)
+    link_text = re.compile(r"\[[^\[\]]*\]\(")
+    angle_destination = re.compile(r"<[^<>\n]+>\)")
+    retained = re.compile(r"`[^`\n]*[^`\s][^`\n]*`,\s*sha-?256:?\s*[0-9a-f]{64}(?![0-9a-f])", re.I)
+
+    def bare_destination(notes, start):
+        """Whether a non-empty destination without spaces or `<` starts at `start` and the link's `)` closes it."""
+        depth = 0
+        position = start
+        while position < len(notes):
+            char = notes[position]
+            if char.isspace() or char == "<":
+                return False
+            if char == "\\" and len(notes) > position + 1 and notes[position + 1] in string.punctuation:
+                position += 1  # A backslash escape, such as `\(`, is part of the destination.
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                if depth == 0:
+                    return position > start
+                depth -= 1
+            position += 1
+        return False
+
+    def reference_form(notes, start):
+        """Whether one of the two reference forms starts at `start`."""
+        if retained.match(notes, start):
+            return True
+        opened = link_text.match(notes, start)
+        return opened is not None and (angle_destination.match(notes, opened.end()) is not None
+                                       or bare_destination(notes, opened.end()))
 
     def referenced(notes):
         """Whether a Notes clause opens with `reference:` directly followed by one of the two reference forms."""
         # A clause opens the cell or follows `;`, `,`, `.`, or a `<br>` line break. Only what directly
         # follows the label counts, so `reference: pending. See [x](y)` records no reference.
-        return reference.search(notes) is not None
+        return any(reference_form(notes, found.end()) for found in label.finditer(notes))
 
     # foundation/sources.md states the basis and reference forms these read.
     result["sources"] = None if registered is None else {"count": len(registered), "documentation_without_reference": [
