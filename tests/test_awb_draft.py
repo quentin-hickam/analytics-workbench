@@ -1043,6 +1043,9 @@ PROBES = {
                                [(WEST_DISCOUNT, NO_LINE)], [], [("methodology.md:7", CLAIM_IN_LIST)]),
     "declaration indented two spaces": ([], [(WEST_CLAIM, f"  {WEST_CLAIM}")], ("r-009", "r-002"),
                                         [(WEST_DISCOUNT, NO_LINE)], [], [("methodology.md:7", CLAIM_INDENTED)]),
+    # Round 4: a declaration opening a paragraph counts, with text continuing it (Opus 3).
+    "declaration opening a paragraph": ([], [(WEST_CLAIM, f"{WEST_CLAIM}\nResult `r-009` shows it.")],
+                                        ("r-009", "r-002"), [], [], []),
     "declaration inside a paragraph": ([], [(WEST_CLAIM, f"The claim follows.\n{WEST_CLAIM}")], ("r-009", "r-002"),
                                        [(WEST_DISCOUNT, NO_LINE)], [], [("methodology.md:8", CLAIM_IN_PARAGRAPH)]),
     # The other forms outside the subset: indented code, an indented or unclosed fence, an indented comment,

@@ -457,7 +457,7 @@ def _view(text):
             where = (_INSIDE if entry["inside"] else "indented from the start of its line" if entry["indent"]
                      else "after a comment on its line" if entry["kind"] == "html" else "inside a paragraph")
             refuse(entry["number"], f"a **Claim strength:** line {where}",
-                   "its own paragraph at the start of its line, outside lists and quotes")
+                   "a line opening a top-level paragraph at the start of its line, outside lists and quotes")
         view.append(_Line(entry["number"], entry["kind"], entry["level"],
                           _collapse(_shown(entry["plain"])) if entry["kind"] == "heading" else None, entry["plain"],
                           entry["prose"], entry["spaced"], entry["links"], entry["group"], entry["start"], declares))
@@ -1139,8 +1139,11 @@ def write_charts(charts_dir: str | os.PathLike, charts: list) -> list[Path]:
 
 def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike) -> list[dict]:
     """Match the chart specifications in findings.md with the chart files."""
-    numbers = [int(match[1]) for line in _read_view(findings_path)[0]
-               if line.start and (match := _CHART_SPEC.match(line.plain))]
+    view = _read_view(findings_path)[0]
+    numbers = [int(match[1]) for line in view if line.start and (match := _CHART_SPEC.match(line.plain))]
+    # A spec line that continues the paragraph or bullet above it renders inside that block, so it is no spec.
+    continued = {int(match[1]) for line in view if line.kind == "text" and not line.start
+                 and (match := _CHART_SPEC.match(line.plain))}
     rows = []
     for position, number in enumerate(numbers, start=1):
         if number != position:
@@ -1159,7 +1162,9 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
     for number in sorted(specified - files.keys()):
         rows.append({"chart": f"Chart {number}", "problem": "no chart file for this specification"})
     for number in sorted(files.keys() - specified):
-        rows.append({"chart": f"Chart {number}", "problem": "chart file has no specification in findings"})
+        rows.append({"chart": f"Chart {number}", "problem": (
+            f"Chart {number}'s specification continues the paragraph or bullet above it; leave a blank line before "
+            "it" if number in continued else "chart file has no specification in findings")})
     for number in sorted(specified & files.keys()):
         with files[number].open(encoding="utf-8") as stream:
             lines = [line for line, _ in zip(stream, range(2)) if line.strip()]
