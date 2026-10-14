@@ -36,6 +36,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import shlex
 import shutil
@@ -655,14 +656,19 @@ def test_cli_publish_view_sql_loads_through_session(tmp_path, capsys, dataset):
         assert connection.execute(f"SELECT * FROM {name} ORDER BY id").fetchall() == [(1, 20), (2, 40)]
 
 
+# Git commands in the .gitignore tests see only the project's rules, not the developer's global excludes.
+GIT_ENV = {**os.environ, "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.excludesFile",
+           "GIT_CONFIG_VALUE_0": os.devnull}
+
+
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 def test_gitignore_template_tracks_env_example(tmp_path):
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=GIT_ENV)
     (tmp_path / ".gitignore").write_bytes((WORKBENCH / ".gitignore").read_bytes())
     for name in (".env", ".env.local", ".env.example"):
         (tmp_path / name).write_text("ACME_TOKEN=\n")
     status = subprocess.run(["git", "-C", str(tmp_path), "status", "--porcelain", "--ignored",
-                             "--untracked-files=all"], check=True, capture_output=True, text=True)
+                             "--untracked-files=all"], check=True, capture_output=True, text=True, env=GIT_ENV)
     assert sorted(status.stdout.splitlines()) == [
         "!! .env", "!! .env.local", "?? .env.example", "?? .gitignore"]
 
@@ -687,9 +693,9 @@ def test_repair_check_ignore_follows_the_env_rules_the_project_keeps(tmp_path):
                               (".env", [".env.local"])):
         layouts.append(([line for line in template if line != dropped], expected, True))
     for lines, expected, done in layouts:
-        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=GIT_ENV)
         (tmp_path / ".gitignore").write_text("\n".join(lines) + "\n", encoding="utf-8")
-        output = subprocess.run(shlex.split(command), cwd=tmp_path, capture_output=True, text=True)
+        output = subprocess.run(shlex.split(command), cwd=tmp_path, capture_output=True, text=True, env=GIT_ENV)
         assert output.stdout.splitlines() == expected
         agrees = all((name in expected) == printed for rule, (name, printed) in rules.items() if rule in lines)
         assert agrees == done
