@@ -8,8 +8,13 @@ settings question, verbatim), inputs (its settings inputs, or []), recorded_at
 (sorted), producing_uncommitted_changes (path/status/bytes/sha256), views
 (path/bytes/sha256/publications), publications (path/publication_file/inputs/
 conversion_commit/files), acquisitions (path/provenance_file/status/files),
-settings (path/bytes/sha256/[result]/content), checks (name/outcome/detail), notes (text or null).
-Unknowns are {"unknown": reason}.
+settings (path/bytes/sha256/[result]/content), runtime (python/platform/packages/
+unread_requirements), checks (name/outcome/detail), notes (text or null). Unknowns are
+{"unknown": reason}. runtime is the recording interpreter's Python version, system-machine
+platform, the installed version of duckdb, pandas, and each package requirements.txt names (null
+when not installed; unknown when its metadata records no version), and each requirements line or
+include it could not read. read_requirements() reads requirements.txt and the files it includes
+with -r and returns what it cannot read; requirement_name() states which lines name a package.
 Settings are scoped: the settings file must hold a [results.<id>] table for the result, with a
 one-line question and optionally inputs, a list of dataset or view names; settings
 carries "result", content holds only [parameters] and that table, and the settings file is left
@@ -27,7 +32,9 @@ values use ISO strings in JSON, consistently during comparison.
 
 record_evidence derives omitted publications from the views' data/parquet references and
 omitted acquisitions from those publications' publication.json inputs. cli_stale backs
-`python3 src/awb.py stale`, which compares every recorded result with the current state.
+`python3 src/awb.py stale`, which compares every recorded result with the current state and lists
+each result whose recorded runtime differs from the interpreter running it, or records unread
+requirements lines, under runtime_mismatches: a warning, never a stale result.
 
 prior_result and record_finding write a recorded result's state.md findings row for run.py, and
 cli_state backs `python3 src/awb.py state`, which shows and updates investigation state.
@@ -37,14 +44,20 @@ writers add the history.md entries for reruns and status changes that matter.
 """
 
 import argparse
+import codecs
 import hashlib
+import importlib.metadata
 import json
 import os
+import platform
+import posixpath
 import re
+import shlex
 import signal
 import subprocess
 import sys
 import threading
+import urllib.parse
 from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import datetime
@@ -227,6 +240,277 @@ def _settings_keys(content, result_id):
             f"results.{result_id}": content.get("results", {}).get(result_id)}
 
 
+# Packages every runtime block records; the project's requirements.txt adds its own.
+_RUNTIME_PACKAGES = ("duckdb", "pandas")
+
+
+def _package(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+# Archive suffixes pip installs from a path or URL: a wheel is name-version-tags, an sdist name-version.
+_ARCHIVES = (".whl", ".tar.gz", ".tgz", ".tar.bz2", ".tbz", ".tar.xz", ".txz", ".tar", ".zip")
+# A comment as pip strips it: from a # at the line start or after whitespace.
+_COMMENT = re.compile(r"(^|\s+)#.*$")
+# Options pip reads in a requirements file, as (what each is, whether it takes a value).
+_OPTIONS = {
+    "-r": ("include", True), "--requirement": ("include", True),
+    "-e": ("editable", True), "--editable": ("editable", True),
+    "-c": ("constraint", True), "--constraint": ("constraint", True),
+    "-i": ("index", True), "--index-url": ("index", True), "--pypi-url": ("index", True),
+    "--extra-index-url": ("index", True), "--no-index": ("index", False), "-f": ("index", True),
+    "--find-links": ("index", True), "--trusted-host": ("index", True), "--no-binary": ("format", True),
+    "--only-binary": ("format", True), "--prefer-binary": ("format", False), "--pre": ("format", False),
+    "--require-hashes": ("format", False), "--use-feature": ("format", True),
+    # Per-requirement options, alone on a line only when a continuation splits them off.
+    "--hash": ("format", True), "--global-option": ("format", True), "-C": ("format", True),
+    "--config-settings": ("format", True),
+}
+
+
+def _is_url(text):
+    """Whether pip reads text as a URL: an http, https, file, or ftp URL, or a VCS URL such as git+https."""
+    try:
+        scheme = urllib.parse.urlsplit(text).scheme.lower()
+    except ValueError:
+        return False
+    return scheme in {"http", "https", "file", "ftp"} or scheme.split("+")[0] in {"git", "hg", "svn", "bzr"}
+
+
+def _option_values(line):
+    """{what: [values]} for an option line, tokenized as pip does (shell quoting; -xVALUE, -x VALUE,
+    --x=VALUE, --x VALUE); None when it does not tokenize or holds an option pip does not read there."""
+    try:
+        tokens = shlex.split(line)
+    except ValueError:
+        return None
+    found, index = {}, 0
+    while index < len(tokens):
+        token, index = tokens[index], index + 1
+        if not token.startswith("-"):
+            continue  # pip ignores an argument after the options.
+        option, equals, value = token.partition("=") if token.startswith("--") else (token[:2], "", token[2:])
+        if option not in _OPTIONS:
+            return None
+        what, takes_value = _OPTIONS[option]
+        if not takes_value and (equals or value):
+            return None
+        if takes_value and not (equals or value):
+            if index == len(tokens):
+                return None
+            value, index = tokens[index], index + 1
+        found.setdefault(what, []).append(value)
+    return found
+
+
+def _reference_name(requirement, editable=False):
+    """(package, conflict): the package a requirement or direct reference names, or None; and the
+    #egg= name of a wheel or sdist whose file name names another package, else None. See
+    requirement_name()."""
+    url = _is_url(requirement)
+    # pip ends a URL's marker only at "; ", so a ";" inside the URL stays part of it.
+    reference = requirement.split("; " if url else ";")[0].strip()
+    # Trailing extras, as in pkg-1.0-py3-none-any.whl[extra], are not part of a reference's file name.
+    reference = re.sub(r"\[[^\]]*\]$", "", reference).rstrip()
+    match = re.match(r"([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)(?=$|\s|[\[(;@<>=!~])", reference)
+    # A bare archive file name, such as pkg-1.0-py3-none-any.whl, is a path, not a name.
+    if match and not url and not editable and not (match.end() == len(reference)
+                                                    and reference.lower().endswith(_ARCHIVES)):
+        return _package(match[1]), None
+    egg = re.search(r"[#&]egg=([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)", reference)
+    egg = _package(egg[1]) if egg else None
+    if url:  # The URL path's last segment, percent-decoded, as pip names a link's file.
+        archive = urllib.parse.unquote(urllib.parse.urlsplit(reference).path.rstrip("/").rsplit("/", 1)[-1])
+    else:
+        archive = re.split(r"[/\\]", reference.split("#")[0].split("?")[0].rstrip("/\\"))[-1]
+    lower, name = archive.lower(), None
+    if lower.endswith(".whl"):
+        name = _package(archive.split("-")[0]) if "-" in archive else None
+    else:
+        suffix = next((s for s in _ARCHIVES if lower.endswith(s)), None)
+        name = _package(archive[:-len(suffix)].rsplit("-", 1)[0]) if suffix and "-" in archive else None
+    if name is None:
+        return egg, None
+    # The file name wins, as pip installs what the archive is; a disagreeing #egg= is a conflict.
+    return name, egg if egg not in (None, name) else None
+
+
+def _read_line(line):
+    """What one requirements line holds: ("name", package), ("conflict", (package, egg name)) for an
+    archive whose #egg= names another package, ("include", path), ("none", None) for a blank line,
+    a comment, or an option line that installs nothing, or ("unread", None)."""
+    line = _COMMENT.sub("", line).strip().rstrip("\\").strip()
+    if not line:
+        return "none", None
+    if line.startswith("-"):
+        options = _option_values(line)
+        if options is None:
+            return "unread", None
+        if "editable" in options:  # pip installs the first -e on a line and ignores its -r.
+            return _named(*_reference_name(options["editable"][0], editable=True))
+        if "include" in options:
+            return "include", options["include"][0]
+        return "none", None
+    # Per-requirement options, such as --hash, follow the requirement.
+    return _named(*_reference_name(re.split(r"\s+-", line, maxsplit=1)[0]))
+
+
+def _named(name, conflict):
+    if conflict:
+        return "conflict", (name, conflict)
+    return ("name", name) if name else ("unread", None)
+
+
+def requirement_name(line):
+    """The normalized package name a requirements.txt line installs, or None when it names none.
+
+    A name with optional extras, versions, markers, or `@ URL` gives that name. A direct reference,
+    alone or after -e, gives its wheel or sdist file name's package (a POSIX or Windows path, or a
+    URL, whose path is percent-decoded and may hold a ";"; with or without trailing [extras]), else
+    its #egg= name. When an archive's #egg= names another package, the file name's package is
+    given, as pip installs what the archive is, and read_requirements() also lists the line as
+    unread. Option values are read with shell quoting, as pip reads them, and -e takes
+    its value attached (-eVALUE), after a space, or after = (--editable=VALUE). Per-requirement
+    options after the requirement, such as --hash, and a trailing line-continuation backslash are
+    ignored. read_requirements() reads a whole file through this function and returns every
+    non-blank, non-comment line it cannot name, other than an option line installing nothing, as
+    unread, so a line is never dropped silently.
+
+    Limits, where this reading and pip's differ:
+    - A direct reference is named only by #egg= or a name-version file name; pip builds it to learn
+      the name. A local directory or a VCS URL without #egg= is unread, and an archive whose file
+      name is not name-version gives a wrong name: a forge tag archive such as
+      .../archive/refs/tags/release-1.0.tar.gz gives `release`, and with an #egg= naming another
+      package it is a conflict; NAME @ URL names it.
+    - A requirement is named whether or not its marker matches this interpreter.
+    - Options are matched by their full names, so an abbreviated long option pip would accept is unread.
+    """
+    kind, value = _read_line(line)
+    return value if kind == "name" else value[0] if kind == "conflict" else None
+
+
+# Byte order marks pip honours when it reads a requirements file; UTF-32 LE starts like UTF-16 LE.
+_BOMS = ((codecs.BOM_UTF32_LE, "utf-32"), (codecs.BOM_UTF32_BE, "utf-32"), (codecs.BOM_UTF8, "utf-8-sig"),
+         (codecs.BOM_UTF16_LE, "utf-16"), (codecs.BOM_UTF16_BE, "utf-16"))
+
+
+def _joined(lines):
+    """(first line number, line) with continuation backslashes joined, as pip joins them."""
+    start, parts = None, []
+    for number, line in enumerate(lines, 1):
+        if not line.endswith("\\") or _COMMENT.match(line):
+            line = " " + line if _COMMENT.match(line) else line
+            if parts:
+                yield start, "".join(parts) + line
+                parts = []
+            else:
+                yield number, line
+        else:
+            start = number if not parts else start
+            parts.append(line.strip("\\"))
+    if parts:
+        yield start, "".join(parts)
+
+
+def read_requirements(path) -> tuple[list[str], list[str]]:
+    """(names, unread) for a requirements file: the normalized package names it declares, in order,
+    with those of each file it includes by -r or --requirement (a path relative to the including
+    file, read once; one that cannot be read is reported at each include); and each line it cannot read, as "<file>:<line>: <text>", which is every
+    non-blank, non-comment line requirement_name() cannot name other than an option line installing
+    nothing, and, with the reason in parentheses, every include that cannot be read and every
+    archive whose #egg= names another package than its file name (declared by the file name). An
+    absent file gives neither; one that exists but cannot be read is unread as "<file> (<reason>)".
+    Lines continued by a backslash are joined. -c constraint files declare no package and are not read.
+    A BOM-marked UTF-8, UTF-16, or UTF-32 file is decoded by its mark; one without a BOM is read as
+    UTF-8 (pip falls back to a coding line or the locale encoding). An include that is a URL is not
+    fetched, and environment variables are not expanded, so either include is unread.
+    requirement_name() states the line limits. File names are given relative to the first file's
+    directory."""
+    names, unread, seen = [], [], set()
+
+    def read(file, label, source):
+        try:
+            key = file.resolve()
+            if key in seen:
+                return
+            data = file.read_bytes()
+            seen.add(key)  # After the read, so each include of a file that cannot be read is reported.
+        except (OSError, RuntimeError) as error:
+            if source is not None or not isinstance(error, FileNotFoundError):
+                unread.append(f"{source or label} ({getattr(error, 'strerror', None) or error})")
+            return
+        encoding = next((name for bom, name in _BOMS if data.startswith(bom)), "utf-8")
+        for number, line in _joined(data.decode(encoding, errors="replace").splitlines()):
+            kind, value = _read_line(line)
+            entry = f"{label}:{number}: {_COMMENT.sub('', line).strip()}"
+            if kind == "name":
+                names.append(value)
+            elif kind == "conflict":
+                names.append(value[0])
+                unread.append(f"{entry} (#egg={value[1]} disagrees with the file name; recorded {value[0]})")
+            elif kind == "unread":
+                unread.append(entry)
+            elif kind == "include" and _is_url(value):
+                unread.append(f"{entry} (a URL include is not fetched)")
+            elif kind == "include":
+                read(file.parent / value, posixpath.normpath(posixpath.join(posixpath.dirname(label), value)), entry)
+
+    path = Path(path)
+    read(path, path.name, None)
+    return names, unread
+
+
+def _version(name):
+    """The installed version; None when not installed; unknown when its metadata is broken or has none."""
+    try:
+        version = importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+    except Exception as error:  # Broken metadata fails in other ways.
+        return {"unknown": f"{name}: {error}"}
+    if not isinstance(version, str) or not version.strip():
+        return {"unknown": f"{name}: installed metadata records no version"}
+    return version
+
+
+def _interpreter():
+    return {"python": platform.python_version(), "platform": f"{platform.system()}-{platform.machine()}"}
+
+
+def runtime(project_root) -> dict:
+    """This interpreter's runtime block: Python version, platform, package versions, and the
+    requirements.txt lines read_requirements() could not read."""
+    required, unread = read_requirements(Path(project_root).resolve() / "requirements.txt")
+    names = sorted({_package(n) for n in _RUNTIME_PACKAGES} | set(required))
+    return {**_interpreter(), "packages": {name: _version(name) for name in names}, "unread_requirements": unread}
+
+
+def _shown(version):
+    if version is None:
+        return "not installed"
+    return f"unknown ({version['unknown']})" if _is_unknown(version) else str(version)
+
+
+# How stale names a requirements line the runtime block could not read; release's provenance_gaps
+# (awb_draft.py) repeats this literal, as it cannot load the project's copy of this module.
+UNREAD = "requirements not read, packages unrecorded: "
+
+
+def _runtime_mismatches(recorded) -> list[str]:
+    """How this interpreter differs from a recorded runtime block, compared on the recorded packages,
+    with each requirements line that block could not read."""
+    if not isinstance(recorded, dict) or not isinstance(recorded.get("packages"), dict):
+        return ["evidence records no runtime"]
+    found = [f"{key} {recorded.get(key)} recorded, {value} now"
+             for key, value in _interpreter().items() if recorded.get(key) != value]
+    for name, version in sorted(recorded["packages"].items()):
+        now = _version(name)
+        if now != version:
+            found.append(f"{name} {_shown(version)} recorded, {_shown(now)} now")
+    unread = recorded.get("unread_requirements")
+    return found + ([UNREAD + str(entry) for entry in unread] if isinstance(unread, list) else [])
+
+
 def result_problems(result_id: str, table) -> list[str]:
     """What a [results.<id>] table lacks: a one-line question, and inputs, when given, as a list of names.
 
@@ -332,7 +616,7 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
         "publications": [_input_record(root, p, "publication.json", ["inputs", "conversion_commit", "files"])
                          for p in publications],
         "acquisitions": [_input_record(root, p, "provenance.json", ["status", "files"]) for p in acquisitions],
-        "settings": settings,
+        "settings": settings, "runtime": runtime(root),
         "checks": checks, "notes": notes,
     }
     path = root / _relative(root, f"investigations/{investigation}/evidence/{result_id}.json")
@@ -1396,13 +1680,23 @@ def cli_stale(root: Path, argv: list[str]) -> int:
     """Print, as compact JSON, each recorded result whose evidence no longer matches the project."""
     parser = argparse.ArgumentParser(
         prog="awb.py stale",
-        description="Compare investigations' evidence files with the current code, views, inputs, and "
-                    "settings; changes nothing.",
+        description="Compare investigations' evidence files with the current code, views, inputs, "
+                    "settings, and runtime; changes nothing.",
         epilog="Prints one JSON line: checked, stale, skipped (JSON in an evidence directory that is not "
-               "evidence), and results, one entry per result with a failing comparison: investigation, "
+               "evidence), results, one entry per result with a failing comparison: investigation, "
                "result_id, evidence, failed [{name, detail}], and findings, the exact state.md rows to "
-               "flag. A finding whose linked evidence file is missing is listed too. Exit 0 whether or "
-               "not anything is stale; 2 for an unknown investigation.")
+               "flag; and runtime_mismatches, one entry per result whose recorded Python, platform, or "
+               "package versions differ from the interpreter running stale, or whose runtime records "
+               "requirements lines it could not read: investigation, result_id, evidence, details, a list "
+               "with one string per difference or unread line (an unread line is '" + UNREAD.rstrip() +
+               " <file>:<line>: <text>', the line as read: comment removed, continued lines joined, and "
+               "for an include or a disagreeing #egg= a reason in parentheses; an unreadable "
+               "requirements.txt is '<file> (<reason>)'), and findings. A runtime mismatch is "
+               "a warning to decide on a rerun, not stale, and flags nothing; an unread line's packages "
+               "are recorded once it names them, as with #egg=NAME or NAME @ REFERENCE. Run stale with the interpreter that runs run.py: a "
+               "version mismatch on every result at once usually means a different interpreter, not an "
+               "upgrade. A finding whose linked evidence file is missing is listed under results. Exit 0 "
+               "whether or not anything is stale; 2 for an unknown investigation.")
     parser.add_argument("--investigation", metavar="NAME",
                         help="check only this investigation, by its directory name under investigations/")
     args = parser.parse_args(argv)
@@ -1415,13 +1709,14 @@ def cli_stale(root: Path, argv: list[str]) -> int:
         directories = [base / args.investigation]
     else:
         directories = sorted(p for p in base.iterdir() if p.is_dir()) if base.is_dir() else []
-    results, checked, skipped = [], 0, []
+    results, runtimes, checked, skipped = [], [], 0, []
     for directory in directories:
         rows = finding_rows(directory / "state.md")
         # Evidence files on disk, plus any a finding links that is missing.
         ids = {p.stem for p in (directory / "evidence").glob("*.json") if _ID.fullmatch(p.stem)}
         for result_id in sorted(ids | set(rows)):
             evidence = f"investigations/{directory.name}/evidence/{result_id}.json"
+            content = None
             try:
                 content = json.loads((root / evidence).read_text())
                 if not (isinstance(content, dict) and str(content.get("schema", "")).startswith("awb-evidence/")):
@@ -1430,10 +1725,15 @@ def cli_stale(root: Path, argv: list[str]) -> int:
             except (OSError, ValueError):
                 pass  # compare_evidence reports missing or unreadable evidence.
             checked += 1
+            entry = {"investigation": directory.name, "result_id": result_id, "evidence": evidence}
             failed = [{"name": c["name"], "detail": _short(c["detail"])}
                       for c in compare_evidence(root, evidence) if c["outcome"] == "fail"]
             if failed:
-                results.append({"investigation": directory.name, "result_id": result_id, "evidence": evidence,
-                                "failed": failed, "findings": rows.get(result_id, [])})
-    print(json.dumps({"checked": checked, "stale": len(results), "skipped": skipped, "results": results}))
+                results.append({**entry, "failed": failed, "findings": rows.get(result_id, [])})
+            # A runtime difference is a warning beside the comparisons, never a stale result.
+            mismatches = _runtime_mismatches(content.get("runtime")) if content is not None else []
+            if mismatches:
+                runtimes.append({**entry, "details": mismatches, "findings": rows.get(result_id, [])})
+    print(json.dumps({"checked": checked, "stale": len(results), "skipped": skipped, "results": results,
+                      "runtime_mismatches": runtimes}))
     return 0

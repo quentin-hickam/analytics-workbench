@@ -1081,9 +1081,10 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     entries = [checks.get(r) or kept.get(r) for r in represented]
     record["export_checks"] = [e for e in entries if e] or "none"
     # Every represented result with its evidence, serialized or not, so status can see a later rerun,
-    # and the question it answers, which methodology.md repeats verbatim.
+    # the question it answers, which methodology.md repeats verbatim, and the runtime that evidence recorded.
     questions = {r: evidence[r].get("question", {"unknown": "evidence lacks question"}) for r in represented}
-    record["results"] = [{"result_id": r, "evidence": evidence_paths[r], "question": questions[r]}
+    record["results"] = [{"result_id": r, "evidence": evidence_paths[r], "question": questions[r],
+                          "runtime": _runtime(evidence[r])}
                          for r in represented]
     fields = producing_state(evidence)
     fields["packaging_commit"], fields["packaging_uncommitted_changes"] = packaging_state(root)
@@ -1494,8 +1495,17 @@ def release_dispositions(record: dict, prior) -> list[dict]:
     return rows
 
 
+def _runtime(evidence):
+    """The evidence's runtime block, or unknown when it records none; stale tests the same shape."""
+    runtime = evidence.get("runtime")
+    if isinstance(runtime, dict) and isinstance(runtime.get("packages"), dict):
+        return runtime
+    return {"unknown": "evidence lacks runtime"}
+
+
 def provenance_gaps(record: dict) -> list[dict]:
-    """Each manifest value recorded as unknown, by its dotted field path, with the reason."""
+    """Each manifest value recorded as unknown, by its dotted field path, with the reason, and each
+    requirements line a result's runtime could not read, whose packages' versions went unrecorded."""
     gaps = []
 
     def walk(value, path):
@@ -1505,7 +1515,13 @@ def provenance_gaps(record: dict) -> list[dict]:
             gaps.append({"field": path, "reason": value})
         elif isinstance(value, dict):
             for key, item in value.items():
-                walk(item, f"{path}.{key}")
+                if key == "unread_requirements" and isinstance(item, list):
+                    # The reason's prefix is UNREAD in awb_provenance.py, which stale reports; keep the two equal.
+                    gaps.extend({"field": f"{path}.{key}[{index}]",
+                                 "reason": f"requirements not read, packages unrecorded: {entry}"}
+                                for index, entry in enumerate(item))
+                else:
+                    walk(item, f"{path}.{key}")
         elif isinstance(value, list):
             for index, item in enumerate(value):
                 walk(item, f"{path}[{index}]")
