@@ -32,6 +32,7 @@
 # test_a_relanded_url_is_checked_only_in_its_latest_acquisition: after a changed upstream is landed again, only the newest acquisition of that source and URL is probed and the earlier one counts as superseded, even when the newer one records no validator.
 # test_the_latest_acquisition_is_ordered_by_completed_at_then_acquisition_id: completed_at instants are compared across offsets, not by ID, and acquisitions completed in the same second are ordered by acquisition ID, so exactly one stays current.
 # test_a_host_that_times_out_is_not_requested_again: after a connect or read timeout, the host's remaining files are unknown without a request, and other hosts are still probed.
+# test_a_redirect_target_that_times_out_is_not_requested_again: through urllib's own redirect processing, the host that timed out after a redirect is the one suppressed, for direct and redirected requests alike, and the redirecting host is still requested.
 # test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
 # test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including any upstream field land() refuses (by land()'s own check: an invalid or credential-bearing URL among them), is named under uncertainties with or without the probe and makes probeable_files null, nothing is requested for it, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
 # test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key is valid and counts as without upstream.
@@ -641,7 +642,7 @@ def test_a_host_that_times_out_is_not_requested_again(workbench, monkeypatch, ti
     serve(monkeypatch, server)
     files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
     assert [(file["path"], file["result"], file.get("reason")) for file in files] == [
-        ("a.csv", "unknown", f"no response within {status.PROBE_TIMEOUT} s"),
+        ("a.csv", "unknown", f"no response from slow.test within {status.PROBE_TIMEOUT} s"),
         ("b.csv", "unknown", "not requested: an earlier request to slow.test timed out"),
         ("c.csv", "unchanged", None)]
     assert [url for _, url, _ in server.requests] == ["https://slow.test/a.csv", "https://fast.test/c.csv"]
@@ -771,6 +772,50 @@ def test_probe_follows_redirects_only_to_http_and_only_as_head(workbench, monkey
     assert ftp == []
     assert requests == [("HEAD", "https://example.test/ftp"), ("HEAD", "https://example.test/old"),
                         ("HEAD", "https://example.test/new")]
+
+
+@pytest.mark.parametrize("timeout", ["connect", "read"])
+def test_a_redirect_target_that_times_out_is_not_requested_again(workbench, monkeypatch, timeout):
+    """Runs urllib's own redirect processing; only the HTTPS connections are replaced."""
+    import email.message
+    import io
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    import urllib.response
+    answers = {
+        "https://one.test/a": (302, {"Location": "https://slow.test/a"}),
+        "https://two.test/c": (307, {"Location": "https://slow.test/c"}),
+        "https://one.test/d": (200, {"ETag": '"v1"'}),
+    }
+    requests = []
+
+    def https_open(handler, request):
+        requests.append((request.get_method(), request.full_url))
+        if urllib.parse.urlsplit(request.full_url).hostname == "slow.test":
+            raise urllib.error.URLError(TimeoutError("timed out")) if timeout == "connect" else TimeoutError("timed out")
+        code, fields = answers[request.full_url]
+        headers = email.message.Message()
+        for name, value in fields.items():
+            headers[name] = value
+        response = urllib.response.addinfourl(io.BytesIO(b""), headers, request.full_url, code)
+        response.msg = "Redirect" if code != 200 else "OK"
+        return response
+
+    monkeypatch.setattr(urllib.request.HTTPSHandler, "https_open", https_open)
+    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://one.test/a", "etag": '"v1"'},
+                                              "b.csv": {"url": "https://slow.test/b", "etag": '"v1"'},
+                                              "c.csv": {"url": "https://two.test/c", "etag": '"v1"'},
+                                              "d.csv": {"url": "https://one.test/d", "etag": '"v1"'}})
+    files = status.collect(workbench, probe_upstream=True)["upstream"]["files"]
+    assert [(file["path"], file["result"], file.get("reason")) for file in files] == [
+        ("a.csv", "unknown", f"no response from slow.test within {status.PROBE_TIMEOUT} s"),
+        ("b.csv", "unknown", "not requested: an earlier request to slow.test timed out"),
+        ("c.csv", "unknown", "redirected to slow.test, not followed: an earlier request to slow.test timed out"),
+        ("d.csv", "unchanged", None),
+    ]
+    assert requests == [("HEAD", "https://one.test/a"), ("HEAD", "https://slow.test/a"),
+                        ("HEAD", "https://two.test/c"), ("HEAD", "https://one.test/d")]
 
 
 def test_probe_upstream_flag_reaches_the_probe(workbench, monkeypatch, capsys):

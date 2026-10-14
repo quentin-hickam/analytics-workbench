@@ -27,7 +27,6 @@ BLOCKING = {"none", "revalidate"}
 
 
 PROBE_TIMEOUT = 10
-TIMED_OUT = f"no response within {PROBE_TIMEOUT} s"
 # land()'s own module from the awb-init skill beside this one: an upstream field it refuses to
 # record is malformed provenance here, by the same check.
 _LANDING = importlib.util.spec_from_file_location(
@@ -358,17 +357,9 @@ def upstream(root, probe, uncertain, entries):
             probeable.append((entry, recorded))
     report = {"probeable_files": len(probeable) if complete else None}
     if probe:
-        opener, unresponsive, results = head_opener(), set(), []
-        for entry, recorded in probeable:
-            # One timeout per host bounds the run when a host is unreachable (VPN off, firewall).
-            host = urllib.parse.urlsplit(recorded["url"]).hostname
-            if host in unresponsive:
-                result = {"result": "unknown", "reason": f"not requested: an earlier request to {host} timed out"}
-            else:
-                result = probe_file(recorded, opener)
-                if result.get("reason") == TIMED_OUT:
-                    unresponsive.add(host)
-            results.append({**entry, **result})
+        # One timeout per host bounds the run when a host is unreachable (VPN off, firewall).
+        opener, unresponsive = head_opener(), set()
+        results = [{**entry, **probe_file(recorded, opener, unresponsive)} for entry, recorded in probeable]
         report.update(files=results, not_probeable=not_probeable, superseded=superseded, without_upstream=without)
     return report
 
@@ -420,18 +411,28 @@ def timestamp(value):
 
 
 class RedirectRefused(urllib.error.URLError):
-    """A redirect to a URL other than http(s), which the probe does not follow."""
+    """A redirect the probe does not follow: to a URL other than http(s), or to a host that timed out."""
 
 
 class HeadRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Follow a redirect only to an http(s) URL, and only as another HEAD request."""
+    """Follow a redirect only to an http(s) URL, and only as another HEAD request.
+
+    A request from probe_file carries hosts, the hosts its chain has requested in order, and
+    unresponsive, the hosts that timed out; a redirect to an unresponsive host is not followed.
+    """
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if urllib.parse.urlsplit(newurl).scheme.lower() not in {"http", "https"}:
-            raise RedirectRefused("redirect to a URL other than http(s)")
+        target = urllib.parse.urlsplit(newurl)
+        if target.scheme.lower() not in {"http", "https"}:
+            raise RedirectRefused("redirected to a URL other than http(s), not followed")
+        if target.hostname in getattr(req, "unresponsive", ()):
+            raise RedirectRefused(f"redirected to {target.hostname}, not followed: "
+                                  f"an earlier request to {target.hostname} timed out")
         request = super().redirect_request(req, fp, code, msg, headers, newurl)
         if request is not None:
             request.method = "HEAD"
+            request.unresponsive, request.hosts = getattr(req, "unresponsive", set()), getattr(req, "hosts", [])
+            request.hosts.append(target.hostname)
         return request
 
 
@@ -439,19 +440,28 @@ def head_opener():
     return urllib.request.build_opener(HeadRedirectHandler)
 
 
-def probe_file(recorded, opener):
-    """HEAD the recorded URL and compare its ETag, else its Last-Modified, with the recorded value."""
+def probe_file(recorded, opener, unresponsive):
+    """HEAD the recorded URL and compare its ETag, else its Last-Modified, with the recorded value.
+
+    unresponsive holds the hosts a request timed out on, shared across a run: the host whose
+    request timed out, after any redirects, is added, and no request is sent to one already in it.
+    """
+    host = urllib.parse.urlsplit(recorded["url"]).hostname
+    if host in unresponsive:
+        return {"result": "unknown", "reason": f"not requested: an earlier request to {host} timed out"}
+    request = urllib.request.Request(recorded["url"], method="HEAD")
+    request.unresponsive, request.hosts = unresponsive, [host]
     try:
-        request = urllib.request.Request(recorded["url"], method="HEAD")
         with opener.open(request, timeout=PROBE_TIMEOUT) as response:
             headers = response.headers
     except urllib.error.HTTPError as error:
         return {"result": "unknown", "reason": f"HTTP {error.code}"}
-    except RedirectRefused:
-        return {"result": "unknown", "reason": "redirected to a URL other than http(s), not followed"}
+    except RedirectRefused as error:
+        return {"result": "unknown", "reason": error.reason}
     except (OSError, ValueError, http.client.HTTPException) as error:
         if isinstance(error, TimeoutError) or isinstance(getattr(error, "reason", None), TimeoutError):
-            return {"result": "unknown", "reason": TIMED_OUT}
+            unresponsive.add(request.hosts[-1])
+            return {"result": "unknown", "reason": f"no response from {request.hosts[-1]} within {PROBE_TIMEOUT} s"}
         return {"result": "unknown", "reason": f"{type(error).__name__}: {error}"}
     compared = {}
     for name, header in (("etag", "ETag"), ("last_modified", "Last-Modified")):
