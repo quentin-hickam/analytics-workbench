@@ -17,7 +17,7 @@ The shared, authoritative representation of source data under documented prepara
 Source records durably captured independently of the canonical analytical store, with provenance linking them to their acquisition. Landed data is the input to preparation, not an assertion of cleanliness or analytical fitness.
 
 **Acquisition**:
-One completed capture of records from a source, landed under `data/raw/<source>/<acquisition-id>/` with a provenance file recording its request, timing, and file checksums. An incomplete acquisition stays unpublished.
+One completed capture of records from a source, landed under `data/raw/<source>/<acquisition-id>/` with a provenance file recording its request, timing, file checksums, and any upstream validators (URL, ETag, Last-Modified, version ID) the fetch received. An incomplete acquisition stays unpublished.
 
 **Publication**:
 A validated Parquet version of a dataset converted from named acquisitions, written once under `data/parquet/<dataset>/<publication-id>/` with a publication file recording its inputs and conversion commit. Canonical views read publications; a correction adds a view definition or a new publication and leaves existing publications as they are.
