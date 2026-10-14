@@ -15,6 +15,7 @@ AGENTS = SKILLS + 'awb-init/assets/workbench/AGENTS.md'
 ANALYSIS = SKILLS + 'awb-init/assets/workbench/workbench-guides/analysis.md'
 DATA = SKILLS + 'awb-init/assets/workbench/workbench-guides/data.md'
 CONTRACT = SKILLS + 'awb-package/references/package-contract.md'
+REVIEW = SKILLS + 'awb-package/references/review.md'
 
 
 def skill(name):
@@ -56,10 +57,10 @@ def main():
         'analysis_procedures': ([AGENTS], [AGENTS, DATA, ANALYSIS]),
         'status_entry': ([AGENTS, skill('awb-status')], [AGENTS, skill('awb-status')]),
         'release_without_revision': ([AGENTS, skill('awb-release'), skill('awb-package')],
-                                     [AGENTS, skill('awb-release')]),
+                                     [AGENTS, skill('awb-release'), REVIEW]),
         'release_with_flag': ([AGENTS, skill('awb-release'), skill('awb-package')],
-                              [AGENTS, skill('awb-release'), CONTRACT]),
-        'narrative_revision': ([AGENTS, skill('awb-package')], [AGENTS, skill('awb-package'), CONTRACT]),
+                              [AGENTS, skill('awb-release'), REVIEW, CONTRACT]),
+        'narrative_revision': ([AGENTS, skill('awb-package')], [AGENTS, skill('awb-package'), CONTRACT, REVIEW]),
         'clean': ([AGENTS], [AGENTS, skill('awb-clean')]),
         'eda': ([AGENTS], [AGENTS, skill('awb-eda')]),
     }

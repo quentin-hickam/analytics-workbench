@@ -5,6 +5,7 @@
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten, revised_at stamped only when it changes, other manifest fields kept; nothing is written outside the draft.
 # test_evidence_older_than_scoped_3_is_reported_for_rerun: check-draft and export --result refuse awb-evidence/1 and unscoped /3 with a rerun instruction.
 # test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
+# test_check_draft_requires_each_question_in_methodology: export's questions pass once methodology repeats them; a question methodology lacks or rewords, a results entry without a question, and a manifest without results fail check-draft's questions, and release refuses on the check.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
 # test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
@@ -31,6 +32,7 @@
 # test_export_display_stub_names_each_gap_once: missing display names on chart and dataset paths give one quoted [columns] line each, deduplicated, a dotted column kept as one key; a blank name gets its own error and no stub line, so the stub pastes as valid TOML.
 # test_release_refuses_failed_check_or_pending_disposition: a failing verify, an unmatched flag, or a none/revalidate disposition creates no release; a missing or unknown disposition or malformed places fail the check's flag_entries; represented_in none needs no disposition.
 # test_release_reports_fields_for_the_report: datasets, dispositions marked new against the prior release's manifest (unknown when it is unreadable), provenance gaps, checkout-only acquisitions, and a clean local verify.
+# test_release_manifest_lists_runtime_per_result: export copies each represented result's runtime block into its results entry, unknown when the evidence has none or a null one, as stale reads it, and the release manifest keeps them; each unread requirements line is a provenance gap.
 # test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy compared.
 # test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
@@ -62,11 +64,15 @@ CREATE OR REPLACE VIEW orders_view AS
 WITH recent AS (SELECT * FROM read_parquet('data/parquet/orders/p1/*.parquet'))
 SELECT r.*, EXTRACT(year FROM r.ordered_at) AS y FROM recent r JOIN main.regions_table g USING (region);
 """
-SETTINGS = b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n[results.r-001]\n\n[results.r-002]\n"
+SETTINGS = (b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n"
+            b'[results.r-001]\nquestion = "How many claims closed late?"\n\n'
+            b'[results.r-002]\nquestion = "Which regions close claims late?"\n')
 STALE_SETTINGS = SETTINGS.replace(b"minimum_count = 5", b"minimum_count = 6")
 RESULT = "region,late_rate,n\nW,21.349,10\nE,2.675,8\n"
 FINDINGS = "# Order quality\n\n### Late orders rose in the west\n\n**Chart 1.** Bar: late share by region\n"
-METHODOLOGY = "# Methodology\n\n## Findings\n\n### Late orders rose in the west\n"
+QUESTIONS = {"r-001": "How many claims closed late?", "r-002": "Which regions close claims late?"}
+METHODOLOGY = ("# Methodology\n\n## Findings\n\n### Late orders rose in the west\n\n"
+               "Question (r-001): How many claims closed late?\nQuestion (r-002): Which regions close\nclaims late?\n")
 STATE = """# Current investigation state
 
 Last updated: 2026-10-01
@@ -156,9 +162,12 @@ def project(tmp_path):
     write(draft, "methodology.md", METHODOLOGY)
     write(draft, "charts/chart-1.csv", "Region,Late (%)\nWest,21\n")
     write(tmp_path, "investigations/inv/results/r-001.csv", RESULT)
+    write(tmp_path, "investigations/inv/results/r-002.csv", "region\nW\n")
     write(draft, "manifest.json", json.dumps({
-        "investigation": "inv", "package": "pkg", "status": "draft", "revalidation_flags": "none",
-        "results": [{"result_id": "r-001", "evidence": "investigations/inv/evidence/r-001.json"}], "inventory": []}))
+        "investigation": "inv", "package": "pkg", "status": "draft",
+        "revalidation_flags": "none", "inventory": [],
+        "results": [{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json", "question": q}
+                    for r, q in QUESTIONS.items()]}))
     return tmp_path
 
 
@@ -191,7 +200,8 @@ def test_toml_keys_fall_back_to_tomli_then_key_lines(project, monkeypatch):
     monkeypatch.setitem(sys.modules, "tomllib", None)
     monkeypatch.setitem(sys.modules, "tomli", tomllib)
     assert draft._toml_keys(text) == {"parameters", "parameters.minimum_count", "parameters.start",
-                                      "results", "results.r-001", "results.r-002"}
+                                      "results", "results.r-001", "results.r-001.question",
+                                      "results.r-002", "results.r-002.question"}
     monkeypatch.setitem(sys.modules, "tomli", None)
     assert {"parameters", "results.r-001", "minimum_count"} <= draft._toml_keys(text)
     write(project, "foundation/display.toml", "[columns]\n")
@@ -203,6 +213,7 @@ def test_check_draft_rewrites_inventory_and_passes(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["passed"] and "record" not in report
     assert (report["findings"], report["charts"], report["verify"], report["errors"]) == ([], [], [], [])
+    assert report["questions"] == []  # r-002's question is wrapped across two lines and still matches
     assert report["inventory"] == {"rows": 4, "source": "rewritten"}
     record = manifest(project)
     assert [row["path"] for row in record["inventory"]] == [
@@ -236,6 +247,46 @@ def test_check_draft_reports_each_helper_problem(project, capsys):
     assert report["names_problems"] == [
         "no settings found: investigations/inv/settings.toml is absent and no evidence records a settings file"]
     assert report["verify"] == []
+
+
+def set_results(project, results):
+    path = project / "deliveries/inv/pkg/draft/manifest.json"
+    record = json.loads(path.read_text())
+    if results is None:
+        record.pop("results")
+    else:
+        record["results"] = results
+    path.write_text(json.dumps(record))
+
+
+def test_check_draft_requires_each_question_in_methodology(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    write(draft, "methodology.md", METHODOLOGY.split("Question (r-002)")[0])
+    code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001")
+    assert code == 0 and report["questions"] == {"r-001": QUESTIONS["r-001"]}
+    assert run(project, capsys, "check-draft", "inv", "pkg")[1]["passed"]
+    assert run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")[1]["written"]
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and not report["passed"] and report["questions"] == [
+        {"result_id": "r-002", "question": QUESTIONS["r-002"],
+         "problem": "methodology.md does not repeat this question verbatim"}]
+    write(draft, "methodology.md", METHODOLOGY.replace("Which regions close", "Which regions closed"))
+    assert run(project, capsys, "check-draft", "inv", "pkg")[1]["questions"][0]["result_id"] == "r-002"
+    write(draft, "methodology.md", METHODOLOGY)
+    run(project, capsys, "check-draft", "inv", "pkg")
+    no_question = "the manifest records no question for this result; run export, or copy its question " \
+                  "from settings into a hand-added entry"
+    for results, problems in (
+            ([{"result_id": "r-001", "evidence": "investigations/inv/evidence/r-001.json"}],
+             [{"result_id": "r-001", "problem": no_question}]),
+            ([{"result_id": "r-001", "question": {"unknown": "evidence lacks question"}}],
+             [{"result_id": "r-001", "problem": no_question}]),
+            (None, [{"result_id": None, "problem": "the manifest records no results list; run export"}])):
+        set_results(project, results)
+        code, report = run(project, capsys, "release", "inv", "pkg")
+        assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
+        assert report["check"]["questions"] == problems
+    assert not (project / "deliveries/inv/pkg/released").exists()
 
 
 def set_flags(project, flags):
@@ -322,8 +373,8 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
     write(project, "investigations/inv/results/r-001.profile.json", json.dumps(
         {"row_count": 2, "columns": {"region": {"dtype": "object", "null_rate": 0.0, "distinct_count": 2}}}))
     write(project, "investigations/inv/results/r-002.csv", "orders\n1240\n")
-    set_manifest(project, results=[{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json"}
-                                   for r in ("r-001", "r-002")])
+    set_manifest(project, results=[{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json",
+                                    "question": QUESTIONS[r]} for r in ("r-001", "r-002")])
     # Table cells rounded, a check detail, a setting, a profile rate as a percent, a thousands separator.
     write(draft, "findings.md", TRACED)
     write(draft, "methodology.md", METHODOLOGY + "\nSettings `minimum_count = 7` (r-001), release 002, as of "
@@ -334,7 +385,7 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
     write(draft, "findings.md", TRACED.replace("21.3%", "23.1%"))
     write(draft, "methodology.md", METHODOLOGY + "\nAbout 40 stores.\n")
     rows = [{"file": "findings.md", "line": 5, "text": "23.1%"},
-            {"file": "methodology.md", "line": 7, "text": "40"}]
+            {"file": "methodology.md", "line": 11, "text": "40"}]
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"] and report["numbers"] == rows
     code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
@@ -355,6 +406,7 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
 
 
 def test_check_draft_reports_number_problems(project, capsys):
+    (project / "investigations/inv/results/r-002.csv").unlink()
     for fields, problems in [
             ({"allowed_numbers": [{"text": "40", "reason": " "}, "40"]},
              ["allowed_numbers entry 1 is not {text, reason} with both filled in",
@@ -606,9 +658,13 @@ def test_export_results_records_provenance_only(project, capsys):
         (["r-002"], {"minimum_count": 5, "start": "2026-01-01"})]
     assert record["packaging_commit"] == head and record["packaging_uncommitted_changes"] == "none"
     assert record["export_checks"] == "none" and "charts" not in record and "dataset_selection" not in record
-    # A result represented without serialization is still listed with its evidence, for status.
-    assert record["results"] == [{"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json"}
-                                 for r in ("r-001", "r-002")]
+    # A result represented without serialization is still listed with its evidence, for status, the
+    # question its evidence recorded, verbatim, for methodology.md, and the runtime it recorded.
+    assert record["results"] == [
+        {"result_id": r, "evidence": f"investigations/inv/evidence/{r}.json", "question": QUESTIONS[r],
+         "runtime": json.loads((project / f"investigations/inv/evidence/{r}.json").read_text())["runtime"]}
+        for r in ("r-001", "r-002")]
+    assert report["questions"] == QUESTIONS
     assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes() == chart
 
 
@@ -793,6 +849,7 @@ def test_export_checks_follow_the_represented_set(project, capsys):
 
 
 def test_export_names_every_gap_and_blocks_stale_results(project, capsys):
+    (project / "investigations/inv/results/r-002.csv").unlink()
     with_results(project)
     write(project, "foundation/display.toml", DISPLAY.replace('n = "Cases"\n', ""))
     code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--chart", "r-002", "--no-datasets")
@@ -906,6 +963,42 @@ def test_release_reports_fields_for_the_report(project, capsys):
     (project / "deliveries/inv/pkg/released/003/manifest.json").write_text("not json")
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["release_number"] == "004" and report["dispositions"][0]["new"] is None
+
+
+def test_release_manifest_lists_runtime_per_result(project, capsys):
+    evidence = project / "investigations/inv/evidence"
+    first = json.loads((evidence / "r-001.json").read_text())["runtime"]
+    assert set(first) == {"python", "platform", "packages", "unread_requirements"}
+    second = json.loads((evidence / "r-002.json").read_text())
+    second["runtime"]["packages"]["duckdb"] = "0.0.1-fixture"
+    (evidence / "r-002.json").write_text(json.dumps(second))
+    code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    assert code == 0 and report["written"]
+    run(project, capsys, "check-draft", "inv", "pkg")
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 0 and report["released"] and report["provenance_gaps"] == []
+    assert [(r["result_id"], r["runtime"]) for r in manifest(project, "released/001")["results"]] == [
+        ("r-001", first), ("r-002", second["runtime"])]
+    second["runtime"]["unread_requirements"] = ["requirements.txt:2: -e ."]
+    (evidence / "r-002.json").write_text(json.dumps(second))
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    run(project, capsys, "check-draft", "inv", "pkg")
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 0 and report["released"] and report["provenance_gaps"] == [
+        {"field": "results[1].runtime.unread_requirements[0]",
+         "reason": "requirements not read, packages unrecorded: requirements.txt:2: -e ."}]
+    del second["runtime"]
+    (evidence / "r-002.json").write_text(json.dumps(second))
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    run(project, capsys, "check-draft", "inv", "pkg")
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 0 and report["provenance_gaps"] == [
+        {"field": "results[1].runtime", "reason": "evidence lacks runtime"}]
+    assert manifest(project, "released/003")["results"][1]["runtime"] == {"unknown": "evidence lacks runtime"}
+    second["runtime"] = None
+    (evidence / "r-002.json").write_text(json.dumps(second))
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    assert manifest(project, "draft")["results"][1]["runtime"] == {"unknown": "evidence lacks runtime"}
 
 
 def test_release_numbers_stamps_and_copies_to_storage(project, capsys, tmp_path_factory):

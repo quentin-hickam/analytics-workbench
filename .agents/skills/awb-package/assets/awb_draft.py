@@ -1,14 +1,16 @@
-"""Export, check, and release an analytics workbench package draft.
+"""Export, review, check, and release an analytics workbench package draft.
 
 awb-init's installer places this file at `src/packaging/draft.py`. `src/awb.py` runs its commands:
 
     python3 src/awb.py export <investigation> <package> [--chart RESULT[:COLUMNS]]... [--dataset NAME=RESULT[:COLUMNS]]... [--no-datasets] [--result RESULT]...
+    python3 src/awb.py review-rules check <investigation> <package>
+    python3 src/awb.py review-rules add --area AREA --severity error|warning --rule TEXT --fix TEXT [--pattern REGEX]
     python3 src/awb.py check-draft <investigation> <package> [--verify-only]
     python3 src/awb.py release <investigation> <package>
     python3 src/awb.py copy-releases <investigation> [<package>]
 
 Each prints one line of JSON. The manifest is the draft's `manifest.json`; chart and dataset files
-are CSV. Standard library only; `export` also needs the project's `src/provenance.py`.
+are CSV; review rules live in `foundation/review-rules.md`. Standard library only; `export` also needs the project's `src/provenance.py`.
 """
 
 import argparse
@@ -75,15 +77,19 @@ def _read_json(path):
     return record
 
 
-def _write_json(path, record):
-    # Atomic, so an interrupted write never leaves a half manifest in the draft.
+def _write_text(path, text):
+    # Atomic, so an interrupted write never leaves a half manifest or rule file.
     path = Path(path)
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     try:
-        temporary.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+        temporary.write_text(text, encoding="utf-8")
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _write_json(path, record):
+    _write_text(path, json.dumps(record, indent=2) + "\n")
 
 
 def _now():
@@ -492,6 +498,28 @@ def _headings(path):
         elif not fenced and line.startswith("### "):
             headings.append(line[4:].strip().rstrip("#").strip())
     return headings
+
+
+def question_problems(draft, record: dict) -> list[dict]:
+    """List each manifest `results` entry whose question methodology.md does not repeat verbatim.
+
+    Runs of whitespace compare equal, so a wrapped line still matches.
+    """
+    methodology = " ".join((Path(draft) / "methodology.md").read_text(encoding="utf-8").split())
+    entries = record.get("results")
+    if not isinstance(entries, list):
+        return [{"result_id": None, "problem": "the manifest records no results list; run export"}]
+    problems = []
+    for entry in entries:
+        result_id = entry.get("result_id") if isinstance(entry, dict) else None
+        question = entry.get("question") if isinstance(entry, dict) else None
+        if not isinstance(question, str) or not question.strip():
+            problems.append({"result_id": result_id, "problem": "the manifest records no question for this "
+                             "result; run export, or copy its question from settings into a hand-added entry"})
+        elif " ".join(question.split()) not in methodology:
+            problems.append({"result_id": result_id, "question": question,
+                             "problem": "methodology.md does not repeat this question verbatim"})
+    return problems
 
 
 def heading_problems(draft) -> list[dict]:
@@ -1006,8 +1034,9 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
 
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
-            and report["charts"] == [] and report["headings"] == [] and report["verify"] == []
-            and report["flag_entries"] == [] and report["numbers"] == [] and not report["numbers_problems"])
+            and report["charts"] == [] and report["headings"] == [] and report["questions"] == []
+            and report["verify"] == [] and report["flag_entries"] == [] and report["numbers"] == []
+            and not report["numbers_problems"])
 
 
 def check_draft(root, investigation, package, *, verify_only=False) -> dict:
@@ -1015,8 +1044,9 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
-              "charts": None, "headings": None, "numbers": None, "numbers_problems": [], "inventory": None,
-              "verify": None, "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
+              "charts": None, "headings": None, "questions": None, "numbers": None, "numbers_problems": [],
+              "inventory": None, "verify": None, "flag_entries": None, "unmatched_flags": None, "errors": [],
+              "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
         return report
@@ -1062,6 +1092,10 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             raise ValueError(f"no manifest at {_rel(root, path)}; run export first")
         record = _read_json(path)
         report["flag_entries"] = flag_entry_problems(record)
+        try:
+            report["questions"] = question_problems(draft, record)
+        except (OSError, UnicodeError) as error:
+            report["errors"].append(f"questions check: {error}")
         if not verify_only:
             rows = inventory(draft)
             if rows != record.get("inventory"):
@@ -1102,9 +1136,10 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py check-draft", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Run every mechanical draft check (internal names in findings.md, chart files, "
-                    "matching finding headings, numbers in both narratives, the manifest inventory, and "
-                    "state.md's current flags) and rewrite the manifest inventory, stamping revised_at when it "
-                    "changes; --verify-only checks a release candidate and writes nothing.",
+                    "matching finding headings, each represented result's question in methodology.md, "
+                    "numbers in both narratives, the manifest inventory, and state.md's current flags) and "
+                    "rewrite the manifest inventory, stamping revised_at when it changes; --verify-only checks a "
+                    "release candidate and writes nothing.",
         epilog="Prints one JSON line.\nnumbers lists, as file, line, and text, each number in findings.md or "
                "methodology.md that no represented result's table, profile, check details, or settings round to "
                "and the manifest's allowed_numbers does not cover by its text or a phrase around it; "
@@ -1113,9 +1148,10 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "unmatched_flags lists each finding state.md flags whose exact finding and reason the manifest's "
                "revalidation_flags does not record.\nflag_entries lists a "
                "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
-               "that is neither none nor a list of places, and an unknown disposition.\nExit 0 only when "
-               "names_problems, findings, charts, headings, numbers, numbers_problems, verify, flag_entries, "
-               "unmatched_flags, and errors are all empty.")
+               "that is neither none nor a list of places, and an unknown disposition.\nquestions lists each "
+               "manifest results entry without a question, or whose question methodology.md does not repeat "
+               "verbatim.\nExit 0 only when names_problems, findings, charts, headings, questions, numbers, "
+               "numbers_problems, verify, flag_entries, unmatched_flags, and errors are all empty.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
                         help="verify against the recorded inventory without rewriting it (the release gate)")
@@ -1405,8 +1441,12 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     kept = {c.get("result_id"): c for c in previous if isinstance(c, dict)}
     entries = [checks.get(r) or kept.get(r) for r in represented]
     record["export_checks"] = [e for e in entries if e] or "none"
-    # Every represented result with its evidence, serialized or not, so status can see a later rerun.
-    record["results"] = [{"result_id": r, "evidence": evidence_paths[r]} for r in represented]
+    # Every represented result with its evidence, serialized or not, so status can see a later rerun,
+    # the question it answers, which methodology.md repeats verbatim, and the runtime that evidence recorded.
+    questions = {r: evidence[r].get("question", {"unknown": "evidence lacks question"}) for r in represented}
+    record["results"] = [{"result_id": r, "evidence": evidence_paths[r], "question": questions[r],
+                          "runtime": _runtime(evidence[r])}
+                         for r in represented]
     fields = producing_state(evidence)
     fields["packaging_commit"], fields["packaging_uncommitted_changes"] = packaging_state(root)
     record.update(fields)
@@ -1417,6 +1457,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     report["written"] = True
     commits, changes = fields["producing_commit"], fields["producing_uncommitted_changes"]
     report["results"] = represented
+    report["questions"] = questions
     report["producing_commit"] = "differs by result" if isinstance(commits, list) else commits
     report["producing_uncommitted_changes"] = len(changes) if isinstance(changes, list) else 0
     report["packaging_commit"] = fields["packaging_commit"]
@@ -1443,7 +1484,9 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "state.md's flags (none when it flags nothing), keeping an entry whose finding and reason match "
                "exactly and adding others with represented_in [] and disposition none; flags_pending lists "
                "each entry that needs represented_in or, once represented, a disposition. When state.md "
-               "cannot be read, flags_error says why and revalidation_flags is left as it was.\nExit 0 only "
+               "cannot be read, flags_error says why and revalidation_flags is left as it was.\nquestions maps "
+               "each represented result to the question its evidence records, for methodology.md to repeat "
+               "verbatim; the manifest's results entries record it.\nExit 0 only "
                "when written and check_charts is empty.")
     _package_arguments(parser)
     parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS]",
@@ -1481,6 +1524,288 @@ def cli_export(root: Path, argv: list[str]) -> int:
                     rounding=rounding)
     _print(report)
     return 0 if report["written"] and not report.get("check_charts") else 1
+
+
+# ---------------------------------------------------------------- review rules
+
+REVIEW_RULES = "foundation/review-rules.md"
+_SEVERITIES = ("error", "warning")
+# An area's last segment holds a letter, so R-<area>-NNN never reads as another area's ID.
+_AREA_TEXT = r"(?:[a-z0-9]+-)*[a-z0-9]*[a-z][a-z0-9]*"
+_AREA = re.compile(_AREA_TEXT)
+# [0-9], not \d, which also takes other scripts' digits, such as Arabic-Indic ones.
+_RULE_HEADING = re.compile(rf"## (R-({_AREA_TEXT})-([0-9]{{3,}}))\s*")
+_RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Fix|Added): ?(.*)")
+_LOOSE_FIELD = re.compile(r"\s*[-*+]?\s*(?:Severity|Rule|Pattern|Fix|Added)\s*:", re.IGNORECASE)
+_MARKDOWN_HEADING = re.compile(r"\s*#{1,6}(?:\s|$)")
+_REQUIRED_FIELDS = ("Severity", "Rule", "Pattern", "Fix")
+_BAD_HEADING = ("rule heading is not ## R-<area>-NNN with a lowercase area, its last part holding a letter, "
+                "and a three-digit number")
+_STRAY_HEADING = "heading after the first rule is not a ## R-<area>-NNN rule heading"
+# Every line break str.splitlines() recognizes but \n; grep -n counts only \n.
+_OTHER_BREAK = re.compile("[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
+_REVIEWED = ("findings.md", "methodology.md")
+_MATCH_CAP = 20
+_RULES_HEADER = """# Review rules
+
+Rules from the user's corrections to package drafts. The read-only package review checks every rule on \
+every draft; `python3 src/awb.py review-rules check <investigation> <package>` lists each rule with the \
+narrative lines its pattern matches.
+
+Add a rule only with `python3 src/awb.py review-rules add`. A rule ID, `R-<area>-NNN`, is never \
+renumbered, reused, or deleted: edit a rule's other fields in place, and retire a rule by setting its \
+severity to `retired`. A pattern is a Python regular expression in backticks, matched against each line \
+of the draft's `findings.md` and `methodology.md`, or `none` when no pattern can find the problem.
+"""
+
+
+def _parse_pattern(value):
+    """(pattern text or None, problem or None) from a Pattern field: `regex` in backticks, or none."""
+    if value == "none":
+        return None, None
+    if len(value) < 3 or not (value.startswith("`") and value.endswith("`")):
+        return None, "Pattern is neither none nor a regular expression in backticks"
+    problem = _pattern_problem(value[1:-1])
+    return (None, f"Pattern {problem}") if problem else (value[1:-1], None)
+
+
+def _pattern_problem(pattern):
+    """Why a regular expression is unusable, or None; Python raises more than re.error on some."""
+    try:
+        re.compile(pattern)
+    except (re.error, OverflowError, RecursionError, ValueError) as error:
+        return f"does not compile: {error}"
+    return None
+
+
+def _read_lines(path):
+    r"""A file's lines as grep -n numbers them: split on \n only, with no empty line after a final \n.
+
+    Read as bytes: text mode would turn a lone \r into \n and shift every later line number. A \r is
+    dropped only where a \n follows it, as a CRLF ending; any other \r, one at the end of the file
+    included, stays in its line. A UTF-8 byte order mark is not part of line 1."""
+    *ended, last = Path(path).read_bytes().decode("utf-8-sig").split("\n")
+    return [line.removesuffix("\r") for line in ended] + ([last] if last else [])
+
+
+def parse_review_rules(lines: list) -> tuple:
+    """(rules, problems) from review-rules.md: each `## R-<area>-NNN` section and its `- Field:` lines.
+
+    Any heading ends a section, and after the first rule every heading must be a rule's. Inside a rule
+    section only blank and `- Field:` lines may appear, so a wrapped line starting with `#` is reported
+    too; outside one no heading may name a rule and no line may look like a field. A rule that a hand
+    edit breaks or cuts short is reported instead of silently dropped or truncated, and its ID is never
+    handed out again by add. Lines are numbered as _read_lines splits them, so each problem's line is the
+    one grep -n shows; a line holding another line break (U+2028, form feed, a lone carriage return) is a
+    problem, since an editor may show it as two lines."""
+    rules, problems, current = [], [], None
+    for number, line in enumerate(lines, 1):
+        other = _OTHER_BREAK.search(line)
+        if other:
+            problems.append({"line": number, "problem": f"line holds U+{ord(other[0]):04X}, a line break other "
+                                                        "than \\n; replace it with a space or a newline"})
+        if line.lstrip().startswith("#"):
+            heading = _RULE_HEADING.fullmatch(line)
+            if heading:
+                current = {"id": heading[1], "area": heading[2], "number": int(heading[3]), "line": number,
+                           "fields": {}}
+                rules.append(current)
+                continue
+            # Only a heading that starts like a rule ID is a broken rule heading; ## PR-12 notes is not.
+            if re.match(r"\s*#+\s*R-", line):
+                problems.append({"line": number, "problem": _BAD_HEADING})
+                current = None
+                continue
+            if _MARKDOWN_HEADING.match(line):
+                if rules:
+                    problems.append({"line": number, "problem": _STRAY_HEADING})
+                current = None
+                continue
+            # Text such as `#hashtags`, not a heading: inside a rule it is a line that is not a field.
+        if current is None:
+            if _LOOSE_FIELD.match(line):
+                problems.append({"line": number, "problem": "rule field outside a ## R-<area>-NNN section"})
+            continue
+        field = _RULE_FIELD.fullmatch(line.rstrip())
+        if field:
+            if field[1] in current["fields"]:
+                problems.append({"rule": current["id"], "line": number, "problem": f"repeated {field[1]} line"})
+            current["fields"][field[1]] = field[2].strip()
+        elif line.strip():
+            problems.append({"rule": current["id"], "line": number,
+                             "problem": "line is not a - Severity, Rule, Pattern, Fix, or Added field"})
+    seen = {}
+    for rule in rules:
+        fields = rule.pop("fields")
+        first = seen.setdefault((rule["area"], rule["number"]), rule)
+        if first is not rule:
+            # R-x-007 and R-x-0007 are one number written twice, so add must not treat them as two.
+            problems.append({"rule": rule["id"], "problem": "rule ID appears more than once"
+                             if first["id"] == rule["id"] else f"rule ID repeats the number of {first['id']}"})
+        missing = [name for name in _REQUIRED_FIELDS if not fields.get(name)]
+        if missing:
+            problems.append({"rule": rule["id"], "problem": f"missing {', '.join(missing)}"})
+        severity = fields.get("Severity", "")
+        if severity and severity not in (*_SEVERITIES, "retired"):
+            problems.append({"rule": rule["id"], "problem": f"unknown severity {severity!r}; use error, "
+                                                            "warning, or retired"})
+        rule.update(severity=severity, rule=fields.get("Rule", ""), fix=fields.get("Fix", ""),
+                    pattern=None, usable=True)
+        if fields.get("Pattern"):
+            rule["pattern"], problem = _parse_pattern(fields["Pattern"])
+            if problem:
+                rule["usable"] = False
+                problems.append({"rule": rule["id"], "problem": problem})
+    return rules, problems
+
+
+def _read_rules(root):
+    """(rules, problems), or None when the project has no rule file.
+
+    Only an absent path means no rules: a directory or other non-file there, or a symbolic link to
+    nothing, raises OSError, so check reports an error and add refuses instead of reading no rules."""
+    path = Path(root) / REVIEW_RULES
+    try:
+        path.stat()
+    except FileNotFoundError:
+        if not path.is_symlink():
+            return None
+        raise
+    if not path.is_file():
+        raise OSError("not a regular file")
+    return parse_review_rules(_read_lines(path))
+
+
+def check_review_rules(root, investigation, package) -> dict:
+    """List every review rule with the draft narrative lines its pattern matches; writes nothing."""
+    root = Path(root)
+    draft = _package_dir(root, investigation, package) / "draft"
+    report = {"rules_file": REVIEW_RULES, "draft": _rel(root, draft), "rules": [], "problems": [], "errors": []}
+    texts = {}
+    for name in _REVIEWED:
+        try:
+            texts[name] = _read_lines(draft / name)
+        except (OSError, UnicodeError) as error:
+            report["errors"].append(f"{_rel(root, draft / name)}: {error}")
+    try:
+        parsed = _read_rules(root)
+    except (OSError, UnicodeError) as error:
+        report["errors"].append(f"{REVIEW_RULES}: {error}")
+        return report
+    if parsed is None:
+        report["rules_file"] = "none recorded"
+        return report
+    rules, report["problems"] = parsed
+    for rule in rules:
+        row = {"id": rule["id"], "severity": rule["severity"]}
+        if rule["severity"] == "retired":
+            row["status"] = "retired"
+        elif not rule["usable"]:
+            row["status"] = "unchecked"
+        elif rule["pattern"] is None:
+            row["status"] = "no pattern"
+        else:
+            pattern = re.compile(rule["pattern"])
+            matches = [{"file": name, "line": number, "text": line.strip()[:160]}
+                       for name, lines in texts.items()
+                       for number, line in enumerate(lines, 1) if pattern.search(line)]
+            row["status"] = "matched" if matches else "no match"
+            if matches:
+                row["matches"] = matches[:_MATCH_CAP]
+                if len(matches) > _MATCH_CAP:
+                    row["more_matches"] = len(matches) - _MATCH_CAP
+        report["rules"].append(row)
+    return report
+
+
+def add_review_rule(root, area, severity, rule, fix, pattern=None, *, today=None) -> dict:
+    """Append rule R-<area>-NNN, numbered after every ID the area has used, creating the file if absent."""
+    root = Path(root)
+    path = root / REVIEW_RULES
+    try:
+        parsed = _read_rules(root)
+    except (OSError, UnicodeError) as error:
+        return {"added": None, "refused": f"{REVIEW_RULES}: {error}"}
+    rules, problems = parsed if parsed is not None else ([], [])
+    if problems:
+        return {"added": None, "refused": f"repair {REVIEW_RULES} first; numbering needs a sound file",
+                "problems": problems}
+    number = max((r["number"] for r in rules if r["area"] == area), default=0) + 1
+    rule_id = f"R-{area}-{number:03d}"
+    day = today or datetime.now().astimezone().date().isoformat()
+    entry = (f"## {rule_id}\n\n- Severity: {severity}\n- Rule: {rule}\n"
+             f"- Pattern: {f'`{pattern}`' if pattern else 'none'}\n- Fix: {fix}\n- Added: {day}\n")
+    existing = path.read_text(encoding="utf-8-sig") if parsed is not None else ""
+    if not existing.strip():
+        existing = _RULES_HEADER
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_text(path, existing.rstrip("\n") + "\n\n" + entry)
+    return {"added": rule_id, "rules_file": REVIEW_RULES, "created": parsed is None,
+            "rules": len(rules) + 1}
+
+
+def cli_review_rules(root: Path, argv: list[str]) -> int:
+    raw = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(
+        prog="awb.py review-rules", formatter_class=raw,
+        description=f"Check a draft against the review rules in {REVIEW_RULES}, or append a rule from a "
+                    "user's correction.",
+        epilog="Run `awb.py review-rules <subcommand> --help` for its arguments, output, and exit status.")
+    actions = parser.add_subparsers(dest="action", required=True, metavar="{check,add}")
+    check = actions.add_parser(
+        "check", formatter_class=raw, help="list every rule with the draft lines its pattern matches",
+        description="List every review rule with the lines of the draft's findings.md and methodology.md "
+                    "its pattern matches. Writes nothing.",
+        epilog="Prints one JSON line.\nEach rules row has id, severity, and status: matched (with matches, "
+               "each file, line, and text, at most 20, and more_matches beyond), no match, no pattern (judge "
+               "the rule by reading), retired, or unchecked (its problem is listed).\nA match is a candidate "
+               "for the reviewer to judge, and no match does not prove the rule holds.\nrules_file is none "
+               "recorded when the project has no rules.\nExit 0 when problems and errors are empty, matches "
+               "or not; 1 otherwise.")
+    _package_arguments(check)
+    add = actions.add_parser(
+        "add", formatter_class=raw, help="append the next numbered rule",
+        description=f"Append a rule to {REVIEW_RULES}, creating the file when absent, as R-<area>-NNN: the "
+                    "number after every one the area has used, retired rules included.",
+        epilog="Prints one JSON line: added (the new ID), rules_file, created, and rules (the count).\nRefuses, "
+               "writing nothing, when the rule file has problems that `review-rules check` lists.\nExit 0 "
+               "added; 1 refused; 2 unusable arguments.")
+    add.add_argument("--area", required=True, help="what the rule governs, lowercase words joined by '-', "
+                                                   "the last not all digits, such as periods or "
+                                                   "metric-definitions")
+    add.add_argument("--severity", required=True, choices=_SEVERITIES,
+                     help="error: a violation must be repaired; warning: repaired or accepted by the user")
+    add.add_argument("--rule", required=True, help="what every draft must do, in one line")
+    add.add_argument("--fix", required=True, help="how to repair a violation, in one line")
+    add.add_argument("--pattern", help="a Python regular expression matching a likely violation on one line "
+                                       "(default: none, judged by reading)")
+    args = parser.parse_args(argv)
+    if args.action == "check":
+        report = check_review_rules(Path(root), _simple(args.investigation, "investigation"),
+                                    _simple(args.package, "package"))
+        _print(report)
+        return 1 if report["problems"] or report["errors"] else 0
+    if not _AREA.fullmatch(args.area):
+        add.error(f"--area must be lowercase letters and digits joined by '-', the last part holding a "
+                  f"letter: {args.area!r}")
+    for name in ("rule", "fix", "pattern"):
+        value = getattr(args, name)
+        if value is None:
+            continue
+        # \n and every other break the parser reports (_OTHER_BREAK), or the file add writes would fail
+        # its own check and block the next add.
+        if not value.strip() or value.splitlines() != [value]:
+            add.error(f"--{name} must be one non-blank line")
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:  # bytes that are not UTF-8 reach argv as lone surrogates
+            add.error(f"--{name} is not valid UTF-8")
+    if args.pattern is not None and (problem := _pattern_problem(args.pattern)):
+        add.error(f"--pattern {problem}")
+    report = add_review_rule(Path(root), args.area, args.severity, args.rule.strip(), args.fix.strip(),
+                             args.pattern)
+    _print(report)
+    return 0 if report["added"] else 1
 
 
 # ---------------------------------------------------------------- release
@@ -1531,8 +1856,17 @@ def release_dispositions(record: dict, prior) -> list[dict]:
     return rows
 
 
+def _runtime(evidence):
+    """The evidence's runtime block, or unknown when it records none; stale tests the same shape."""
+    runtime = evidence.get("runtime")
+    if isinstance(runtime, dict) and isinstance(runtime.get("packages"), dict):
+        return runtime
+    return {"unknown": "evidence lacks runtime"}
+
+
 def provenance_gaps(record: dict) -> list[dict]:
-    """Each manifest value recorded as unknown, by its dotted field path, with the reason."""
+    """Each manifest value recorded as unknown, by its dotted field path, with the reason, and each
+    requirements line a result's runtime could not read, whose packages' versions went unrecorded."""
     gaps = []
 
     def walk(value, path):
@@ -1542,7 +1876,13 @@ def provenance_gaps(record: dict) -> list[dict]:
             gaps.append({"field": path, "reason": value})
         elif isinstance(value, dict):
             for key, item in value.items():
-                walk(item, f"{path}.{key}")
+                if key == "unread_requirements" and isinstance(item, list):
+                    # The reason's prefix is UNREAD in awb_provenance.py, which stale reports; keep the two equal.
+                    gaps.extend({"field": f"{path}.{key}[{index}]",
+                                 "reason": f"requirements not read, packages unrecorded: {entry}"}
+                                for index, entry in enumerate(item))
+                else:
+                    walk(item, f"{path}.{key}")
         elif isinstance(value, list):
             for index, item in enumerate(value):
                 walk(item, f"{path}[{index}]")

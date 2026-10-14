@@ -17,7 +17,7 @@ The shared, authoritative representation of source data under documented prepara
 Source records durably captured independently of the canonical analytical store, with provenance linking them to their acquisition. Landed data is the input to preparation, not an assertion of cleanliness or analytical fitness.
 
 **Acquisition**:
-One completed capture of records from a source, landed under `data/raw/<source>/<acquisition-id>/` with a provenance file recording its request, timing, and file checksums. An incomplete acquisition stays unpublished.
+One completed capture of records from a source, landed under `data/raw/<source>/<acquisition-id>/` with a provenance file recording its request, timing, file checksums, and any upstream validators (URL, ETag, Last-Modified, version ID) the fetch received. An incomplete acquisition stays unpublished.
 
 **Publication**:
 A validated Parquet version of a dataset converted from named acquisitions, written once under `data/parquet/<dataset>/<publication-id>/` with a publication file recording its inputs and conversion commit. Canonical views read publications; a correction adds a view definition or a new publication and leaves existing publications as they are.
@@ -53,7 +53,7 @@ A validated result an investigation records as a row of `state.md`, with a statu
 Awaiting revalidation: a finding that a shared correction or changed input may affect, marked with the reason and with its prior status kept visible in the status value, as in `revalidation-needed (was supported)`. Scan output is an anomaly in EDA and an issue in cleaning, never a flag.
 
 **Stale**:
-A finding whose result evidence no longer matches the current producing code, view definitions, input publications and acquisitions, or resolved settings, as the `stale` comparison reports. An export refuses a stale result. A record whose date lags recent work is out of date, not stale.
+A finding whose result evidence no longer matches the current producing code, view definitions, input publications and acquisitions, or resolved settings, as the `stale` comparison reports. An export refuses a stale result. A record whose date lags recent work is out of date, not stale. A changed Python, platform, or package version is a runtime mismatch, which `stale` reports as a warning, not stale.
 
 **Delivery package**:
 A collection of audience-facing outputs, with an internal methodology reference, representing an investigation at a particular point, with provenance identifying the code, inputs, and analytical parameters that produced it.
@@ -76,6 +76,9 @@ The condition of every release: its files, results, and provenance stay exactly 
 **Disposition**:
 The user's choice for a flagged finding that a draft represents: revalidate it, omit it, or release it with its caveat. A new or changed flag reopens the choice. A release proceeds only when every place the finding appears is omitted or released with its caveat; revalidation pauses it for separate analytical work.
 
+**Review rule**:
+A numbered rule, `R-<area>-NNN`, recorded from a correction the user made while reviewing a package draft, which every later review of a draft checks. Its ID is never renumbered or reused.
+
 **Investigation state**:
 The current understanding of an investigation, including its active question, findings, unresolved issues, and next steps.
 
@@ -83,4 +86,4 @@ The current understanding of an investigation, including its active question, fi
 The record of meaningful findings, analytical decisions, and relevant data limitations accumulated during an investigation, including superseded conclusions. It retains methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, and excludes routine debugging, coding mistakes, and abandoned attempts that changed no understanding.
 
 **Result evidence**:
-The per-result record of what produced a finding: the producing commit or `uncommitted` state with checksums, the inputs with the checksums their provenance or publication files record, the view definitions read, the resolved settings, and the validation checks. It is written to `investigations/<name>/evidence/<result-id>.json` and linked from the finding's row in `state.md`. It records provenance for one result; the investigation history records how understanding changed.
+The per-result record of what produced a finding and why: the question it answers in the user's words, the producing commit or `uncommitted` state with checksums, the inputs with the checksums their provenance or publication files record, the view definitions read, the resolved settings, the runtime (Python, platform, and package versions), and the validation checks. It is written to `investigations/<name>/evidence/<result-id>.json` and linked from the finding's row in `state.md`. It records provenance for one result; the investigation history records how understanding changed.
