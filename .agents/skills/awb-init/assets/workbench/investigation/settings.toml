@@ -1,6 +1,6 @@
 # Scope and settings for run.py. A result's evidence records [parameters] and the result's own
-# table; editing either marks that result stale until it is rerun. [eda] and other results'
-# tables don't.
+# table; editing either, its question included, marks that result stale until it is rerun. [eda]
+# and other results' tables don't.
 
 [parameters]
 # Named query parameters: a result query reads `start` as $start. Use TOML dates for dates.
@@ -8,7 +8,11 @@
 # end = 2026-06-30
 
 # One table per result. The ID names its query, saved table, evidence file, and findings row.
+# question is required: one line, the question this result answers in the user's own words, never
+# paraphrased. inputs optionally names the datasets or views the producer reads. Evidence copies both.
 # [results.orders-by-month]
+# question = "How many orders did we take each month this half?"
+# inputs = ["orders"]
 # queries = ["queries/orders-by-month.sql"]  # default: ["queries/<id>.sql"]; a producer may use more
 #
 # Validation spec for validate(): static checks here, run-time counts from a run.py producer.
