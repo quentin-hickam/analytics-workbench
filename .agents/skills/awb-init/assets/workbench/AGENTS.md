@@ -1,12 +1,12 @@
 # Analytics workbench
 
-One data foundation serves every investigation here. Source knowledge and references, quality records, vocabulary, the catalog, and canonical SQL views belong in `foundation/`; reusable operations in `src/`; each question's scope, settings, exploration, findings, and history in `investigations/<name>/`.
+One data foundation serves every investigation: source knowledge and references, quality records, vocabulary, the catalog, and canonical views in `foundation/`; reusable operations in `src/`; each question's records in `investigations/<name>/`.
 
 ## Start or resume
 
-For investigation work, run `python3 src/awb.py state` to resume README's active investigation (`--investigation <name>` for another) and name it briefly; read history when prior reasoning matters. Switch with `state switch <name>`. When an ask could belong to several investigations, ask which before changing records.
+For investigation work, resume README's active investigation with `python3 src/awb.py state` (`--investigation <name>` for another) and name it; read history when prior reasoning matters. Switch with `state switch <name>`. When an ask could belong to several investigations, ask which before changing records.
 
-Use the workbench skills for their work even when you start it yourself; take a new business question or a consequential scope change, such as a broader or different population, through `awb-scope`.
+Use the workbench skills even for work you start; take a new business question or a consequential scope change, such as a broader population, through `awb-scope`.
 
 ## Procedures
 
@@ -23,24 +23,26 @@ Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists them a
 
 ## Conversation
 
-Records keep their precise terms; chat uses plain words: ledger rows are open (or answered) questions, findings are what we found, flagged findings are awaiting recheck, limitations are caveats, and a disposition is the decision on <finding>. An ID such as `Q-007` may sit beside the plain text, never replace it. Helper output stays in files and tool results: summarize its outcome, quoting it only for a failure or on request.
+Records keep precise terms; chat uses plain words: ledger rows are questions, findings are what we found, flagged findings await recheck, limitations are caveats, and a disposition is the decision on <finding>. An ID such as `Q-007` may sit beside plain text, never replace it. Summarize helper output, quoting it only for a failure or on request. Answer in chat, giving file paths; never say a file was attached or sent.
 
-A turn that changed workbench records ends with one plain line on what changed and what comes next; other turns have none. For example: Questions: answered 1 · opened 2 (1 needs you) · next: explore the March extract.
+When you need the user, ask in that message for a plain decision, with your recommendation and the alternative; never send them to a skill or instruction file. Report an environment or tool limit only when it affects the user: whether they must act, and what the workbench does instead.
+
+A turn that changed workbench records ends with one plain line: what changed for the user's questions, the ledger's roots, if anything, and the next step; other turns have none. For example: Your five questions: 3 answered, 2 open · next: explore the March extract.
 
 ## Analytical invariants
 
-Let the active question bound preparation; broader preparation needs an explicit request. Keep exploratory transformations local to the investigation until deliberately promoted, and intermediate computation in views and in-process results.
+The active question bounds preparation, and exploratory work stays in the investigation until deliberately promoted; broader preparation needs an explicit request.
 
-Compute before interpreting: read other investigations' conclusions only after this investigation has its own results, unless the user asks otherwise. Preserve results that challenge the expected explanation.
+Compute before interpreting: read other investigations' conclusions only once this one has results, unless asked. Preserve results that challenge the expected explanation, and offer an untested explanation as a question, not an answer.
 
-Only a result from the investigation's `run.py`, run with its settings, can become a finding; present other query output as exploration. Understand and record each failed check before promoting a finding. Word a finding no more strongly than its Claim in `state.md`: an association never drives, causes, or leads to anything.
+Only a result from the investigation's `run.py`, run with its settings, can become a finding; present other query output, saved queries' too, as exploration. Record what the user recalls as their statement, not as confirmed, and name what a comparison leaves uncontrolled when a decision rests on it. Word a finding no more strongly than its Claim in `state.md`: an association never drives, causes, or leads to anything.
 
 ## Record maintenance
 
-Settle ambiguous terms with concrete examples and the data. Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and dataset, view, and cache descriptions in `foundation/catalog.md`; these replace context maps and ADRs.
+Settle ambiguous terms with concrete examples and the data. Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and dataset, view, and cache descriptions in `foundation/catalog.md`; never in context maps or ADRs.
 
-`run.py` writes findings rows; hand edits to the table are refused as drift. Change wording, status, claim strength, or caveats with `awb.py state finding`, which writes any history entry due, and issues and next steps with `state issues` or `state next`. Unresolved issues hold data problems and blockers, Next steps actions; a question raised in the work goes in the investigation's ledger with `awb.py questions add`, and an answer the user gives with `questions answer`. A data question is answered only by a result whose settings table declares it. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. When the user names who will read the deliverables, record it in the brief's Audience section.
+Change findings, issues, and next steps with `awb.py state finding`, `state issues`, and `state next`; record a question the work raises with `questions add --parent <question it serves>`, and the user's answer with `questions answer`. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. Record a reader the user names in the brief's Audience section.
 
-Commit when the user asks; suggest one when analytical code is uncommitted, so evidence carries a SHA.
+Commit when asked; when README's `Commits:` line says `as I go`, which you set when asked, also commit analytical code as you go. Otherwise suggest one at most once a session while analytical code is uncommitted, so evidence carries a SHA.
 
-Answer in chat. Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen. When the user corrects a package draft while reviewing it, take the correction through `awb-package`, which first appends a correction later drafts could repeat to `foundation/review-rules.md` as a numbered rule that every later review checks.
+Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen. Take a user's correction to a package draft through `awb-package`, which keeps one later drafts could repeat in `foundation/review-rules.md`.

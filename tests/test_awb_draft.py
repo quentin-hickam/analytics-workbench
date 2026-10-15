@@ -19,7 +19,7 @@
 # test_check_numbers_reads_formats: thousands separators, percents of fractions, scales, multipliers, scientific notation, ranges, and rounding trace; dates, years where their period ends, times with am or pm or seconds, codes, glued names, chart number lists, list markers, footnotes, code, comments, and link targets are skipped; a count beside a month name, a bare or parenthesized year-like count, a fraction, a time without am or pm, and a hash in scientific form are read; allowed texts pass.
 # test_check_numbers_reviewed_probes: every narrative probed in review rounds 1 to 4 is reported or skipped as intended, reading fail-safe: a context skips a number only where it marks no quantity, so a count after a punctuation mark, a chart reference, a date, or a year, or a year a word follows, is read; paths and identifiers are skipped whole; joined digits that are not thousands grouping or one decimal are read and never trace; a unit or context split by whitespace or a line wrap still counts; a number wrapping a list item's text is read, and a row's text allowed exactly covers it across a wrap; a leading- or trailing-point scientific mantissa is one number; and non-quantities such as a comparison year or a week number are reported.
 # test_recorded_text_reviewed_probes: every recorded text probed in review records the magnitudes intended, and an extreme or non-finite cell records nothing or itself without crashing.
-# test_check_numbers_skips_a_doi: a DOI, 10. with a four- to nine-digit registrant code, a slash, and a suffix, is skipped whole after doi: or DOI, in a doi.org link, or bare when its suffix holds a digit; a shorter registrant code, no slash, or a bare suffix without a digit, as in 10.2500/litre, is read.
+# test_check_numbers_skips_a_doi: a DOI, 10. with a four- to nine-digit registrant code, a slash, and a suffix, is skipped whole after doi: or DOI, in a doi.org link, or bare when its suffix holds a letter and a digit, ending at whitespace or a , or ; before a digit; a shorter registrant code, no slash, a bare suffix without a letter or a digit, as in 10.2500/litre, 10.2500/1000, or 10.12345/67.8, and a number glued after a DOI by , or ; are read.
 # test_provenance_gaps_are_unknown_objects_and_unread_requirements: an {"unknown": reason} object and an unread requirements line are gaps; a settings value or column name such as unknown_pickup, or a string starting with unknown, is not.
 # test_check_numbers_allowed_phrases_and_precision: an allowed phrase covers only the number it is written around, a bare allowed text every occurrence; a row's text copied exactly covers its number after a line wrap or extra spaces; a number traces at every written digit beyond 28 significant digits and not one unit of a further place outside its rounding.
 # test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's or a path's digits add nothing; evidence text and parsed settings content add scaled and scientific values a narrative can write in full, without dates, booleans, or the settings file's size.
@@ -64,8 +64,9 @@
 # test_numbers_count_lines_as_the_claims_check_does_after_a_comment: a comment holding a line break that str.splitlines() sees (U+2028, form feed, NEL) keeps the numbers check's line numbers on the claims check's, so the accepted-claim skip cannot land on the next line.
 # test_methodology_note_is_checked_with_rows_naming_it: a clean methodology-note.md passes and joins the inventory; an internal name, an untraced number, causal wording above the strongest represented claim, and an HTML block in it fail check-draft and release with rows naming the file; without it check-draft reports exactly what it did before.
 # test_check_draft_counts_main_and_appendix_slides: slides counts the main sequence, title included, and the appendix apart; How we know under ## Appendix passes.
-# test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section and its wording is not read; an appendix finding slide is held to its claim strength.
-# test_presentation_order_decides_finding_order_when_set: absent or none leaves the ledger order; a non-ledger order the slides follow passes, inline markup read as the heading is; an order missing a finding, listing one twice, naming a heading no slide has, out of the slides' order, not a list, or holding a blank entry fails storyline in both modes.
+# test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section; an appendix finding slide is held to its claim strength.
+# test_appendix_how_we_know_and_limitations_wording_is_not_read: with only an association result represented, causal wording on How we know and Limitations under ## Appendix gives no claims row, and the same wording on an appendix finding slide is refused.
+# test_presentation_order_decides_finding_order_when_set: absent or none leaves the ledger order; a non-ledger order the slides follow passes, inline markup read as the heading is; an order missing a finding, listing one twice, naming a heading no slide has, out of the slides' order, not a list, holding a blank entry, or recorded as JSON null fails storyline in both modes.
 # test_export_keeps_presentation_order: export keeps the hand-recorded presentation_order.
 # test_presentation_order_is_no_provenance_gap: a presentation_order heading that starts with Unknown is no release provenance gap, as allowed_numbers is not.
 # test_storyline_orders_main_and_appendix_findings_each_by_the_ledger: main and appendix finding slides are ranked separately, the appendix numbering on.
@@ -742,9 +743,12 @@ def test_check_numbers_skips_a_doi(tmp_path):
     path.write_text("Data: UCI repository (DOI 10.24432/C5CG6D), doi:10.1000.10/182-x and "
                     "https://doi.org/10.24432/C5CG6D; 10.24432/C5CG6D.\n"
                     "Not a DOI: 10.123/abc, 10.24432 alone, and 1.24432/C5.\n"
-                    "Fuel cost 10.2500/litre in March; doi: 10.1000/xyz is a paper.\n")
+                    "Fuel cost 10.2500/litre in March; doi: 10.1000/xyz is a paper.\n"
+                    "Cost was 10.2500/1000 litres; ratio 10.12345/67.8 held.\n"
+                    "See DOI 10.24432/C5CG6D,478 rows, and 10.24432/C5CG6D;12 more; cell 10.1016/j.cell.2009.01.002.\n")
     assert [(row["line"], row["text"]) for row in draft.check_numbers(path, [])] == [
-        (2, "10.123"), (2, "10.24432"), (2, "1.24432"), (3, "10.2500")]
+        (2, "10.123"), (2, "10.24432"), (2, "1.24432"), (3, "10.2500"), (4, "10.2500/1000"), (4, "10.12345/67.8"),
+        (5, "478"), (5, "12")]
 
 
 def test_provenance_gaps_are_unknown_objects_and_unread_requirements():
@@ -2644,7 +2648,7 @@ def test_appendix_slides_are_checked_like_main_slides(project, capsys):
     west = DECK_FINDINGS[DECK_FINDINGS.index(WEST):DECK_FINDINGS.index("### Discounts")]
     how = DECK_FINDINGS[DECK_FINDINGS.index("## How we know"):DECK_FINDINGS.index("## Limitations")]
     moved = appendix_deck(DECK_FINDINGS.replace(how, ""), west, "\n" + how.replace("## How", "### How"))
-    # How we know needs no methodology section, and its caveat wording is not read, from the appendix too.
+    # How we know needs no methodology section from the appendix too.
     claim_draft(project, moved)
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["passed"] and report["headings"] == [] and report["claims"] == [], report
@@ -2656,7 +2660,31 @@ def test_appendix_slides_are_checked_like_main_slides(project, capsys):
         (WEST_DISCOUNT, "drives", text[:text.index("drives")].count("\n") + 1)]
 
 
+def test_appendix_how_we_know_and_limitations_wording_is_not_read(project, capsys):
+    # Only the association result is represented, so causal wording on a read slide is refused.
+    discount = DECK_FINDINGS[DECK_FINDINGS.index("### Discounts"):DECK_FINDINGS.index("## How we know")]
+    closing = DECK_FINDINGS[DECK_FINDINGS.index("## How we know"):]
+    findings = (DECK_FINDINGS.replace(discount, "").replace(closing, "")
+                .replace("Discounts drive 4 points fewer late orders", "Late orders rose in the west"))
+    methodology = CLAIM_METHODOLOGY[:CLAIM_METHODOLOGY.index("### Discounts")]
+    moved = findings + "## Appendix\n\n" + closing.replace("## ", "### ")
+    claim_draft(project, moved, methodology, results=("r-009",))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["claims"] == [], report
+    assert report["slides"] == {"main": 3, "appendix": 2}, report
+    # The same wording on an appendix finding slide is read.
+    slide = closing.replace("## How we know", "### Feed outage").replace("**Headline:** Totals reconcile to the "
+                                                                          "ledger\n\n", "")
+    slide = slide[:slide.index("## Limitations")]
+    claim_draft(project, moved + "\n" + slide, methodology + "\n### Feed outage\n\n" + WEST_CLAIM
+                + "\n\nResult `r-009`.\n", results=("r-009",))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and [(row["section"], row["phrase"]) for row in report["claims"]] == [
+        ("Feed outage", "due to")], report
+
+
 ORDER = ["Regional rates differ", "Coverage remains limited", "Customer rates differ"]
+NULL = object()  # presentation_order recorded as JSON null, which is malformed rather than absent
 
 
 def ordered_deck(project, headlines, order):
@@ -2664,7 +2692,7 @@ def ordered_deck(project, headlines, order):
     write(draft, "findings.md", deck("".join(f"### {headline}\n\n- Rates vary across groups.\n\n**Notes:** Compare "
                                              "the groups.\n\n" for headline in headlines)))
     if order is not None:
-        set_manifest(project, presentation_order=order)
+        set_manifest(project, presentation_order=None if order is NULL else order)
     return draft
 
 
@@ -2691,7 +2719,11 @@ def ordered_deck(project, headlines, order):
     ([ORDER[0], ORDER[1], ""],
      [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
                    "or none")]),
-], ids=["absent", "none", "followed", "missing", "repeated", "unknown", "moved", "markup", "not a list", "blank"])
+    (NULL,
+     [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
+                   "or none")]),
+], ids=["absent", "none", "followed", "missing", "repeated", "unknown", "moved", "markup", "not a list", "blank",
+        "null"])
 def test_presentation_order_decides_finding_order_when_set(project, capsys, order, rows):
     ordered_deck(project, ORDER, order)
     code, report = run(project, capsys, "check-draft", "inv", "pkg")

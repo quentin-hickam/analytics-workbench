@@ -5,7 +5,7 @@ awb-init's installer places this file at `src/packaging/draft.py`. `src/awb.py` 
     python3 src/awb.py export <investigation> <package> [--chart RESULT[:COLUMNS][@first=N|@where=COLUMN=VALUE[,VALUE]]]...
         [--dataset NAME=RESULT[:COLUMNS]]... [--no-datasets] [--result RESULT]... [--round COLUMN=PLACES]...
     python3 src/awb.py review-rules check <investigation> <package>
-    python3 src/awb.py review-rules add --area AREA --severity error|warning --rule TEXT --fix TEXT [--pattern REGEX]
+    python3 src/awb.py review-rules add --area AREA --severity error|warning --rule TEXT --fix TEXT [--pattern REGEX] [--scope line|slide|document]
     python3 src/awb.py check-draft <investigation> <package> [--verify-only]
     python3 src/awb.py release <investigation> <package>
     python3 src/awb.py copy-releases <investigation> [<package>]
@@ -1174,9 +1174,12 @@ _EXTENSIONS = "md|py|csv|tsv|parquet|jsonl?|sql|png|svg|jpe?g|pdf|html?|duckdb|d
 _FILE = re.compile(rf"(?<![\w.,/\\-])[\w-]*\w\.(?:{_EXTENSIONS})(?![\w/\\])")
 _HYPHENATED = re.compile(r"(?<![\w.-])([A-Za-z_]\w*)(?:-\w+)+")
 # A DOI: 10., a registrant code of four to nine digits with any dot-separated parts, a slash, and its suffix,
-# after doi: or DOI, or bare when its suffix holds a digit; a bare 10.2500/litre is a quantity, so it is read.
-_DOI = re.compile(r"(?i:\bdoi)(?::\s*|\s+)10\.[0-9]{4,9}(?:\.[0-9]+)*/\S+"
-                  r"|(?<![\w.])10\.[0-9]{4,9}(?:\.[0-9]+)*/\S*[0-9]\S*")
+# which runs to the next whitespace or to a , or ; before a digit, after doi: or DOI, or bare when its
+# suffix holds both a letter and a digit; a bare 10.2500/litre or 10.2500/1000 is a quantity, so it is read.
+_DOI_SUFFIX = r"(?:[^\s,;]|[,;](?![0-9]))"
+_DOI = re.compile(rf"(?i:\bdoi)(?::\s*|\s+)10\.[0-9]{{4,9}}(?:\.[0-9]+)*/{_DOI_SUFFIX}+"
+                  rf"|(?<![\w.])10\.[0-9]{{4,9}}(?:\.[0-9]+)*/(?={_DOI_SUFFIX}*?[A-Za-z])(?={_DOI_SUFFIX}*?[0-9])"
+                  rf"{_DOI_SUFFIX}+")
 
 
 def _path(token):
@@ -2141,7 +2144,7 @@ def chart_file_problems(root, investigation, draft, record) -> list[dict]:
 
 # ---------------------------------------------------------------- check-draft
 
-def storyline_problems(root, investigation, draft, represented, provenance, order=None):
+def storyline_problems(root, investigation, draft, represented, provenance, order="none"):
     """Accepted input: the outline reader's Markdown subset (references/helpers.md), with ### finding headlines matched
     exactly to ### methodology headings. The matching section names represented results using
     the existing _cited grammar (bounded result IDs or evidence/<ID>.json links, outside
@@ -2163,7 +2166,8 @@ def storyline_problems(root, investigation, draft, represented, provenance, orde
     `order` is the manifest's presentation_order. When it is a list it decides the order instead: each
     entry is a finding slide's heading, read as inline Markdown as the heading is, and the list holds
     every finding slide, main and appendix, exactly once, in deck order. A list entry that is not
-    non-blank text makes the whole field malformed; absent and "none" leave the ledger order in force.
+    non-blank text makes the whole field malformed, as does any other value, JSON null included; absent
+    and "none" leave the ledger order in force.
     """
     tree = provenance.question_tree(root, investigation)
     ranks = {q["id"]: (("must", "should", "could").index(q["priority"]), position)
@@ -2185,7 +2189,7 @@ def storyline_problems(root, investigation, draft, represented, provenance, orde
         if question is None:
             unlinked.append(slide["heading"])
         ranked.append((ranks[question] if question else (3, 0), slide, question))
-    if order is not None and order != "none":
+    if order != "none":
         return _order_problems(order, [slide for _, slide, _ in ranked]), unlinked
     main = [entry for entry in ranked if not entry[1]["appendix"]]
     behind = [entry for entry in ranked if entry[1]["appendix"]]
@@ -2512,7 +2516,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             try:
                 report["storyline"], report["unlinked_findings"] = storyline_problems(
                     root, investigation, draft, [r["result_id"] for r in represented], provenance,
-                    record.get("presentation_order"))
+                    record.get("presentation_order", "none"))
             except (OSError, ValueError, AttributeError) as error:
                 report["errors"].append(f"storyline check: {error}")
         if not verify_only:
@@ -3296,10 +3300,14 @@ _AREA_TEXT = r"(?:[a-z0-9]+-)*[a-z0-9]*[a-z][a-z0-9]*"
 _AREA = re.compile(_AREA_TEXT)
 # [0-9], not \d, which also takes other scripts' digits, such as Arabic-Indic ones.
 _RULE_HEADING = re.compile(rf"## (R-({_AREA_TEXT})-([0-9]{{3,}}))\s*")
-_RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Fix|Added): ?(.*)")
-_LOOSE_FIELD = re.compile(r"\s*[-*+]?\s*(?:Severity|Rule|Pattern|Fix|Added)\s*:", re.IGNORECASE)
+_RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Scope|Fix|Added): ?(.*)")
+_LOOSE_FIELD = re.compile(r"\s*[-*+]?\s*(?:Severity|Rule|Pattern|Scope|Fix|Added)\s*:", re.IGNORECASE)
 _MARKDOWN_HEADING = re.compile(r"\s*#{1,6}(?:\s|$)")
 _REQUIRED_FIELDS = ("Severity", "Rule", "Pattern", "Fix")
+# What one violation of a rule covers, and so how check groups its matches: each line (the default, when a
+# rule has no Scope field); each slide, read as the section a #, ##, or ### heading opens as the narrative
+# renders, which in findings.md is one slide and in methodology.md and the note one section; or each file.
+_SCOPES = ("line", "slide", "document")
 _BAD_HEADING = ("rule heading is not ## R-<area>-NNN with a lowercase area, its last part holding a letter, "
                 "and a three-digit number")
 _STRAY_HEADING = "heading after the first rule is not a ## R-<area>-NNN rule heading"
@@ -3316,7 +3324,9 @@ Add a rule only with `python3 src/awb.py review-rules add`. A rule ID, `R-<area>
 renumbered, reused, or deleted: edit a rule's other fields in place, and retire a rule by setting its \
 severity to `retired`. A pattern is a Python regular expression in backticks, matched against each line \
 of the draft's `findings.md`, `methodology.md`, and `methodology-note.md` when it has one, or `none` when no \
-pattern can find the problem.
+pattern can find the problem. An optional scope, `line` (the default), `slide`, or `document`, sets what one \
+violation covers: a line, a slide (in `methodology.md` and the note, a section under a `#`, `##`, or `###` \
+heading), or a whole file.
 """
 
 
@@ -3352,6 +3362,10 @@ def _read_lines(path):
 def parse_review_rules(lines: list) -> tuple:
     """(rules, problems) from review-rules.md: each `## R-<area>-NNN` section and its `- Field:` lines.
 
+    The grammar is closed. A rule section holds blank lines and `- <Field>: <value>` lines, each field at
+    most once: Severity (error, warning, or retired), Rule, Pattern (`regex` in backticks, or none), and
+    Fix, all required; Scope (exactly line, slide, or document; line when absent) and Added, optional. Any
+    other line, field, or value is a problem, and a rule with an unusable Pattern or Scope is unchecked.
     Any heading ends a section, and after the first rule every heading must be a rule's. Inside a rule
     section only blank and `- Field:` lines may appear, so a wrapped line starting with `#` is reported
     too; outside one no heading may name a rule and no line may look like a field. A rule that a hand
@@ -3394,7 +3408,7 @@ def parse_review_rules(lines: list) -> tuple:
             current["fields"][field[1]] = field[2].strip()
         elif line.strip():
             problems.append({"rule": current["id"], "line": number,
-                             "problem": "line is not a - Severity, Rule, Pattern, Fix, or Added field"})
+                             "problem": "line is not a - Severity, Rule, Pattern, Scope, Fix, or Added field"})
     seen = {}
     for rule in rules:
         fields = rule.pop("fields")
@@ -3411,13 +3425,57 @@ def parse_review_rules(lines: list) -> tuple:
             problems.append({"rule": rule["id"], "problem": f"unknown severity {severity!r}; use error, "
                                                             "warning, or retired"})
         rule.update(severity=severity, rule=fields.get("Rule", ""), fix=fields.get("Fix", ""),
-                    pattern=None, usable=True)
+                    pattern=None, scope=fields.get("Scope", "line"), usable=True)
         if fields.get("Pattern"):
             rule["pattern"], problem = _parse_pattern(fields["Pattern"])
             if problem:
                 rule["usable"] = False
                 problems.append({"rule": rule["id"], "problem": problem})
+        # Present but blank is malformed too: an absent Scope is the only way to mean line by default.
+        if rule["scope"] not in _SCOPES:
+            rule["usable"] = False
+            problems.append({"rule": rule["id"], "problem": f"unknown scope {rule['scope']!r}; use line, slide, "
+                                                            "or document"})
     return rules, problems
+
+
+def _sections(lines):
+    """The first line number of each section a #, ##, or ### heading opens, read as the text renders, with
+    its heading text: [(first line, heading or None)], text before the first heading under None. Unless a
+    heading opens line 1, the list starts with (1, None), blank lines alone included, so every line has one.
+
+    The view splits on every line break str.splitlines() knows, so each other break becomes a space first
+    and every section keeps the line numbers grep -n gives (_read_lines)."""
+    view = _view("\n".join(_OTHER_BREAK.sub(" ", line) for line in lines))[0]
+    sections = [(first, heading) for level, heading, first, rows in _regions(view) if level or rows]
+    return sections if sections and sections[0][0] == 1 else [(1, None), *sections]
+
+
+def _scoped_matches(scope, texts, pattern):
+    """A rule's matched lines grouped into one entry per line, slide, or file (_SCOPES); lines in an entry
+    are capped at _MATCH_CAP, with more_lines counting the rest."""
+    entries = []
+    for name, lines in texts.items():
+        found = [{"line": number, "text": line.strip()[:160]}
+                 for number, line in enumerate(lines, 1) if pattern.search(line)]
+        if scope == "line":
+            entries += [{"file": name, **match} for match in found]
+            continue
+        groups = {}
+        if scope == "document" and found:
+            groups[0] = ({"file": name}, found)
+        elif scope == "slide" and found:
+            sections = _sections(lines)
+            starts = [first for first, _ in sections]
+            for match in found:
+                first, heading = sections[bisect.bisect_right(starts, match["line"]) - 1]
+                groups.setdefault(first, ({"file": name, "heading": heading, "line": first}, []))[1].append(match)
+        for entry, inside in groups.values():
+            entry["lines"] = inside[:_MATCH_CAP]
+            if len(inside) > _MATCH_CAP:
+                entry["more_lines"] = len(inside) - _MATCH_CAP
+            entries.append(entry)
+    return entries
 
 
 def _read_rules(root):
@@ -3459,6 +3517,8 @@ def check_review_rules(root, investigation, package) -> dict:
     rules, report["problems"] = parsed
     for rule in rules:
         row = {"id": rule["id"], "severity": rule["severity"]}
+        if rule["scope"] in _SCOPES[1:]:
+            row["scope"] = rule["scope"]
         if rule["severity"] == "retired":
             row["status"] = "retired"
         elif not rule["usable"]:
@@ -3466,10 +3526,7 @@ def check_review_rules(root, investigation, package) -> dict:
         elif rule["pattern"] is None:
             row["status"] = "no pattern"
         else:
-            pattern = re.compile(rule["pattern"])
-            matches = [{"file": name, "line": number, "text": line.strip()[:160]}
-                       for name, lines in texts.items()
-                       for number, line in enumerate(lines, 1) if pattern.search(line)]
+            matches = _scoped_matches(rule["scope"], texts, re.compile(rule["pattern"]))
             row["status"] = "matched" if matches else "no match"
             if matches:
                 row["matches"] = matches[:_MATCH_CAP]
@@ -3479,8 +3536,10 @@ def check_review_rules(root, investigation, package) -> dict:
     return report
 
 
-def add_review_rule(root, area, severity, rule, fix, pattern=None, *, today=None) -> dict:
-    """Append rule R-<area>-NNN, numbered after every ID the area has used, creating the file if absent."""
+def add_review_rule(root, area, severity, rule, fix, pattern=None, scope=None, *, today=None) -> dict:
+    """Append rule R-<area>-NNN, numbered after every ID the area has used, creating the file if absent.
+
+    A scope is written only when given; a rule without one is checked line by line."""
     root = Path(root)
     path = root / REVIEW_RULES
     try:
@@ -3494,8 +3553,9 @@ def add_review_rule(root, area, severity, rule, fix, pattern=None, *, today=None
     number = max((r["number"] for r in rules if r["area"] == area), default=0) + 1
     rule_id = f"R-{area}-{number:03d}"
     day = today or datetime.now().astimezone().date().isoformat()
+    scoped = f"- Scope: {scope}\n" if scope else ""
     entry = (f"## {rule_id}\n\n- Severity: {severity}\n- Rule: {rule}\n"
-             f"- Pattern: {f'`{pattern}`' if pattern else 'none'}\n- Fix: {fix}\n- Added: {day}\n")
+             f"- Pattern: {f'`{pattern}`' if pattern else 'none'}\n{scoped}- Fix: {fix}\n- Added: {day}\n")
     existing = path.read_text(encoding="utf-8-sig") if parsed is not None else ""
     if not existing.strip():
         existing = _RULES_HEADER
@@ -3518,11 +3578,15 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
         description="List every review rule with the lines of the draft's findings.md, methodology.md, and "
                     "methodology-note.md when the draft holds it, that its pattern matches. Writes nothing.",
         epilog="Prints one JSON line.\nEach rules row has id, severity, and status: matched (with matches, "
-               "each file, line, and text, at most 20, and more_matches beyond), no match, no pattern (judge "
-               "the rule by reading), retired, or unchecked (its problem is listed).\nA match is a candidate "
-               "for the reviewer to judge, and no match does not prove the rule holds.\nrules_file is none "
-               "recorded when the project has no rules.\nExit 0 when problems and errors are empty, matches "
-               "or not; 1 otherwise.")
+               "at most 20, and more_matches beyond), no match, no pattern (judge the rule by reading), "
+               "retired, or unchecked (its problem is listed). A row has scope when the rule's is slide or "
+               "document.\nA line rule's match is one line: file, line, and text. A slide rule's match is "
+               "one slide, in methodology.md and the note one section, under a #, ##, or ### heading as the "
+               "file renders: file, heading (null before the first), the heading's line, and lines, each line "
+               "and text. A document rule's match is one file: file and lines. A match lists at most 20 "
+               "lines, with more_lines beyond.\nA match is a candidate for the reviewer to judge, and no "
+               "match does not prove the rule holds.\nrules_file is none recorded when the project has no "
+               "rules.\nExit 0 when problems and errors are empty, matches or not; 1 otherwise.")
     _package_arguments(check)
     add = actions.add_parser(
         "add", formatter_class=raw, help="append the next numbered rule",
@@ -3540,6 +3604,11 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
     add.add_argument("--fix", required=True, help="how to repair a violation, in one line")
     add.add_argument("--pattern", help="a Python regular expression matching a likely violation on one line "
                                        "(default: none, judged by reading)")
+    add.add_argument("--scope", choices=_SCOPES,
+                     help="what one violation covers, so a wording rule gives one verdict per slide or file "
+                          "rather than per line: line (the default, written only when given), slide (one "
+                          "slide, in methodology.md and the note one section under a #, ##, or ### heading), "
+                          "or document (one file)")
     args = parser.parse_args(argv)
     if args.action == "check":
         report = check_review_rules(Path(root), _simple(args.investigation, "investigation"),
@@ -3564,7 +3633,7 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
     if args.pattern is not None and (problem := _pattern_problem(args.pattern)):
         add.error(f"--pattern {problem}")
     report = add_review_rule(Path(root), args.area, args.severity, args.rule.strip(), args.fix.strip(),
-                             args.pattern)
+                             args.pattern, args.scope)
     _print(report)
     return 0 if report["added"] else 1
 

@@ -1582,12 +1582,16 @@ def _notes(caveat):
     return [_cell(note) for note in [*notes, "".join(current)] if note.strip()]
 
 
-# Wording that asserts a reconciliation or a completed check, matched case-insensitively as whole words:
-# sum(s|med|ming) to, add(s|ed|ing) up to, reconcile(s|d)/reconciling/reconciliation, and checked or
-# verified every, each, or all. A passing check whose name or detail uses such wording records it.
-_ASSERTS_CHECK = re.compile(
-    r"(?<![\w-])(?:(?:sums?|summed|summing)\s+to|(?:adds?|added|adding)\s+up\s+to"
-    r"|reconcil(?:e|es|ed|ing|iation)|(?:checked|verified)\s+(?:every|each|all))(?![\w-])", re.IGNORECASE)
+# Wording that asserts a reconciliation or a completed check, matched case-insensitively as whole words,
+# in two kinds: a reconciliation, sum(s|med|ming) to, add(s|ed|ing) up to, or
+# reconcile(s|d)/reconciling/reconciliation; and a completed check, checked or verified every, each, or
+# all. A passing check whose name or detail uses wording of the same kind records it, so a scope judgment
+# "Checked all date filters" never backs "sums to".
+_ASSERTS_KINDS = (
+    re.compile(r"(?<![\w-])(?:(?:sums?|summed|summing)\s+to|(?:adds?|added|adding)\s+up\s+to"
+               r"|reconcil(?:e|es|ed|ing|iation))(?![\w-])", re.IGNORECASE),
+    re.compile(r"(?<![\w-])(?:checked|verified)\s+(?:every|each|all)(?![\w-])", re.IGNORECASE),
+)
 
 
 def _package_reader(root):
@@ -1606,7 +1610,7 @@ def _package_reader(root):
 def _finding_warnings(root, investigation, result_id, text, evidence_path):
     """Warnings for a finding's text: each number its result does not record, read by the package helper's
     number reader when src/packaging/draft.py is present, and wording that asserts a reconciliation or a
-    completed check that no passing check records. They never refuse the write; unreadable evidence is
+    completed check that no passing check records with wording of the same kind. They never refuse the write; unreadable evidence is
     one warning that nothing was checked."""
     try:
         evidence = json.loads(evidence_path.read_text())
@@ -1638,14 +1642,16 @@ def _finding_warnings(root, investigation, result_id, text, evidence_path):
             warnings += [f"warning: {result_id}: {problem}" for problem in problems]
             warnings += [f"warning: {result_id}: {row['text']} is not a value its table, profile, checks, or "
                          "settings record; check the number or reword" for row in rows]
-    backed = any(c.get("outcome") == "pass" and _ASSERTS_CHECK.search(f"{c.get('name', '')} {c.get('detail', '')}")
-                 for c in checks if isinstance(c, dict))
-    asserted = _ASSERTS_CHECK.search(text)
-    if asserted and not backed:
+    passing = [f"{c.get('name', '')} {c.get('detail', '')}" for c in checks
+               if isinstance(c, dict) and c.get("outcome") == "pass"]
+    for kind in _ASSERTS_KINDS:
+        asserted = kind.search(text)
+        if not asserted or any(kind.search(check) for check in passing):
+            continue
         warnings.append(f'warning: {result_id}: "{asserted.group(0)}" asserts a reconciliation or a completed '
-                        "check that no passing check in its evidence records; state the check, with its tolerance, "
-                        f"in the detail of a passing values or metrics judgment in [results.{result_id}.validation] "
-                        "and rerun, or reword")
+                        "check that no passing check in its evidence records; state the check, with its "
+                        "tolerance, in the detail of a passing values or metrics judgment in "
+                        f"[results.{result_id}.validation] and rerun, or reword")
     return warnings
 
 
@@ -2370,7 +2376,8 @@ def cli_questions(root: Path, argv: list[str]) -> int:
         parser.add_argument("--audience", default="" if action == "add" else None,
                             help="audience wording for Open questions; empty clears it; whitespace is collapsed")
         parser.add_argument("--parent", default="" if action == "add" else None,
-                            help="existing question ID; empty for a root")
+                            help="the existing question ID this one serves; empty for a root, "
+                                 "a question the user asked")
         parser.add_argument("--priority", choices=_PRIORITIES, default="should" if action == "add" else None)
     try:
         args = parser.parse_args(argv[1:])
@@ -2541,7 +2548,8 @@ def cli_state(root: Path, argv: list[str]) -> int:
                    "reconciliation or a completed check (sum, sums, summed, or summing to; add, adds, added, or "
                    "adding up to; reconcile, reconciles, reconciled, reconciling, or reconciliation; checked or "
                    "verified every, each, or all; any case, as whole words) that no passing check's name or "
-                   "detail records. A values or metrics judgment in [results.<id>.validation] whose detail states "
+                   "detail records with wording of the same kind: reconciliation wording for a reconciliation, "
+                   "checked or verified wording for a completed check. A values or metrics judgment in [results.<id>.validation] whose detail states "
                    "the check records it. Warnings print first.\n",
         "render": "Prints discarded disk rows; without findings.json the table renders empty.\n",
         "flag": "Validates every flag before writing. --check writes nothing. Only a rerun clears a flag.\n",

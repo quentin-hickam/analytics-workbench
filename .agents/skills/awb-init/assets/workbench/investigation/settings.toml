@@ -19,8 +19,9 @@
 # answers = ["Q-004"]  # optional: ledger data questions this result answers; run.py marks them answered.
 #                      # Linking computes nothing, so adding or changing answers never makes the result stale.
 # queries = ["queries/orders-by-month.sql"]  # default: ["queries/<id>.sql"]; a producer may use more
-# code = ["helpers.py"]  # optional: files its producer, producers/<id>.py, imports or reads, relative to
-#                        # this folder; each must exist, and a folder is refused, so list its files.
+# code = ["helpers.py"]  # optional: files its queries read directly, such as a lookup CSV in read_csv(),
+#                        # or its producer, producers/<id>.py, imports or reads, relative to this
+#                        # folder; each must exist, and a folder is refused, so list its files.
 #                        # Evidence counts only these, its queries, its producer, run.py, and src/.
 # parameters = ["minimum_orders"]  # optional: [parameters] its producer reads that no query names as $name
 #

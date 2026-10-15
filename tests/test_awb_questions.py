@@ -10,7 +10,7 @@
 # test_linking_reads_the_recorded_settings_file: a result recorded from another settings file is linked from that file, by run and by hand; unreadable evidence refuses a hand link.
 # test_results_answer_only_data_questions: answers naming a user or stakeholder question is refused before evidence, by run.py, and by a hand link; link_answers skips one; the person's answer is still taken; a ledger linking results to a person's question is malformed.
 # test_status_transitions: answered can only be superseded, keeping its answer; open reopens parked or declined and is a no-op on open; reasons are required; only open or parked questions are edited, and a data question keeps answerer data; a superseded answer stays visible in questions.md and list.
-# test_status_collector_reads_the_ledger: collect_status reports counts, open questions by answerer, and derived answers awaiting recheck; null without a ledger; a malformed one, or questions.md without questions.json, is an uncertainty.
+# test_status_collector_reads_the_ledger: collect_status reports counts, the root and must sub-question counts, open questions by answerer, and derived answers awaiting recheck; null without a ledger; a malformed one, or questions.md without questions.json, is an uncertainty.
 # test_resume_and_list_show_finding_status: state shows open questions and answers awaiting recheck; list shows each linked finding's current status.
 
 from datetime import date
@@ -423,13 +423,17 @@ def test_resume_and_list_show_finding_status(project, capsys):
 def test_status_collector_reads_the_ledger(project):
     assert status.collect(project)["active"]["questions"] is None
     add(project, "Does churn differ by region?")
-    add(project, "Which churn definition does finance use?", "stakeholder", kind="context")
-    add(project, "Is EMEA in scope?", "user", kind="decision", status="declined", reason="no")
+    add(project, "Which churn definition does finance use?", "stakeholder", kind="context", parent="Q-001",
+        priority="must")
+    add(project, "Is EMEA in scope?", "user", kind="decision", status="declined", reason="no", parent="Q-001")
     settings(project, {"r1": ["Q-001"]})
     produce(project, "r1")
     provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "region view corrected"}])
     questions = status.collect(project)["active"]["questions"]
-    assert questions == {"counts": {"answered (awaiting recheck)": 1, "open": 1, "declined": 1}, "open_by_answerer": {"stakeholder": 1},
+    # The user asked one question, the root; the stakeholder's definition and the decision serve it.
+    assert questions == {"counts": {"answered (awaiting recheck)": 1, "open": 1, "declined": 1},
+                         "roots": {"answered (awaiting recheck)": 1},
+                         "must_subquestions": {"open": 1}, "open_by_answerer": {"stakeholder": 1},
                          "open": ["Q-002 [stakeholder, context] Which churn definition does finance use?"],
                          "awaiting_recheck": ["Q-001 answered (awaiting recheck) [data, analytical] Does churn differ by region? -> r1 (revalidation-needed (was provisional))"]}
     (project / INV / "questions.json").write_text('{"schema": "awb-questions/1", "questions": [1]}')
