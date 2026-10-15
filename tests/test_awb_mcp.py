@@ -1,6 +1,6 @@
 # Kept cases:
 # test_handshake_ping_and_tool_list: initialize answers 2025-11-25, echoes an earlier legacy version but not 2025-03-26 (which requires batches), and answers 2025-11-25 to an unknown one; initialized gets no reply; ping answers {}; tools/list gives seven tools, readOnlyHint true only on read, openWorldHint true only on read, destructiveHint left to its default (true), no outputSchema; stdout carries only JSON-RPC lines.
-# test_unknown_methods_fail_at_once: server/discover and any other unknown request get -32601 at once; a bad line gets -32700, a non-2.0 message or one with an id and neither method nor result -32600, an unknown tool -32602; the server keeps serving.
+# test_unknown_methods_fail_at_once: server/discover and any other unknown request get -32601 at once; a bad line gets -32700, a non-2.0 message, one with an id and neither method nor result, or one whose id is not a string, number, or null -32600, an unknown tool or a non-string tool name -32602; the server keeps serving.
 # test_setup_installs_into_a_folder_without_helpers: setup round trip: check writes nothing, then install writes src/awb.py and the receipt; a folder without workbench markers exits 1 with the installer's hint.
 # test_read_commands_round_trip_and_write_nothing: every read command without DuckDB (state, questions, stale, review-rules, check-draft, status, help) runs its helper and leaves the project, .git included, unchanged.
 # test_records_round_trip: records adds a question, edits next steps, adds a review rule, flags through stdin, and runs clean-record, each writing its record.
@@ -12,7 +12,7 @@
 # test_no_workbench: a read in a folder without src/awb.py, by argument, root, or working directory, is an error result pointing at awb-init; setup alone accepts it.
 # test_long_output_is_cut_with_a_pointer: output over AWB_MCP_MAX_CHARS is cut, keeping its start and end, and names a file holding the full text, in a directory private to the server process.
 # test_clip_stays_within_the_limit_and_counts_the_cut: the cut output never exceeds the limit, the note states the number of characters actually cut, and a limit below 1000 is raised to 1000.
-# test_read_writes_no_bytecode_and_reads_no_shared_cache: a read subprocess runs with bytecode writes off and no PYTHONPYCACHEPREFIX, so it reads no bytecode from a shared temp directory; a write subprocess keeps Python's cache.
+# test_read_writes_no_bytecode_and_reads_no_shared_cache: a read subprocess runs with bytecode writes off and no PYTHONPYCACHEPREFIX, even one the server inherits, so it reads no bytecode from a cache directory; a write subprocess keeps Python's cache settings.
 # test_root_uris_are_unquoted_once: a root URI's percent escapes are decoded once.
 
 import importlib.util
@@ -200,6 +200,12 @@ def test_unknown_methods_fail_at_once(connect):
     client.initialize()
     response = client.request("tools/call", {"name": "write_anything", "arguments": {}}, timeout=5)
     assert response["error"]["code"] == -32602
+    # An id or tool name of the wrong type is an error, not a crash.
+    response = client.request("tools/call", {"name": ["read"], "arguments": {}}, timeout=5)
+    assert response["error"]["code"] == -32602
+    for message in ({"jsonrpc": "2.0", "id": [7], "result": {}}, {"jsonrpc": "2.0", "id": {"a": 1}, "method": "ping"}):
+        client.send(message)
+        assert client.receive(5) == {"jsonrpc": "2.0", "id": None, "error": {"code": -32600, "message": "Invalid Request"}}
     client.send({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}})
     assert client.request("ping", timeout=5)["result"] == {}
 
@@ -438,11 +444,11 @@ def test_clip_stays_within_the_limit_and_counts_the_cut(monkeypatch):
 
 def test_read_writes_no_bytecode_and_reads_no_shared_cache(tmp_path, monkeypatch):
     server = load_server(monkeypatch)
-    for name in ("PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE"):
-        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("PYTHONDONTWRITEBYTECODE", raising=False)
+    monkeypatch.setenv("PYTHONPYCACHEPREFIX", str(tmp_path / "cache"))  # inherited by the server
     probe = [sys.executable, "-c", "import os, sys; print(sys.flags.dont_write_bytecode, sys.pycache_prefix)"]
     assert server.execute(probe, tmp_path, read=True)["content"][0]["text"].startswith("1 None")
-    assert server.execute(probe, tmp_path, read=False)["content"][0]["text"].startswith("0 None")
+    assert server.execute(probe, tmp_path, read=False)["content"][0]["text"].startswith(f"0 {tmp_path / 'cache'}")
 
 
 def test_root_uris_are_unquoted_once(monkeypatch):

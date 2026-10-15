@@ -433,8 +433,10 @@ def execute(argv, root, *, read, stdin=None, label="tool"):
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
     timeout = None
     if read:
-        # Keep a read from writing bytecode caches or refreshing Git's index in the project.
+        # Keep a read from writing bytecode caches or refreshing Git's index in the project, and from
+        # reading bytecode from a cache directory outside the install.
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        env.pop("PYTHONPYCACHEPREFIX", None)
         env["GIT_OPTIONAL_LOCKS"] = "0"
         timeout = READ_TIMEOUT
     log(f"{label}: {' '.join(argv[1:])}")
@@ -523,6 +525,9 @@ class Server:
             return
         method = message.get("method")
         request_id = message.get("id")
+        if not isinstance(request_id, (str, int, float, type(None))):
+            self.error(None, -32600, "Invalid Request")
+            return
         if method is None:
             # A response to one of our requests.
             slot = self.pending.get(request_id)
@@ -554,7 +559,7 @@ class Server:
             self.reply(request_id, {"tools": TOOLS})
         elif method == "tools/call":
             name = params.get("name") if isinstance(params, dict) else None
-            if name not in TOOL_NAMES:
+            if not isinstance(name, str) or name not in TOOL_NAMES:
                 self.error(request_id, -32602, f"Unknown tool: {name}")
                 return
             # A worker thread, so the reader keeps answering pings and receives the roots/list answer.
