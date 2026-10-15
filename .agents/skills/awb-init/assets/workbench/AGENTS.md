@@ -19,7 +19,13 @@ Read each guide once per session. Existing project conventions win; surface any 
 
 When the host offers the `awb` MCP server, use its tools for the CLI commands below, and the CLI otherwise: `read` for commands that only read; `records`, `data`, `run`, `package`, `release`, and `setup` for those that write. Each tool's description lists its commands. Pass the absolute project root as `project` and translate CLI arguments to the tool's schema.
 
-Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists them and `<command> --help` their arguments. Compute through saved queries: run every query with `awb.py sql`, and counts, null rates, and distinct values with `awb.py profile`; save a query you run twice as `investigations/<name>/exploration/<topic>.sql` and rerun it by path. Run the project's helpers, customized or not, as black boxes; open one's source only to adapt or debug it. When a helper or package is missing, repair through `awb-init`. Keep complete records in files; in chat, report counts, paths, and helper failures verbatim.
+Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists them and `<command> --help` their arguments. Compute through saved queries: run every query with `awb.py sql`, and counts, null rates, and distinct values with `awb.py profile`; save a query you run twice as `investigations/<name>/exploration/<topic>.sql` and rerun it by path. Run the project's helpers, customized or not, as black boxes; open one's source only to adapt or debug it. When a helper or package is missing, repair through `awb-init`. Keep complete records in files.
+
+## Conversation
+
+Records keep their precise terms; chat uses plain words: ledger rows are open (or answered) questions, findings are what we found, flagged findings are awaiting recheck, limitations are caveats, and a disposition is the decision on <finding>. An ID such as `Q-007` may sit beside the plain text, never replace it. Helper output stays in files and tool results: summarize its outcome, quoting it only for a failure or on request.
+
+A turn that changed workbench records ends with one plain line on what changed and what comes next; other turns have none. For example: Questions: answered 1 · opened 2 (1 needs you) · next: explore the March extract.
 
 ## Analytical invariants
 

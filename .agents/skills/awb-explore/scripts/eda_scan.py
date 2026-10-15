@@ -23,7 +23,7 @@ import re
 import statistics
 import sys
 
-FORMAT = "awb-eda/1"
+FORMAT = "awb-explore/1"
 SETTINGS_KEYS = ("where", "date_column", "period_start", "period_end", "measure", "dimensions",
                  "key", "period")
 PARAMETER_FALLBACKS = {"period_start": "start", "period_end": "end"}

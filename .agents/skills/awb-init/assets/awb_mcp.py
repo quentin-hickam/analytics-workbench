@@ -59,8 +59,8 @@ LEGACY = ("2024-11-05", "2025-06-18", PROTOCOL)
 SKILLS = Path(__file__).resolve().parents[2]
 SCRIPTS = {
     "status": "awb-status/scripts/collect_status.py",
-    "eda-scan": "awb-eda/scripts/eda_scan.py",
-    "eda-show": "awb-eda/scripts/eda_scan.py",
+    "eda-scan": "awb-explore/scripts/eda_scan.py",
+    "eda-show": "awb-explore/scripts/eda_scan.py",
     "clean-scan": "awb-clean/scripts/scan_dataset.py",
     "clean-record": "awb-clean/scripts/record_cleaning.py",
     "install": "awb-init/scripts/install_helpers.py",

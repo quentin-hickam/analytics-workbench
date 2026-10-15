@@ -1,6 +1,6 @@
 ---
 name: awb-status
-description: Report where an analytics workbench stands and what to ask next. Use when the user asks for status, what to do next, or whether landed sources changed upstream.
+description: "Report where an analytics workbench stands and suggest next requests. Use for \"what's left?\", \"where are we?\", \"what should we do next?\", or \"have the landed sources changed upstream?\"."
 ---
 
 # Report workbench status
@@ -21,7 +21,7 @@ When `workbench` is false, stop and suggest `awb-init`. Treat `null`, `unknown`,
 
 ## Report
 
-Keep the report to one screen, in this order. Report the collector's values as given, in the investigation's wording shortened, and omit empty items.
+Keep the report to one screen, in this order. Report the collector's values without its keys, in the investigation's wording shortened, and omit empty items.
 
 - **Question and state.** `active.question` and `active.last_updated`, then `git.state_status`; for `out of date`, add `days_after_state` and `latest_change`. Add `git.commit_comparison` when present. Modification dates use the host timezone: convert `latest_change.date` only when the user's timezone differs and the conversion moves the date. When `active.question` is a ledger ID, report the ID with its `questions.open` or `questions.awaiting_recheck` entry, falling back to its line from `python3 <project-root>/src/awb.py questions list --all`. A missing ID or failed lookup leaves the question unsettled; report the uncertainty.
 - **Findings.** `active.counts`, then every flagged finding in `active.findings` with its `reason`. Read a `foundation/quality.md` correction row only when a reason cites one that needs explaining.
@@ -51,10 +51,10 @@ Finish with up to five requests whose state applies, risk rows first, then progr
 | The brief or state records an open scope or purpose decision | "Resolve the <topic> scope change" | `awb-scope` | progress |
 | `questions` is null for the active investigation and no `uncertainties` entry names its ledger | "Start the question ledger for <investigation>" | `awb-scope` | progress |
 | `questions.open_by_answerer` counts `user` or `stakeholder` questions | "Work through the open questions" | `awb-scope` | progress |
-| `questions.open_by_answerer` counts `data` questions | "Explore <dataset> for Q-NNN" | `awb-eda` | progress |
+| `questions.open_by_answerer` counts `data` questions | "Explore <dataset> to answer <question in plain words>" | `awb-explore` | progress |
 | `questions.counts` has answered questions and at most two open ones | "What else should we ask?" | `awb-brainstorm` | progress |
 | A dataset the investigation uses has no row in the quality record, or unresolved issues or next steps name data errors | "Clean the <dataset> data" | `awb-clean` | progress |
-| No findings yet, or a next step calls for exploring a dataset | "Explore <dataset> for this investigation" | `awb-eda` | progress |
+| No findings yet, or a next step calls for exploring a dataset | "Explore <dataset> for this investigation" | `awb-explore` | progress |
 | Supported findings and no draft | "Prepare a draft package" | `awb-package` | progress |
 | `draft_vs_release` is `ahead`, or a draft has no release | "Mark the <package> package delivered" | `awb-release` | progress |
 | Next steps call for preparation beyond the active question | "Prepare <source> more broadly" | analytical work under AGENTS.md | progress |

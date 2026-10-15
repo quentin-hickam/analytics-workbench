@@ -5,7 +5,7 @@
 #
 # Archive layout, independent of the checkout directory's name:
 #   analytics-workbench-skills/
-#     awb-brainstorm/ awb-clean/ awb-eda/ awb-init/ awb-package/ awb-release/ awb-scope/
+#     awb-brainstorm/ awb-clean/ awb-explore/ awb-init/ awb-package/ awb-release/ awb-scope/
 #     awb-status/
 #     CHANGELOG.md LICENSE README.md
 # The skill folders sit at the top level so they can be copied as-is into a
@@ -21,7 +21,7 @@ skills_prefix=".agents/skills/"
 allowlist="
 .agents/skills/awb-brainstorm
 .agents/skills/awb-clean
-.agents/skills/awb-eda
+.agents/skills/awb-explore
 .agents/skills/awb-init
 .agents/skills/awb-package
 .agents/skills/awb-release

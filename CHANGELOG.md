@@ -20,6 +20,8 @@ All notable changes to this project are recorded in this file. The format is bas
 - Parent and priority fields for ledger questions through the CLI and MCP tools, with missing-parent and cycle checks and priority-ordered tree rendering.
 - Ledger-derived finding slide order, informational reporting of unlinked findings, and draft checks for slide order and the conditional Open questions slide.
 - A headline approval checkpoint before full slides for new drafts or changed storylines.
+- Add a conditional turn footer and plain conversation vocabulary to the workbench `AGENTS.md` template: name record changes and the next action, with IDs only alongside plain text.
+- Check every skill's name, folder and metadata limits, with accepted and refused frontmatter forms; check repository files for the retired exploration skill name outside changelog history.
 
 ### Changed
 
@@ -47,6 +49,9 @@ All notable changes to this project are recorded in this file. The format is bas
 - Design notes record the user-level reviewer as a deliberate vendor-specific exception that is never generated into projects.
 - Answered data questions derive an `answered (awaiting recheck)` display status whenever any answering finding is flagged or superseded; stored status remains unchanged. Status collection reports `awaiting_recheck` in place of `answered_by_unsettled`.
 - The findings template includes every unanswered must question after Limitations and open caveats. Open questions is exempt from the five-bullet limit to preserve complete coverage.
+- Rename the exploration skill to `awb-explore` throughout skills, templates, documentation, distribution tooling, MCP dispatch paths and tests, including its scan format label. Move its existing tests with the skill; provide no compatibility alias.
+- Rewrite all eight skill descriptions around plain requests while keeping package and release work explicitly requested.
+- Summarize helper outcomes in conversation; keep complete output in files and tool results, quoting it for failures or on request. Preserve the exact reviewer-to-caller report for checking every review verdict and diagnostic, with its reason stated in the review brief.
 
 ### Fixed
 

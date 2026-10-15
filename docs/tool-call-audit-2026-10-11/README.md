@@ -18,7 +18,7 @@ Counts the agent tool calls each standard workbench task takes when its skill or
 | 2 | Land a user-supplied extract (data guide) | 8 | 8 | 1 | 1 | 2 |
 | 3 | Publish two datasets, views, catalog (data guide) | 8 | 12 | 0 | 0 | 1 |
 | 4 | Clean `orders`, first pass (`awb-clean`) | 8 | 8 | 0 | 1 | 1 |
-| 5 | Explore `orders` (`awb-eda`) | 9 | 9 | 0 | 0 | 3 |
+| 5 | Explore `orders` (`awb-explore`) | 9 | 9 | 0 | 0 | 3 |
 | 6 | Add a result, run, validate, promote (analysis guide) | 9 | 9 | 0 | 0 | 1 |
 | 7 | Status (`awb-status`) | 2 | 2 | 0 | 0 | 0 |
 | 8 | New package draft (`awb-package`) | 16 | 16 | 2 | 1 | 4 |
@@ -90,7 +90,7 @@ The user changed the decision on an already-corrected issue (Q-004: from nulling
 
 ### F8. The `state` list subcommands are undocumented where they are used (task 5, 3 calls)
 
-`awb-eda` step 5 says to add Unresolved issues and Next steps items without naming the commands. AGENTS.md names `state issues` and `state next` without arguments. Two `--help` calls were needed. Updating both lists then took two calls, because each subcommand edits one list.
+`awb-explore` step 5 says to add Unresolved issues and Next steps items without naming the commands. AGENTS.md names `state issues` and `state next` without arguments. Two `--help` calls were needed. Updating both lists then took two calls, because each subcommand edits one list.
 
 **Fix:** show `state next --add TEXT --drop N` and `state issues --add TEXT` in the eda step. Optionally, accept both lists in one call.
 

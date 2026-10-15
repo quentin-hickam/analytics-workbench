@@ -24,7 +24,7 @@ Fetch scripts read credentials from environment variables; local values may sit 
 
 `data/raw/` is excluded from Git, and acquisitions may be impossible to fetch again. Before the first landing, if README's `Landed data is kept at` line is absent or `not yet recorded`, ask for an external retention location and record it there, inserting a missing line directly after `Active investigation`. If the user declines, record `none chosen` and warn after each landing that originals exist only in this checkout. Record a location whenever the user provides one.
 
-`land` and `retain` copy to a reachable filesystem location and write the Acquisitions row themselves; report any conflict or discrepancy they print verbatim. For any other location, tell the user exactly what to copy where, and record the destination once the copy is verified or the user confirms it. After recording or changing a location, run `python3 src/awb.py retain`. Fill each new row's Restrictions yourself.
+`land` and `retain` copy to a reachable filesystem location and write the Acquisitions row themselves; report any conflict or discrepancy they print. For any other location, tell the user exactly what to copy where, and record the destination once the copy is verified or the user confirms it. After recording or changing a location, run `python3 src/awb.py retain`. Fill each new row's Restrictions yourself.
 
 ## Publish and prepare
 

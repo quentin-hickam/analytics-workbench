@@ -1,6 +1,6 @@
 ---
 name: awb-brainstorm
-description: Propose new questions for an analytics workbench investigation from its answered and open ledger questions, findings, and available data. Use when the user asks what else to ask, explore, or investigate, or when an investigation's open questions run out.
+description: "Propose questions from an analytics workbench investigation's questions, findings, and available data. Use for \"what else should we ask?\", \"what else could we investigate?\", or when open questions run out."
 ---
 
 # Brainstorm questions for an investigation
@@ -47,4 +47,4 @@ From the project root, with `--origin brainstorm`:
 
 ## 4. Report
 
-Report the IDs added, the counts parked and declined, and what comes next: data questions through `awb-eda` or analysis, questions for the user or a stakeholder through `awb-scope`, and each scope change through `awb-scope`.
+Report the questions added, the counts parked and declined, and what comes next: data questions through `awb-explore` or analysis, questions for the user or a stakeholder through `awb-scope`, and each scope change through `awb-scope`.

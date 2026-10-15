@@ -1,6 +1,6 @@
 ---
 name: awb-init
-description: Initialize or repair an analytics workbench. Use when the user sets one up for a business question, or asks to repair it or update it to newer skills.
+description: "Set up or repair an analytics workbench. Use for \"set up a workbench\", \"repair this workbench\", or \"update it to the newer skills\"; hand the business question to awb-scope."
 ---
 
 # Initialize an analytics workbench
@@ -54,7 +54,7 @@ Report:
 - unresolved decisions, file conflicts, and files left for the user to decide;
 - any host instruction file from step 1, with its import line;
 - installer items needing attention;
-- if the host's MCP status has no `awb` registration, the output and destination from `python3 <skill-directory>/scripts/install_helpers.py --mcp-config <host>` (`copilot`, `claude`, or `codex`); leave merging user configuration to the user. If registered but unavailable, report the host's diagnostic instead;
+- if the host's MCP status has no `awb` registration, the registration destination from `python3 <skill-directory>/scripts/install_helpers.py --mcp-config <host>` (`copilot`, `claude`, or `codex`) and how to obtain its entry; show the entry when the user asks. Leave merging user configuration to the user. If registered but unavailable, report the host's diagnostic instead;
 - which lazy directories were deferred;
 - how work continues: a new question or scope change through `awb-scope`, analysis through normal requests, a package only when the user asks `awb-package` for one; and
 - the active investigation from `awb-scope`'s report, or that none exists, followed by a suggestion to use `awb-status` to see where things stand and what to ask next.

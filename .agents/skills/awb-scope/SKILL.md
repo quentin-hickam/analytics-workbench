@@ -1,6 +1,6 @@
 ---
 name: awb-scope
-description: Start, sharpen, or rescope an analytics workbench investigation by interviewing the user about its business question and context, keeping its question ledger. Use when the user brings a new business question, wants to dig into or answer the open questions behind one, or changes an investigation's population or scope.
+description: "Start or refine an analytics workbench investigation. Use for \"let's investigate this question\", \"work through the open questions\", or \"change the population or period\"; interview the user and keep the question ledger."
 ---
 
 # Scope an investigation
@@ -58,4 +58,4 @@ An investigation without `questions.json` predates the ledger: move each item of
 
 ## 4. Report
 
-Report the investigation and branch, the records created or changed, and the open ledger questions grouped by who answers them: the user's to answer now or later through `awb-scope`, each stakeholder's to collect, and the data's for `awb-eda` or analysis. When few questions stay open or the user wants to widen the inquiry, suggest `awb-brainstorm`. Suggest `awb-status` for where things stand.
+Summarize the investigation, what was settled, the records created or changed, and the open questions grouped by who answers them: the user's to answer now or later through `awb-scope`, each stakeholder's to collect, and the data's for `awb-explore` or analysis. When few questions stay open or the user wants to widen the inquiry, suggest `awb-brainstorm`. Suggest `awb-status` for where things stand.

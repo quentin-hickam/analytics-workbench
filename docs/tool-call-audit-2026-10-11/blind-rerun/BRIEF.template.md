@@ -24,7 +24,7 @@ You are the coding agent in an analyst's session. Work through the user requests
 2. "Land inbox/orders.csv and inbox/customers.csv from our ERP export as one acquisition, extract-2026-07-01."
 3. "Publish orders and customers as canonical datasets with views, and catalog them." Then: "Commit."
 4. "Use awb-clean to clean the orders data." Then: "Commit."
-5. "Use awb-eda to explore orders for this investigation." Then: "Commit."
+5. "Use awb-explore to explore orders for this investigation." Then: "Commit."
 6. "Calculate the region return rates with 95% intervals and record the finding; promote it if it validates." Then: "Commit."
 7. "Use awb-status — where are we?"
 8. "Use awb-package to prepare a draft for operations leadership." Then: "Commit."
