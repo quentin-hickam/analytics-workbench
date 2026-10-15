@@ -33,7 +33,7 @@ When none holds, build without asking.
 
 ## Charts
 
-Draw each chart as an editable chart whose data is its file in `charts/`, not as a picture. Chart data verbatim: plot every row of its file, in the file's order, at the file's values. When a chart cannot be drawn from its file, or its data does not match the file, say so to the requester and name the slide; never substitute an image or estimated values.
+Draw each chart as an editable chart whose data is its file in `charts/`, not as a picture. Chart data verbatim: plot every row of its file, in the file's order, at the file's values. The file's numbers arrive rounded, and a percent column already holds percents (21.3, not 0.213): plot them as written, never multiplying a percent by 100 again. When a chart cannot be drawn from its file, or its data does not match the file, say so to the requester and name the slide; never substitute an image or estimated values.
 
 ### Chart forms
 
