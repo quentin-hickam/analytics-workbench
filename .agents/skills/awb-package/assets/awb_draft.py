@@ -2,7 +2,8 @@
 
 awb-init's installer places this file at `src/packaging/draft.py`. `src/awb.py` runs its commands:
 
-    python3 src/awb.py export <investigation> <package> [--chart RESULT[:COLUMNS]]... [--dataset NAME=RESULT[:COLUMNS]]... [--no-datasets] [--result RESULT]...
+    python3 src/awb.py export <investigation> <package> [--chart RESULT[:COLUMNS][@first=N|@where=COLUMN=VALUE[,VALUE]]]...
+        [--dataset NAME=RESULT[:COLUMNS]]... [--no-datasets] [--result RESULT]... [--round COLUMN=PLACES]...
     python3 src/awb.py review-rules check <investigation> <package>
     python3 src/awb.py review-rules add --area AREA --severity error|warning --rule TEXT --fix TEXT [--pattern REGEX] [--scope line|slide|document]
     python3 src/awb.py check-draft <investigation> <package> [--verify-only]
@@ -20,6 +21,7 @@ import hashlib
 import html
 import importlib.util
 import json
+import math
 import os
 import re
 import shutil
@@ -1695,8 +1697,8 @@ def parse_outline(text: str) -> dict:
     """Derive the deck from findings.md text as it renders, writing nothing.
 
     Returns {"title", "slides", "charts", "stray", "appendix", "counts"}. title is the `#` heading's slide or
-    None: {"line", "text", "subtitle", "notes", ...}. slides are the deck's other slides in order, one per
-    `##` section except Findings and Appendix and one per `###` slide under them: {"line", "section",
+    None: {"line", "text", "subtitle", "subtitle_line", "notes", ...}. slides are the deck's other slides in
+    order, one per `##` section except Findings and Appendix and one per `###` slide under them: {"line", "section",
     "finding", "appendix", "heading", "headline", "bullets", "notes", "chart", ...}. A `###` slide is a
     finding slide, except one under ## Appendix headed with a template slide's name, such as How we know,
     which is that slide; appendix marks the slides under ## Appendix. headline is a finding's `###` heading
@@ -1724,6 +1726,7 @@ def _outline(view):
             # The subtitle is the paragraph the title slide opens with.
             subtitle = read["extra"].pop(0) if read["extra"] and read["extra"][0]["line"] == read["opening"] else None
             outline["title"] = {**read, "text": heading, "subtitle": subtitle and subtitle["text"],
+                                "subtitle_line": subtitle and subtitle["line"],
                                 "notes": read["notes"][0]["text"] if read["notes"] else None,
                                 "notes_lines": [n["line"] for n in read["notes"]]}
             outline["charts"] += read["charts"]
@@ -2058,6 +2061,121 @@ def _intervals_note(form, column=False):
             else f"; a {form} draws no intervals, so interval columns need a Bar with intervals")
 
 
+def _chart_entry(entry):
+    """Whether a manifest charts entry records the shaping export applied, in the form export writes it."""
+    columns, headers, selection = entry.get("columns"), entry.get("headers"), entry.get("selection")
+    where = selection.get("where") if isinstance(selection, dict) and set(selection) == {"where"} else None
+    return (isinstance(entry.get("result_id"), str) and bool(_SIMPLE.fullmatch(entry["result_id"]))
+            and isinstance(columns, list) and bool(columns) and all(isinstance(c, str) for c in columns)
+            and isinstance(headers, list) and len(headers) == len(columns) and all(isinstance(h, str) for h in headers)
+            and (selection == "all"
+                 or isinstance(selection, dict) and set(selection) == {"first"} and type(selection["first"]) is int
+                 and selection["first"] >= 1
+                 or isinstance(where, dict) and isinstance(where.get("column"), str)
+                 and isinstance(where.get("values"), list) and all(isinstance(v, str) for v in where["values"]))
+            and isinstance(entry.get("values"), dict)
+            and all(isinstance(codes, dict) and all(isinstance(label, str) for label in codes.values())
+                    for codes in entry["values"].values())
+            and isinstance(entry.get("percent"), list) and all(isinstance(c, str) for c in entry["percent"])
+            and isinstance(entry.get("round"), dict)
+            and all(type(p) is int and 0 <= p <= _ROUND_LIMIT for p in entry["round"].values()))
+
+
+def _chart_difference(actual, expected):
+    """Where a chart file's rows first differ from the rows its entry gives, or None when they agree."""
+    if actual[:1] != expected[:1]:
+        return "its header"
+    if len(actual) != len(expected):
+        return f"{len(actual) - 1} rows where the selection gives {len(expected) - 1}"
+    return next((f"row {index}" for index, (have, want) in enumerate(zip(actual, expected)) if have != want), None)
+
+
+def _display_difference(entry, saved, display):
+    """Which of an entry's headers, value labels, or percent columns differ from what display.toml now gives
+    for its result and selected rows, or None. Its places can come from --round, so they are not compared."""
+    names, values, _ = _labels(display, entry["result_id"])
+    own_percent = display["results"].get(entry["result_id"], {}).get("percent")
+    percent = display["percent"] if own_percent is None else own_percent
+    selected = _select(saved, entry["selection"])
+    labels = {}
+    for column in entry["columns"]:
+        codes = values.get(column, {})
+        if used := {row[column]: codes[row[column]] for row in selected if row[column] in codes}:
+            labels[column] = used
+    if entry["headers"] != [names.get(column) for column in entry["columns"]]:
+        return "headers"
+    if entry["values"] != labels:
+        return "value labels"
+    if entry["percent"] != [column for column in entry["columns"] if column in percent]:
+        return "percent columns"
+    return None
+
+
+def chart_file_problems(root, investigation, draft, record) -> list[dict]:
+    """Match each chart file with the manifest's charts entry export recorded for it, the entry's headers,
+    value labels, and percent columns with what foundation/display.toml gives, and the file with its result's
+    saved table under that entry's selection, value labels, percent columns, and rounding: {"chart",
+    "problem"}. The numbers check is separate: every plotted value is still a recorded value."""
+    charts = record.get("charts")
+    entries = [] if charts is None or charts == "none" else charts
+    if not isinstance(entries, list) or not all(isinstance(e, dict) and isinstance(e.get("path"), str)
+                                                for e in entries):
+        return [{"chart": None, "problem": "the manifest's charts is not none or a list of the entries export "
+                                           "writes; rerun export"}]
+    directory = Path(draft) / "charts"
+    files = sorted((int(match[1]), path) for path in (directory.iterdir() if directory.is_dir() else ())
+                   if (match := _CHART_FILE.fullmatch(path.name)))
+    recorded = {}
+    for entry in entries:
+        recorded.setdefault(entry["path"], entry)
+    rows = [{"chart": f"Chart {number}", "problem": f"{path.name} is not in the manifest's charts; export writes "
+                                                   "every chart file, so rerun export with its --chart"}
+            for number, path in files if f"charts/{path.name}" not in recorded]
+    present = {f"charts/{path.name}": path for _, path in files}
+    display = None
+    for name, entry in recorded.items():
+        match = re.fullmatch(r"charts/" + _CHART_FILE.pattern, name)
+        label = f"Chart {match[1]}" if match else name
+        if name not in present:
+            rows.append({"chart": label, "problem": f"the manifest's charts lists {name}, which the draft lacks; "
+                                                    "rerun export"})
+            continue
+        file = present[name].name
+        if not _chart_entry(entry):
+            rows.append({"chart": label, "problem": f"the manifest's charts entry for {file} records no selection, "
+                                                    "columns, headers, value labels, percent, or rounding; rerun "
+                                                    "export with every --chart to record them (a --result-only "
+                                                    "export keeps this entry)"})
+            continue
+        table = Path(root) / "investigations" / investigation / "results" / f"{entry['result_id']}.csv"
+        try:
+            available, saved = _read_table(table)
+            with present[name].open(newline="", encoding="utf-8") as stream:
+                actual = list(csv.reader(stream))
+        except (OSError, UnicodeError, csv.Error) as error:
+            rows.append({"chart": label, "problem": f"{file} cannot be checked against {_rel(root, table)}: {error}"})
+            continue
+        lacking = [column for column in entry["columns"] if column not in available]
+        if not lacking:
+            if display is None:
+                try:
+                    display = display_names(root)
+                except (ValueError, ImportError) as error:
+                    return rows + [{"chart": None, "problem": f"chart files cannot be checked: {error}"}]
+            if part := _display_difference(entry, saved, display):
+                rows.append({"chart": label, "problem": f"the manifest's charts entry for {file} records {part} "
+                                                        f"other than {_DISPLAY} gives; rerun export, which "
+                                                        "records them"})
+                continue
+        detail = (f"its saved table has no column {lacking[0]!r}" if lacking
+                  else _chart_difference(actual, [entry["headers"]] + _apply(saved, entry)))
+        if detail:
+            rows.append({"chart": label, "problem": f"{file} differs from {entry['result_id']} under its recorded "
+                                                    f"selection, rounding, and labels ({detail}); rerun export, and "
+                                                    "select rows with --chart rather than editing the file"})
+    return rows
+
+
 # ---------------------------------------------------------------- check-draft
 
 def storyline_problems(root, investigation, draft, represented, provenance, order="none"):
@@ -2243,6 +2361,83 @@ def open_question_problems(root, investigation, draft, provenance, *, names, roo
     return rows, len(questions)
 
 
+# A deck naming itself unfinished: the word draft, or the phrase working copy or not a numbered release, in any
+# case and as whole words, so drafted, redraft, and working copies are not markers.
+_DRAFT_MARKER = re.compile(r"(?<!\w)(?:draft|working\s+copy|not\s+a\s+numbered\s+release)(?!\w)", re.IGNORECASE)
+
+
+def draft_markers(findings_path: str | os.PathLike) -> list[dict]:
+    """Each draft marker in the places a deck names its own status, as they render: the title, the subtitle,
+    each slide's heading and **Headline:** text, and the title slide's notes, as {"where", "line", "marker",
+    "text"}. Bullets, charts, and other slides' notes are not read. The rows are informational: a release
+    copies the draft byte for byte, so awb-release shows them and the user confirms or revises the wording."""
+    outline = read_outline(findings_path)
+    title, places = outline["title"], []
+    if title is not None:
+        places.append(("title", title["line"], title["text"]))
+        if title["subtitle"]:
+            places.append(("subtitle", title["subtitle_line"], title["subtitle"]))
+        if title["notes"]:
+            places.append(("title notes", title["notes_lines"][0], title["notes"]))
+    for slide in outline["slides"]:
+        places.append(("heading", slide["line"], slide["heading"]))
+        places += [("headline", headline["line"], headline["text"]) for headline in slide["headlines"]]
+    return [{"where": where, "line": line, "marker": match[0], "text": text}
+            for where, line, text in places for match in _DRAFT_MARKER.finditer(text or "")]
+
+
+# The note check-draft writes at the top of the draft, so whoever holds the package or a release knows which
+# files go to the audience, which build the deck, and which stay internal. check-draft, not export, writes it:
+# export runs before the narratives and any methodology note are final, and check-draft runs last.
+START_HERE = "START-HERE.md"
+# The one-line prompt assembly/m365.md gives the requester; the two stay word for word the same.
+M365_PROMPT = "Build a PowerPoint deck from findings.md and the chart files, following deck-rules.md and m365.md."
+
+
+def start_here(draft, investigation, package) -> str:
+    """START-HERE.md's plain text for a draft as it now stands: send these to your audience (the deck once
+    built, methodology-note.md when present, each file under datasets/); to build the deck (the attach list
+    and prompt assembly/m365.md gives, each chart file named); internal (methodology.md, manifest.json,
+    deck-rules.md)."""
+    draft = Path(draft)
+    charts = sorted((int(match[1]), path.name) for path in
+                    ((draft / "charts").iterdir() if (draft / "charts").is_dir() else ())
+                    if (match := _CHART_FILE.fullmatch(path.name)))
+    # Every dataset file but a hidden one, such as a file manager's .DS_Store, goes to the audience.
+    datasets = sorted(path.relative_to(draft).as_posix() for path in
+                      ((draft / "datasets").rglob("*") if (draft / "datasets").is_dir() else ())
+                      if path.is_file() and not path.name.startswith("."))
+    audience = ["the deck, once you build it as part 2 says"]
+    if (draft / METHODOLOGY_NOTE).is_file():
+        audience.append(f"{METHODOLOGY_NOTE}, a plain account of how the analysis was done")
+    attach = ["findings.md", *(f"charts/{name}" for _, name in charts), "methodology.md", "deck-rules.md",
+              "assembly/m365.md"]
+    # Plain text, a blank line after each list, so a viewer that renders Markdown joins no line to a list item.
+    lines = ["Start here", "",
+             f"This folder is the {package} package of the {investigation} investigation. Its files fall into "
+             "three parts.", "",
+             "1. Send these to your audience", "", *(f"- {item}" for item in audience + datasets), "",
+             "2. To build the deck", "",
+             "In a Microsoft 365 Copilot app chat, add the PowerPoint agent and attach these files:", "",
+             *(f"- {path}" for path in attach), "", "Then send this prompt:", "", M365_PROMPT, "",
+             "3. Internal: keep these, and do not send them", "",
+             "- methodology.md, the full account of the analysis",
+             "- manifest.json, the record of what this package holds and what produced it",
+             "- deck-rules.md, the rules the deck is built by", "",
+             "The other files in part 2 are the deck's source; your audience gets the deck instead."]
+    return "\n".join(lines) + "\n"
+
+
+def _write_start_here(draft, investigation, package):
+    path, text = Path(draft) / START_HERE, start_here(draft, investigation, package)
+    try:
+        current = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        current = None
+    if current != text:
+        _write_text(path, text)
+
+
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
             and report["outline"] == [] and report["charts"] == [] and report["headings"] == [] and report["markdown"] == []
@@ -2253,14 +2448,16 @@ def _structure_passed(report):
 
 
 def check_draft(root, investigation, package, *, verify_only=False) -> dict:
-    """Run every mechanical draft check; unless verify_only, rewrite the manifest's inventory."""
+    """Run every mechanical draft check; unless verify_only, write START-HERE.md and rewrite the manifest's
+    inventory."""
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
               "outline": None, "slides": None, "charts": None, "headings": None, "markdown": None, "claims": None, "questions": None,
               "storyline": None, "unlinked_findings": None, "open_questions": None, "open_questions_count": None,
               "numbers": None, "numbers_problems": [], "inventory": None, "verify": None,
-              "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
+              "flag_entries": None, "unmatched_flags": None, "draft_markers": None, "start_here": None,
+              "errors": [], "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
         return report
@@ -2279,6 +2476,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     try:
         report["outline"] = outline_problems(findings_path)
         report["slides"] = read_outline(findings_path)["counts"]
+        report["draft_markers"] = draft_markers(findings_path)
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"outline check: {error}")
     try:
@@ -2330,6 +2528,11 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             raise ValueError(f"no manifest at {_rel(root, path)}; run export first")
         record = _read_json(path)
         report["flag_entries"] = flag_entry_problems(record)
+        if report["charts"] is not None:
+            try:
+                report["charts"] += chart_file_problems(root, investigation, draft, record)
+            except OSError as error:
+                report["errors"].append(f"charts check: {error}")
         try:
             report["questions"] = question_problems(draft, record)
         except (OSError, UnicodeError) as error:
@@ -2351,12 +2554,17 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             except (OSError, ValueError, AttributeError) as error:
                 report["errors"].append(f"storyline check: {error}")
         if not verify_only:
+            _write_start_here(draft, investigation, package)  # before the inventory, which then lists it
             rows = inventory(draft)
             if rows != record.get("inventory"):
                 record.update(inventory=rows, revised_at=_now())
                 _write_json(path, record)
         elif not isinstance(record.get("inventory"), list):
             raise ValueError(f"{MANIFEST} records no inventory list; run check-draft without --verify-only")
+        elif not (draft / START_HERE).is_file():
+            # Every release includes it; an inventory recorded before it was written would not miss it.
+            report["errors"].append(f"{START_HERE}: the draft lacks it; run check-draft without --verify-only, "
+                                    "which writes it and records it in the inventory")
         report["inventory"] = {"rows": len(record["inventory"]),
                                "source": "recorded" if verify_only else "rewritten"}
         report["verify"] = verify(draft, record["inventory"])
@@ -2364,6 +2572,8 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             report["unmatched_flags"] = unmatched_flags(record, flags)
     except (OSError, ValueError) as error:
         report["errors"].append(f"manifest: {error}")
+    if (draft / START_HERE).is_file():
+        report["start_here"] = _rel(root, draft / START_HERE)
 
     # Every number in any narrative traces to a represented result or is allowed with a reason; a Claim
     # strength line the claims check accepts repeats state.md and is skipped.
@@ -2396,9 +2606,9 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                     "and files, "
                     "matching finding headings, the Markdown subset, causal wording against claim strength, "
                     "each represented result's question in methodology.md, numbers in the narratives, the "
-                    "manifest inventory, and state.md's current flags) and rewrite the manifest inventory, "
-                    "stamping revised_at when it changes; --verify-only checks a release candidate and writes "
-                    "nothing.",
+                    "manifest inventory, and state.md's current flags), write START-HERE.md, and rewrite the "
+                    "manifest inventory, stamping revised_at when it changes; --verify-only checks a release "
+                    "candidate and writes nothing.",
         epilog="Prints one JSON line.\nmethodology-note.md, when the draft holds it, is read by the findings, "
                "claims, markdown, and numbers checks too; its rows carry file.\n"
                "outline lists, as slide, line, and problem, each break of the slide "
@@ -2424,7 +2634,12 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "a file, or without a form from deck-rules.md; a **Data:** line missing, malformed, or not naming "
                "its form's roles; a column it names that the file lacks, and a column of the file that it names by "
                "no role; an item nested under a field or a second paragraph in one; and a chart file without a "
-               "specification or data rows, or a foreign file.\nclaims lists each causal phrase (line, section, phrase, claim, results) "
+               "specification or data rows, or a foreign file. It also lists each chart file the manifest's "
+               "charts does not record, an entry whose file is missing or that records no selection, columns, "
+               "headers, value labels, percent, or rounding, an entry whose headers, value labels, or percent "
+               "columns differ from what foundation/display.toml gives, and a file that differs from its result's saved "
+               "table under that entry's selection, labels, percent columns, and rounding (export writes every "
+               "chart file; rows are selected with --chart, never by editing the file).\nclaims lists each causal phrase (line, section, phrase, claim, results) "
                "in a findings.md slide, heading included, above its claim strength: a ### finding slide is held to the weakest "
                "Claim in state.md among the results its methodology.md section cites (all represented results "
                "when it cites none), and the title and other slides that state conclusions to the strongest; "
@@ -2451,7 +2666,17 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "that is neither none nor a list of places, and an unknown disposition.\nquestions lists each "
                "manifest results entry without a question, or whose question methodology.md does not repeat "
                "verbatim within one paragraph or heading as it renders, the question read as written or rendered the "
-               "same way: a code span counts, and a question in a comment or fenced code does not count.\nExit 0 only when names_problems, findings, outline, charts, "
+               "same way: a code span counts, and a question in a comment or fenced code does not count.\n"
+               "draft_markers lists, as where, line, marker, and text, the word draft or the phrase working copy "
+               "or not a numbered release, any case, whole words, in the title, subtitle, a slide heading or "
+               "**Headline:**, or the title slide's notes; it is informational, since a release copies the draft "
+               "byte for byte, so awb-release asks the user to confirm or revise each before releasing.\n"
+               "Without --verify-only it first writes START-HERE.md, plain text in three parts: what to send the "
+               "audience (the deck once built, methodology-note.md, each dataset), what builds the deck (the "
+               "attach list and prompt assembly/m365.md gives), and what stays internal; the inventory then lists "
+               "it, and --verify-only verifies it like any other file and lists an errors row when the draft lacks "
+               "it. start_here names it when present.\n"
+               "Exit 0 only when names_problems, findings, outline, charts, "
                "headings, markdown, claims, "
                "questions, storyline, open_questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
                "are all empty.")
@@ -2547,90 +2772,322 @@ def _load_provenance(root):
 # ---------------------------------------------------------------- export
 
 _DISPLAY = "foundation/display.toml"
+_DISPLAY_KEYS = ("columns", "values", "round", "percent", "results")
+# A number cell: an optional sign, digits with an optional decimal point, and an optional exponent, as a CSV
+# writer writes a number. Other text, a thousands separator, NaN, and infinity included, is shown as written.
+_NUMBER_CELL = re.compile(r"[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?")
+# A number shown with more decimal places than this, trailing zeros aside, needs [round] places; see `_unrounded`.
+UNROUNDED_PLACES = 4
+_ROUND_LIMIT = 20
+_CHART_FORM = "RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]]"
+_COLLISION = ("results answering different questions share this [columns] name; confirm it fits each, "
+              "or name the column for one result under [results.\"<result>\".columns]")
+
+
+def _table(value, problem):
+    if not isinstance(value, dict):
+        raise ValueError(f"{_DISPLAY}: {problem}")
+    return dict(value)
+
+
+def _labels_from(record, where):
+    """A [columns] table and the [values.<column>] tables, as `where` names them in the file."""
+    columns = _table(record.get("columns", {}), f"{where}columns] maps each column to its display name")
+    values = _table(record.get("values", {}), f"{where}values.<column>] maps each coded value to a text label")
+    for column, codes in values.items():
+        if not isinstance(codes, dict) or not all(isinstance(label, str) for label in codes.values()):
+            raise ValueError(f"{_DISPLAY}: {where}values.{column}] maps each coded value to a text label")
+        values[column] = dict(codes)
+    return columns, values
+
+
+def _percent_from(value, where):
+    """A [percent] table's columns list, as `where` names the table in the file."""
+    if not (isinstance(value, dict) and set(value) == {"columns"} and isinstance(value["columns"], list)
+            and all(isinstance(column, str) and column for column in value["columns"])):
+        raise ValueError(f"{_DISPLAY}: {where}percent] holds one key, columns, a list of column names")
+    return list(value["columns"])
 
 
 def display_names(root) -> dict:
-    """Return {columns, values, round} from foundation/display.toml, empty when it is absent."""
+    """Return {columns, values, round, percent, results} from foundation/display.toml, empty when it is absent.
+
+    The file holds only [columns] (column: display name), [values.<column>] (coded value: label), [round]
+    (column: decimal places), [percent] with one key, columns = [...] (columns whose fractions show 100 times
+    larger), and [results."<result>"] tables holding columns, values, and percent tables, which replace the
+    global ones for that result's files, a values table for its whole column and a percent table for every
+    column. A result without a percent table has None there. Anything else raises ValueError. A name or a
+    number of places is checked where a column is exported.
+    """
     path = Path(root) / _DISPLAY
     try:
         record = _toml().loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
     except ImportError as error:
         raise ImportError(f"reading {path.name} needs Python 3.11 or the tomli package") from error
-    return {"columns": dict(record.get("columns", {})),
-            "values": {column: dict(codes) for column, codes in record.get("values", {}).items()},
-            "round": dict(record.get("round", {}))}
+    for key in record:
+        if key not in _DISPLAY_KEYS:
+            raise ValueError(f"{_DISPLAY}: unknown key {key!r}; the file holds only [columns], [values.<column>], "
+                             "[round], [percent], and [results.\"<result>\"]")
+    columns, values = _labels_from(record, "[")
+    percent = _percent_from(record.get("percent", {"columns": []}), "[")
+    results = {}
+    for result_id, entry in _table(record.get("results", {}), "[results.\"<result>\"] holds a columns table, a "
+                                                               "values table, and a percent table for one "
+                                                               "result").items():
+        where = f'[results."{result_id}"'
+        if not isinstance(entry, dict) or not set(entry) <= {"columns", "values", "percent"}:
+            raise ValueError(f"{_DISPLAY}: {where}] holds only a columns table, a values table, and a percent table")
+        own_columns, own_values = _labels_from(entry, where + ".")
+        results[result_id] = {"columns": own_columns, "values": own_values,
+                              "percent": _percent_from(entry["percent"], where + ".") if "percent" in entry else None}
+    return {"columns": columns, "values": values,
+            "round": _table(record.get("round", {}), "[round] maps each column to its decimal places"),
+            "percent": percent, "results": results}
+
+
+def parse_chart(text: str) -> tuple:
+    """Parse a --chart value into (result_id, [columns] or None, selection), refusing any other text.
+
+    The grammar is closed: RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]]. The first '@'
+    opens the row selection, so a column name holding '@' or ',' cannot be named in COLUMNS, though the
+    @where column may hold either. Before it, RESULT is a simple name, and the first ':' opens COLUMNS,
+    comma-separated names, each stripped of surrounding spaces and none empty. After it, first=<n>, n a
+    whole number from 1 to 999999999 written without leading zeros, takes the table's first n rows;
+    where=<column>=<value>[,<value>] takes, in table order, the rows
+    whose column holds one of the values exactly as the saved table writes it, the column ending at the first
+    '=' and stripped, so no value can hold ',' and none may be empty. selection is "all", {"first": n}, or
+    {"where": {"column", "values"}}. Anything else raises ValueError naming the part that does not fit.
+    """
+    def refuse(reason):
+        raise ValueError(f"--chart {text!r}: {reason}; write {_CHART_FORM}")
+
+    head, at, selection = text.partition("@")
+    result_id, colon, listed = head.partition(":")
+    if not _SIMPLE.fullmatch(result_id):
+        refuse("the result ID is not a simple name")
+    columns = [column.strip() for column in listed.split(",")] if colon else None
+    if columns is not None and not all(columns):
+        refuse("a column name is empty")
+    if not at:
+        return result_id, columns, "all"
+    kind, equals, rest = selection.partition("=")
+    if equals and kind == "first":
+        if not re.fullmatch(r"[1-9][0-9]{0,8}", rest):
+            refuse("@first takes a whole number of rows from 1 to 999999999, without leading zeros")
+        return result_id, columns, {"first": int(rest)}
+    if equals and kind == "where":
+        column, equals, values = rest.partition("=")
+        values = values.split(",")
+        if not equals or not column.strip() or not all(values):
+            refuse("@where needs a column, =, and values separated by commas, none empty")
+        return result_id, columns, {"where": {"column": column.strip(), "values": values}}
+    refuse("the row selection is not @first=<n> or @where=<column>=<value>[,<value>]")
 
 
 def _spec(text, what):
-    """Parse RESULT[:COL,COL] into (result_id, [columns] or None)."""
+    """Parse a --dataset's RESULT[:COL,COL] into (result_id, [columns] or None)."""
     result_id, _, columns = text.partition(":")
     return _simple(result_id, what), [c.strip() for c in columns.split(",") if c.strip()] or None
 
 
-def _rounded(value, places):
-    # Decimal from the saved text rounds half up as a reader would, which binary floats do not.
+def _number(text):
+    """Whether a cell is a finite number cell, the only kind a percent or [round] changes. A cell whose
+    exponent is too large for a decimal to hold, such as 1e-9999999999999999999, is none: it is written as
+    saved, as an overflowing one is."""
+    if not (_NUMBER_CELL.fullmatch(text) and math.isfinite(float(text))):
+        return False
     try:
-        number = Decimal(value)
-    except InvalidOperation:
-        return value
-    return str(number.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP))
+        Decimal(text)
+    except ArithmeticError:
+        return False
+    return True
 
 
-def _display_name(display, column):
+def _unrounded(text, percent=False) -> bool:
+    """Whether a cell shows more than UNROUNDED_PLACES decimal places: a finite number cell whose saved text,
+    the file's text unless rounded, has more once trailing zeros are dropped, any exponent applied, and a
+    percent column's 100-fold scaling applied, so a percent column's saved fraction may carry two more. So
+    366.89000039169395 and 1e-05 are unrounded, and 21.3500, which is 21.35, is not; digits beyond a float's
+    precision count, since the file shows them."""
+    if not _number(text):
+        return False
+    places = -Decimal(text).normalize(_EXACT).as_tuple().exponent
+    return places - (2 if percent else 0) > UNROUNDED_PLACES
+
+
+def _display_cell(text, labels, percent, places):
+    """A saved cell as a file shows it: its value label; else, for a number cell, scaled exactly by 100 in a
+    percent column and rounded half up to its places, as a reader would; else as written."""
+    if text in labels:
+        return labels[text]
+    if not _number(text) or not percent and places is None:
+        return text
+    with localcontext(_EXACT):
+        number = Decimal(text).scaleb(2) if percent else Decimal(text)
+        if places is not None:
+            number = number.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+        return format(number, "f")
+
+
+def _select(rows, selection):
+    """The rows a selection takes from a saved table, in table order."""
+    if selection == "all":
+        return rows
+    if "first" in selection:
+        return rows[:selection["first"]]
+    where = selection["where"]
+    return [row for row in rows if row.get(where["column"]) in where["values"]]
+
+
+def _apply(rows, entry):
+    """A file's data rows from a saved table's rows, as an entry export records shapes them."""
+    return [[_display_cell(row[column], entry["values"].get(column, {}), column in entry["percent"],
+                           entry["round"].get(column)) for column in entry["columns"]]
+            for row in _select(rows, entry["selection"])]
+
+
+def _read_table(path):
+    """A saved result table's header and rows, a short row's missing cells read as empty."""
+    with Path(path).open(newline="", encoding="utf-8") as stream:
+        reader = csv.DictReader(stream)
+        rows = [{key: "" if value is None else value for key, value in row.items() if key is not None}
+                for row in reader]
+        return list(reader.fieldnames or []), rows
+
+
+def _display_name(names, column):
     """A column's display name, or None when absent or blank."""
-    name = display["columns"].get(column)
+    name = names.get(column)
     return name if isinstance(name, str) and name.strip() else None
 
 
+def _labels(display, result_id):
+    """A result's column names and value labels: its [results."<id>"] tables over the global ones."""
+    own = display["results"].get(result_id, {"columns": {}, "values": {}})
+    return {**display["columns"], **own["columns"]}, {**display["values"], **own["values"]}, own["columns"]
+
+
 def _toml_key(name):
-    # A quoted key, so a dotted or spaced column stays one key under [columns].
+    # A quoted key, so a dotted or spaced column stays one key under [columns] or [round].
     escaped = name.replace("\\", "\\\\").replace('"', '\\"')
     return '"' + re.sub(r"[\x00-\x1f\x7f]", lambda match: f"\\u{ord(match.group()):04X}", escaped) + '"'
 
 
-def _shape(root, investigation, result_id, columns, display, rounding, gaps):
-    """Read a saved result table and return (headers, rows, sources, problems) for the audience.
+def _shape(root, investigation, result_id, columns, selection, display, rounding, gaps, round_gaps):
+    """Shape a saved result table for the audience: (entry, rows, sources, problems).
 
-    Each available column without a display name is appended to `gaps`.
+    entry records the shaping, which check-draft reapplies (`_apply`): the result, its columns, the row
+    selection, the headers, the value labels the selected rows use, and the columns shown as percents and
+    rounded. sources states it as methodology lines (`_sources`). A column without a display name is
+    appended to `gaps`, and an unrounded one without places to `round_gaps`; only the cells the file holds
+    count.
     """
     path = Path(root) / "investigations" / investigation / "results" / f"{result_id}.csv"
     if not path.is_file():
         return None, None, None, [f"{_rel(root, path)} is missing. Stop: saving a result table needs "
                                   "separately authorized analytical work"]
-    with path.open(newline="", encoding="utf-8") as stream:
-        reader = csv.DictReader(stream)
-        available, rows = list(reader.fieldnames or []), list(reader)
+    available, table = _read_table(path)
     chosen = columns or available
-    problems = [f"{result_id}: no column {c!r} (has {', '.join(available)})" for c in chosen if c not in available]
-    missing = [c for c in chosen if c in available and _display_name(display, c) is None]
-    problems += [f"{result_id}: column {c!r} has "
-                 f"{'a blank' if c in display['columns'] else 'no'} display name in {_DISPLAY} [columns]"
-                 for c in missing]
-    gaps += missing
+    names, values, own = _labels(display, result_id)
+    unknown = [f"{result_id}: no column {c!r} (has {', '.join(available)})" for c in chosen if c not in available]
+    missing = [c for c in chosen if c in available and _display_name(names, c) is None]
+    unnamed = [f"{result_id}: column {c!r} has {'a blank' if c in names else 'no'} display name in {_DISPLAY} "
+               + (f'[results."{result_id}".columns]' if c in own else "[columns]") for c in missing]
+    gaps += [c for c in missing if c not in own]
+    unselected = []
+    if isinstance(selection, dict) and "where" in selection:
+        column, wanted = selection["where"]["column"], selection["where"]["values"]
+        if column not in available:
+            unselected.append(f"{result_id}: @where names no column {column!r} (has {', '.join(available)})")
+        else:
+            present = {row[column] for row in table}
+            unselected += [f"{result_id}: no row has {column} = {value!r}; @where compares values as the saved "
+                           "table writes them" for value in dict.fromkeys(wanted) if value not in present]
+    elif isinstance(selection, dict) and selection["first"] > len(table):
+        unselected.append(f"{result_id}: @first={selection['first']} asks for more rows than the table's "
+                          f"{len(table)}")
+    problems = unknown + unnamed + unselected
+    if unknown or unselected:
+        return None, None, None, problems  # the cells a file would hold are unknown, so rounding waits
+    selected = _select(table, selection)
+    # A result's own percent list replaces the global one, so a column already holding percents there is kept.
+    own_percent = display["results"].get(result_id, {}).get("percent")
+    percent = [c for c in chosen if c in (display["percent"] if own_percent is None else own_percent)]
+    places = {}
+    for column in chosen:
+        if column in rounding:
+            value = rounding[column]
+            if type(value) is not int or not 0 <= value <= _ROUND_LIMIT:
+                problems.append(f"{result_id}: column {column!r} has [round] places {value!r} in {_DISPLAY}; give "
+                                f"a whole number from 0 to {_ROUND_LIMIT}")
+            else:
+                places[column] = value
+            continue
+        example = next((row[column] for row in selected if row[column] not in values.get(column, {})
+                        and _unrounded(row[column], column in percent)), None)
+        if example is not None:
+            problems.append(f"{result_id}: column {column!r} has values with more than {UNROUNDED_PLACES} decimal "
+                            f"places{' shown as a percent' if column in percent else ''}, trailing zeros aside, "
+                            f"such as {example}, and no places under [round] in {_DISPLAY}")
+            round_gaps.append(column)
     if problems:
         return None, None, None, problems
-    headers = [display["columns"][c] for c in chosen]
-    out = []
-    for row in rows:
-        cells = []
-        for column in chosen:
-            value = row[column]
-            value = display["values"].get(column, {}).get(value, value)
-            if column in rounding and value != "":
-                value = _rounded(value, int(rounding[column]))
-            cells.append(value)
-        out.append(cells)
-    sources = [f"{header} <- {result_id}.{column}" for header, column in zip(headers, chosen)]
-    return headers, out, sources, []
+    used = {}
+    for column in chosen:
+        codes = values.get(column, {})
+        labeled = {row[column]: codes[row[column]] for row in selected if row[column] in codes}
+        if labeled:
+            used[column] = labeled
+    entry = {"result_id": result_id, "columns": chosen, "selection": selection,
+             "headers": [names[c] for c in chosen], "values": used, "percent": percent, "round": places}
+    return entry, _apply(table, entry), _sources(entry), []
+
+
+def _sources(entry):
+    """The methodology lines for one file's entry: the rows it selects, unless all, then each header's source
+    column with its percent scaling and rounding, so methodology.md states the shaping the manifest records."""
+    result_id, selection, lines = entry["result_id"], entry["selection"], []
+    if selection != "all" and "first" in selection:
+        lines.append(f"rows <- the first {selection['first']} rows of {result_id}")
+    elif selection != "all":
+        where, values = selection["where"], selection["where"]["values"]
+        listed = values[0] if len(values) == 1 else f"{', '.join(values[:-1])} or {values[-1]}"
+        lines.append(f"rows <- the rows of {result_id} whose {where['column']} is {listed}")
+    for header, column in zip(entry["headers"], entry["columns"]):
+        places = entry["round"].get(column)
+        shaping = ([", times 100"] if column in entry["percent"] else []) + (
+            [] if places is None else [", rounded to whole numbers" if places == 0
+                                       else f", rounded to {places} decimal place{'s' if places != 1 else ''}"])
+        lines.append(f"{header} <- {result_id}.{column}{''.join(shaping)}")
+    return lines
+
+
+def label_collisions(display, files, questions) -> list[dict]:
+    """Each column whose global [columns] name labels files from results answering different questions, no
+    such result naming the column under its own [results."<id>".columns]: {column, name, results, warning}.
+
+    files is [(result_id, [columns])], one per exported file; questions maps each result to its question.
+    """
+    groups = {}
+    for result_id, columns in files:
+        own = display["results"].get(result_id, {}).get("columns", {})
+        for column in columns:
+            if column in display["columns"] and column not in own:
+                groups.setdefault(column, {})[result_id] = None
+    return [{"column": column, "name": display["columns"][column], "results": list(results), "warning": _COLLISION}
+            for column, results in groups.items()
+            if len({json.dumps(questions.get(r), sort_keys=True) for r in results}) > 1]
 
 
 def export(root, investigation, package, charts=(), datasets=(), results=(), *, no_datasets=False,
            rounding=None) -> dict:
     """Serialize recorded results into the draft and record the represented results' provenance.
 
-    Any chart, dataset, or no_datasets makes a full export that replaces the chart set and the dataset
-    selection; serialized results must pass compare_evidence. Results named only in `results` are
-    represented without the check, and with no chart or dataset the exported files stay untouched.
+    charts are (result_id, columns) or (result_id, columns, selection) as `parse_chart` gives them; datasets
+    are (name, (result_id, columns)). Any chart, dataset, or no_datasets makes a full export that replaces
+    the chart set and the dataset selection; serialized results must pass compare_evidence. Results named
+    only in `results` are represented without the check, and with no chart or dataset the exported files
+    stay untouched.
     """
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
@@ -2648,22 +3105,27 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
         report["errors"].append(str(error))
         return report
 
-    shaped, sources, gaps = [], [], []
+    shaped, sources, gaps, round_gaps = [], [], [], []
     if full:
         rounding = {**display["round"], **(rounding or {})}
-        for kind, label, (result_id, columns) in (
+        for kind, label, (result_id, columns, *selection) in (
                 [("chart", f"chart-{i}", spec) for i, spec in enumerate(charts, 1)]
                 + [("dataset", n, spec) for n, spec in datasets]):
-            headers, rows, lines, problems = _shape(root, investigation, result_id, columns, display, rounding, gaps)
+            entry, rows, lines, problems = _shape(root, investigation, result_id, columns,
+                                                  selection[0] if selection else "all", display, rounding,
+                                                  gaps, round_gaps)
             report["errors"] += problems
             if not problems:
-                shaped.append((kind, label, result_id, headers, rows))
+                shaped.append((kind, label, entry, rows))
                 sources += [f"{label}: {line}" for line in lines]
         # Ready to paste under [columns] once each name is filled in from the glossary. A blank name
         # already has its key, so it is fixed in place from its error and left out, keeping a paste valid.
         absent = [c for c in dict.fromkeys(gaps) if c not in display["columns"]]
         if absent:
             report["display_stub"] = "\n".join(f'{_toml_key(c)} = ""' for c in absent)
+        # Likewise under [round], each filled in with the decimal places the slide's number format shows.
+        if round_gaps:
+            report["round_stub"] = "\n".join(f'{_toml_key(c)} = ""' for c in dict.fromkeys(round_gaps))
     else:
         recorded = record.get("charts") if isinstance(record.get("charts"), list) else []
         report["errors"] += [f"{c.get('path')} serializes {c.get('result_id')}, which this call does not name; "
@@ -2672,7 +3134,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     if report["errors"]:
         return report
 
-    serialized = list(dict.fromkeys(r for _, _, r, _, _ in shaped))
+    serialized = list(dict.fromkeys(entry["result_id"] for _, _, entry, _ in shaped))
     represented = list(dict.fromkeys(serialized + list(results)))
     evidence, evidence_paths = {}, {}
     for result_id in represented:
@@ -2686,6 +3148,10 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
             report["errors"].append(f"missing evidence: {evidence_paths[result_id]}: {error}")
     if report["errors"]:
         return report
+    questions = {r: evidence[r].get("question", {"unknown": "evidence lacks question"}) for r in represented}
+    if full:
+        report["label_warnings"] = label_collisions(
+            display, [(entry["result_id"], entry["columns"]) for _, _, entry, _ in shaped], questions)
 
     checks = {}
     if serialized:
@@ -2710,31 +3176,36 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
         flags, report["flags_error"] = None, str(error)
 
     if full:
-        frames = [(r, headers, rows) for kind, _, r, headers, rows in shaped if kind == "chart"]
+        frames = [(entry, rows) for kind, _, entry, rows in shaped if kind == "chart"]
         try:
-            paths = write_charts(draft / "charts", [(headers, rows) for _, headers, rows in frames])
+            paths = write_charts(draft / "charts", [(entry["headers"], rows) for entry, rows in frames])
         except ValueError as error:
             report["errors"].append(f"charts: {error}")
             return report
-        report["charts"] = [{"path": _rel(draft, p), "result_id": r} for p, (r, _, _) in zip(paths, frames)]
-        record["charts"] = report["charts"] or "none"
+        report["charts"] = [{"path": _rel(draft, p), "result_id": entry["result_id"]}
+                            for p, (entry, _) in zip(paths, frames)]
+        # Each entry records the shaping check-draft reapplies to verify its file.
+        record["charts"] = [{"path": _rel(draft, p), **entry} for p, (entry, _) in zip(paths, frames)] or "none"
         directory = draft / "datasets"
         if directory.is_dir():
             for stale in directory.glob("*.csv"):
                 stale.unlink()  # The selection is replaced whole, as write_charts replaces charts.
-        for kind, label, result_id, headers, rows in shaped:
+        selection = []
+        for kind, label, entry, rows in shaped:
             if kind != "dataset":
                 continue
             directory.mkdir(exist_ok=True)
             dataset = directory / f"{label}.csv"
             with dataset.open("w", newline="", encoding="utf-8") as stream:
                 writer = csv.writer(stream, lineterminator="\n")
-                writer.writerow(headers)
+                writer.writerow(entry["headers"])
                 writer.writerows(rows)
-            report["datasets"].append({"path": _rel(draft, dataset), "result_id": result_id})
+            report["datasets"].append({"path": _rel(draft, dataset), "result_id": entry["result_id"]})
+            selection.append({"path": _rel(draft, dataset), "result_id": entry["result_id"],
+                              "columns": entry["columns"], "percent": entry["percent"], "round": entry["round"]})
         if directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()
-        record["dataset_selection"] = [d["path"] for d in report["datasets"]] or "none"
+        record["dataset_selection"] = selection or "none"
         report["methodology_lines"] = sources
 
     if report["created"]:
@@ -2746,7 +3217,6 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     record["export_checks"] = [e for e in entries if e] or "none"
     # Every represented result with its evidence, serialized or not, so status can see a later rerun,
     # the question it answers, which methodology.md repeats verbatim, and the runtime that evidence recorded.
-    questions = {r: evidence[r].get("question", {"unknown": "evidence lacks question"}) for r in represented}
     record["results"] = [{"result_id": r, "evidence": evidence_paths[r], "question": questions[r],
                           "runtime": _runtime(evidence[r])}
                          for r in represented]
@@ -2775,14 +3245,45 @@ def cli_export(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py export", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Write the draft's chart and dataset files from saved result tables, renamed, mapped, "
-                    "and rounded through foundation/display.toml, once compare_evidence passes for every "
-                    "serialized result, and the manifest's producing and packaging state from the evidence "
-                    "of every represented result. Creates the manifest when absent.",
+                    "scaled, and rounded through foundation/display.toml, a chart's rows selected as its --chart "
+                    "says, once compare_evidence passes for every serialized result, and the manifest's "
+                    "producing and packaging state from the evidence of every represented result. Creates the "
+                    "manifest when absent.",
         epilog="Prints one JSON line.\nAny --chart, --dataset, or --no-datasets replaces the whole chart set "
                "and dataset selection: no --chart records charts none. With only --result it records "
-               "provenance and leaves exported files untouched.\nEvery exported column needs a non-blank "
-               "display name in foundation/display.toml; gaps are listed together with display_stub, lines "
-               "for absent names to fill in under [columns] (a blank name is fixed in place), and nothing is written.\nWrites nothing when an evidence file is "
+               "provenance and leaves exported files untouched.\n"
+               f"--chart takes {_CHART_FORM}, a closed grammar: the first '@' opens the row selection, so a "
+               "column name holding '@' or ',' cannot be named in COLUMNS, though the @where column may hold "
+               "either; before it, the first ':' opens the columns, "
+               "comma-separated, none empty. @first=<n> (a whole number from 1 to 999999999, no leading zero) takes the "
+               "saved table's first n rows, in its stable order; @where=<column>=<value>[,<value>] takes, in table order, the rows whose "
+               "column holds one of the values exactly as the table writes it, before value labels, so no value "
+               "can hold ',' or be empty. Malformed text is refused with exit 2; a selection naming no column "
+               "of the table, a value no row holds, or more rows than the table has is an error, and nothing "
+               "is written. A --dataset takes no row selection.\n"
+               "foundation/display.toml holds [columns] (column = display name), [values.<column>] (coded "
+               "value = label), [round] (column = decimal places, 0 to 20), [percent] with columns = [...] "
+               "(fractions shown 100 times larger, scaled exactly before rounding), and [results.\"<result>\"] "
+               "with columns, values, and percent tables that replace the global ones for that result, a values "
+               "table for its whole column and a percent table for every column, so a column that already holds "
+               "percents in one result is not scaled again; any other key is an error.\nEvery exported column "
+               "needs a non-blank display name; gaps are listed together with display_stub, lines for absent "
+               "names to fill in under [columns] (a blank name is fixed in place), and nothing is written. A "
+               "number cell a file holds "
+               f"is unrounded when its saved text, with trailing zeros dropped, any exponent applied, and a "
+               f"percent column's 100-fold scaling applied, has more than {UNROUNDED_PLACES} decimal places, so "
+               f"a percent column's saved fraction may carry {UNROUNDED_PLACES + 2} (366.89000039169395 and "
+               "1e-05 are; 21.3500, which is 21.35, is not); a column holding one needs places under [round] "
+               "or --round, listed with round_stub, lines to paste under [round] once each \"\" is replaced "
+               "with the places the slide's number format shows, unquoted, such as \"share\" = 1.\nlabel_warnings "
+               "lists each column whose [columns] name labels files from results with different questions "
+               "and no [results.\"<result>\".columns] name; it is a warning, and the files are written.\n"
+               "The manifest's charts entries record each chart's result, columns, selection, headers, value "
+               "labels used, percent columns, and places, which check-draft reapplies to verify the file; "
+               "dataset_selection entries record each dataset's result, columns, percent columns, and places.\n"
+               "methodology_lines states each file's shaping for methodology.md: the rows a chart selects, then "
+               "each header's source column with any percent scaling and rounding.\n"
+               "Writes nothing when an evidence file is "
                "missing or any comparison fails (exports_blocked).\nEach write sets revalidation_flags from "
                "state.md's flags (none when it flags nothing), keeping an entry whose finding and reason match "
                "exactly and adding others with represented_in [] and disposition none; flags_pending lists "
@@ -2790,10 +3291,11 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "cannot be read, flags_error says why and revalidation_flags is left as it was.\nquestions maps "
                "each represented result to the question its evidence records, for methodology.md to repeat "
                "verbatim; the manifest's results entries record it.\nExit 0 only "
-               "when written and check_charts is empty.")
+               "when written and check_charts is empty; 2 for unusable arguments.")
     _package_arguments(parser)
-    parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS]",
-                        help="one per chart, in the order of the Chart N specifications; columns comma-separated")
+    parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS][@SELECTION]",
+                        help="one per chart, in the order of the Chart N specifications; columns comma-separated; "
+                             "@first=<n> or @where=<column>=<value>[,<value>] selects rows")
     parser.add_argument("--dataset", action="append", default=[], metavar="NAME=RESULT[:COLUMNS]",
                         help="one per selected dataset; replaces the whole selection")
     parser.add_argument("--no-datasets", action="store_true", help="record an explicit selection of none")
@@ -2801,7 +3303,7 @@ def cli_export(root: Path, argv: list[str]) -> int:
                         help="a represented result not serialized here; its producing state is recorded "
                              "without the export check")
     parser.add_argument("--round", action="append", default=[], metavar="COLUMN=PLACES",
-                        help="decimal places for a column, over foundation/display.toml [round]")
+                        help=f"decimal places, 0 to {_ROUND_LIMIT}, for a column, over foundation/display.toml [round]")
     args = parser.parse_args(argv)
     if args.dataset and args.no_datasets:
         parser.error("--dataset and --no-datasets exclude each other")
@@ -2809,21 +3311,31 @@ def cli_export(root: Path, argv: list[str]) -> int:
         parser.error("--chart replaces the whole export: name every --dataset, or --no-datasets")
     if not (args.chart or args.dataset or args.no_datasets or args.result):
         parser.error("name every represented result: --chart, --dataset or --no-datasets, and --result")
-    datasets = []
+    charts, datasets, refused = [], [], []
+    for item in args.chart:
+        try:
+            charts.append(parse_chart(item))
+        except ValueError as error:
+            refused.append(str(error))
     for item in args.dataset:
         label, sep, spec = item.partition("=")
         if not sep:
             parser.error(f"--dataset needs NAME=RESULT: {item!r}")
+        if "@" in spec:
+            refused.append(f"--dataset {item!r}: a dataset takes no row selection; select rows only in a --chart")
+            continue
         datasets.append((_simple(label, "dataset name"), _spec(spec, "result-id")))
+    if refused:
+        _print({"charts": [], "datasets": [], "written": False, "errors": refused})
+        return 2
     rounding = {}
     for item in args.round:
         column, sep, places = item.partition("=")
-        if not sep or not places.isdigit():
-            parser.error(f"--round needs COLUMN=PLACES: {item!r}")
+        if not sep or not places.isascii() or not places.isdigit() or int(places) > _ROUND_LIMIT:
+            parser.error(f"--round needs COLUMN=PLACES, PLACES from 0 to {_ROUND_LIMIT}: {item!r}")
         rounding[column] = int(places)
     report = export(Path(root), _simple(args.investigation, "investigation"), _simple(args.package, "package"),
-                    [_spec(c, "result-id") for c in args.chart], datasets,
-                    [_simple(r, "result-id") for r in args.result], no_datasets=args.no_datasets,
+                    charts, datasets, [_simple(r, "result-id") for r in args.result], no_datasets=args.no_datasets,
                     rounding=rounding)
     _print(report)
     return 0 if report["written"] and not report.get("check_charts") else 1
@@ -3224,6 +3736,28 @@ def release_dispositions(record: dict, prior) -> list[dict]:
     return rows
 
 
+# The deck's slides that state what stays open, wherever they stand, the appendix included.
+_OPEN_SLIDES = ("Limitations and open caveats", "Open questions")
+
+
+def open_caveats(directory, record: dict) -> list[dict]:
+    """The open caveats a release carries, new or carried forward, so its report never calls it clean while one
+    remains: the headline and then each top-level bullet of the deck's Limitations and open caveats and Open
+    questions slides in the findings.md under directory, as it renders and in deck order, as {"slide",
+    "line", "text", "sub"}, nested items in sub and a headline's sub empty; then each represented flag
+    released with its caveat, as {"finding", "reason", "represented_in"}. An omitted flag carries no caveat."""
+    rows = [{"slide": slide["heading"], "line": block["line"], "text": block["text"], "sub": block.get("sub", [])}
+            for slide in read_outline(Path(directory) / "findings.md")["slides"]
+            if not slide["finding"] and slide["heading"] in _OPEN_SLIDES
+            for block in slide["headlines"][:1] + slide["bullets"]]
+    flags = record.get("revalidation_flags")
+    return rows + [{"finding": flag.get("finding"), "reason": flag.get("reason"),
+                    "represented_in": flag["represented_in"]}
+                   for flag in (flags if isinstance(flags, list) else [])
+                   if isinstance(flag, dict) and isinstance(flag.get("represented_in"), list)
+                   and flag.get("disposition") == "release_with_caveat"]
+
+
 def _runtime(evidence):
     """The evidence's runtime block, or unknown when it records none; stale tests the same shape."""
     runtime = evidence.get("runtime")
@@ -3306,21 +3840,23 @@ def storage_location(root) -> tuple:
 
 
 def _copy_to_storage(root, local, investigation, package, number):
+    """Copy one release to <location>/<investigation>/<package>/<n>/. The checkout's released/ folder is not
+    repeated there, so a location the user calls releases holds no releases/.../released/ path."""
     kind, location = storage_location(root)
     if kind == "none-chosen":
         return {"status": "none chosen",
                 "warning": f"no release storage was chosen; {_rel(root, local)} in this checkout is the only copy"}
-    destination = f"{location}/{investigation}/{package}/released/{number}/" if location else None
+    destination = f"{location}/{investigation}/{package}/{number}/" if location else None
     instruction = (f"copy {_rel(root, local)}/ to {destination}" if destination else
                    f"record where released packages are kept, then copy {_rel(root, local)}/ there "
-                   f"as <location>/{investigation}/{package}/released/{number}/")
+                   f"as <location>/{investigation}/{package}/{number}/")
     if kind != "path":
         return {"status": kind, "location": location, "instruction": instruction}
     base = Path(location).expanduser()
     base = base if base.is_absolute() else Path(root) / base
     if not base.is_dir():
         return {"status": "unreachable", "location": location, "instruction": instruction}
-    target = base / investigation / package / "released" / number
+    target = base / investigation / package / number
     try:
         if target.exists():
             # An identical earlier copy is already in place; anything else is left for the user.
@@ -3385,6 +3921,7 @@ def release(root, investigation, package) -> dict:
                   verify=verify(target, record["inventory"]),
                   datasets=record.get("dataset_selection", {"unknown": "dataset_selection is not recorded"}),
                   dispositions=release_dispositions(record, prior_record),
+                  open_caveats=open_caveats(target, record),
                   provenance_gaps=provenance_gaps(record),
                   checkout_only_acquisitions=checkout_only_acquisitions(root, record),
                   storage=_copy_to_storage(root, target, investigation, package, number))
@@ -3398,9 +3935,17 @@ def cli_release(root: Path, argv: list[str]) -> int:
                     "recorded and disposed, to the next numbered release and to release storage.",
         epilog="Prints one JSON line.\nRefuses, creating nothing, unless check-draft --verify-only passes and "
                "every represented revalidation_flags entry is omit or release_with_caveat; a flag refusal "
-               "lists unmatched_flags and dispositions.\nOn success it prints the report fields: datasets, "
-               "dispositions (new: absent from the prior release's manifest), provenance_gaps, "
-               "checkout_only_acquisitions, verify (the local copy), and storage.\nstorage.status is copied or "
+               "lists unmatched_flags and dispositions. Its draft_markers rows do not refuse: run check-draft "
+               "--verify-only first to show them.\nOn success it prints the report fields: datasets, "
+               "dispositions (new: absent from the prior release's manifest), open_caveats, provenance_gaps, "
+               "checkout_only_acquisitions, verify (the local copy), and storage.\nopen_caveats lists the open "
+               "caveats the release carries, new or carried forward: the headline and then each bullet of the deck's "
+               "Limitations and open caveats and Open questions slides, wherever they stand, as slide, line, "
+               "text, and sub (nested items, empty for a headline), then each represented flag released with "
+               "its caveat, as finding, reason, and "
+               "represented_in; while one remains, the release is not clean.\nThe release is "
+               "deliveries/<investigation>/<package>/released/<n>/; storage holds its copy at "
+               "<location>/<investigation>/<package>/<n>/.\nstorage.status is copied or "
                "already copied (empty compare_trees), mismatch or conflict (compare_trees rows), copy failed "
                "(problem), unreachable or unrecorded (instruction), or none chosen (warning).\nExit 1 on "
                "refusal, a verify row, or storage status mismatch, conflict, or copy failed.")
@@ -3444,8 +3989,9 @@ def cli_copy_releases(root: Path, argv: list[str]) -> int:
         prog="awb.py copy-releases", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Copy every existing numbered release of an investigation (or one package) to the "
                     "README's recorded release storage and compare each copy with compare_trees.",
-        epilog="Prints one JSON line with one storage row per release, statuses as release reports them; an "
-               "identical existing copy is already copied, a differing one a conflict, never overwritten.\n"
+        epilog="Prints one JSON line with one storage row per release, statuses as release reports them; each "
+               "release copies to <location>/<investigation>/<package>/<n>/, and an identical existing copy is "
+               "already copied, a differing one a conflict, never overwritten.\n"
                "Exit 1 when no release exists or any storage status is mismatch, conflict, or copy failed.")
     _package_arguments(parser, package=False)
     parser.add_argument("package", nargs="?", help="package name under deliveries/<investigation>/ "
