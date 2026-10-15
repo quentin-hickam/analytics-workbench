@@ -2,7 +2,7 @@
 
 Paths below that begin with `references/` or `assets/` are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (VS Code Copilot and Codex).
 
-Existing project layouts remain authoritative. Read `references/landing.md` only to write a `fetch` callable for `land()` or a `convert` callable for `publish()`.
+Existing project layouts remain authoritative. Read `references/landing.md` only to write a `fetch` callable for `land()` or a `convert` callable for `publish()`, or when `sql --read-only` or the `read` tool refuses a function or needs an extension.
 
 ## Assess and acquire
 
