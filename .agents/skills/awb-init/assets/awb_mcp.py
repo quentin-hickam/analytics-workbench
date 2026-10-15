@@ -24,9 +24,11 @@ must hold src/awb.py, except for setup. Several roots and no argument is an erro
 
 Subprocesses run with cwd at the project root and stdin closed unless a tool passes text to it. The
 interpreter is $AWB_PYTHON, else the project's .venv or venv interpreter, else this one. Read calls
-keep bytecode and Git's optional locks out of the project and stop after $AWB_MCP_READ_TIMEOUT
-seconds (default 300). Results are plain text: stdout, then stderr, then the exit status, cut to
-$AWB_MCP_MAX_CHARS characters (default 16000) with the full text saved to a file the result names.
+write no bytecode and take none of Git's optional locks, and stop after $AWB_MCP_READ_TIMEOUT seconds
+(default 300); write calls run one at a time, so concurrent updates to one record never overwrite each
+other. Results are plain text: stdout, then stderr, then the exit status, cut to $AWB_MCP_MAX_CHARS
+characters (default 16000, at least 1000) with the full text saved to a file the result names, in a
+directory private to this server process.
 
 Protocol: the legacy handshake era through 2025-11-25 (initialize, notifications/initialized, ping,
 tools/list, tools/call), newline-delimited JSON-RPC on stdin and stdout. Every other request,
@@ -34,6 +36,8 @@ server/discover included, gets an immediate -32601 error, so dual-era clients fa
 initialize. Logs go to stderr.
 """
 
+import contextlib
+import functools
 import json
 import os
 import re
@@ -50,7 +54,8 @@ from pathlib import Path
 VERSION = "0.1.0"
 PROTOCOL = "2025-11-25"
 # Earlier legacy revisions share every method this server uses; a client asking for one gets it back.
-LEGACY = ("2024-11-05", "2025-03-26", "2025-06-18", PROTOCOL)
+# 2025-03-26 is left out: it alone requires receiving JSON-RPC batches, which this server refuses.
+LEGACY = ("2024-11-05", "2025-06-18", PROTOCOL)
 SKILLS = Path(__file__).resolve().parents[2]
 SCRIPTS = {
     "status": "awb-status/scripts/collect_status.py",
@@ -60,9 +65,10 @@ SCRIPTS = {
     "clean-record": "awb-clean/scripts/record_cleaning.py",
     "install": "awb-init/scripts/install_helpers.py",
 }
-MAX_CHARS = int(os.environ.get("AWB_MCP_MAX_CHARS") or 16000)
+MAX_CHARS = max(1000, int(os.environ.get("AWB_MCP_MAX_CHARS") or 16000))
 READ_TIMEOUT = float(os.environ.get("AWB_MCP_READ_TIMEOUT") or 300)
 ROOTS_TIMEOUT = 10
+WRITE_LOCK = threading.Lock()
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 QUESTION_STATUSES = ("open", "answered", "parked", "declined", "superseded")
 # help topics: awb.py commands, with their subcommands, and the skill scripts.
@@ -104,8 +110,8 @@ def _write_tool(name, title, description, commands, *, stdin=False):
     return {"name": name, "title": title, "description": description,
             "inputSchema": {"type": "object", "properties": properties, "required": ["command"],
                             "additionalProperties": False},
-            "annotations": {"title": title, "readOnlyHint": False, "destructiveHint": False,
-                            "idempotentHint": False, "openWorldHint": False}}
+            "annotations": {"title": title, "readOnlyHint": False, "idempotentHint": False,
+                            "openWorldHint": False}}
 
 
 TOOLS = [
@@ -141,7 +147,8 @@ TOOLS = [
          "topic": {"type": "string", "description": "help: an awb.py command with an optional subcommand, "
                    "or a script: status, eda-scan, clean-scan, clean-record, install. Omitted, it lists "
                    "the awb.py commands."}}},
-     "annotations": {"title": "Read workbench", "readOnlyHint": True, "openWorldHint": False}},
+     # Open world: status can probe upstream URLs, and a SELECT can read a URL.
+     "annotations": {"title": "Read workbench", "readOnlyHint": True, "openWorldHint": True}},
     _write_tool(
         "records", "Update workbench records",
         "Write investigation and foundation records through their helpers. command state: change findings, "
@@ -164,8 +171,8 @@ TOOLS = [
                          "investigation": {"type": "string", "description": "Investigation name."},
                          "results": {"type": "array", "items": {"type": "string"},
                                      "description": "Result IDs to run; default every result."}}},
-     "annotations": {"title": "Run investigation", "readOnlyHint": False, "destructiveHint": False,
-                     "idempotentHint": False, "openWorldHint": False}},
+     "annotations": {"title": "Run investigation", "readOnlyHint": False, "idempotentHint": False,
+                     "openWorldHint": False}},
     _write_tool(
         "package", "Build package draft",
         "Write a package draft's exports and manifest. command export: chart and dataset files and "
@@ -189,8 +196,8 @@ TOOLS = [
          "replace": {"type": "array", "items": {"type": "string"},
                      "description": "With upgrade: customized project paths to replace."},
          "remove_retired": {"type": "boolean", "description": "With upgrade: delete unmodified retired files."}}},
-     "annotations": {"title": "Install workbench helpers", "readOnlyHint": False, "destructiveHint": False,
-                     "idempotentHint": True, "openWorldHint": False}},
+     "annotations": {"title": "Install workbench helpers", "readOnlyHint": False, "idempotentHint": True,
+                     "openWorldHint": False}},
 ]
 TOOL_NAMES = {tool["name"] for tool in TOOLS}
 # Write tools whose command is an awb.py command; the rest map to scripts.
@@ -255,7 +262,7 @@ def _root_paths(roots):
         parsed = urllib.parse.urlparse(uri)
         if parsed.scheme != "file":
             continue
-        paths.append(Path(urllib.request.url2pathname(urllib.parse.unquote(parsed.path))))
+        paths.append(Path(urllib.request.url2pathname(parsed.path)))  # url2pathname unquotes
     return paths
 
 
@@ -403,16 +410,22 @@ def write_command(tool, arguments, root):
     return [_python(root), str(root / "src" / "awb.py"), command] + args, stdin
 
 
+@functools.cache
+def _private_dir():
+    """This process's own temporary directory, mode 0700. A fixed name under the shared temp directory
+    would let another local user read the files or plant them first."""
+    return Path(tempfile.mkdtemp(prefix="awb-mcp-"))
+
+
 def _clip(text, label):
     if len(text) <= MAX_CHARS:
         return text
-    folder = Path(tempfile.gettempdir()) / "awb-mcp"
-    folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{time.strftime('%Y%m%d-%H%M%S')}-{label}-{uuid.uuid4().hex[:8]}.txt"
+    path = _private_dir() / f"{time.strftime('%Y%m%d-%H%M%S')}-{label}-{uuid.uuid4().hex[:8]}.txt"
     path.write_text(text, encoding="utf-8")
     tail = min(2000, MAX_CHARS // 4)
-    note = f"\n\n[... {len(text) - MAX_CHARS + tail} characters cut; the full output is in {path} ...]\n\n"
-    return text[:MAX_CHARS - tail - len(note)] + note + text[-tail:]
+    note = "\n\n[... {} characters cut; the full output is in " + str(path) + " ...]\n\n"
+    head = max(0, MAX_CHARS - tail - len(note) - len(str(len(text))))
+    return text[:head] + note.format(len(text) - head - tail) + text[-tail:]
 
 
 def execute(argv, root, *, read, stdin=None, label="tool"):
@@ -421,14 +434,16 @@ def execute(argv, root, *, read, stdin=None, label="tool"):
     timeout = None
     if read:
         # Keep a read from writing bytecode caches or refreshing Git's index in the project.
-        env["PYTHONPYCACHEPREFIX"] = str(Path(tempfile.gettempdir()) / "awb-mcp-pycache")
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["GIT_OPTIONAL_LOCKS"] = "0"
         timeout = READ_TIMEOUT
     log(f"{label}: {' '.join(argv[1:])}")
     try:
-        process = subprocess.run(argv, cwd=root, env=env, timeout=timeout, capture_output=True,
-                                 input=(stdin or "").encode("utf-8") if stdin is not None else None,
-                                 stdin=subprocess.DEVNULL if stdin is None else None)
+        # Helpers read, change, and replace records unlocked, so write calls run one at a time.
+        with contextlib.nullcontext() if read else WRITE_LOCK:
+            process = subprocess.run(argv, cwd=root, env=env, timeout=timeout, capture_output=True,
+                                     input=(stdin or "").encode("utf-8") if stdin is not None else None,
+                                     stdin=subprocess.DEVNULL if stdin is None else None)
     except subprocess.TimeoutExpired:
         return _text(f"stopped after {timeout:g} seconds; narrow the query or raise AWB_MCP_READ_TIMEOUT", True)
     except OSError as error:
@@ -514,6 +529,8 @@ class Server:
             if slot is not None:
                 slot[1] = message
                 slot[0].set()
+            elif "result" not in message and "error" not in message:
+                self.error(request_id, -32600, "Invalid Request")
             return
         if not isinstance(method, str):
             self.error(request_id, -32600, "Invalid Request")
