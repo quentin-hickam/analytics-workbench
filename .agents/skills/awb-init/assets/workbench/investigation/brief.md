@@ -16,6 +16,8 @@ Record the decision this analysis will support, or state that its purpose is exp
 
 Record who will read the package, what they already know, the decision they own, and the terms they use. Leave it blank until the user names the audience; packaging asks for it when it is missing.
 
+Record also, when the user states them, a deck length (such as about 8 slides) and how they want to check a new storyline: **preview-and-wait**, the slide headlines before the draft is written, or **draft-then-review**, the full draft with its headlines marked provisional. Every later package reuses them, though a request that names a mode gets it, and one that supplies the storyline or asks for the full draft gets draft-then-review.
+
 ## Usefulness criteria
 
 Describe what would make the answer useful to its intended audience.

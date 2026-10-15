@@ -9,7 +9,8 @@ Write every section in the audience's words: the glossary's business terms for n
 ## Slide rules
 
 - The file opens with a `#` heading giving the deck title in the audience's words, followed by one subtitle line naming the audience, population, and period in plain words. Together they are the title slide.
-- Each `##` section below is one slide, in this order, except **Findings**, which is a deck section holding one slide per `###` finding. Order finding slides by the highest-priority ledger question their results' recorded settings `answers` identify (`must`, `should`, `could`), then that question's depth-first position in the ledger tree, whose siblings sort by priority then ID. Findings answering no ledger question go last and are named in the draft report.
+- Each `##` section below is one slide, in this order, except **Findings** and **Appendix**, which are deck sections holding one slide per `###` heading. Each section says whether it is required, conditional, or optional. The required slides are the title slide, **Answer**, at least one finding slide under **Findings**, **How we know**, and **Limitations and open caveats**, in that order, though **How we know** or **Limitations and open caveats** may move to the appendix, keeping that order when both do; `check-draft` refuses a deck that lacks one, repeats one, or puts them out of order. The deck opens with the title slide and then the **Answer** slide; the two stay separate.
+- Order finding slides by the highest-priority ledger question their results' recorded settings `answers` identify (`must`, `should`, `could`), then that question's depth-first position in the ledger tree, whose siblings sort by priority then ID. Findings answering no ledger question go last and are named in the draft report. Finding slides in the main sequence and those under **Appendix** each follow this order. It is the order proposed at the headline step: an order the user approves instead is recorded in the manifest's `presentation_order`, which then decides the order of every finding slide.
 - A slide's headline is one sentence of at most 15 words stating its point with its key number, never a topic label. A finding slide's `###` heading is its headline; every other slide opens with a `**Headline:**` line.
 - The slide body is at most five bullets, each one claim with its number written exactly as the slide should show it. **Open questions** is exempt from the bullet limit so it can list every required question. Other content that does not fit goes to another slide or into the notes. A slide holds nothing besides its headline, bullets, chart, and notes; the title slide holds only its subtitle line.
 - Word each finding no more strongly than its claim strength in the investigation's state. Below causal, say what moved together or differed ("stores offering the discount had 4 points fewer late orders"), never that one thing drives, causes, or leads to another; `check-draft` refuses such wording anywhere on the slide, its headline and **Caveat:** bullets included.
@@ -30,6 +31,8 @@ Write every section in the audience's words: the glossary's business terms for n
 
 ## Answer
 
+*Required: the first slide after the title slide.*
+
 **Headline:** <the answer to the question, with its key number>
 
 - The business question and the decision it informs.
@@ -40,11 +43,15 @@ Write every section in the audience's words: the glossary's business terms for n
 
 ## Findings
 
+*Required: at least one finding slide stays in this section.*
+
 ### State the finding as a one-sentence headline with its number
 
 Give one `###` slide per finding. Use the same heading text for the matching section of the methodology. Present the evidence as bullets with their numbers, add the chart that shows it, and keep any result that complicates or contradicts it on the same slide.
 
 ## Implications
+
+*Optional.*
 
 **Headline:** <what the findings mean for the decision>
 
@@ -52,17 +59,23 @@ Connect the findings to the decision or exploratory purpose. Keep recommendation
 
 ## How we know
 
+*Required; it may move to the appendix.*
+
 **Headline:** <why the answer can be trusted, in one sentence>
 
 Give the method in plain language: the definitions the answer depends on; the sources, described by owner, content, and period; each exclusion and analytical choice, described by its effect on the population or result; and the validation performed, in plain terms ("totals reconcile to the finance ledger within 0.5%"). Put what the audience needs on the slide and the rest in the notes.
 
 ## Limitations and open caveats
 
+*Required; it may move to the appendix.*
+
 **Headline:** <the limitation that matters most to the decision>
 
 List the source limitations, assumptions, and unresolved issues that limit interpretation. List each flagged finding as unresolved, with its reason.
 
 ## Open questions
+
+*Conditional: required when unanswered `must` questions exist, and omitted otherwise. It follows **Limitations and open caveats**; when that slide moves to the appendix, it follows the last finding, **Implications**, or **How we know** slide.*
 
 **Headline:** <what remains unanswered for the decision>
 
@@ -72,12 +85,22 @@ List exactly the unanswered `must` ledger questions, one per top-level bullet, u
 
 ## What changed since the last version
 
+*Conditional: required for every version after the first.*
+
 **Headline:** <the most material change>
 
 For a later version, describe material changes to scope, sources, method, findings, caveats, or supporting datasets since the last delivered version, referring to that version by its delivery date. Omit this slide for the first version.
 
 ## Supporting datasets
 
+*Conditional: required when datasets are selected; it may move to the appendix.*
+
 **Headline:** <what the attached data lets the reader check or explore>
 
 Describe each audience-facing dataset delivered beside the deck in business terms: what a row represents, the population and period, the measures it carries in the audience's terms, and any caveat on the dataset or one of its fields. Omit this slide when no dataset is selected.
+
+## Appendix
+
+*Optional: slides kept for reference after the main sequence, such as those that would take the deck past the length the brief's **Audience** section records.*
+
+Give one `###` slide per appendix slide under this one `## Appendix`, after every other section. A `###` slide headed **How we know**, **Limitations and open caveats**, or **Supporting datasets** is that slide moved here and keeps its **Headline:** line; every other `###` slide is a finding slide moved here, under the finding rules, its claim strength included. **Answer**, **Implications**, **Open questions**, and **What changed since the last version** stay in the main sequence. The builder opens the appendix with a divider slide titled Appendix.

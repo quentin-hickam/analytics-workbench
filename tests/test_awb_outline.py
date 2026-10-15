@@ -1,8 +1,12 @@
 # Kept cases:
 # test_parse_outline_derives_the_deck: the title slide, one slide per ## section but Findings and per ### finding, with section, headline, bullets and nested bullets, notes, and chart; every chart with its form, comparison, fields, and slide; nothing is written.
 # test_parse_outline_reads_as_it_renders: a comment hides a bullet, a fence is no bullet, a chart's fields end at a blank line so a later Caveat bullet stays on the slide, a list-item specification is a chart, a field already given is a bullet, and a wrapped bullet is one bullet, a block quote inside it included; a paragraph back at a bullet's depth after its nested chart joins no field.
-# test_outline_problems_clean_deck: a deck following every slide rule has no rows; a 15-word headline and five bullets pass.
+# test_outline_problems_clean_deck: a deck following every slide rule, its required slides included, has no rows; a 15-word headline and five bullets pass.
 # test_outline_problems_rows: each slide rule broken gives its row with slide, line, and problem, a block quote outside a list being a paragraph of its own, as is a paragraph back at a bullet's depth after a deeper item, and the title slide's notes counted too; a deck without its # heading also has its subtitle on no slide, and one without ## Findings has each finding outside it.
+# test_outline_passes_without_implications: a deck without Implications passes, and one with it passes too.
+# test_outline_requires_its_slides_in_order: a deck without How we know, Limitations, or Answer, with Answer not first, without a finding slide in the main sequence, with How we know before a finding or Limitations before How we know, or with a required slide repeated gives one row for each, a missing slide's line null.
+# test_appendix_slides_parse_in_order_and_count_separately: ## Appendix ### slides parse in order, a template slide's name making that slide rather than a finding, are marked appendix and counted apart from the main sequence, and a required slide there still counts.
+# test_appendix_rows: text before the appendix's first slide, a ## slide after it, a main-sequence slide placed in it, an empty appendix, an appendix slide without its headline, every finding moved into it, a ### finding slide under a ## Findings reopened after it, a second ## Appendix, and Limitations before How we know in it give their rows.
 # test_chart_data_reads_roles: role: header pairs in order, case-insensitive roles, headers kept whole, colons in a header kept.
 # test_check_charts_every_form_passes: a specification in each of the seven forms, its Data line naming that form's roles, and a file with those columns passes.
 # test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, a column the file lacks, and a file column no role names give one row each; an interval role on a form without intervals says only a Bar with intervals draws them, and an unnamed column there says so if it holds interval bounds.
@@ -67,6 +71,14 @@ highest of the four regions.
 - Claims are counted once.
 
 **Notes:** The ledger is the finance team's.
+
+## Limitations and open caveats
+
+**Headline:** March records are incomplete in every region
+
+- **Caveat:** March counts may rise once the records are complete.
+
+**Notes:** The claims team expects the full March file in July.
 """
 CSV = {1: "Region,Closed late (%),Lower (%),Upper (%)\nWest,21,18,24\nEast,5,4,6\n",
        2: "Month,Region,Closed late (%)\nJan,West,15\nJan,East,5\nFeb,West,21\nFeb,East,5\n"}
@@ -94,7 +106,8 @@ def test_parse_outline_derives_the_deck(tmp_path):
         ("Answer", False, "West claims close late four times as often as the east", None),
         ("Findings", True, "West claims closed late 21% of the time", 1),
         ("Findings", True, "Late claims rose each month in the west", 2),
-        ("How we know", False, "Totals reconcile to the finance ledger", None)]
+        ("How we know", False, "Totals reconcile to the finance ledger", None),
+        ("Limitations and open caveats", False, "March records are incomplete in every region", None)]
     assert [b["text"] for b in slides[0]["bullets"]] == [
         "The west closed 21% of claims late, the east 5%.", "Staffing the west queue is the decision."]
     assert slides[0]["notes"] == "The west rate is the highest of the four regions."
@@ -248,6 +261,131 @@ def test_outline_problems_rows(tmp_path, old, new, expected):
     rows = draft.outline_problems(package(tmp_path, DECK.replace(old, new, 1)))
     assert [(r["slide"], r["line"], r["problem"]) for r in rows] == (expected if isinstance(expected, list)
                                                                      else [expected])
+
+
+HOW = DECK[DECK.index("## How we know"):DECK.index("## Limitations")]
+LIMITS = DECK[DECK.index("## Limitations"):]
+ANSWER_SLIDE = DECK[DECK.index("## Answer"):DECK.index("## Findings")]
+FINDING_SLIDES = DECK[DECK.index("### West"):DECK.index("## How we know")]
+CONTEXT = "## Context\n\n**Headline:** Claims rose this year in every region\n\n**Notes:** Context first.\n\n"
+APPENDIX = """
+## Appendix
+
+### Late claims fell in the north
+
+- North closed 4% of claims late.
+
+**Notes:** The north is the smallest region.
+
+""" + HOW.replace("## How we know", "### How we know")
+# DECK with How we know moved under ## Appendix, after one more finding slide.
+MOVED = DECK.replace(HOW, "") + APPENDIX
+NEXT_STEPS = "\n## Next steps\n\n**Headline:** Staff the west queue first\n\n**Notes:** The queue is the decision.\n"
+SOUTH = "\n### Late claims fell in the south\n\n- South closed 3% of claims late.\n\n**Notes:** The south is small.\n"
+
+
+def line_of(text, marker, occurrence=1):
+    index = -1
+    for _ in range(occurrence):
+        index = text.index(marker, index + 1)
+    return text.count("\n", 0, index) + 1
+
+
+def test_outline_passes_without_implications(tmp_path):
+    # Implications is optional; DECK has none, and adding one keeps the deck clean too.
+    assert "Implications" not in DECK and draft.outline_problems(package(tmp_path)) == []
+    implications = "## Implications\n\n**Headline:** Staffing the west queue cuts late claims\n\n" \
+                   "**Notes:** Within the evidence.\n\n"
+    text = DECK.replace("## How we know", implications + "## How we know")
+    assert draft.outline_problems(package(tmp_path, text)) == []
+
+
+# The required slides are the title, Answer, at least one finding in the main sequence, How we know, and
+# Limitations and open caveats, in that order; How we know and Limitations may move to the appendix.
+@pytest.mark.parametrize("text, expected", [
+    (DECK.replace(HOW, ""),
+     [("How we know", None, "no How we know slide; add it after the finding slides, or under ## Appendix")]),
+    (DECK.replace("\n" + LIMITS, ""),
+     [("Limitations and open caveats", None, "no Limitations and open caveats slide; add it after the finding "
+                                             "slides, or under ## Appendix")]),
+    (DECK.replace(HOW, "").replace("\n" + LIMITS, ""),
+     [("How we know", None, "no How we know slide; add it after the finding slides, or under ## Appendix"),
+      ("Limitations and open caveats", None, "no Limitations and open caveats slide; add it after the finding "
+                                             "slides, or under ## Appendix")]),
+    (DECK.replace(ANSWER_SLIDE, ""),
+     [("Answer", None, "no ## Answer slide; open the deck with it, right after the title slide")]),
+    (DECK.replace("## Answer", CONTEXT + "## Answer"),
+     [("Answer", line_of(DECK.replace("## Answer", CONTEXT + "## Answer"), "## Answer"),
+       "the Answer slide comes first after the title slide; move it there")]),
+    (DECK.replace("## Findings\n\n" + FINDING_SLIDES, ""),
+     [("Findings", None, "no ### finding slide in the main sequence; keep at least one under ## Findings")]),
+    (DECK.replace(HOW, "").replace("## Findings", HOW + "## Findings"),
+     [("How we know", line_of(DECK.replace(HOW, "").replace("## Findings", HOW + "## Findings"), "## How we know"),
+       "How we know comes after the finding slides; move it below them")]),
+    (DECK.replace(HOW, "") + "\n" + HOW,
+     [("Limitations and open caveats", line_of(DECK, "## Limitations") - HOW.count("\n"),
+       "Limitations and open caveats comes after the finding slides and How we know; move it below them")]),
+    (DECK + "\n" + HOW,
+     [("How we know", line_of(DECK + "\n" + HOW, "## How we know", 2), "2 How we know slides; keep one")]),
+], ids=["no how we know", "no limitations", "neither", "no answer", "answer not first", "no finding",
+        "how we know before findings", "limitations before how we know", "repeated"])
+def test_outline_requires_its_slides_in_order(tmp_path, text, expected):
+    rows = draft.outline_problems(package(tmp_path, text))
+    assert [(r["slide"], r["line"], r["problem"]) for r in rows] == expected
+
+
+def test_appendix_slides_parse_in_order_and_count_separately(tmp_path):
+    text = MOVED
+    outline = draft.read_outline(package(tmp_path, text))
+    assert [(s["section"], s["finding"], s["appendix"], s["heading"], s["headline"]) for s in outline["slides"]] == [
+        ("Answer", False, False, "Answer", "West claims close late four times as often as the east"),
+        ("Findings", True, False, "West claims closed late 21% of the time", "West claims closed late 21% of the time"),
+        ("Findings", True, False, "Late claims rose each month in the west", "Late claims rose each month in the west"),
+        ("Limitations and open caveats", False, False, "Limitations and open caveats",
+         "March records are incomplete in every region"),
+        ("Appendix", True, True, "Late claims fell in the north", "Late claims fell in the north"),
+        ("Appendix", False, True, "How we know", "Totals reconcile to the finance ledger")]
+    assert outline["counts"] == {"main": 5, "appendix": 2}
+    assert outline["appendix"] == [{"line": line_of(text, "## Appendix"), "slides": 2}]
+    assert [b["text"] for b in outline["slides"][-1]["bullets"]] == ["Claims are counted once."]
+    # How we know counts as present from the appendix, so the deck passes.
+    assert draft.outline_problems(package(tmp_path, text)) == []
+    assert draft.read_outline(package(tmp_path))["counts"] == {"main": 6, "appendix": 0}
+
+
+@pytest.mark.parametrize("text, expected", [
+    (MOVED.replace("## Appendix\n", "## Appendix\n\nBackup slides follow.\n"),
+     [("under Appendix before its first slide", "Backup slides follow.",
+       "text under Appendix before its first slide is on no slide; move it onto a slide")]),
+    (MOVED + NEXT_STEPS,
+     [("Next steps", "## Next steps",
+       "a ## slide after ## Appendix; the appendix ends the deck, so move this slide before it")]),
+    (MOVED + "\n### Implications\n\n**Headline:** Staff the west queue first\n\n**Notes:** N.\n",
+     [("Implications", "### Implications",
+       "Implications stays in the main sequence; make it a ## slide before ## Appendix")]),
+    (DECK + "\n## Appendix\n",
+     [("Appendix", "## Appendix", "## Appendix holds no slide; add ### slides under it or remove it")]),
+    (MOVED.replace("**Headline:** Totals reconcile to the finance ledger\n\n", ""),
+     [("How we know", "### How we know", "no **Headline:** line; open the slide with one")]),
+    (DECK.replace("## Findings\n\n" + FINDING_SLIDES, "") + "\n## Appendix\n\n" + FINDING_SLIDES,
+     [("Findings", None, "no ### finding slide in the main sequence; keep at least one under ## Findings")]),
+    (MOVED + "\n## Findings\n" + SOUTH,
+     [("Late claims fell in the south", "### Late claims fell in the south",
+       "a ### finding slide after ## Appendix; the appendix ends the deck, so move it under ## Findings before "
+       "## Appendix, or under ## Appendix")]),
+    (MOVED + "\n## Appendix\n" + SOUTH,
+     [("Appendix", "## Appendix\n\n### Late claims fell in the south",
+       "a second ## Appendix; the deck has one appendix, so merge them")]),
+    (DECK.replace(HOW, "").replace("\n" + LIMITS, "") + "\n## Appendix\n\n"
+     + LIMITS.replace("## Limitations", "### Limitations") + "\n" + HOW.replace("## How we know", "### How we know"),
+     [("Limitations and open caveats", "### Limitations",
+       "Limitations and open caveats comes after How we know under ## Appendix; move it below How we know")]),
+], ids=["text before first slide", "slide after appendix", "main-only section", "empty", "section without headline",
+        "every finding moved", "finding after appendix", "second appendix", "limitations before how we know"])
+def test_appendix_rows(tmp_path, text, expected):
+    rows = draft.outline_problems(package(tmp_path, text))
+    assert [(r["slide"], r["line"], r["problem"]) for r in rows] == [
+        (slide, line_of(text, marker) if marker else None, problem) for slide, marker, problem in expected]
 
 
 def test_chart_data_reads_roles():

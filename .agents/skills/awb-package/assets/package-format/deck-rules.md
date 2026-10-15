@@ -4,7 +4,7 @@
 
 ## Before you start
 
-You have `findings.md`, every `charts/` file, `methodology.md`, these rules, and your builder's assembly file; datasets travel beside the deck and are not attached.
+You have `findings.md`, every `charts/` file, `methodology.md`, these rules, and your builder's assembly file; datasets, and `methodology-note.md` when the package has one, travel beside the deck and are not attached.
 
 ## Using methodology.md
 
@@ -24,8 +24,8 @@ When none holds, build without asking.
 
 ## Build the deck
 
-- **One slide per outline slide.** The `#` heading and subtitle line make the title slide. Each `##` section is one slide, except **Findings**, which becomes a section of the deck holding one slide per `###` finding. Keep the outline's order; add no slide, and drop none.
-- **Headlines verbatim.** The `###` heading, or the text after **Headline:**, goes in the slide's title as written.
+- **One slide per outline slide.** The `#` heading and subtitle line make the title slide. Each `##` section is one slide, except **Findings** and **Appendix**, each of which becomes a section of the deck holding one slide per `###` heading. Start the appendix with a divider slide titled "Appendix". Keep the outline's order; add no slide but that divider, and drop none.
+- **Headlines verbatim.** A finding slide's `###` heading, or the text after a slide's **Headline:**, goes in the slide's title as written.
 - **Bullets verbatim.** Every bullet, number, rounding, unit, and qualifier as written; tighten wording only where no claim, number, or qualifier changes.
 - **Caveats stay on their slide.** A **Caveat:** or **Awaiting revalidation:** bullet stays on the slide of the claim it qualifies, visible on the slide, not only in the notes.
 - **Notes.** The **Notes:** paragraph goes into the slide's speaker notes, unchanged in substance.
@@ -76,7 +76,7 @@ A `series` column splits one `value` column into a series per distinct entry, in
 
 ## Supporting datasets
 
-Deliver each dataset file beside the deck as supplied; the **Supporting datasets** slide is its only presence in the deck.
+Deliver each dataset file beside the deck as supplied; the **Supporting datasets** slide is its only presence in the deck. Deliver `methodology-note.md`, when the package has one, beside the deck unchanged; it adds no slide.
 
 ## Theme and accessibility
 
@@ -88,4 +88,4 @@ When a requested change affects the storyline, wording, findings, numbers, chart
 
 ## Before handing back
 
-Confirm: one slide per outline slide, in order; every chart drawn from its file; every **Caveat:** and **Awaiting revalidation:** bullet visible on its slide; and what your builder's assembly file adds.
+Confirm: one slide per outline slide, in order, with the appendix divider when the outline has an appendix; every chart drawn from its file; every **Caveat:** and **Awaiting revalidation:** bullet visible on its slide; and what your builder's assembly file adds.

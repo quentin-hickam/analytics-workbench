@@ -2,6 +2,7 @@
 # test_correction_becomes_a_numbered_rule: add creates foundation/review-rules.md with its header and R-<area>-001, numbers per area after every ID used, retired and hand-numbered ones included, and never renumbers earlier rules.
 # test_next_review_reports_against_the_rule: check lists every rule in file order with matched lines from both narratives, no match, no pattern, and retired; matches are capped; nothing is written.
 # test_check_without_rules_or_draft: no rule file reports none recorded and exits 0; a missing draft narrative is an error and exits 1.
+# test_check_lists_matches_in_the_methodology_note: matches in methodology-note.md are listed with its file; without it nothing is missing; a note that cannot be read is an error.
 # test_malformed_rule_file_is_reported_and_blocks_add: a bad heading, a repeated ID or field (at its line), missing fields, an unknown severity, and an unusable pattern (one overflowing included) are problems; check exits 1 with the rule unchecked; add refuses and writes nothing.
 # test_broken_rule_section_is_reported_not_dropped: a rule under a malformed heading, or field lines outside a rule section, are problems; check exits 1 and add refuses, so no ID is reused.
 # test_preamble_heading_holding_r_dash_is_not_a_rule_heading: a heading before the first rule that only contains R-, such as ## PR-12 follow-ups, is no problem.
@@ -143,6 +144,23 @@ def test_check_without_rules_or_draft(project, capsys):
     assert [m["file"] for m in out["rules"][0]["matches"]] == ["findings.md"]
     code, out = run(project, capsys, "review-rules", "check", "inv", "other")
     assert code == 1 and len(out["errors"]) == 2
+
+
+def test_check_lists_matches_in_the_methodology_note(project, capsys):
+    add(project, capsys, pattern=r"(?i)partial month")
+    note = project / "deliveries/inv/pkg/draft/methodology-note.md"
+    note.write_text("# How the analysis was done\n\nOctober is a partial month, so it is compared to the 12th.\n")
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 0 and out["errors"] == []
+    assert [(m["file"], m["line"]) for m in out["rules"][0]["matches"]] == [
+        ("findings.md", 3), ("methodology.md", 3), ("methodology-note.md", 3)]
+    # Without the note nothing is missing; a note that cannot be read is an error, never skipped.
+    note.unlink()
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 0 and [m["file"] for m in out["rules"][0]["matches"]] == ["findings.md", "methodology.md"]
+    note.mkdir()
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 1 and len(out["errors"]) == 1 and "methodology-note.md" in out["errors"][0]
 
 
 def test_malformed_rule_file_is_reported_and_blocks_add(project, capsys):

@@ -1,5 +1,6 @@
 # Kept cases:
 # test_renderer_builds_every_slide_verbatim: the reference renderer builds the title slide and one slide per outline slide in order, with headlines, bullets and nested bullets, and notes verbatim, and leaves the draft untouched.
+# test_renderer_starts_the_appendix_with_a_divider: a draft with ## Appendix gets one divider slide titled Appendix, holding nothing else, before its slides, which keep their order.
 # test_renderer_draws_every_form_from_its_file: each of the seven forms is drawn from its chart file at the file's values and order: bar, column, line, and stacked types with a series pivoted, intervals as custom error bars, each bar, column, and line value axis from zero, scatter points and fit, a table's cells; alt text and the source line (with the **Interval:** text) and caveat line come from the specification.
 # test_renderer_line_axis_follows_axis_field: a line chart's value axis includes zero unless **Axis:** says non-zero baseline, which then joins the source line; other wording, the template's "reason for another" included, keeps zero, and so does a column chart whose **Axis:** says non-zero baseline, leaving it out of the source line.
 # test_renderer_value_axis_spans_zero_and_every_value: a bar, column, or line axis pins zero as its minimum when every value and interval bound is zero or more, and as its maximum when every one is zero or less and one is below zero; it pins an interval bound that reaches past every value, whichever side of zero it lies on; otherwise it leaves the bound automatic, so mixed-sign and all-negative values and every interval stay visible.
@@ -77,6 +78,14 @@ Regional operations managers, claims closed in the first half of the year
 - Claims are counted once.
 
 **Notes:** The ledger is the finance team's.
+
+## Limitations and open caveats
+
+**Headline:** March records are incomplete in every region
+
+- **Caveat:** March counts may rise.
+
+**Notes:** The full March file comes in July.
 """
 
 
@@ -105,15 +114,50 @@ def test_renderer_builds_every_slide_verbatim(package, tmp_path):
     assert [slide.shapes.title.text for slide in slides] == [
         "Late claims in the west", "West claims close late four times as often as the east",
         *(f"Finding {n} shows the {form.lower()}" for n, (form, _, _) in enumerate(FORMS, start=1)),
-        "Totals reconcile to the finance ledger"]
+        "Totals reconcile to the finance ledger", "March records are incomplete in every region"]
     assert slides[0].placeholders[1].text == ("Regional operations managers, claims closed in the first half of "
                                               "the year")
     assert body(slides[1]) == [(0, "The west closed most claims late."), (1, "Nested under the first bullet."),
                                (0, "Staffing is the decision.")]
     assert body(slides[2]) == [(0, "Point 1."), (0, "Caveat: caveat 1.")]
     assert [slide.notes_slide.notes_text_frame.text for slide in slides[1:]] == [
-        "The answer in brief.", *(f"notes {n}" for n in range(1, 8)), "The ledger is the finance team's."]
+        "The answer in brief.", *(f"notes {n}" for n in range(1, 8)), "The ledger is the finance team's.",
+        "The full March file comes in July."]
     assert not slides[0].has_notes_slide
+
+
+APPENDIX = """
+## Appendix
+
+### Late claims fell in the north
+
+- North closed 4% of claims late.
+
+**Notes:** The north is the smallest region.
+
+### How we know
+
+**Headline:** Totals reconcile to the finance ledger
+
+- Claims are counted once.
+
+**Notes:** The ledger is the finance team's.
+"""
+
+
+def test_renderer_starts_the_appendix_with_a_divider(package, tmp_path):
+    path = package / "findings.md"
+    text = path.read_text(encoding="utf-8")
+    how = text[text.index("## How we know"):text.index("## Limitations")]
+    path.write_text(text.replace(how, "") + APPENDIX, encoding="utf-8")
+    slides = list(deck(package, tmp_path).slides)
+    titles = [slide.shapes.title.text for slide in slides]
+    assert titles[-4:] == ["March records are incomplete in every region", "Appendix", "Late claims fell in the north",
+                           "Totals reconcile to the finance ledger"]
+    divider = slides[-3]
+    assert [shape.text_frame.text for shape in divider.shapes if shape.has_text_frame] == ["Appendix"]
+    assert not divider.has_notes_slide
+    assert body(slides[-2]) == [(0, "North closed 4% of claims late.")]
 
 
 def frames(slide):

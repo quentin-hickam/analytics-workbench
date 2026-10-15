@@ -31,6 +31,9 @@ from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, ROUND_HALF_UP, Context, Decima
 from pathlib import Path
 
 MANIFEST = "manifest.json"
+# The optional audience-facing account of method; when the draft holds it, the names, numbers, claims,
+# Markdown, and review-rule checks read it beside findings.md and methodology.md.
+METHODOLOGY_NOTE = "methodology-note.md"
 _SIMPLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _EVIDENCE_SCHEMA = "awb-evidence/3"
 _EVIDENCE_LINK = re.compile(r"evidence/([A-Za-z0-9][A-Za-z0-9._-]*)\.json")
@@ -144,11 +147,12 @@ def _evidence_files(root, investigation):
 
 # ---------------------------------------------------------------- Markdown as it renders
 #
-# Every draft check but numbers reads findings.md and methodology.md through `_view`, one reading of what
-# renders, so a form that hides text from the reader hides it from every such check, and a form that shows
-# text shows it to every such check. The numbers check reads source lines (`_unfenced`), as the check-draft
-# help text says. The reading covers the Markdown subset helpers.md lists. A block form outside it that
-# could hide or move text is refused (`markdown_problems`) rather than guessed at, so it never passes.
+# Every draft check but numbers reads the narratives (findings.md, methodology.md, and methodology-note.md
+# when the draft holds it) through `_view`, one reading of what renders, so a form that hides text from the
+# reader hides it from every such check, and a form that shows text shows it to every such check. The
+# numbers check reads source lines (`_unfenced`), as the check-draft help text says. The reading covers the
+# Markdown subset helpers.md lists. A block form outside it that could hide or move text is refused
+# (`markdown_problems`) rather than guessed at, so it never passes.
 
 # One source line as it renders. kind is "text", "heading", "fence" (a code fence's opening line),
 # "code" (inside a fence, its closing line included), "hidden" (inside a comment block), or "html" (the
@@ -894,12 +898,28 @@ def question_problems(draft, record: dict) -> list[dict]:
     return problems
 
 
+def _named(level, heading, section):
+    """Whether a findings.md region is a slide the template names, such as How we know: a ## slide, or a
+    ### one under ## Appendix headed with a template slide's name. Any other ### region is a finding."""
+    return level == 2 or (level == 3 and section == _APPENDIX_SECTION and heading in _SECTIONS)
+
+
+def _finding_headings(view):
+    section, headings = None, []
+    for line in view:
+        if line.level == 2:
+            section = line.title
+        elif line.level == 3 and not _named(3, line.title, section):
+            headings.append(line.title)
+    return headings
+
+
 def heading_problems(draft) -> list[dict]:
     """List each `###` finding heading in findings.md that not exactly one methodology.md section repeats,
-    or that findings.md repeats."""
+    or that findings.md repeats. A template slide under ## Appendix, such as ### How we know, is no finding."""
     draft = Path(draft)
-    findings, methodology = (Counter(line.title for line in _read_view(draft / name)[0] if line.level == 3)
-                             for name in ("findings.md", "methodology.md"))
+    findings = Counter(_finding_headings(_read_view(draft / "findings.md")[0]))
+    methodology = Counter(line.title for line in _read_view(draft / "methodology.md")[0] if line.level == 3)
     rows = []
     for heading, count in findings.items():
         if count > 1:
@@ -913,11 +933,20 @@ def heading_problems(draft) -> list[dict]:
     return rows
 
 
+def _narratives(draft):
+    """The narrative files the checks read: findings.md, methodology.md, and the note when the draft holds it.
+
+    Only an absent note is left out: a directory or a dangling link at its path is read, and fails as
+    unreadable, rather than being skipped."""
+    note = Path(draft) / METHODOLOGY_NOTE
+    return NARRATIVES + ((METHODOLOGY_NOTE,) if note.exists() or note.is_symlink() else ())
+
+
 def markdown_problems(draft) -> list[dict]:
-    """List each block form in findings.md or methodology.md outside the Markdown subset the checks read."""
+    """List each block form in a narrative (`_narratives`) outside the Markdown subset the checks read."""
     draft = Path(draft)
     return [{"file": name, "line": number, "problem": problem}
-            for name in ("findings.md", "methodology.md") for number, problem in _read_view(draft / name)[1]]
+            for name in _narratives(draft) for number, problem in _read_view(draft / name)[1]]
 
 
 # ---------------------------------------------------------------- claim strength
@@ -1027,9 +1056,11 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
     `claims` maps result IDs to state.md Claim cells, as `state_claims` returns them. A `###` finding
     slide is held to the weakest claim among the results its methodology.md namesake cites, or among
     all represented results when it cites none; the title, Answer, Implications, and any other slide
-    that states conclusions, to the strongest represented claim. Each finding's methodology section
-    states its strength on one `**Claim strength:**` line, a causal one as its results' Claim cell.
-    Both files are read as they render (`_view`).
+    that states conclusions, to the strongest represented claim. A slide the template names keeps its rule
+    under ## Appendix, and an appendix finding slide is held like any other. Each finding's methodology
+    section states its strength on one `**Claim strength:**` line, a causal one as its results' Claim cell.
+    methodology-note.md, when the draft holds it, is read whole at the strongest represented claim, its
+    rows carrying `file`. Every file is read as it renders (`_view`).
     """
     return _claim_review(draft, represented, claims)[0]
 
@@ -1053,11 +1084,14 @@ def _claim_review(draft, represented, claims):
                     section["lines"].append(line.number)
     known = [levels[r] for r in represented if levels.get(r)]
     deck = max(known, key=_CLAIMS.index) if known else _CLAIMS[0]
-    declared, accepted = set(), set()
+    declared, part, accepted = set(), None, set()
     for level, heading, first, lines in _regions(_read_view(draft / "findings.md")[0]):
-        if level == 2 and heading in _UNCHECKED:
+        if level == 2:
+            part = heading
+        named = _named(level, heading, part)
+        if named and heading in _UNCHECKED:
             continue
-        if level == 3:
+        if level == 3 and not named:
             section = sections.get(heading)
             cited = _cited("\n".join(section["text"]) if section else "", represented) or list(represented)
             ceiling = _weakest(cited, levels)
@@ -1069,17 +1103,25 @@ def _claim_review(draft, represented, claims):
             declared.add(heading)
         else:
             cited, ceiling = list(represented), deck
-        if ceiling == "causal":
-            continue
-        found = _phrases(lines, "prose", level)
-        found += (Counter(_phrases(lines, "spaced", level)) - Counter(found)).elements()
-        for offset, phrase, in_heading in sorted(found, key=lambda item: item[0]):
-            rows.append({"line": first + offset, "section": heading or "title",
-                         "phrase": phrase, "claim": ceiling, "results": cited,
-                         "problem": f"causal wording above the {ceiling} claim strength; reword it, since only "
-                                    "an experiment or an identified natural experiment supports a causal claim"
-                                    + ("; reword the methodology.md heading to match" if in_heading else "")})
+        rows += _wording(lines, first, 0 if named else level, ceiling, cited, heading or "title")
+    if METHODOLOGY_NOTE in _narratives(draft):
+        for level, heading, first, lines in _regions(_read_view(draft / METHODOLOGY_NOTE)[0]):
+            rows += [{"file": METHODOLOGY_NOTE, **row}
+                     for row in _wording(lines, first, 0, deck, list(represented), heading)]
     return rows, accepted
+
+
+def _wording(lines, first, level, ceiling, cited, section):
+    """A region's causal phrases above `ceiling` as claims rows; a level-3 region's heading is a headline."""
+    if ceiling == "causal":
+        return []
+    found = _phrases(lines, "prose", level)
+    found += (Counter(_phrases(lines, "spaced", level)) - Counter(found)).elements()
+    return [{"line": first + offset, "section": section, "phrase": phrase, "claim": ceiling, "results": cited,
+             "problem": f"causal wording above the {ceiling} claim strength; reword it, since only an experiment "
+                        "or an identified natural experiment supports a causal claim"
+                        + ("; reword the methodology.md heading to match" if in_heading else "")}
+            for offset, phrase, in_heading in sorted(found, key=lambda item: item[0])]
 
 
 # ---------------------------------------------------------------- numbers in the narratives
@@ -1532,6 +1574,16 @@ _CHART_FIELD = re.compile(r"(Data|Highlight|Axis|Interval|Source|Caveat|Alt text
 _HEADLINE = re.compile(r"Headline:(?=\s|$)\s*(.*)")
 _NOTES = re.compile(r"Notes:(?=\s|$)\s*(.*)")
 _FINDINGS_SECTION = "Findings"
+# ## Appendix, like ## Findings, holds ### slides; a deck has one, which follows the main sequence and ends it.
+_APPENDIX_SECTION = "Appendix"
+# The template's other ## slides. Under ## Appendix a ### slide with one of these headings is that slide,
+# not a finding; only _MOVABLE ones may stand there. _REQUIRED must each appear once, in this order,
+# with at least one finding slide in the main sequence after Answer; How we know or Limitations and open
+# caveats may move to the appendix, keeping this order when both do.
+_SECTIONS = ("Answer", "Implications", "How we know", "Limitations and open caveats", "Open questions",
+             "What changed since the last version", "Supporting datasets")
+_MOVABLE = ("How we know", "Limitations and open caveats", "Supporting datasets")
+_REQUIRED = ("Answer", "How we know", "Limitations and open caveats")
 HEADLINE_WORDS = 15
 SLIDE_BULLETS = 5
 # Form -> (roles it needs, roles it may add, roles it may repeat); every other role is named once.
@@ -1642,25 +1694,29 @@ def _slide(heading, first, lines):
 def parse_outline(text: str) -> dict:
     """Derive the deck from findings.md text as it renders, writing nothing.
 
-    Returns {"title", "slides", "charts", "stray"}. title is the `#` heading's slide or None: {"line",
-    "text", "subtitle", "notes", ...}. slides are the deck's other slides in order, one per `##` section
-    except Findings and one per `###` finding: {"line", "section", "finding", "heading", "headline",
-    "bullets", "notes", "chart", ...}, where headline is the `###` heading or the first **Headline:** text,
-    bullets are {"line", "text", "sub"} with nested items in sub, notes is the first **Notes:** text, and
-    chart is the slide's first chart number. charts lists every chart specification in file order:
-    {"number", "line", "form", "written", "comparison", "fields", "inside", "slide"}, form being the
-    canonical CHART_FORMS name or None, fields each field's text by name, inside each nested "item" or
-    later "paragraph" in a field as {"line", "field", "kind"}, and slide the index of its slide in
-    slides, or None on the title slide or outside any slide. stray lists text outside every slide, and
-    any second `#` heading, as {"where", "line", "text"}. The remaining slide keys keep what the checks report:
-    every **Headline:** and **Notes:** paragraph, the first block after the notes, every chart, and text
-    that is none of these.
+    Returns {"title", "slides", "charts", "stray", "appendix", "counts"}. title is the `#` heading's slide or
+    None: {"line", "text", "subtitle", "notes", ...}. slides are the deck's other slides in order, one per
+    `##` section except Findings and Appendix and one per `###` slide under them: {"line", "section",
+    "finding", "appendix", "heading", "headline", "bullets", "notes", "chart", ...}. A `###` slide is a
+    finding slide, except one under ## Appendix headed with a template slide's name, such as How we know,
+    which is that slide; appendix marks the slides under ## Appendix. headline is a finding's `###` heading
+    or the first **Headline:** text, bullets are {"line", "text", "sub"} with nested items in sub, notes is
+    the first **Notes:** text, and chart is the slide's first chart number. charts lists every chart
+    specification in file order: {"number", "line", "form", "written", "comparison", "fields", "inside",
+    "slide"}, form being the canonical CHART_FORMS name or None, fields each field's text by name, inside
+    each nested "item" or later "paragraph" in a field as {"line", "field", "kind"}, and slide the index of
+    its slide in slides, or None on the title slide or outside any slide. stray lists text outside every
+    slide, and any second `#` heading, as {"where", "line", "text"}. appendix lists each ## Appendix heading
+    as {"line", "slides"}, slides counting the `###` slides under it. counts is {"main", "appendix"}: the
+    title slide and the slides before ## Appendix, and the slides under it, without the divider a builder
+    adds. The remaining slide keys keep what the checks report: every **Headline:** and **Notes:**
+    paragraph, the first block after the notes, every chart, and text that is none of these.
     """
     return _outline(_view(text)[0])
 
 
 def _outline(view):
-    outline = {"title": None, "slides": [], "charts": [], "stray": []}
+    outline = {"title": None, "slides": [], "charts": [], "stray": [], "appendix": []}
     section = None
     for level, heading, first, lines in _regions(view):
         read = _slide(heading, first, lines)
@@ -1674,9 +1730,12 @@ def _outline(view):
             continue
         if level == 2:
             section = heading
-        if level in (0, 1) or (level == 2 and heading == _FINDINGS_SECTION):
+            if heading == _APPENDIX_SECTION:
+                outline["appendix"].append({"line": first, "slides": 0})
+        if level in (0, 1) or (level == 2 and heading in (_FINDINGS_SECTION, _APPENDIX_SECTION)):
             where = ("before the deck title" if level == 0 else "under a second # heading" if level == 1
-                     else "under Findings before its first finding slide")
+                     else "under Findings before its first finding slide" if heading == _FINDINGS_SECTION
+                     else "under Appendix before its first slide")
             if level == 1:
                 outline["stray"].append({"where": "a second # heading", "line": first, "text": heading})
             for block in sorted(read["headlines"] + read["notes"] + read["bullets"] + read["charts"] + read["extra"],
@@ -1689,12 +1748,18 @@ def _outline(view):
         for chart in read["charts"]:
             chart["slide"] = index
         outline["charts"] += read["charts"]
-        finding = level == 3
+        appendix = level == 3 and section == _APPENDIX_SECTION
+        if appendix:
+            outline["appendix"][-1]["slides"] += 1
+        finding = level == 3 and not (appendix and heading in _SECTIONS)
         headline = heading if finding else read["headlines"][0]["text"] if read["headlines"] else None
-        outline["slides"].append({**read, "section": section, "finding": finding, "headline": headline,
-                                  "notes": read["notes"][0]["text"] if read["notes"] else None,
+        outline["slides"].append({**read, "section": section, "finding": finding, "appendix": appendix,
+                                  "headline": headline, "notes": read["notes"][0]["text"] if read["notes"] else None,
                                   "notes_lines": [n["line"] for n in read["notes"]],
                                   "chart": read["charts"][0]["number"] if read["charts"] else None})
+    behind = sum(slide["appendix"] for slide in outline["slides"])
+    outline["counts"] = {"main": (outline["title"] is not None) + len(outline["slides"]) - behind,
+                         "appendix": behind}
     return outline
 
 
@@ -1713,7 +1778,11 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
     Every slide after the title has a headline of at most HEADLINE_WORDS words (its `###` heading, or one
     **Headline:** line), at most SLIDE_BULLETS bullets (Open questions is exempt), at most one chart, and one **Notes:** paragraph that
     ends it, and holds nothing else. The title slide is the `#` heading with its subtitle line; a `###`
-    finding slide sits under ## Findings.
+    finding slide sits under ## Findings or ## Appendix. The deck holds each _REQUIRED slide once: Answer
+    first after the title, then at least one finding slide, with How we know and then Limitations and open
+    caveats after the finding slides or under ## Appendix, How we know first when both stand in the same
+    part. The deck holds one ## Appendix, which ends it and holds only _MOVABLE template slides besides
+    findings.
     """
     outline = read_outline(findings_path)
     rows = []
@@ -1738,10 +1807,18 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
         row(stray["where"], stray["line"], "a second # heading; the deck has one title slide, so make this a ## "
             "slide or remove it" if stray["where"] == "a second # heading" else
             f"text {stray['where']} is on no slide; move it onto a slide")
+    opens = outline["appendix"][0]["line"] if outline["appendix"] else None
     for slide in outline["slides"]:
         name, line = slide["heading"], slide["line"]
-        if slide["finding"] and slide["section"] != _FINDINGS_SECTION:
+        if slide["finding"] and slide["section"] not in (_FINDINGS_SECTION, _APPENDIX_SECTION):
             row(name, line, "a ### finding slide outside the ## Findings section; move it under ## Findings")
+        elif slide["finding"] and not slide["appendix"] and opens is not None and line > opens:
+            row(name, line, "a ### finding slide after ## Appendix; the appendix ends the deck, so move it under "
+                            "## Findings before ## Appendix, or under ## Appendix")
+        elif not slide["appendix"] and opens is not None and line > opens:
+            row(name, line, "a ## slide after ## Appendix; the appendix ends the deck, so move this slide before it")
+        if slide["appendix"] and not slide["finding"] and name not in _MOVABLE:
+            row(name, line, f"{name} stays in the main sequence; make it a ## slide before ## Appendix")
         if slide["finding"] and slide["headlines"]:
             row(name, slide["headlines"][0]["line"], "a finding slide's ### heading is its headline; remove the "
                                                      "**Headline:** line")
@@ -1771,6 +1848,49 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
                                                "into one")
         elif slide["after_notes"] is not None and slide["after_notes"] not in {e["line"] for e in slide["extra"]}:
             row(name, slide["after_notes"], "text after the **Notes:** paragraph; the notes end the slide")
+
+    # The required slides: Answer opens the main sequence, which holds at least one finding slide; How we
+    # know and then Limitations follow the finding slides there, or stand under ## Appendix, How we know
+    # first when both stand in the same part. Positions are in deck order; a finding slide after ## Appendix
+    # has its own row above, so it moves no required slide.
+    slides = outline["slides"]
+    main = [slide for slide in slides if not slide["appendix"]]
+    findings = [index for index, slide in enumerate(slides) if slide["finding"] and not slide["appendix"]
+                and (opens is None or slide["line"] < opens)]
+    placed = {}
+    for name in _REQUIRED:
+        given = [slide for slide in outline["slides"] if not slide["finding"] and slide["heading"] == name
+                 and not (name == "Answer" and slide["appendix"])]
+        if len(given) > 1:
+            row(name, given[1]["line"], f"{len(given)} {name} slides; keep one")
+        if name == "Answer":
+            if not given:
+                row(name, None, "no ## Answer slide; open the deck with it, right after the title slide")
+            elif main[0] is not given[0]:
+                row(name, given[0]["line"], "the Answer slide comes first after the title slide; move it there")
+            if not findings:
+                row(_FINDINGS_SECTION, None, "no ### finding slide in the main sequence; keep at least one under "
+                                             "## Findings")
+            continue
+        if not given:
+            row(name, None, f"no {name} slide; add it after the finding slides, or under ## Appendix")
+            continue
+        placed[name] = position = next(i for i, slide in enumerate(slides) if slide is given[0])
+        appendix = given[0]["appendix"]
+        known = placed.get("How we know")
+        if name == "How we know":
+            if not appendix and findings and position < findings[-1]:
+                row(name, given[0]["line"], "How we know comes after the finding slides; move it below them")
+        elif not appendix and (findings and position < findings[-1]
+                               or known is not None and not slides[known]["appendix"] and position < known):
+            row(name, given[0]["line"], f"{name} comes after the finding slides and How we know; move it below them")
+        elif appendix and known is not None and slides[known]["appendix"] and position < known:
+            row(name, given[0]["line"], f"{name} comes after How we know under ## Appendix; move it below How we know")
+    for index, entry in enumerate(outline["appendix"]):
+        if index:
+            row(_APPENDIX_SECTION, entry["line"], "a second ## Appendix; the deck has one appendix, so merge them")
+        if not entry["slides"]:
+            row(_APPENDIX_SECTION, entry["line"], "## Appendix holds no slide; add ### slides under it or remove it")
     return rows
 
 
@@ -1940,7 +2060,7 @@ def _intervals_note(form, column=False):
 
 # ---------------------------------------------------------------- check-draft
 
-def storyline_problems(root, investigation, draft, represented, provenance):
+def storyline_problems(root, investigation, draft, represented, provenance, order="none"):
     """Accepted input: the outline reader's Markdown subset (references/helpers.md), with ### finding headlines matched
     exactly to ### methodology headings. The matching section names represented results using
     the existing _cited grammar (bounded result IDs or evidence/<ID>.json links, outside
@@ -1956,7 +2076,14 @@ def storyline_problems(root, investigation, draft, represented, provenance):
     Markdown and missing/repeated methodology headings.
 
     A row names each slide outside the longest run of finding slides already in order, so moving
-    one slide reports that slide alone rather than every slide it shifted.
+    one slide reports that slide alone rather than every slide it shifted. The main sequence's finding
+    slides and the appendix's each follow the ledger order, the appendix numbering on from the main.
+
+    `order` is the manifest's presentation_order. When it is a list it decides the order instead: each
+    entry is a finding slide's heading, read as inline Markdown as the heading is, and the list holds
+    every finding slide, main and appendix, exactly once, in deck order. A list entry that is not
+    non-blank text makes the whole field malformed, as does any other value, JSON null included; absent
+    and "none" leave the ledger order in force.
     """
     tree = provenance.question_tree(root, investigation)
     ranks = {q["id"]: (("must", "should", "could").index(q["priority"]), position)
@@ -1978,14 +2105,53 @@ def storyline_problems(root, investigation, draft, represented, provenance):
         if question is None:
             unlinked.append(slide["heading"])
         ranked.append((ranks[question] if question else (3, 0), slide, question))
-    ordered = sorted(range(len(ranked)), key=lambda i: ranked[i][0])
-    positions = {index: position for position, index in enumerate(ordered, 1)}
-    in_order = _longest_ordered_run([rank for rank, _, _ in ranked])
-    rows = [{"slide": slide["heading"], "line": slide["line"], "position": index + 1,
-             "expected_position": positions[index], "question": question,
-             "problem": f"finding slide is out of place; move it to finding position {positions[index]}"}
-            for index, (_, slide, question) in enumerate(ranked) if index not in in_order]
+    if order != "none":
+        return _order_problems(order, [slide for _, slide, _ in ranked]), unlinked
+    main = [entry for entry in ranked if not entry[1]["appendix"]]
+    behind = [entry for entry in ranked if entry[1]["appendix"]]
+    rows = []
+    for part, offset in ((main, 0), (behind, len(main))):
+        rows += [{**row, "question": part[index][2],
+                  "problem": f"finding slide is out of place; move it to finding position {row['expected_position']}"}
+                 for index, row in _misplaced([rank for rank, _, _ in part], [s for _, s, _ in part], offset)]
     return rows, unlinked
+
+
+def _misplaced(ranks, slides, offset=0):
+    """(index, row) for each slide outside the longest run already in rank order, positions counted from offset."""
+    ordered = sorted(range(len(ranks)), key=ranks.__getitem__)
+    positions = {index: position for position, index in enumerate(ordered, offset + 1)}
+    in_order = _longest_ordered_run(ranks)
+    return [(index, {"slide": slide["heading"], "line": slide["line"], "position": offset + index + 1,
+                     "expected_position": positions[index]})
+            for index, slide in enumerate(slides) if index not in in_order]
+
+
+def _order_problems(order, slides):
+    """Rows for a presentation_order that is malformed, misses or repeats a finding slide, names a heading no
+    finding slide has, or that the finding slides, in deck order, do not follow."""
+    if not isinstance(order, list) or not all(isinstance(entry, str) and entry.strip() for entry in order):
+        return [{"slide": None, "line": None, "problem": "presentation_order is not none or a list of finding "
+                                                         "headings; record the approved order, or none"}]
+    listed = Counter(_collapse(_shown(_inline(entry)[0])) for entry in order)
+    headings = {slide["heading"] for slide in slides}
+    rows = []
+    for heading, count in listed.items():
+        if count > 1:
+            rows.append({"slide": heading, "line": None,
+                         "problem": f"presentation_order lists this heading {count} times; keep it once"})
+        if heading not in headings:
+            rows.append({"slide": heading, "line": None, "problem": "presentation_order names no finding slide with "
+                                                                    "this heading; give the slide's current heading "
+                                                                    "or remove it"})
+    rows += [{"slide": slide["heading"], "line": slide["line"], "problem": "presentation_order does not list this "
+              "finding slide; add its heading where the user placed it"}
+             for slide in slides if slide["heading"] not in listed]
+    rank = {heading: index for index, heading in enumerate(listed)}
+    placed = [slide for slide in slides if slide["heading"] in rank]
+    return rows + [{**row, "problem": "finding slide is out of place in presentation_order; move it to finding "
+                                      f"position {row['expected_position']}"}
+                   for _, row in _misplaced([rank[slide["heading"]] for slide in placed], placed)]
 
 
 def _longest_ordered_run(ranks):
@@ -2004,7 +2170,8 @@ def _longest_ordered_run(ranks):
 
 def open_question_problems(root, investigation, draft, provenance, *, names, roots):
     """Accepted input: exactly one ## Open questions slide iff required questions exist,
-    immediately after ## Limitations and open caveats and before ## What changed since the
+    immediately after ## Limitations and open caveats (or, with that slide under ## Appendix, after the
+    last main finding, Implications, or How we know slide) and before ## What changed since the
     last version when present. Its body is top-level Markdown list items (bullet or numbered,
     inline markup and wrapped continuations as the existing outline reader accepts), exactly
     each required question's audience wording when set, otherwise its text, rendered by
@@ -2045,9 +2212,18 @@ def open_question_problems(root, investigation, draft, provenance, *, names, roo
         return rows, len(questions)
     if len(opened) != 1:
         row("keep exactly one Open questions slide", opened[1][1]["line"])
+    # With Limitations under ## Appendix, Open questions stands where it would have: after the last main
+    # finding, Implications, or How we know slide.
+    limitations = "Limitations and open caveats"
+    if any(not s["appendix"] and s["heading"] == limitations for s in slides):
+        anchors = [i for i, s in enumerate(slides) if s["heading"] == limitations]
+    else:
+        anchors = [i for i, s in enumerate(slides) if not s["appendix"]
+                   and (s["finding"] or s["heading"] in ("Implications", "How we know"))][-1:]
     for position, slide in opened:
-        if position == 0 or slides[position - 1]["heading"] != "Limitations and open caveats":
-            row("place Open questions immediately after Limitations and open caveats", slide["line"])
+        if position - 1 not in anchors:
+            row("place Open questions immediately after Limitations and open caveats, or, with that slide in the "
+                "appendix, immediately after the last finding, Implications, or How we know slide", slide["line"])
         if any(s["heading"] == "What changed since the last version" for s in slides[:position]):
             row("place Open questions before What changed since the last version", slide["line"])
         actual = Counter(b["text"] for b in slide["bullets"])
@@ -2081,7 +2257,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
-              "outline": None, "charts": None, "headings": None, "markdown": None, "claims": None, "questions": None,
+              "outline": None, "slides": None, "charts": None, "headings": None, "markdown": None, "claims": None, "questions": None,
               "storyline": None, "unlinked_findings": None, "open_questions": None, "open_questions_count": None,
               "numbers": None, "numbers_problems": [], "inventory": None, "verify": None,
               "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
@@ -2095,10 +2271,14 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     findings_path = draft / "findings.md"
     try:
         report["findings"] = check_findings(findings_path, names=names, roots=recorded)
+        if METHODOLOGY_NOTE in _narratives(draft):
+            report["findings"] += [{"file": METHODOLOGY_NOTE, **row} for row in
+                                   check_findings(draft / METHODOLOGY_NOTE, names=names, roots=recorded)]
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"findings check: {error}")
     try:
         report["outline"] = outline_problems(findings_path)
+        report["slides"] = read_outline(findings_path)["counts"]
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"outline check: {error}")
     try:
@@ -2166,7 +2346,8 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         if provenance is not None:
             try:
                 report["storyline"], report["unlinked_findings"] = storyline_problems(
-                    root, investigation, draft, [r["result_id"] for r in represented], provenance)
+                    root, investigation, draft, [r["result_id"] for r in represented], provenance,
+                    record.get("presentation_order", "none"))
             except (OSError, ValueError, AttributeError) as error:
                 report["errors"].append(f"storyline check: {error}")
         if not verify_only:
@@ -2184,13 +2365,13 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     except (OSError, ValueError) as error:
         report["errors"].append(f"manifest: {error}")
 
-    # Every number in either narrative traces to a represented result or is allowed with a reason; a Claim
+    # Every number in any narrative traces to a represented result or is allowed with a reason; a Claim
     # strength line the claims check accepts repeats state.md and is skipped.
     if record is not None:
         allowed, problems = allowed_numbers(record)
         values, more = recorded_values(root, investigation, record.get("results"))
         report["numbers_problems"], report["numbers"] = problems + more, []
-        for name in NARRATIVES:
+        for name in _narratives(draft):
             try:
                 report["numbers"] += check_numbers(draft / name, values, allowed=allowed,
                                                    claim_lines=claim_lines if name == "methodology.md" else ())
@@ -2210,20 +2391,33 @@ def _package_arguments(parser, *, package=True):
 def cli_check_draft(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py check-draft", formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Run every mechanical draft check (internal names in findings.md, the slide rules, ledger storyline and Open questions, chart "
-                    "specifications and files, "
+        description="Run every mechanical draft check (internal names in findings.md and any methodology-note.md, "
+                    "the slide rules and required slides, the finding order and Open questions, chart specifications "
+                    "and files, "
                     "matching finding headings, the Markdown subset, causal wording against claim strength, "
-                    "each represented result's question in methodology.md, numbers in both narratives, the "
+                    "each represented result's question in methodology.md, numbers in the narratives, the "
                     "manifest inventory, and state.md's current flags) and rewrite the manifest inventory, "
                     "stamping revised_at when it changes; --verify-only checks a release candidate and writes "
                     "nothing.",
-        epilog="Prints one JSON line.\noutline lists, as slide, line, and problem, each break of the slide "
-               "rules: a missing # title or subtitle, text outside every slide, a ### finding outside ## Findings, "
+        epilog="Prints one JSON line.\nmethodology-note.md, when the draft holds it, is read by the findings, "
+               "claims, markdown, and numbers checks too; its rows carry file.\n"
+               "outline lists, as slide, line, and problem, each break of the slide "
+               "rules: a missing # title or subtitle, text outside every slide, a ### finding outside ## Findings "
+               "and ## Appendix, "
                "a missing, repeated, empty, or over-15-word headline, more than five bullets except on Open questions, more than one chart, "
                "text that is no headline, bullet, chart, or notes, and a missing, repeated, or non-final **Notes:** "
-               "paragraph.\nstoryline lists the finding slides to move, those outside the longest run already in "
-               "priority/tree order, each with its expected position; unlinked_findings "
-               "names slides with no declared ledger answer, which go last and are informational.\n"
+               "paragraph; a missing, repeated, or misplaced required slide (Answer first after the title, a finding "
+               "slide in the main sequence, then How we know and Limitations and open caveats, either of which may "
+               "stand under ## Appendix instead, How we know first when both stand in the main sequence or both "
+               "under ## Appendix), its line null when missing; and a slide after ## Appendix outside it, a second "
+               "## Appendix, an appendix slide that stays in the main sequence, or an empty ## Appendix. slides "
+               "counts the main sequence's slides, title included, and the appendix's.\nstoryline lists the "
+               "finding slides to move, those outside the longest run already in priority/tree order, the main "
+               "sequence and the appendix each ranked alone, each with its expected position; when the manifest's "
+               "presentation_order is a list it ranks every finding slide instead, and storyline also lists a "
+               "malformed order, a heading it repeats or that no finding slide has, and a finding slide it misses. "
+               "unlinked_findings names slides with no declared ledger answer, which go last without a "
+               "presentation_order; it is informational.\n"
                "open_questions lists presence, placement, and exact-question-bullet problems on Open questions; "
                "open_questions_count is the required count, including parked questions and answers awaiting recheck.\n"
                "charts lists, as chart and problem, a specification numbered out of order, without "
@@ -2235,21 +2429,22 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "Claim in state.md among the results its methodology.md section cites (all represented results "
                "when it cites none), and the title and other slides that state conclusions to the strongest; "
                "How we know, Limitations and open caveats, Open questions, What changed since the last version, and Supporting "
-               "datasets are not read. It also lists a represented result without a recognized Claim, and a "
+               "datasets are not read, under ## Appendix too; methodology-note.md is held to the strongest. It also lists a represented result without a recognized Claim, and a "
                "finding whose methodology.md section is missing or whose **Claim strength:** line is missing, "
                "repeated, unrecognized, or differs from state.md, a causal design included.\nheadings lists a ### "
                "finding heading without exactly one methodology.md section or repeated in findings.md.\nmarkdown "
                "lists each form outside the Markdown subset the checks read, which could hide text or move "
                "it between slides: a heading, fence, comment, or **Claim strength:** line inside a list or quote; "
                "an indented fence or comment; a setext heading; indented code; an HTML block or inline tag; a link "
-               "reference definition; an unclosed fence or comment. Every check but numbers reads both files as "
-               "they render."
-               "\nnumbers lists, as file, line, and text, each number in findings.md or "
-               "methodology.md that no represented result's table, profile, check details, or settings round to "
-               "and the manifest's allowed_numbers does not cover by its text or a phrase around it, reading source "
-               "lines without comments or fenced code, and skipping a methodology.md **Claim strength:** line the "
-               "claims check accepts, whose numbers repeat state.md's Claim cell; numbers_problems names a missing "
-               "table, an unreadable table, profile, or evidence file, or a malformed results or allowed_numbers.\n"
+               "reference definition; an unclosed fence or comment. Every check but numbers reads the narratives "
+               "as they render."
+               "\nnumbers lists, as file, line, and text, each number in findings.md, methodology.md, or "
+               "methodology-note.md that no represented result's table, profile, check details, or settings round "
+               "to and the manifest's allowed_numbers does not cover by its text or a phrase around it, reading "
+               "source lines without comments or fenced code, and skipping a methodology.md **Claim strength:** "
+               "line the claims check accepts, whose numbers repeat state.md's Claim cell; numbers_problems names "
+               "a missing table, an unreadable table, profile, or evidence file, or a malformed results or "
+               "allowed_numbers.\n"
                "unmatched_flags lists each finding state.md flags whose exact finding and reason the manifest's "
                "revalidation_flags does not record.\nflag_entries lists a "
                "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
@@ -2652,7 +2847,6 @@ _BAD_HEADING = ("rule heading is not ## R-<area>-NNN with a lowercase area, its 
 _STRAY_HEADING = "heading after the first rule is not a ## R-<area>-NNN rule heading"
 # Every line break str.splitlines() recognizes but \n; grep -n counts only \n.
 _OTHER_BREAK = re.compile("[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
-_REVIEWED = ("findings.md", "methodology.md")
 _MATCH_CAP = 20
 _RULES_HEADER = """# Review rules
 
@@ -2663,7 +2857,8 @@ narrative lines its pattern matches.
 Add a rule only with `python3 src/awb.py review-rules add`. A rule ID, `R-<area>-NNN`, is never \
 renumbered, reused, or deleted: edit a rule's other fields in place, and retire a rule by setting its \
 severity to `retired`. A pattern is a Python regular expression in backticks, matched against each line \
-of the draft's `findings.md` and `methodology.md`, or `none` when no pattern can find the problem.
+of the draft's `findings.md`, `methodology.md`, and `methodology-note.md` when it has one, or `none` when no \
+pattern can find the problem.
 """
 
 
@@ -2790,7 +2985,7 @@ def check_review_rules(root, investigation, package) -> dict:
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"rules_file": REVIEW_RULES, "draft": _rel(root, draft), "rules": [], "problems": [], "errors": []}
     texts = {}
-    for name in _REVIEWED:
+    for name in _narratives(draft):
         try:
             texts[name] = _read_lines(draft / name)
         except (OSError, UnicodeError) as error:
@@ -2862,8 +3057,8 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
     actions = parser.add_subparsers(dest="action", required=True, metavar="{check,add}")
     check = actions.add_parser(
         "check", formatter_class=raw, help="list every rule with the draft lines its pattern matches",
-        description="List every review rule with the lines of the draft's findings.md and methodology.md "
-                    "its pattern matches. Writes nothing.",
+        description="List every review rule with the lines of the draft's findings.md, methodology.md, and "
+                    "methodology-note.md when the draft holds it, that its pattern matches. Writes nothing.",
         epilog="Prints one JSON line.\nEach rules row has id, severity, and status: matched (with matches, "
                "each file, line, and text, at most 20, and more_matches beyond), no match, no pattern (judge "
                "the rule by reading), retired, or unchecked (its problem is listed).\nA match is a candidate "
@@ -2996,7 +3191,7 @@ def provenance_gaps(record: dict) -> list[dict]:
                 walk(item, f"{path}[{index}]")
 
     for key, value in record.items():
-        if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers"}:
+        if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers", "presentation_order"}:
             walk(value, key)
     return gaps
 

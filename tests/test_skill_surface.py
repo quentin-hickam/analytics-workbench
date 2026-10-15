@@ -200,3 +200,23 @@ def test_question_add_example_accepted_and_refused_forms(text, expected):
 @pytest.mark.parametrize("path", shipped_skills(ROOT), ids=lambda path: path.parent.name)
 def test_every_question_add_example_carries_priority(path):
     question_add_priorities(path.read_text(encoding="utf-8"))
+
+
+def test_headline_checkpoint_names_both_modes_and_never_waits_unconditionally():
+    # The headline checkpoint is preview-and-wait or draft-then-review; neither the skill nor any other
+    # shipped text keeps the old unconditional wait before writing the slides.
+    package = (ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8')
+    contract = (ROOT / '.agents/skills/awb-package/references/package-contract.md').read_text(encoding='utf-8')
+    brief = (ROOT / '.agents/skills/awb-init/assets/workbench/investigation/brief.md').read_text(encoding='utf-8')
+    # The current request comes before a mode the brief recorded for an earlier package.
+    precedence = ("the mode the request states; **draft-then-review** when the request supplies the storyline or "
+                  "asks for the full draft; the mode the brief's **Audience** section records; **preview-and-wait**")
+    for text in (package, contract):
+        assert '**preview-and-wait**' in text and '**draft-then-review**' in text
+        assert precedence in ' '.join(text.split())
+    assert 'preview-and-wait' in brief and 'draft-then-review' in brief
+    retired = ('wait for their answer before expanding the slides', "and wait for the user's approval or reorder")
+    offenders = [(str(path.relative_to(ROOT)), phrase) for path in sorted((ROOT / '.agents/skills').rglob('*'))
+                 if path.is_file() and path.suffix in ('.md', '.py')
+                 for phrase in retired if phrase in ' '.join(path.read_text(encoding='utf-8').split())]
+    assert offenders == []

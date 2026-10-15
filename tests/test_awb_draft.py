@@ -50,6 +50,15 @@
 # test_claim_strength_follows_cited_results_and_records: a slide citing several results takes the weakest claim; one citing none takes the weakest represented; with no causal finding the Answer slide fails too; a missing Claim, a missing results list, and a missing or differing methodology Claim strength line each fail.
 # test_numbers_skip_a_claim_strength_line_the_claims_check_accepts: numbers on a causal Claim strength line that repeats its result's Claim cell give no numbers row, while a line continuing its paragraph is read; a line the claims check refuses, another design or no experiment named, keeps its numbers; check_numbers skips only the claim_lines it is given.
 # test_numbers_count_lines_as_the_claims_check_does_after_a_comment: a comment holding a line break that str.splitlines() sees (U+2028, form feed, NEL) keeps the numbers check's line numbers on the claims check's, so the accepted-claim skip cannot land on the next line.
+# test_methodology_note_is_checked_with_rows_naming_it: a clean methodology-note.md passes and joins the inventory; an internal name, an untraced number, causal wording above the strongest represented claim, and an HTML block in it fail check-draft and release with rows naming the file; without it check-draft reports exactly what it did before.
+# test_check_draft_counts_main_and_appendix_slides: slides counts the main sequence, title included, and the appendix apart; How we know under ## Appendix passes.
+# test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section; an appendix finding slide is held to its claim strength.
+# test_appendix_how_we_know_and_limitations_wording_is_not_read: with only an association result represented, causal wording on How we know and Limitations under ## Appendix gives no claims row, and the same wording on an appendix finding slide is refused.
+# test_presentation_order_decides_finding_order_when_set: absent or none leaves the ledger order; a non-ledger order the slides follow passes, inline markup read as the heading is; an order missing a finding, listing one twice, naming a heading no slide has, out of the slides' order, not a list, holding a blank entry, or recorded as JSON null fails storyline in both modes.
+# test_export_keeps_presentation_order: export keeps the hand-recorded presentation_order.
+# test_presentation_order_is_no_provenance_gap: a presentation_order heading that starts with Unknown is no release provenance gap, as allowed_numbers is not.
+# test_storyline_orders_main_and_appendix_findings_each_by_the_ledger: main and appendix finding slides are ranked separately, the appendix numbering on.
+# test_open_questions_follows_how_we_know_when_limitations_is_in_the_appendix: with Limitations under ## Appendix, Open questions passes after How we know and fails before it.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
 
 import hashlib
@@ -85,8 +94,23 @@ SETTINGS = (b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n"
 STALE_SETTINGS = SETTINGS.replace(b"minimum_count = 5", b"minimum_count = 6")
 RESULT = "region,late_rate,n\nW,21.349,10\nE,2.675,8\n"
 CHART_SPEC = "**Chart 1.** Horizontal bar: late share by region\n- **Data:** category: Region; value: Closed late (%)\n"
-FINDINGS = ("# Order quality\nOperations leads, all regions\n\n## Findings\n\n### Late orders rose in the west\n\n"
-            + CHART_SPEC + "\n**Notes:** The west leads the regions.\n")
+# The required slides around the finding slides: the title and Answer open the deck, How we know and
+# Limitations and open caveats follow the findings.
+OPENING = ("# Order quality\nOperations leads, all regions\n\n## Answer\n\n**Headline:** The west has the most late orders\n\n"
+           "**Notes:** The west leads the regions.\n\n## Findings\n\n")
+HOW_WE_KNOW = "\n## How we know\n\n**Headline:** Totals reconcile to the order ledger\n\n**Notes:** Orders are counted once.\n"
+LIMITATIONS = ("\n## Limitations and open caveats\n\n**Headline:** Coverage remains limited\n\n"
+               "**Notes:** Interpret with care.\n")
+
+
+def deck(slides, closing=HOW_WE_KNOW + LIMITATIONS):
+    """A findings.md around the given finding slides."""
+    return OPENING + slides + closing
+
+
+BASE = deck("### Late orders rose in the west\n\n" + CHART_SPEC + "\n**Notes:** The west leads the regions.\n",
+            HOW_WE_KNOW)
+FINDINGS = BASE + LIMITATIONS
 QUESTIONS = {"r-001": "How many claims closed late?", "r-002": "Which regions close claims late?"}
 METHODOLOGY = ("# Methodology\n\n## Findings\n\n### Late orders rose in the west\n\n"
                "**Claim strength:** association\n\n"
@@ -260,8 +284,8 @@ def test_check_draft_reports_each_helper_problem(project, capsys):
         path.unlink()
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"]
-    assert report["findings"] == [{"line": 13, "kind": "name", "text": "orders_view"},
-                                  {"line": 13, "kind": "path", "text": "inv/notes"}]
+    assert report["findings"] == [{"line": 31, "kind": "name", "text": "orders_view"},
+                                  {"line": 31, "kind": "path", "text": "inv/notes"}]
     assert report["charts"] == [{"chart": "Chart 2", "problem": "no chart file for this specification"},
                                 {"chart": "Chart 2", "problem": "no **Data:** line under the specification"}]
     assert report["headings"] == [
@@ -281,7 +305,7 @@ def test_check_draft_reports_outline_and_chart_spec_rows(project, capsys):
     for argv in (("check-draft", "inv", "pkg"), ("check-draft", "inv", "pkg", "--verify-only")):
         code, report = run(project, capsys, *argv)
         assert code == 1 and not report["passed"]
-        assert report["outline"] == [{"slide": long, "line": 6, "problem": "the headline has 16 words; keep it to 15"}]
+        assert report["outline"] == [{"slide": long, "line": 12, "problem": "the headline has 16 words; keep it to 15"}]
         assert report["charts"] == [
             {"chart": "Chart 1", "problem": "names no chart form (Pie); open the specification with one of: "
                                             "Horizontal bar, Bar with intervals, Line, Column, Stacked bar, Scatter, "
@@ -415,12 +439,12 @@ def test_check_draft_help_and_references_agree_on_the_rendered_reading(project, 
     with pytest.raises(SystemExit):
         cli.main(["check-draft", "--help"])
     help_text = " ".join(capsys.readouterr().out.split())
-    assert "Every check but numbers reads both files as they render." in help_text
+    assert "Every check but numbers reads the narratives as they render." in help_text
     assert "a question in a comment or fenced code does not count" in help_text
     helpers = (SKILLS / "awb-package/references/helpers.md").read_text()
     assert "Every draft check but `numbers` reads" in helpers and "`questions` rows" in helpers
     source = ASSETS["src/packaging/draft.py"].read_text()
-    assert "# Every draft check but numbers reads findings.md and methodology.md through `_view`" in source
+    assert "# Every draft check but numbers reads the narratives (findings.md, methodology.md, and methodology-note.md" in source
 
 
 def set_flags(project, flags):
@@ -490,12 +514,7 @@ def set_manifest(project, **fields):
     path.write_text(json.dumps({**json.loads(path.read_text()), **fields}))
 
 
-TRACED = """# Order quality, January to June 2026
-Operations leads, all regions
-
-## Findings
-
-### Late orders rose in the west
+TRACED = deck("""### Late orders rose in the west
 
 - West closed 21.3% of orders late, against 2.7% in the east.
 - Ten checks covered 3 rows; regions needed at least 5 orders.
@@ -503,7 +522,7 @@ Operations leads, all regions
 
 """ + CHART_SPEC + """
 **Notes:** The west leads the regions.
-"""
+""").replace("# Order quality\n", "# Order quality, January to June 2026\n")
 
 
 def test_check_draft_traces_narrative_numbers(project, capsys):
@@ -522,7 +541,7 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
     # A number no represented result produced fails with its file and line, in both modes and at release.
     write(draft, "findings.md", TRACED.replace("21.3%", "23.1%"))
     write(draft, "methodology.md", METHODOLOGY + "\nAbout 40 stores.\n")
-    rows = [{"file": "findings.md", "line": 8, "text": "23.1%"},
+    rows = [{"file": "findings.md", "line": 14, "text": "23.1%"},
             {"file": "methodology.md", "line": 13, "text": "40"}]
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"] and report["numbers"] == rows
@@ -540,7 +559,7 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
     code, _ = run(project, capsys, "export", "inv", "pkg", "--result", "r-002")
     assert code == 0 and manifest(project)["allowed_numbers"] == allowed  # export keeps the hand-recorded field
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
-    assert code == 1 and {"file": "findings.md", "line": 8, "text": "2.7%"} in report["numbers"]
+    assert code == 1 and {"file": "findings.md", "line": 14, "text": "2.7%"} in report["numbers"]
 
 
 def test_check_draft_reports_number_problems(project, capsys):
@@ -1900,8 +1919,8 @@ def storyline_fixture(project):
 ])
 def test_check_draft_orders_findings_from_priority_then_tree(project, capsys, headlines, misplaced):
     draft = storyline_fixture(project)
-    write(draft, "findings.md", "# Order quality\nOperations leads, all regions\n\n## Findings\n\n" +
-          "".join(f"### {headline}\n\n- Rates vary across groups.\n\n**Notes:** Compare the groups.\n\n" for headline in headlines))
+    write(draft, "findings.md", deck("".join(f"### {headline}\n\n- Rates vary across groups.\n\n**Notes:** Compare the "
+                                             "groups.\n\n" for headline in headlines)))
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert [(row["slide"], row["question"], row["expected_position"]) for row in report["storyline"]] == misplaced
     assert report["unlinked_findings"] == ["Coverage remains limited"]
@@ -1957,7 +1976,7 @@ def test_check_draft_open_questions_rows(project, capsys, required, body, placem
               "\n\n**Notes:** These answers matter.\n") if body is not None else ""
     parts = {"after": limitations + opened + changed, "before": opened + limitations + changed,
              "late": limitations + changed + opened, "twice": limitations + opened + opened + changed}
-    write(draft, "findings.md", FINDINGS + parts[placement])
+    write(draft, "findings.md", BASE + parts[placement])
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     if problem:
         assert code == 1 and any(problem in row["problem"] for row in report["open_questions"]), report
@@ -1985,7 +2004,7 @@ def test_open_questions_includes_parked_and_recheck_without_truncation(project, 
     record = manifest(project)
     record["revalidation_flags"] = [{"finding": "West volume is stable", "reason": "Changed input", "represented_in": "none", "disposition": "none"}]
     write(draft, "manifest.json", json.dumps(record))
-    before_open = FINDINGS + "\n## Limitations and open caveats\n\n**Headline:** Coverage remains limited\n\n**Notes:** Interpret carefully.\n"
+    before_open = BASE + "\n## Limitations and open caveats\n\n**Headline:** Coverage remains limited\n\n**Notes:** Interpret carefully.\n"
     opened = "\n## Open questions\n\n**Headline:** These answers still matter\n\n" + "\n".join("- " + text for text in questions) + "\n\n**Notes:** Confirm the unanswered questions.\n"
     write(draft, "findings.md", before_open + opened)
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
@@ -2013,10 +2032,9 @@ def test_open_questions_includes_parked_and_recheck_without_truncation(project, 
 ])
 def test_storyline_citation_grammar_reports_unlinked_text(project, capsys, citation, unlinked):
     draft = storyline_fixture(project)
-    write(draft, "findings.md", "# Order quality\nOperations leads, all regions\n\n## Findings\n\n"
-          "### Customer rates differ\n\n**Notes:** Compare customers.\n\n"
-          "### Regional rates differ\n\n**Notes:** Compare regions.\n\n"
-          "### Coverage remains limited\n\n**Notes:** Interpret carefully.\n")
+    write(draft, "findings.md", deck("### Customer rates differ\n\n**Notes:** Compare customers.\n\n"
+                                     "### Regional rates differ\n\n**Notes:** Compare regions.\n\n"
+                                     "### Coverage remains limited\n\n**Notes:** Interpret carefully.\n"))
     path = draft / "methodology.md"
     if citation is None:
         (project / "investigations/inv/evidence/r-001.json").unlink()
@@ -2036,8 +2054,7 @@ def test_storyline_citation_grammar_reports_unlinked_text(project, capsys, citat
 ])
 def test_storyline_refuses_unreadable_or_invalid_declared_answers(project, capsys, settings_text, empty_ledger, expected):
     draft = storyline_fixture(project)
-    write(draft, "findings.md", "# Order quality\nOperations leads, all regions\n\n## Findings\n\n"
-          "### Regional rates differ\n\n**Notes:** Compare the regions.\n")
+    write(draft, "findings.md", deck("### Regional rates differ\n\n**Notes:** Compare the regions.\n"))
     # Use the alternative settings file named in the evidence, rather than assume settings.toml.
     evidence = project / "investigations/inv/evidence/r-001.json"
     recorded = json.loads(evidence.read_text())
@@ -2056,9 +2073,8 @@ def test_storyline_should_precedes_could_and_ties_keep_order(project, capsys):
     path = project / "investigations/inv/settings.toml"
     path.write_text(path.read_text().replace('answers = ["Q-001", "Q-002"]', 'answers = ["Q-001"]')
                     .replace('answers = ["Q-003"]', 'answers = ["Q-004"]'))
-    write(draft, "findings.md", "# Order quality\nOperations leads, all regions\n\n## Findings\n\n"
-          "### Customer rates differ\n\n**Notes:** Compare customers.\n\n"
-          "### Regional rates differ\n\n**Notes:** Compare regions.\n")
+    write(draft, "findings.md", deck("### Customer rates differ\n\n**Notes:** Compare customers.\n\n"
+                                     "### Regional rates differ\n\n**Notes:** Compare regions.\n"))
     _, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert [(row["slide"], row["question"], row["expected_position"]) for row in report["storyline"]] == [
         ("Customer rates differ", "Q-004", 2)]
@@ -2066,3 +2082,202 @@ def test_storyline_should_precedes_could_and_ties_keep_order(project, capsys):
     path.write_text(path.read_text().replace('answers = ["Q-004"]', 'answers = ["Q-001"]'))
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert report["storyline"] == [] and code == 0, report
+
+
+NOTE = """# How the analysis was done
+
+Operations leads, all regions, January to June 2026.
+
+## Sources
+
+- The order extract from the operations team.
+
+## Method
+
+- Orders are counted once.
+"""
+NOTE_ADDITIONS = ("\n- Counts come from orders_view.\n- About 40 stores took part.\n"
+                  "- Discounts drive fewer late orders.\n\n<div>Draft only.</div>\n")
+
+
+def test_methodology_note_is_checked_with_rows_naming_it(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    # One association result is represented, so causal wording anywhere in the note is above its strength.
+    set_manifest(project, results=[{"result_id": "r-001", "evidence": "investigations/inv/evidence/r-001.json",
+                                    "question": QUESTIONS["r-001"]}])
+    code, before = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and before["passed"]
+    write(draft, "methodology-note.md", NOTE)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"], report
+    assert "methodology-note.md" in [row["path"] for row in manifest(project)["inventory"]]
+    write(draft, "methodology-note.md", NOTE + NOTE_ADDITIONS)
+    first = len(NOTE.splitlines()) + 2
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and not report["passed"]
+    assert report["findings"] == [{"file": "methodology-note.md", "line": first, "kind": "name", "text": "orders_view"}]
+    assert report["numbers"] == [{"file": "methodology-note.md", "line": first + 1, "text": "40"}]
+    assert report["claims"] == [{
+        "file": "methodology-note.md", "line": first + 2, "section": "Method", "phrase": "drive",
+        "claim": "association", "results": ["r-001"], "problem": "causal wording above the association claim "
+        "strength; reword it, since only an experiment or an identified natural experiment supports a causal claim"}]
+    assert report["markdown"] == [{"file": "methodology-note.md", "line": first + 4, "problem":
+                                   f"unsupported Markdown: an HTML block at line {first + 4}; rewrite as Markdown text"}]
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
+    # Without the note, check-draft reports exactly what it did before the note was written.
+    (draft / "methodology-note.md").unlink()
+    code, after = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and after == before
+
+
+def test_check_draft_counts_main_and_appendix_slides(project, capsys):
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["slides"] == {"main": 5, "appendix": 0}
+    draft = project / "deliveries/inv/pkg/draft"
+    write(draft, "findings.md", BASE.replace(HOW_WE_KNOW, "") + LIMITATIONS + "\n## Appendix\n"
+          + HOW_WE_KNOW.replace("## How we know", "### How we know"))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["slides"] == {"main": 4, "appendix": 1} and report["outline"] == [], report
+
+
+def appendix_deck(findings, slide, closing):
+    """findings with `slide` cut from ## Findings and placed, with `closing`, under ## Appendix."""
+    return findings.replace(slide, "") + "\n## Appendix\n\n" + slide + closing
+
+
+def test_appendix_slides_are_checked_like_main_slides(project, capsys):
+    west = DECK_FINDINGS[DECK_FINDINGS.index(WEST):DECK_FINDINGS.index("### Discounts")]
+    how = DECK_FINDINGS[DECK_FINDINGS.index("## How we know"):DECK_FINDINGS.index("## Limitations")]
+    moved = appendix_deck(DECK_FINDINGS.replace(how, ""), west, "\n" + how.replace("## How", "### How"))
+    # How we know needs no methodology section from the appendix too.
+    claim_draft(project, moved)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["headings"] == [] and report["claims"] == [], report
+    # An appendix finding slide is still held to its claim strength.
+    claim_draft(project, moved.replace(WEST_BULLET, "- The new carrier drives the rise to 21%."))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    text = moved.replace(WEST_BULLET, "- The new carrier drives the rise to 21%.")
+    assert code == 1 and [(row["section"], row["phrase"], row["line"]) for row in report["claims"]] == [
+        (WEST_DISCOUNT, "drives", text[:text.index("drives")].count("\n") + 1)]
+
+
+def test_appendix_how_we_know_and_limitations_wording_is_not_read(project, capsys):
+    # Only the association result is represented, so causal wording on a read slide is refused.
+    discount = DECK_FINDINGS[DECK_FINDINGS.index("### Discounts"):DECK_FINDINGS.index("## How we know")]
+    closing = DECK_FINDINGS[DECK_FINDINGS.index("## How we know"):]
+    findings = (DECK_FINDINGS.replace(discount, "").replace(closing, "")
+                .replace("Discounts drive 4 points fewer late orders", "Late orders rose in the west"))
+    methodology = CLAIM_METHODOLOGY[:CLAIM_METHODOLOGY.index("### Discounts")]
+    moved = findings + "## Appendix\n\n" + closing.replace("## ", "### ")
+    claim_draft(project, moved, methodology, results=("r-009",))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["claims"] == [], report
+    assert report["slides"] == {"main": 3, "appendix": 2}, report
+    # The same wording on an appendix finding slide is read.
+    slide = closing.replace("## How we know", "### Feed outage").replace("**Headline:** Totals reconcile to the "
+                                                                          "ledger\n\n", "")
+    slide = slide[:slide.index("## Limitations")]
+    claim_draft(project, moved + "\n" + slide, methodology + "\n### Feed outage\n\n" + WEST_CLAIM
+                + "\n\nResult `r-009`.\n", results=("r-009",))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and [(row["section"], row["phrase"]) for row in report["claims"]] == [
+        ("Feed outage", "due to")], report
+
+
+ORDER = ["Regional rates differ", "Coverage remains limited", "Customer rates differ"]
+NULL = object()  # presentation_order recorded as JSON null, which is malformed rather than absent
+
+
+def ordered_deck(project, headlines, order):
+    draft = storyline_fixture(project)
+    write(draft, "findings.md", deck("".join(f"### {headline}\n\n- Rates vary across groups.\n\n**Notes:** Compare "
+                                             "the groups.\n\n" for headline in headlines)))
+    if order is not None:
+        set_manifest(project, presentation_order=None if order is NULL else order)
+    return draft
+
+
+@pytest.mark.parametrize("order, rows", [
+    # Without an order the ledger decides: Customer answers the must root, so it leads.
+    (None, [("Customer rates differ", 1, "finding slide is out of place; move it to finding position 1")]),
+    ("none", [("Customer rates differ", 1, "finding slide is out of place; move it to finding position 1")]),
+    (ORDER, []),
+    (["Regional rates differ", "Coverage remains limited"],
+     [("Customer rates differ", None, "presentation_order does not list this finding slide; add its heading where "
+                                      "the user placed it")]),
+    (ORDER + ["Regional rates differ"],
+     [("Regional rates differ", None, "presentation_order lists this heading 2 times; keep it once")]),
+    (ORDER + ["West volume is flat"],
+     [("West volume is flat", None, "presentation_order names no finding slide with this heading; give the "
+                                    "slide's current heading or remove it")]),
+    (["Customer rates differ", "Regional rates differ", "Coverage remains limited"],
+     [("Customer rates differ", 1, "finding slide is out of place in presentation_order; move it to finding "
+                                   "position 1")]),
+    (["Regional rates differ", "Coverage remains limited", "Customer rates **differ**"], []),
+    ("Regional rates differ",
+     [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
+                   "or none")]),
+    ([ORDER[0], ORDER[1], ""],
+     [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
+                   "or none")]),
+    (NULL,
+     [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
+                   "or none")]),
+], ids=["absent", "none", "followed", "missing", "repeated", "unknown", "moved", "markup", "not a list", "blank",
+        "null"])
+def test_presentation_order_decides_finding_order_when_set(project, capsys, order, rows):
+    ordered_deck(project, ORDER, order)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert [(row["slide"], row.get("expected_position"), row["problem"]) for row in report["storyline"]] == rows
+    assert report["unlinked_findings"] == ["Coverage remains limited"]
+    assert code == (1 if rows else 0) and report["passed"] is (not rows), report
+    _, verified = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert verified["storyline"] == report["storyline"]
+
+
+def test_export_keeps_presentation_order(project, capsys):
+    ordered_deck(project, ORDER, ORDER)
+    code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    assert code == 0 and report["written"] and manifest(project)["presentation_order"] == ORDER
+
+
+def test_presentation_order_is_no_provenance_gap():
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_order_gaps")
+    record = {"presentation_order": ["Unknown regions hold few late orders"],
+              "producing_commit": {"unknown": "no Git history"}}
+    assert draft.provenance_gaps(record) == [{"field": "producing_commit", "reason": "no Git history"}]
+
+
+def test_storyline_orders_main_and_appendix_findings_each_by_the_ledger(project, capsys):
+    draft = storyline_fixture(project)
+    slides = {headline: f"### {headline}\n\n- Rates vary across groups.\n\n**Notes:** Compare the groups.\n\n"
+              for headline in ORDER}
+    text = deck(slides["Regional rates differ"]) + "\n## Appendix\n\n" + slides["Customer rates differ"] \
+        + slides["Coverage remains limited"]
+    write(draft, "findings.md", text)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["storyline"] == [] and report["outline"] == [], report
+    # Within the appendix the ledger order still applies.
+    write(draft, "findings.md", deck(slides["Regional rates differ"]) + "\n## Appendix\n\n"
+          + slides["Coverage remains limited"] + slides["Customer rates differ"])
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert [(row["slide"], row["expected_position"]) for row in report["storyline"]] == [("Coverage remains limited", 3)]
+
+
+def test_open_questions_follows_how_we_know_when_limitations_is_in_the_appendix(project, capsys):
+    provenance = load(project / "src/provenance.py", "ledger_appendix_fixture")
+    provenance.add_question(project, "inv", "What caused the delay?", kind="context", answerer="user",
+                            origin="scope", priority="must")
+    opened = "\n## Open questions\n\n**Headline:** Some questions remain\n\n- What caused the delay?\n\n" \
+             "**Notes:** These answers matter.\n"
+    appendix = "\n## Appendix\n" + LIMITATIONS.replace("## Limitations", "### Limitations")
+    draft = project / "deliveries/inv/pkg/draft"
+    write(draft, "findings.md", BASE + opened + appendix)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["open_questions"] == [] and report["outline"] == [], report
+    write(draft, "findings.md", BASE.replace(HOW_WE_KNOW, opened + HOW_WE_KNOW) + appendix)
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert [row["problem"] for row in report["open_questions"]] == [
+        "place Open questions immediately after Limitations and open caveats, or, with that slide in the appendix, "
+        "immediately after the last finding, Implications, or How we know slide"]
