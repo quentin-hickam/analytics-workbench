@@ -677,8 +677,9 @@ def heading_anchors(text):
     printable ASCII, `*`, `[`, `<`, an entity such as `&amp;`, or a `_` not between
     two letters or digits, since the rule above is GitHub's for plain ASCII text and
     these render as other text. Known limits: a repeated heading's `-1` suffix and Setext
-    headings are not produced, so a link to one fails; an indented code block's lines
-    are read like any other.
+    headings are not produced, and a heading inside a blockquote gives no anchor, so a
+    link to one fails; an indented code block's lines are read like any other, so a
+    ``` line inside one opens a fence that hides the headings after it.
     """
     anchors, fence = set(), None
     for line in text.split('\n'):
