@@ -16,7 +16,7 @@ Before building the deck, check for the conditions below. When one holds, ask th
 
 - **Audience or decision differs.** The requester names readers or a decision that differ from the deck's subtitle line and **Answer** slide. Example: "The deck is written for regional operations managers deciding on staffing. Is it for them, or for the finance committee? Default: regional operations managers."
 - **A slide will not fit.** A slide's bullets and chart cannot fit at the minimum text sizes below. Example: "The third finding slide has five bullets and a chart and will not fit at 18 pt. Should I split it into two slides with the same headline continued? Default: yes, split it."
-- **A chart cannot be drawn as specified.** Its chart file lacks a column the specification names, or the form cannot show those columns. Example: "Chart 2 asks for intervals but its file has no interval columns, so I cannot draw it as specified. Default: build the rest, leave Chart 2 as a marked placeholder, and report the deck as incomplete until the analyst corrects the package."
+- **A chart cannot be drawn as specified.** Its chart file lacks a column the specification names, the form cannot show those columns, or a Stacked bar's file holds a part below zero. Example: "Chart 2 asks for intervals but its file has no interval columns, so I cannot draw it as specified. Default: build the rest, leave Chart 2 as a marked placeholder, and report the deck as incomplete until the analyst corrects the package."
 - **A caveat's effect on a headline is ambiguous.** It is unclear whether a caveat narrows, weakens, or leaves intact the headline it sits under. Example: "The late-closure headline carries a caveat about missing March records. Keep the headline as written with the caveat bullet beneath it? Default: yes."
 - **A slide needs method context that only `methodology.md` has.** A reader could not trust or interpret the slide from the outline alone. Example: "The second finding depends on how repeat cases are counted, which only the internal notes explain. Should I flag this for the analyst to add? Default: yes, and build now from what the outline says, with the gap noted to you."
 
@@ -41,15 +41,15 @@ The specification names one of these forms. Its **Data:** line names every colum
 
 | Form | Use for | Data roles | Build |
 | --- | --- | --- | --- |
-| Horizontal bar | Ranking or comparing categories | `category`, one or more `value`, or one `value` with a `series` | Clustered bar, categories in the file's order, value axis from zero |
+| Horizontal bar | Ranking or comparing categories | `category`, one or more `value`, or one `value` with a `series` | Clustered bar, categories in the file's order, bars from zero |
 | Bar with intervals | Estimates with intervals across groups | `category`, `value`, `lower`, `upper` | Clustered bar with custom error bars from the file's lower and upper columns |
 | Line | Change over time, a few series | `category` (the period), one or more `value`, or one `value` with a `series` | Line chart, time on the horizontal axis; label line ends instead of a legend when there are four series or fewer |
-| Column | A few categories with short labels, or counts by period | `category`, one or more `value`, or one `value` with a `series` | Clustered column, value axis from zero |
-| Stacked bar | Part-to-whole across categories | `category`, one or more `value`, or one `value` with a `series` | 100% stacked bar; use instead of a pie whenever there are more than three parts |
+| Column | A few categories with short labels, or counts by period | `category`, one or more `value`, or one `value` with a `series` | Clustered column, columns from zero |
+| Stacked bar | Part-to-whole across categories, each part zero or more | `category`, one or more `value`, or one `value` with a `series` | 100% stacked bar; use instead of a pie whenever there are more than three parts |
 | Scatter | Relationship between two measures | `x`, `y`, and optionally `label` and `fit` | Scatter chart; a fitted line only when the file carries its values |
 | Table | About six numbers or fewer, or a two-way grid of values | one `column` per table column, in order | Table, numbers right-aligned, units in the header row, optional color fill in one hue by value |
 
-A `series` column splits one `value` column into a series per distinct entry, in the order each first appears in the file. Never use 3D, a second value axis, or decorative effects. Put a second measure in its own chart rather than on a second axis.
+A `series` column splits one `value` column into a series per distinct entry, in the order each first appears in the file. Only Bar with intervals takes `lower` and `upper` columns and draws intervals; a Table may show the bounds as columns of their own. Never use 3D, a second value axis, or decorative effects. Put a second measure in its own chart rather than on a second axis.
 
 ### Style
 
@@ -69,7 +69,7 @@ A `series` column splits one `value` column into a series per distinct entry, in
 
 ### Honest display
 
-- Bars and columns start at zero. A line chart uses a non-zero baseline only when **Axis:** says so; keep the reason in the source line.
+- Bars and columns start at zero. A Horizontal bar, Bar with intervals, Column, or Line value axis spans zero and every value and interval bound in the file, negative values included, unless a line chart's **Axis:** says `non-zero baseline` and gives the reason; keep that reason in the source line. Any other wording keeps zero on the axis. A Stacked bar's axis runs from 0 to 100%, so each part is zero or more.
 - Draw intervals whenever the file carries them, and state what they mean in the source line from **Interval:**.
 - Keep every category, period, and outlier the file holds, including results that contradict the headline.
 - Charts across the deck that show the same measure use the same scale unless **Axis:** says otherwise.

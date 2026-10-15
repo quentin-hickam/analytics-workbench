@@ -54,7 +54,7 @@ Report:
 - unresolved decisions, file conflicts, and files left for the user to decide;
 - any host instruction file from step 1, with its import line;
 - installer items needing attention;
-- if the host's MCP status has no `awb` registration, offer in one line the entry and destination that `python3 <skill-directory>/scripts/install_helpers.py --mcp-config <host>` (`copilot`, `claude`, or `codex`) prints, run with a stable Python 3.10+ interpreter outside any project virtual environment, with any interpreter warning. Leave merging user configuration to the user. If registered but unavailable, report the host's diagnostic instead;
+- if the host's MCP status has no `awb` registration, offer in one line the host's registration command that `python3 <skill-directory>/scripts/install_helpers.py --mcp-config <host>` (`copilot`, `claude`, or `codex`) prints, run with a stable Python 3.10+ interpreter outside any project virtual environment, with any interpreter warning, and its printed entry and destination as the fallback. Leave running the command and merging user configuration to the user. If registered but unavailable, report the host's diagnostic instead;
 - which lazy directories were deferred;
 - how work continues: a new question or scope change through `awb-scope`, analysis through normal requests, a package only when the user asks `awb-package` for one; and
 - the active investigation from `awb-scope`'s report, or that none exists, followed by a suggestion to use `awb-status` to see where things stand and what to ask next.

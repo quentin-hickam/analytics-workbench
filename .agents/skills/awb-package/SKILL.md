@@ -77,7 +77,7 @@ Once the narratives and flags are complete, run the review in [references/review
 
 Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it.
 
-A `numbers` row is a number no represented result records. Repair it by the first of these that fits:
+A `numbers` row is a number no represented result records. A `numbers` row on a `methodology.md` **Claim strength:** line that the `claims` check refuses clears once that `claims` row is repaired, so repair that row first and never list its numbers in `allowed_numbers`. Repair any other `numbers` row by the first of these that fits:
 
 1. It comes from a recorded result the draft relies on but `export` was not given: rerun `export` as step 4 says, passing that result too. `allowed_numbers` never stands in for representing a result.
 2. A represented result records it at another value or precision: rewrite it from the recorded value.

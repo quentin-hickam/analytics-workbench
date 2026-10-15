@@ -9,7 +9,9 @@
 # test_appendix_rows: text before the appendix's first slide, a ## slide after it, a main-sequence slide placed in it, an empty appendix, an appendix slide without its headline, every finding moved into it, a ### finding slide under a ## Findings reopened after it, a second ## Appendix, and Limitations before How we know in it give their rows.
 # test_chart_data_reads_roles: role: header pairs in order, case-insensitive roles, headers kept whole, colons in a header kept.
 # test_check_charts_every_form_passes: a specification in each of the seven forms, its Data line naming that form's roles, and a file with those columns passes.
-# test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, a column the file lacks, and a file column no role names give one row each.
+# test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, a column the file lacks, and a file column no role names give one row each; an interval role on a form without intervals says only a Bar with intervals draws them, and an unnamed column there says so if it holds interval bounds.
+# test_chart_fields_read_past_a_nested_item: an item nested under a field is kept out of the fields and the bullets and reported, and the fields after it still count; a blank line before the nested item changes none of this; a later paragraph in a field is reported, after a nested item too, and the fields after it still count; a paragraph at a nested specification's own depth is outside the fields; a field-named item back at a shallower depth is a bullet.
+# test_check_draft_help_lists_every_chart_row: the check-draft --help epilog names the unnamed-column and field-list chart rows.
 
 import importlib.util
 from pathlib import Path
@@ -423,7 +425,21 @@ def test_check_charts_every_form_passes(tmp_path):
     ("Column", "category: Region; value: Cases; Cases", "Region,Cases\nW,1\n",
      "**Data:** entry 'Cases' is not role: column header"),
     ("Column", "category: Region; value: Cases; lower: Low", "Region,Cases,Low\nW,1,0\n",
-     "**Data:** role lower is not one a Column takes (category, value, series)"),
+     "**Data:** role lower is not one a Column takes (category, value, series); a Column draws no intervals, so "
+     "interval columns need a Bar with intervals"),
+    ("Line", "category: Month; value: Rate (%); lower: Lower (%); upper: Upper (%)",
+     "Month,Rate (%),Lower (%),Upper (%)\nJan,2,1,3\n",
+     ["**Data:** role lower is not one a Line takes (category, value, series); a Line draws no intervals, so "
+      "interval columns need a Bar with intervals",
+      "**Data:** role upper is not one a Line takes (category, value, series); a Line draws no intervals, so "
+      "interval columns need a Bar with intervals"]),
+    ("Line", "category: Month; value: Rate (%)", "Month,Rate (%),Lower (%)\nJan,2,1\n",
+     "chart-1.csv column 'Lower (%)' is named by no **Data:** role; name it by a role a Line takes (category, value, "
+     "series), or export the chart without it; if it holds interval bounds, a Line draws none, so use a Bar with "
+     "intervals"),
+    ("Scatter", "x: Spend; y: Late", "Spend,Late,Store\n1,2,A\n",
+     "chart-1.csv column 'Store' is named by no **Data:** role; name it by a role a Scatter takes (x, y, label, "
+     "fit), or export the chart without it"),
     ("Line", "category: Month; category: Region; value: Cases", "Month,Region,Cases\nJan,W,1\n",
      "**Data:** names more than one category column"),
     ("Bar with intervals", "category: Region; value: Rate; lower: Low", "Region,Rate,Low\nW,2,1\n",
@@ -434,13 +450,77 @@ def test_check_charts_every_form_passes(tmp_path):
     ("Table", "column: Region; column: Late (%)", "Region\nW\n",
      "chart-1.csv has no column 'Late (%)', which **Data:** names"),
     ("Horizontal bar", "category: Region; value: Closed late (%)", "Region,Closed late (%),Orders (n)\nW,21,90\n",
-     "chart-1.csv column 'Orders (n)' is named by no **Data:** role; name it, or export the chart without it"),
+     "chart-1.csv column 'Orders (n)' is named by no **Data:** role; name it by a role a Horizontal bar takes "
+     "(category, value, series), or export the chart without it; if it holds interval bounds, a Horizontal bar "
+     "draws none, so use a Bar with intervals"),
 ])
 def test_check_charts_spec_rows(tmp_path, form, data, content, problem):
     text = f"### Slide\n\n**Chart 1.** {form}: a comparison\n" + (f"- **Data:** {data}\n" if data else "")
     path = package(tmp_path, text, {1: content})
-    assert draft.check_charts(path, tmp_path / "charts") == [{"chart": "Chart 1", "problem": problem}]
+    assert draft.check_charts(path, tmp_path / "charts") == [
+        {"chart": "Chart 1", "problem": text} for text in (problem if isinstance(problem, list) else [problem])]
     if form == "Pie":
         package(tmp_path, text.replace("Pie: a comparison", "a comparison"), {1: content})
         assert draft.check_charts(path, tmp_path / "charts")[0]["problem"].startswith("names no chart form (a "
                                                                                       "comparison)")
+
+
+def test_chart_fields_read_past_a_nested_item(tmp_path):
+    text = ("### Slide\n\n- West.\n\n**Chart 1.** Line: monthly cases\n- **Data:** category: Month; value: Cases\n"
+            "  - Cases are counted at closure.\n- **Source:** the claims team\n- **Alt text:** Cases rose.\n\n"
+            "  **Caveat:** March is partial.\n\n**Notes:** N\n")
+    path = package(tmp_path, text, {1: "Month,Cases\nJan,4\n"})
+    outline = draft.read_outline(path)
+    (chart,), (slide,) = outline["charts"], outline["slides"]
+    assert chart["fields"] == {"Data": "category: Month; value: Cases", "Source": "the claims team",
+                               "Alt text": "Cases rose. Caveat: March is partial."}
+    assert chart["inside"] == [{"line": 7, "field": "Data", "kind": "item"},
+                               {"line": 11, "field": "Alt text", "kind": "paragraph"}]
+    assert [b["text"] for b in slide["bullets"]] == ["West."] and slide["extra"] == []
+    assert draft.check_charts(path, tmp_path / "charts") == [
+        {"chart": "Chart 1", "problem": "an item at line 7 is nested under the **Data:** field; a field is one "
+                                        "paragraph, so join it to the field or move it below the specification as a "
+                                        "slide bullet, after a blank line"},
+        {"chart": "Chart 1", "problem": "a paragraph at line 11 continues the **Alt text:** field; a field is one "
+                                        "paragraph, so join it to the field or move it below the specification as a "
+                                        "slide bullet, after a blank line"}]
+    # After a blank line a nested item still renders inside the field, so it is reported and the fields go on.
+    loose = draft.parse_outline("# T\nSub\n\n## A\n\n**Headline:** H\n\n- West.\n\n**Chart 1.** Line: x\n"
+                                "- **Data:** category: M; value: C\n\n  - Cases are counted at closure.\n"
+                                "- **Source:** s\n- **Alt text:** a\n\n**Notes:** N\n")
+    assert loose["charts"][0]["fields"] == {"Data": "category: M; value: C", "Source": "s", "Alt text": "a"}
+    assert loose["charts"][0]["inside"] == [{"line": 13, "field": "Data", "kind": "item"}]
+    assert loose["slides"][0]["bullets"] == [{"line": 8, "text": "West.", "sub": []}]
+    # A paragraph back at the field's depth after a nested item renders inside the field too, so it is reported
+    # and the fields go on; one at the depth of a nested specification's own item is outside the fields.
+    after = draft.parse_outline("# T\nSub\n\n## A\n\n**Headline:** H\n\n**Chart 1.** Line: x\n"
+                                "- **Data:** category: M; value: C\n  - Cases are counted at closure.\n\n"
+                                "  More on the data.\n- **Source:** s\n- **Alt text:** a\n\n- West.\n"
+                                "  - **Chart 2.** Table: grid\n    - **Data:** column: Region\n"
+                                "      - Regions as filed.\n\n      More on the regions.\n    - **Alt text:** Grid.\n\n"
+                                "    Under the specification.\n\n**Notes:** N\n")
+    first, second = after["charts"]
+    assert first["fields"] == {"Data": "category: M; value: C", "Source": "s", "Alt text": "a"}
+    assert first["inside"] == [{"line": 10, "field": "Data", "kind": "item"},
+                               {"line": 12, "field": "Data", "kind": "paragraph"}]
+    assert second["fields"] == {"Data": "column: Region", "Alt text": "Grid."}
+    assert second["inside"] == [{"line": 19, "field": "Data", "kind": "item"},
+                                {"line": 21, "field": "Data", "kind": "paragraph"}]
+    assert after["slides"][0]["bullets"] == [{"line": 16, "text": "West.", "sub": []}]
+    assert after["slides"][0]["extra"] == [{"line": 24, "text": "Under the specification."}]
+    # A field-named item back at a shallower depth renders outside the specification, so it is a bullet.
+    nested = draft.parse_outline("# T\nSub\n\n## A\n\n- West.\n  - **Chart 1.** Table: grid\n"
+                                 "    - **Data:** column: Region\n      - Regions as filed.\n"
+                                 "    - **Alt text:** Grid.\n- **Source:** the claims team\n")
+    slide = nested["slides"][0]
+    assert nested["charts"][0]["fields"] == {"Data": "column: Region", "Alt text": "Grid."}
+    assert nested["charts"][0]["inside"] == [{"line": 9, "field": "Data", "kind": "item"}]
+    assert [b["text"] for b in slide["bullets"]] == ["West.", "Source: the claims team"]
+
+
+def test_check_draft_help_lists_every_chart_row(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        draft.cli_check_draft(tmp_path, ["--help"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "a column of the file that it names by no role" in help_text
+    assert "an item nested under a field or a second paragraph in one" in help_text
