@@ -222,6 +222,280 @@ def test_headline_checkpoint_names_both_modes_and_never_waits_unconditionally():
     assert offenders == []
 
 
+AGENTS = ROOT / '.agents/skills/awb-init/assets/workbench/AGENTS.md'
+
+
+def section(text, heading):
+    """Accepted input: LF Markdown text holding exactly one line that is `heading`
+    itself, such as `## Conversation`, at column 0. Returns the lines after it up to
+    the next heading of its level or above (one to as many `#` as it has, then a
+    space), or to the end. Refuse a heading argument that is not `#` marks, a space,
+    and text, and a heading line that is absent or repeated, with ValueError. Known
+    limits: headings inside code fences are read as headings; Setext headings are
+    not headings.
+    """
+    lines = text.split('\n')
+    level = len(heading) - len(heading.lstrip('#'))
+    if not 1 <= level <= 6 or heading[level:level + 1] != ' ' or not heading[level + 1:].strip():
+        raise ValueError('expected an ATX heading such as "## Conversation"')
+    starts = [index for index, line in enumerate(lines) if line == heading]
+    if len(starts) != 1:
+        raise ValueError(f'expected exactly one {heading!r} line, found {len(starts)}')
+    body = []
+    for line in lines[starts[0] + 1:]:
+        marks = len(line) - len(line.lstrip('#'))
+        if 1 <= marks <= level and line[marks:marks + 1] == ' ':
+            break
+        body.append(line)
+    return '\n'.join(body)
+
+
+@pytest.mark.parametrize(('text', 'heading', 'expected'), [
+    ('# T\n## A\none\n## B\ntwo\n', '## A', 'one'),
+    ('## A\none\n### Sub\nkept\n## B\n', '## A', 'one\n### Sub\nkept'),
+    ('## A\none\n# Top\nlater\n', '## A', 'one'),
+    ('## A\none\n#hashtag line\n', '## A', 'one\n#hashtag line\n'),
+    ('## 5. Report\n- a\n', '## 5. Report', '- a\n'),
+    ('## B\ntwo\n', '## A', None),
+    ('## A\none\n## A\ntwo\n', '## A', None),
+    (' ## A\none\n', '## A', None),
+    ('## A\n', 'A', None),
+    ('## A\n', '##A', None),
+    ('## \n', '## ', None),
+    ('####### A\n', '####### A', None),
+])
+def test_section_accepted_and_refused_forms(text, heading, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            section(text, heading)
+    else:
+        assert section(text, heading) == expected
+
+
+FOOTER_RULE = 'A turn that changed workbench records ends with'
+
+
+def footer_example(text):
+    """Accepted input: LF text with exactly one line that starts with FOOTER_RULE and
+    holds exactly one `For example: `; returns what follows it on that line, stripped
+    and nonempty. Refuse no or several footer lines, a footer line without exactly one
+    `For example: `, and an empty example with ValueError. Other lines are ignored.
+    """
+    rules = [line for line in text.split('\n') if line.startswith(FOOTER_RULE)]
+    if len(rules) != 1:
+        raise ValueError(f'expected one footer rule line, found {len(rules)}')
+    parts = rules[0].split('For example: ')
+    if len(parts) != 2 or not parts[1].strip():
+        raise ValueError('the footer rule needs exactly one nonempty "For example: "')
+    return parts[1].strip()
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    (FOOTER_RULE + ' one line. For example: Your two questions: 1 answered · next: explore.\n',
+     'Your two questions: 1 answered · next: explore.'),
+    ('Intro.\n\n' + FOOTER_RULE + ' a line. For example: next: clean the data. \nAfter.\n',
+     'next: clean the data.'),
+    ('No footer here.\n', None),
+    (FOOTER_RULE + ' a line.\n', None),
+    (FOOTER_RULE + ' a line. For example: \n', None),
+    (FOOTER_RULE + ' For example: a. For example: b.\n', None),
+    (FOOTER_RULE + ' a. For example: a.\n' + FOOTER_RULE + ' b. For example: b.\n', None),
+    ('  ' + FOOTER_RULE + ' a line. For example: a.\n', None),
+])
+def test_footer_example_accepted_and_refused_forms(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            footer_example(text)
+    else:
+        assert footer_example(text) == expected
+
+
+def test_record_footer_example_counts_the_users_questions_not_ledger_rows():
+    # The footer once taught "Questions: answered 1 · opened 2 (1 needs you)": ledger tallies that
+    # counted every sub-question and announced a question needing the user without asking it.
+    example = footer_example(AGENTS.read_text(encoding='utf-8'))
+    for ledger_count in ('Questions:', 'opened', 'needs you'):
+        assert ledger_count not in example
+    assert not re.search(r'\b(answered|opened|added|open)\s+\d', example), example
+    assert example.startswith('Your ') and ' questions: ' in example
+
+
+def test_conversation_rules_ask_inline_state_impact_and_claim_no_attachment():
+    conversation = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Conversation').split())
+    # A pause is a plain decision request, asked in the message that needs it.
+    assert 'When you need the user, ask in that message for a plain decision, ' \
+           'with your recommendation and the alternative' in conversation
+    assert 'never send them to a skill or instruction file' in conversation
+    # An environment or tool limit is reported by its impact, or not at all.
+    assert 'Report an environment or tool limit only when it affects the user: ' \
+           'whether they must act, and what the workbench does instead.' in conversation
+    # Files are named by path; nothing is attached.
+    assert 'giving file paths; never say a file was attached or sent.' in conversation
+
+
+def test_first_pass_answers_keep_to_the_evidence():
+    invariants = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Analytical invariants').split())
+    # A saved query's figure is exploration until run.py records it as a result.
+    assert "can become a finding; present other query output, saved queries' too, as exploration" in invariants
+    for rule in ('offer an untested explanation as a question, not an answer',
+                 'Record what the user recalls as their statement, not as confirmed',
+                 'name what a comparison leaves uncontrolled when a decision rests on it'):
+        assert rule in invariants
+
+
+def test_commit_preference_is_a_readme_line_the_rules_follow():
+    readme = (ROOT / '.agents/skills/awb-init/assets/workbench/README.md').read_text(encoding='utf-8')
+    assert re.search(r'^Commits: on request$', readme, re.M)
+    agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
+    assert "README's `Commits:` line says `as I go`" in agents
+
+
+def test_scoping_asks_every_user_decision_before_writing_records():
+    scope = ' '.join((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8').split())
+    assert 'now or later' not in scope
+    interview = ' '.join(section((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8'),
+                                 '## 2. Interview').split())
+    # Every decision the user can answer is asked before the records are written; one is parked only
+    # when the user defers it, so a report never lists the user's own decisions unasked.
+    assert 'Before writing the records, ask the user every open decision they can answer' in interview
+    assert 'record one as an open user question only when the user defers it' in interview
+    init = ' '.join(section((ROOT / '.agents/skills/awb-init/SKILL.md').read_text(encoding='utf-8'),
+                            '## 4. Hand off the question').split())
+    assert "run `awb-scope`'s first interview round before it creates the investigation, asking it in this report" in init
+
+
+def list_items(text):
+    """Accepted input: LF Markdown text whose list items start at column 0 with `- `.
+    Returns those lines, each without its marker; a line that does not start a list
+    item, such as prose or an item's wrapped continuation, is ignored. Refuse a nested
+    item (whitespace, then `-`, `*`, `+`, or digits and `.` or `)`, then a space) and a
+    top-level `*`, `+`, or numbered item with ValueError, so no item escapes the count.
+    """
+    items = []
+    for line in text.split('\n'):
+        if re.match(r'\s+([-*+]|\d+[.)])\s', line):
+            raise ValueError(f'nested list item: {line!r}')
+        if re.match(r'([*+]|\d+[.)])\s', line):
+            raise ValueError(f'list items start with "- ": {line!r}')
+        if line.startswith('- '):
+            items.append(line[2:])
+    return items
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('Report:\n\n- one;\n- two; and\n- three.\n\nAfter.\n', ['one;', 'two; and', 'three.']),
+    ('Prose with - a dash.\n', []),
+    ('-not an item\n', []),
+    ('- one\n  - nested\n', None),
+    ('- one\n    1. nested\n', None),
+    ('* starred\n', None),
+    ('+ plus\n', None),
+    ('1. numbered\n', None),
+    ('2) numbered\n', None),
+])
+def test_list_items_accepted_and_refused_forms(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            list_items(text)
+    else:
+        assert list_items(text) == expected
+
+
+def test_setup_report_has_at_most_five_items_and_keeps_the_host_instruction_file():
+    report = section((ROOT / '.agents/skills/awb-init/SKILL.md').read_text(encoding='utf-8'), '## 5. Report')
+    items = list_items(report)
+    assert 1 <= len(items) <= 5, items
+    assert sum('host instruction file' in item for item in items) == 1
+    assert any('impact' in item for item in items)
+    # A repair reports more than setup does; step 5 says so rather than capping a repair at five items.
+    assert 'A repair report adds what [references/repair.md](references/repair.md) says to report' \
+           in ' '.join(report.split())
+
+
+def test_only_the_users_questions_are_roots():
+    # Status and the turn footer count the ledger's roots as the user's questions. A stakeholder's
+    # threshold or a deferred decision left as a root was counted as one the user asked, so scoping
+    # records each question the user asks as a root and puts every other question under one.
+    interview = ' '.join(section((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8'),
+                                 '## 2. Interview').split())
+    assert 'so a root is only a question the user asked: record each one they ask' in interview
+    assert ("Every other question, such as a stakeholder's threshold, a decision the user deferred, "
+            "or a method choice, takes as parent the user's question it serves") in interview
+    record = ' '.join(section((ROOT / '.agents/skills/awb-brainstorm/SKILL.md').read_text(encoding='utf-8'),
+                              '## 3. Record the choices').split())
+    assert 'empty for a root' not in record
+    assert 'leave the parent empty only when the user takes the question as one of their own' in record
+    # The footer names the user's questions as the roots and counts them only when they changed.
+    agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
+    assert ("ends with one plain line: what changed for the user's questions, the ledger's roots, "
+            "if anything, and the next step") in agents
+    status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
+    assert 'lead with `roots`, the questions the user asked' in status
+    assert 'Report `questions.counts`, the totals with every sub-question, only on request' in status
+
+
+def test_analysis_records_its_questions_under_the_one_they_serve():
+    # `questions add` defaults --parent to empty, so a question raised mid-analysis, such as whether a
+    # dip is seasonal, became a root and was counted as one the user asked. The analysis guide gives
+    # the analysis path the parent rule scoping, brainstorming, and exploration follow.
+    add = ' '.join(section((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/analysis.md')
+                           .read_text(encoding='utf-8'), '## Add a result').split())
+    assert ("Record a question the analysis raises, such as whether a dip is seasonal, with "
+            "`awb.py questions add --origin analysis` and the question it serves as `--parent`.") in add
+    assert 'so only a question the user asks is a root' in add
+    # Chat-driven work reads no guide, so the always-loaded rule names the parent too.
+    agents = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Record maintenance').split())
+    assert ("record a question the work raises with `questions add --parent <question it serves>`"
+            in agents)
+    # A ledger written before roots meant the user's questions is re-parented when scoping next runs.
+    sharpen = ' '.join((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8').split())
+    assert ("A root the user did not ask, which an older ledger may hold, takes as parent the user's "
+            "question it serves, recorded first as a root from the brief when the ledger lacks it.") in sharpen
+
+
+def test_guide_commit_points_follow_the_commits_line():
+    # The README promises at most one commit reminder a session under `on request`, and commits
+    # as the work goes under `as I go`; the rerun and publish points keep to both.
+    guides = ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides'
+    analysis = ' '.join((guides / 'analysis.md').read_text(encoding='utf-8').split())
+    assert ("Before rerunning a supported or flagged finding, commit its evidence when README's `Commits:` "
+            "line says `as I go`; otherwise suggest committing it, unless you already suggested a commit "
+            "this session.") in analysis
+    data = ' '.join((guides / 'data.md').read_text(encoding='utf-8').split())
+    assert ("commit these first when README's `Commits:` line says `as I go`; otherwise suggest committing "
+            "them, unless you already suggested a commit this session.") in data
+    assert 'Suggest committing these first' not in data
+    # A kept reference document follows the same line.
+    assert ("under `foundation/references/<source-id>/`; commit it when README's `Commits:` line says "
+            "`as I go`, otherwise suggest committing it, unless you already suggested a commit this session.") in data
+    assert 'and suggest committing it.' not in data
+
+
+def test_exploration_asks_the_users_questions_in_its_report():
+    report = ' '.join(section((ROOT / '.agents/skills/awb-explore/SKILL.md').read_text(encoding='utf-8'),
+                              '## 6. Report').split())
+    assert 'the ledger questions added, asking in the report each one the user can settle' in report
+
+
+def test_brainstorm_asks_the_users_questions_in_its_report():
+    # A kept question the user can settle is asked, never sent to another skill; only a
+    # stakeholder's question and a scope change go through `awb-scope`.
+    report = ' '.join(section((ROOT / '.agents/skills/awb-brainstorm/SKILL.md').read_text(encoding='utf-8'),
+                              '## 4. Report').split())
+    assert 'questions for the user or a stakeholder through `awb-scope`' not in report
+    assert 'asking in the report each kept question the user can settle' in report
+    assert "a stakeholder's question through `awb-scope`" in report
+
+
+def test_status_reports_git_unavailable_with_its_impact():
+    status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
+    assert 'When `git.available` is false, report its `reason`. ' not in status
+    assert ('When `git.available` is false, report its `reason` with what it means for the user: status '
+            'cannot tell what is uncommitted or whether the state is out of date, and evidence records '
+            'file checksums instead of a commit SHA; say whether they must act, such as by installing Git '
+            'or putting the project in a repository.') in status
+
+
 def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     # The review holds a checked or reconciliation sentence to a recorded result or check, pairing with the
     # warning state finding gives, and the package contract tells the writer so; a re-review after repairs may

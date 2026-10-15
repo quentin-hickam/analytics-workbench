@@ -10,6 +10,8 @@ Landed data is kept at: not yet recorded
 
 Released packages are kept at: not yet recorded
 
+Commits: on request
+
 ## Where work belongs
 
 - `foundation/` records sources, canonical datasets and views, shared data quality, common vocabulary, and the review rules every package review checks. `foundation/references/` keeps the third-party documentation those records rely on.
@@ -46,3 +48,5 @@ Name the workbench skill in a plain request:
 - `awb-clean` checks one dataset for errors and corrects them in the shared views: "Use awb-clean to clean the orders data."
 - `awb-explore` explores one dataset for the active investigation: "Use awb-explore to explore the shifts view."
 - `awb-init` repairs the workbench and brings it up to date after newer skills are installed: "Use awb-init to bring this workbench up to date."
+
+The `Commits` line at the top says when the agent commits: `on request`, the default, means only when you ask, with a reminder at most once a session while analytical code is uncommitted; `as I go` means it commits analytical code as it works. Say "commit as you go" to switch.
