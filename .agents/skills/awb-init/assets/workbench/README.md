@@ -44,5 +44,5 @@ Name the workbench skill in a plain request:
 - `awb-package` creates or revises a package's working draft: "Use awb-package to draft a package for this investigation."
 - `awb-release` preserves a numbered release from the draft: "Use awb-release — mark the package delivered."
 - `awb-clean` checks one dataset for errors and corrects them in the shared views: "Use awb-clean to clean the orders data."
-- `awb-eda` explores one dataset for the active investigation: "Use awb-eda to explore the shifts view."
+- `awb-explore` explores one dataset for the active investigation: "Use awb-explore to explore the shifts view."
 - `awb-init` repairs the workbench and brings it up to date after newer skills are installed: "Use awb-init to bring this workbench up to date."

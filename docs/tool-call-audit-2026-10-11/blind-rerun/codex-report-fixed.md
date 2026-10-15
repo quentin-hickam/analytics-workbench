@@ -50,7 +50,7 @@ Rows 2412 -> 2400; amount null rate 0.0 -> 0.0146 (35 rows). No other row loss o
 
 ## 5 — Explore and commit
 
-Applied awb-eda to all H1 orders with date, returned measure, region/channel dimensions and order_id key. The scan covered 2400/2400 rows, all six months, no key violations. Saved region-channel and region-month follow-ups with explicit scope filters and ran them through awb.py sql. Used --show for contrary groups and associations; recorded descriptive observations and next steps. West was highest within each channel and month; retained the relatively high South-web pattern and monthly fluctuations as cautions. Amount extremes were dismissed as errors under the user’s real-order decision; no local exclusion. Commit `f318e1f`.
+Applied awb-explore to all H1 orders with date, returned measure, region/channel dimensions and order_id key. The scan covered 2400/2400 rows, all six months, no key violations. Saved region-channel and region-month follow-ups with explicit scope filters and ran them through awb.py sql. Used --show for contrary groups and associations; recorded descriptive observations and next steps. West was highest within each channel and month; retained the relatively high South-web pattern and monthly fluctuations as cautions. Amount extremes were dismissed as errors under the user’s real-order decision; no local exclusion. Commit `f318e1f`.
 
 Failures: none. Lookups: read scan-file and reading-the-scan references to locate contrary/correlation fields and assess extremes. The unused material_gap setting is a decision threshold, not a missing scope filter. Scan path: `investigations/region-returns/exploration/eda/orders.json`; follow-ups: `region-channel.sql`, `region-month.sql`.
 

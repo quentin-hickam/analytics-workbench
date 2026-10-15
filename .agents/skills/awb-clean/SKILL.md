@@ -1,6 +1,6 @@
 ---
 name: awb-clean
-description: "Clean one analytics workbench dataset: find its data errors and correct them in the shared canonical views. Use when the user asks to clean or quality-check a dataset or source."
+description: "Find data errors in one analytics workbench dataset and correct them in shared canonical views. Use for \"clean this dataset\", \"check this data for errors\", or \"quality-check this source\"."
 ---
 
 # Clean one dataset
@@ -70,4 +70,4 @@ Read the existing catalog row before setting any of its cells; when a publicatio
 
 ## Report
 
-Report the dataset, the decided issues by class, the corrections and changed views, the rescan's delta lines verbatim, the quality IDs, each flagged finding with its reason, the in-scope issues still `open`, and any exclusion named for an investigation's settings. Say that no analysis was rerun. Commit `foundation/quality.json` with `foundation/quality.md`; the JSON holds no source values. When `foundation/sources.md` restricts copying the source's values, confirm before committing `foundation/quality.md`: its rows quote up to three example values.
+Report the dataset, the decided issues by class, the corrections and changed views, the rescan's before-and-after counts in plain words, the recorded issues with optional quality IDs, each finding awaiting recheck with its reason, the in-scope issues still `open`, and any exclusion named for an investigation's settings. Say that no analysis was rerun. Commit `foundation/quality.json` with `foundation/quality.md`; the JSON holds no source values. When `foundation/sources.md` restricts copying the source's values, confirm before committing `foundation/quality.md`: its rows quote up to three example values.

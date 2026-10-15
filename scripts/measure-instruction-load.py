@@ -62,7 +62,7 @@ def main():
                               [AGENTS, skill('awb-release'), REVIEW, CONTRACT]),
         'narrative_revision': ([AGENTS, skill('awb-package')], [AGENTS, skill('awb-package'), CONTRACT, REVIEW]),
         'clean': ([AGENTS], [AGENTS, skill('awb-clean')]),
-        'eda': ([AGENTS], [AGENTS, skill('awb-eda')]),
+        'eda': ([AGENTS], [AGENTS, skill('awb-explore')]),
         # Scoping left awb-init for awb-scope: a new project loads both, a later question only awb-scope.
         'project_setup': ([AGENTS, skill('awb-init')], [AGENTS, skill('awb-init'), skill('awb-scope')]),
         'new_investigation': ([AGENTS, skill('awb-init')], [AGENTS, skill('awb-scope')]),

@@ -1,6 +1,6 @@
 ---
-name: awb-eda
-description: "Explore one dataset (EDA) for the active analytics workbench investigation. Use when the user asks to explore, profile, or understand a dataset or view for the investigation's question."
+name: awb-explore
+description: "Explore one dataset for the active analytics workbench investigation. Use for \"look at this data\", \"explore this dataset\", \"profile this view\", or \"help me understand this data\" within the investigation's question."
 ---
 
 # Explore a dataset for an investigation
@@ -49,4 +49,6 @@ Write each follow-up as `investigations/<name>/exploration/<topic>.sql` and run 
 - **Shared data problems.** Except for coverage limitations recorded below, hand confirmed shared data problems to awb-clean: "Use awb-clean on <dataset> for <problem>". Leave canonical views to awb-clean. When exploration must exclude affected rows, or a question-specific exclusion stays local, do it in a saved query whose comment gives the reason, and say so; an exclusion `run.py` needs goes into settings.
 - **Coverage limitations.** Record a confirmed shared limitation in time coverage or field availability as an `open` row in `foundation/quality.md`, citing the scan; it needs no awb-clean pass.
 
-Report the dataset and scope, the printed tables cut to the rows that bear on the question, the observations, each anomaly's disposition, the saved query paths, the ledger questions added, the records changed, and the scan path.
+## 6. Report
+
+Summarize the dataset and scope, the observations and values that bear on the question, the decision on each anomaly, the saved query paths, the open questions added in plain words with optional IDs, the records changed, and the scan path. Label observations exploratory; link to the complete scan for detail.

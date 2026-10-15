@@ -26,7 +26,7 @@ import sqlite3
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / ".agents/skills/awb-eda/scripts/eda_scan.py"
+SCRIPT = ROOT / ".agents/skills/awb-explore/scripts/eda_scan.py"
 LANDING = ROOT / ".agents/skills/awb-init/assets/awb_landing.py"
 spec = importlib.util.spec_from_file_location("awb_eda_scan", SCRIPT)
 eda = importlib.util.module_from_spec(spec)
@@ -140,7 +140,7 @@ def test_scan_applies_settings_scope_and_writes_only_its_exploration_file(shifts
     path = shifts / "investigations/overtime/exploration/eda/shifts.json"
     assert {p for p in shifts.rglob("*") if p.is_file()} - before == {path}
     scan = json.loads(path.read_text())
-    assert scan["format"] == "awb-eda/1" and scan["dataset"]["definition"] == "foundation/views/01_shifts.sql"
+    assert scan["format"] == "awb-explore/1" and scan["dataset"]["definition"] == "foundation/views/01_shifts.sql"
     assert [f["source"] for f in scan["scope"]["applied"]] == ["scope.where", "scope.period_start",
                                                                "scope.period_end"]
     assert scan["scope"]["rows_before"] == 335 * 3
@@ -259,7 +259,7 @@ def test_publication_path_with_label_and_float_columns_keep_distributions(shifts
 
 
 def test_scan_file_name_follows_the_documented_rule(tmp_path, capsys):
-    doc = (ROOT / ".agents/skills/awb-eda/references/scan-file.md").read_text(encoding="utf-8")
+    doc = (ROOT / ".agents/skills/awb-explore/references/scan-file.md").read_text(encoding="utf-8")
     examples = [("data/parquet/shifts/p1", "shifts-p1"), ("data", "data"), ("daily sales", "daily-sales"),
                 ("Ünïcode_view", "-n-code_view"), ("-n-code_view", "n-code_view"), ("café", "caf"),
                 ("日本", "dataset")]
@@ -295,13 +295,13 @@ def test_scan_file_name_follows_the_documented_rule(tmp_path, capsys):
 
 def test_label_must_be_a_simple_name_and_an_empty_one_cannot_overwrite_the_unlabelled_scan(tmp_path, capsys):
     root = project(tmp_path)
-    saved = write(root, "investigations/overtime/exploration/eda/shifts.json", '{"format": "awb-eda/1"}')
+    saved = write(root, "investigations/overtime/exploration/eda/shifts.json", '{"format": "awb-explore/1"}')
     for label in ("", "-x", ".x", "a b", "é"):
         with pytest.raises(SystemExit) as exit:
             eda.main([str(root), "shifts", f"--label={label}"])
         assert exit.value.code == 2
         assert "--label must be a simple name: an ASCII letter or digit, then any number of [A-Za-z0-9._-]" in capsys.readouterr().err
-    assert saved.read_text() == '{"format": "awb-eda/1"}'
+    assert saved.read_text() == '{"format": "awb-explore/1"}'
     assert [p.name for p in saved.parent.iterdir()] == ["shifts.json"]
     assert eda.parse([str(root), "shifts", "--label", "x."]).label == "x."
     assert eda.parse([str(root), "shifts"]).label is None

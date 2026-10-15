@@ -40,7 +40,7 @@ clean	run	scan_dataset.py orders --rescan
 clean	run	awb.py stale
 clean	run	record_cleaning.py orders (issues, findings none, catalog cells)
 commit	git	commit cleaning
-eda	skill	load awb-eda SKILL.md
+eda	skill	load awb-explore SKILL.md
 eda	read	brief+state already loaded this session? no: awb.py state (one call)
 eda	run	eda_scan.py orders --date-column order_date --start --end --measure returned --dimension region --dimension channel
 eda	write	write exploration/region-by-channel.sql

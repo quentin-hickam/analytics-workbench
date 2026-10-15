@@ -1,6 +1,6 @@
 ---
 name: awb-package
-description: "Draft or revise an analytics workbench delivery package (deck outline, charts, datasets). Use only when the user asks for a package or deck, or a change to its draft."
+description: "Draft or revise an analytics workbench delivery package: deck outline, charts, and selected datasets. Use only for requests such as \"make me slides\", \"prepare a deck\", or \"revise this draft\"."
 ---
 
 # Draft a delivery package
@@ -76,11 +76,11 @@ A `numbers` row is a number no represented result records. Repair it by the firs
 3. It is not a quantity, such as a date, a comparison year, a chart number, a tool version, or a week number: the check reports any number whose context leaves it in doubt, so reword where a context [helpers](references/helpers.md) lists would mark it, such as a comma after a date or year; otherwise, or when the records support it from elsewhere, such as a figure from an earlier release, a fact the user supplied that `history.md` records, or a number inside a result's question that `methodology.md` must repeat, list it in the manifest's `allowed_numbers` as `package-format/manifest-template.md` describes.
 4. It is computed from results that none records: only separately authorized analysis records it; until then, leave it out.
 
-**Done** when `check-draft` prints `passed: true` on the final files and the last review is passed and not stale, as [references/review.md](references/review.md) defines under **After the review**; that review confirms what `check-draft` cannot check, since `check-draft` proves only that each number is recorded somewhere. Any edit after `check-draft` reruns it. Report its rows verbatim.
+**Done** when `check-draft` prints `passed: true` on the final files and the last review is passed and not stale, as [references/review.md](references/review.md) defines under **After the review**; that review confirms what `check-draft` cannot check, since `check-draft` proves only that each number is recorded somewhere. Any edit after `check-draft` reruns it. Summarize the check outcome in plain words.
 
 ## 7. Report
 
-Report the review's last line and any accepted `warning` violations, the draft path, the audience `findings.md` is written for, the included datasets, each chart with the result it serializes, provenance gaps, unresolved caveats, and the check's `unlinked_findings`. When `open_questions_count` exceeds five, report the count so the audience can review the longer slide. Say it is a working copy the next revision overwrites; marking it delivered freezes it as a numbered release. When a represented flagged finding lacks an applicable disposition, say `awb-release` will ask for one before releasing.
+Summarize the review outcome and any accepted warnings in plain words, then report the draft path, the audience `findings.md` is written for, the included datasets, each chart with the result it serializes, provenance gaps, unresolved caveats, and the check's `unlinked_findings`. When `open_questions_count` exceeds five, report the count so the audience can review the longer slide. Say it is a working copy the next revision overwrites; marking it delivered freezes it as a numbered release. When a represented finding awaiting recheck lacks a decision, say `awb-release` will ask for the decision on that finding before releasing.
 
 Tell the user how to build the deck: in a Microsoft 365 Copilot app chat, add the PowerPoint agent, attach `findings.md`, every file in `charts/`, `methodology.md`, `deck-rules.md`, and `assembly/m365.md`, and ask for a deck built under those instructions. Datasets travel beside the deck and are not attached.
 

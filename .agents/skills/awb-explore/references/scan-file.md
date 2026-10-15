@@ -20,7 +20,7 @@ Different sources or labels can give the same file name: `sales` with `--label r
 
 Top-level keys:
 
-- `format` (`awb-eda/1`), `generated_at`, `investigation`, `dataset` (name, kind, and the view definition file or publication path). The name is the source name from step 1 of the file name, before replacement and trimming.
+- `format` (`awb-explore/1`), `generated_at`, `investigation`, `dataset` (name, kind, and the view definition file or publication path). The name is the source name from step 1 of the file name, before replacement and trimming.
 - `scope`: `applied` filters with their sources, `skipped` settings with reasons, `not_set` choices with the options to pass, `rows_before`, `rows`, `settings_path`, `settings_note`, and `settings_unused`.
 - `date_column`: name, source, and period.
 - `grain`: `duplicate_rows`, `single_column_keys`, `near_unique_columns`, `column_pair_keys`, and `declared_key` (the columns of the one key that `--key` or the settings `key` declares, then its duplicated values, rows in them, and rows with a null key, or its `missing_columns`).
