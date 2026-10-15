@@ -43,20 +43,18 @@ Package templates and `deliveries/` stay absent. If the user explicitly asks for
 
 ## 4. Hand off the question
 
-With the foundation in place, invoke the sibling [`awb-scope` skill](../awb-scope/SKILL.md) with the user's question. It interviews the user, creates the investigation's brief, state, history, run script, settings, and question ledger, and points the README's Active investigation line at it. Without a question, leave that line at `none`.
+With the foundation in place, invoke the sibling [`awb-scope` skill](../awb-scope/SKILL.md) with the user's question. It interviews the user, creates the investigation's brief, state, history, run script, settings, and question ledger, and points the README's Active investigation line at it. When the hand-off shares a turn with setup, run `awb-scope`'s first interview round before it creates the investigation, asking it in this report. Without a question, leave that line at `none`.
 
 ## 5. Report
 
-Report:
+Report in plain words, in at most these five items, omitting any that do not apply:
 
-- the target root;
-- files created, replaced, and existing files preserved or augmented;
-- unresolved decisions, file conflicts, and files left for the user to decide;
+- the project root;
+- the question handed to `awb-scope`, with its first interview round or the investigation it created, or that there is none yet;
 - any host instruction file from step 1, with its import line;
-- installer items needing attention;
-- if the host's MCP status has no `awb` registration, offer in one line the host's registration command that `python3 <skill-directory>/scripts/install_helpers.py --mcp-config <host>` (`copilot`, `claude`, or `codex`) prints, run with a stable Python 3.10+ interpreter outside any project virtual environment, with any interpreter warning, and its printed entry and destination as the fallback. Leave running the command and merging user configuration to the user. If registered but unavailable, report the host's diagnostic instead;
-- which lazy directories were deferred;
-- how work continues: a new question or scope change through `awb-scope`, analysis through normal requests, a package only when the user asks `awb-package` for one; and
-- the active investigation from `awb-scope`'s report, or that none exists, followed by a suggestion to use `awb-status` to see where things stand and what to ask next.
+- each item the user must act on, with its impact: what it changes for them and what the workbench does meanwhile, such as installer items step 3.3 carries, unresolved decisions and file conflicts, Git being unavailable, or an `awb` MCP server the host has not registered or cannot start; and
+- the next request: answering the interview round, or `awb-status` to see where things stand.
 
-Commit when the user asks; after a repair, suggest committing it as one commit so it can be reviewed and reverted as a unit. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, the user's business question has gone to `awb-scope`, and the work has stopped short of packages and analysis the user has not requested.
+For an `awb` server the host's MCP status does not list, offer in one line the host's registration command that `python3 <skill-directory>/scripts/install_helpers.py --mcp-config <host>` (`copilot`, `claude`, or `codex`) prints, run with a stable Python 3.10+ interpreter outside any project virtual environment, with any interpreter warning, and its printed entry and destination as the fallback; until then, helpers run as terminal commands the host may ask the user to approve. Leave running the command and merging user configuration to the user. If registered but unavailable, report the host's diagnostic instead.
+
+Commit when the user asks, or as the README's `Commits` line allows; after a repair, suggest committing it as one commit so it can be reviewed and reverted as a unit. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, the user's business question has gone to `awb-scope`, and the work has stopped short of packages and analysis the user has not requested.

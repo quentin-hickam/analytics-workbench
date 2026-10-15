@@ -220,3 +220,190 @@ def test_headline_checkpoint_names_both_modes_and_never_waits_unconditionally():
                  if path.is_file() and path.suffix in ('.md', '.py')
                  for phrase in retired if phrase in ' '.join(path.read_text(encoding='utf-8').split())]
     assert offenders == []
+
+
+AGENTS = ROOT / '.agents/skills/awb-init/assets/workbench/AGENTS.md'
+
+
+def section(text, heading):
+    """Accepted input: LF Markdown text holding exactly one line that is `heading`
+    itself, such as `## Conversation`, at column 0. Returns the lines after it up to
+    the next heading of its level or above (one to as many `#` as it has, then a
+    space), or to the end. Refuse a heading argument that is not `#` marks, a space,
+    and text, and a heading line that is absent or repeated, with ValueError. Known
+    limits: headings inside code fences are read as headings; Setext headings are
+    not headings.
+    """
+    lines = text.split('\n')
+    level = len(heading) - len(heading.lstrip('#'))
+    if not 1 <= level <= 6 or heading[level:level + 1] != ' ' or not heading[level + 1:].strip():
+        raise ValueError('expected an ATX heading such as "## Conversation"')
+    starts = [index for index, line in enumerate(lines) if line == heading]
+    if len(starts) != 1:
+        raise ValueError(f'expected exactly one {heading!r} line, found {len(starts)}')
+    body = []
+    for line in lines[starts[0] + 1:]:
+        marks = len(line) - len(line.lstrip('#'))
+        if 1 <= marks <= level and line[marks:marks + 1] == ' ':
+            break
+        body.append(line)
+    return '\n'.join(body)
+
+
+@pytest.mark.parametrize(('text', 'heading', 'expected'), [
+    ('# T\n## A\none\n## B\ntwo\n', '## A', 'one'),
+    ('## A\none\n### Sub\nkept\n## B\n', '## A', 'one\n### Sub\nkept'),
+    ('## A\none\n# Top\nlater\n', '## A', 'one'),
+    ('## A\none\n#hashtag line\n', '## A', 'one\n#hashtag line\n'),
+    ('## 5. Report\n- a\n', '## 5. Report', '- a\n'),
+    ('## B\ntwo\n', '## A', None),
+    ('## A\none\n## A\ntwo\n', '## A', None),
+    (' ## A\none\n', '## A', None),
+    ('## A\n', 'A', None),
+    ('## A\n', '##A', None),
+    ('## \n', '## ', None),
+    ('####### A\n', '####### A', None),
+])
+def test_section_accepted_and_refused_forms(text, heading, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            section(text, heading)
+    else:
+        assert section(text, heading) == expected
+
+
+FOOTER_RULE = 'A turn that changed workbench records ends with'
+
+
+def footer_example(text):
+    """Accepted input: LF text with exactly one line that starts with FOOTER_RULE and
+    holds exactly one `For example: `; returns what follows it on that line, stripped
+    and nonempty. Refuse no or several footer lines, a footer line without exactly one
+    `For example: `, and an empty example with ValueError. Other lines are ignored.
+    """
+    rules = [line for line in text.split('\n') if line.startswith(FOOTER_RULE)]
+    if len(rules) != 1:
+        raise ValueError(f'expected one footer rule line, found {len(rules)}')
+    parts = rules[0].split('For example: ')
+    if len(parts) != 2 or not parts[1].strip():
+        raise ValueError('the footer rule needs exactly one nonempty "For example: "')
+    return parts[1].strip()
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    (FOOTER_RULE + ' one line. For example: Your two questions: 1 answered · next: explore.\n',
+     'Your two questions: 1 answered · next: explore.'),
+    ('Intro.\n\n' + FOOTER_RULE + ' a line. For example: next: clean the data. \nAfter.\n',
+     'next: clean the data.'),
+    ('No footer here.\n', None),
+    (FOOTER_RULE + ' a line.\n', None),
+    (FOOTER_RULE + ' a line. For example: \n', None),
+    (FOOTER_RULE + ' For example: a. For example: b.\n', None),
+    (FOOTER_RULE + ' a. For example: a.\n' + FOOTER_RULE + ' b. For example: b.\n', None),
+    ('  ' + FOOTER_RULE + ' a line. For example: a.\n', None),
+])
+def test_footer_example_accepted_and_refused_forms(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            footer_example(text)
+    else:
+        assert footer_example(text) == expected
+
+
+def test_record_footer_example_counts_the_users_questions_not_ledger_rows():
+    # The footer once taught "Questions: answered 1 · opened 2 (1 needs you)": ledger tallies that
+    # counted every sub-question and announced a question needing the user without asking it.
+    example = footer_example(AGENTS.read_text(encoding='utf-8'))
+    for ledger_count in ('Questions:', 'opened', 'needs you'):
+        assert ledger_count not in example
+    assert not re.search(r'\b(answered|opened|added|open)\s+\d', example), example
+    assert example.startswith('Your ') and ' questions: ' in example
+
+
+def test_conversation_rules_ask_inline_state_impact_and_claim_no_attachment():
+    conversation = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Conversation').split())
+    # A pause is a plain decision request, asked in the message that needs it.
+    assert 'When you need the user, ask in that message for a plain decision, ' \
+           'with your recommendation and the alternative' in conversation
+    assert 'never send them to a skill or instruction file' in conversation
+    # An environment or tool limit is reported by its impact, or not at all.
+    assert 'Report an environment or tool limit only when it affects the user: ' \
+           'whether they must act, and what the workbench does instead.' in conversation
+    # Files are named by path; nothing is attached.
+    assert 'giving file paths; never say a file was attached or sent.' in conversation
+
+
+def test_first_pass_answers_keep_to_the_evidence():
+    invariants = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Analytical invariants').split())
+    # A saved query's figure is exploration until run.py records it as a result.
+    assert "can become a finding; present other query output, saved queries' too, as exploration" in invariants
+    for rule in ('offer an untested one as a question, not an answer',
+                 'Record what the user recalls as their statement, not as confirmed',
+                 'name what a comparison leaves uncontrolled when a decision rests on it'):
+        assert rule in invariants
+
+
+def test_commit_preference_is_a_readme_line_the_rules_follow():
+    readme = (ROOT / '.agents/skills/awb-init/assets/workbench/README.md').read_text(encoding='utf-8')
+    assert re.search(r'^Commits: on request$', readme, re.M)
+    agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
+    assert "README's `Commits:` line says `as I go`" in agents
+
+
+def test_scoping_asks_every_user_decision_before_writing_records():
+    scope = ' '.join((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8').split())
+    assert 'now or later' not in scope
+    interview = ' '.join(section((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8'),
+                                 '## 2. Interview').split())
+    # Every decision the user can answer is asked before the records are written; one is parked only
+    # when the user defers it, so a report never lists the user's own decisions unasked.
+    assert 'Before writing the records, ask the user every open decision they can answer' in interview
+    assert 'record one as an open user question only when the user defers it' in interview
+    init = ' '.join(section((ROOT / '.agents/skills/awb-init/SKILL.md').read_text(encoding='utf-8'),
+                            '## 4. Hand off the question').split())
+    assert "run `awb-scope`'s first interview round before it creates the investigation, asking it in this report" in init
+
+
+def list_items(text):
+    """Accepted input: LF Markdown text whose list items start at column 0 with `- `.
+    Returns those lines, each without its marker; a line that does not start a list
+    item, such as prose or an item's wrapped continuation, is ignored. Refuse a nested
+    item (whitespace, then `-`, `*`, `+`, or digits and `.` or `)`, then a space) and a
+    top-level `*`, `+`, or numbered item with ValueError, so no item escapes the count.
+    """
+    items = []
+    for line in text.split('\n'):
+        if re.match(r'\s+([-*+]|\d+[.)])\s', line):
+            raise ValueError(f'nested list item: {line!r}')
+        if re.match(r'([*+]|\d+[.)])\s', line):
+            raise ValueError(f'list items start with "- ": {line!r}')
+        if line.startswith('- '):
+            items.append(line[2:])
+    return items
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('Report:\n\n- one;\n- two; and\n- three.\n\nAfter.\n', ['one;', 'two; and', 'three.']),
+    ('Prose with - a dash.\n', []),
+    ('-not an item\n', []),
+    ('- one\n  - nested\n', None),
+    ('- one\n    1. nested\n', None),
+    ('* starred\n', None),
+    ('+ plus\n', None),
+    ('1. numbered\n', None),
+    ('2) numbered\n', None),
+])
+def test_list_items_accepted_and_refused_forms(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            list_items(text)
+    else:
+        assert list_items(text) == expected
+
+
+def test_setup_report_has_at_most_five_items_and_keeps_the_host_instruction_file():
+    report = section((ROOT / '.agents/skills/awb-init/SKILL.md').read_text(encoding='utf-8'), '## 5. Report')
+    items = list_items(report)
+    assert 1 <= len(items) <= 5, items
+    assert sum('host instruction file' in item for item in items) == 1
+    assert any('impact' in item for item in items)

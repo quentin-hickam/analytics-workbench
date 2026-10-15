@@ -1141,3 +1141,40 @@ def test_recheck_status_refuses_unsupported_finding_status_text(workbench, unrec
     result = status.collect(workbench)
     assert result["active"]["questions"]["awaiting_recheck"] == []
     assert any("Unrecognized finding status" in row["reason"] for row in result["uncertainties"])
+
+
+def test_root_and_must_questions_are_counted_apart_from_the_totals(workbench):
+    # Five questions the user asked, as roots, and twelve sub-questions under them: the report
+    # leads with the user's five, so they are counted apart from the ledger's totals.
+    def question(qid, parent, priority, status):
+        person = status == "answered"
+        return dict(id=qid, text="Which regions?", answerer="user", status=status, results=[], kind="context",
+                    answer="Confirmed" if person else "", by="user" if person else "", parent=parent,
+                    priority=priority, unblocks="", origin="scope",
+                    reason="Scope changed" if status == "superseded" else "", updated="2026-10-01")
+    roots = [question(f"Q-00{n}", "", "must" if n < 4 else "should", "answered") for n in range(1, 6)]
+    children = [question(f"Q-0{n}", "Q-001", priority, status) for n, (priority, status) in enumerate([
+        ("must", "answered"), ("must", "answered"), ("must", "open"), ("should", "answered"),
+        ("should", "answered"), ("should", "open"), ("could", "answered"), ("could", "open"),
+        ("should", "answered"), ("should", "superseded"), ("could", "answered"), ("should", "open")], start=10)]
+    # A grandchild is a sub-question too.
+    children[-1]["parent"] = "Q-010"
+    write(workbench, "investigations/churn/questions.json",
+          json.dumps({"schema": "awb-questions/1", "questions": roots + children}))
+    output = status.collect(workbench)["active"]["questions"]
+    assert output["roots"] == {"answered": 5}
+    assert output["must_subquestions"] == {"answered": 2, "open": 1}
+    assert output["counts"] == {"answered": 12, "open": 4, "superseded": 1}
+
+
+@pytest.mark.parametrize("field", ["parent", "priority"])
+def test_ledger_without_parent_or_priority_is_unreadable(workbench, field):
+    entry = {"id": "Q-001", "text": "Which regions?", "status": "open", "answerer": "user", "kind": "context",
+             "answer": "", "by": "", "results": [], "parent": "", "priority": "must", "origin": "scope",
+             "reason": "", "unblocks": "", "updated": "2026-10-01"}
+    del entry[field]
+    write(workbench, "investigations/churn/questions.json",
+          json.dumps({"schema": "awb-questions/1", "questions": [entry]}))
+    result = status.collect(workbench)
+    assert result["active"]["questions"] is None
+    assert any("Unreadable question ledger" in row["reason"] for row in result["uncertainties"])

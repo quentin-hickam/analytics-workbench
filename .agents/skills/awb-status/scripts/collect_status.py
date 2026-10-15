@@ -96,7 +96,10 @@ def collect(root, *, probe_upstream=False):
     def ledger(investigation, findings):
         """The question ledger's counts, open questions, and derived awaiting-recheck answers.
 
-        None when the investigation has no questions.json. Findings statuses come from state.md's table.
+        roots counts the questions with no parent, the ones the investigation was asked, and
+        must_subquestions the must questions under them, each by displayed status, apart from the
+        totals in counts. None when the investigation has no questions.json. Findings statuses come
+        from state.md's table.
         """
         path = investigation / "questions.json"
         if not path.exists():
@@ -109,7 +112,8 @@ def collect(root, *, probe_upstream=False):
                 raise ValueError("unexpected schema")
             questions = [q for q in content["questions"] if isinstance(q, dict)]
             if len(questions) != len(content["questions"]) or not all(
-                    isinstance(q.get(k), str) for q in questions for k in ("id", "text", "status", "answerer", "kind", "answer")) \
+                    isinstance(q.get(k), str) for q in questions
+                    for k in ("id", "text", "status", "answerer", "kind", "answer", "parent", "priority")) \
                     or not all(isinstance(q.get("results"), list) for q in questions):
                 raise ValueError("malformed question")
         except (OSError, UnicodeError, ValueError) as error:
@@ -126,6 +130,9 @@ def collect(root, *, probe_upstream=False):
         displayed = {q["id"]: "answered (awaiting recheck)" if q in recheck else q["status"] for q in questions}
         open_questions = [q for q in questions if q["status"] == "open"]
         return {"counts": dict(Counter(displayed[q["id"]] for q in questions)),
+                "roots": dict(Counter(displayed[q["id"]] for q in questions if not q["parent"])),
+                "must_subquestions": dict(Counter(displayed[q["id"]] for q in questions
+                                                  if q["parent"] and q["priority"] == "must")),
                 "open_by_answerer": dict(Counter(q["answerer"] for q in open_questions)),
                 "open": [f"{q['id']} [{q['answerer']}, {q['kind']}] {q['text']}" for q in open_questions],
                 "awaiting_recheck": [f"{q['id']} answered (awaiting recheck) [{q['answerer']}, {q['kind']}] {q['text']} -> "
