@@ -15,6 +15,8 @@ All notable changes to this project are recorded in this file. The format is bas
 - `check-draft` checks the deck outline against the slide rules (`outline`): a title slide with its subtitle, a headline of at most 15 words, at most five bullets, at most one chart, and a closing **Notes:** paragraph per slide, and no text outside a slide. Its `charts` rows also check each specification's form against the seven chart forms and its **Data:** line, which names the chart file's columns by role (`category: Region; value: Closed late (%)`), against the form's roles and the file's header. The packaging helper derives the slide structure from `findings.md` as it renders (`parse_outline`); the outline stays the only source and no structured copy is written.
 - A reference deck renderer under `tests/` builds a `.pptx` with python-pptx from a parsed outline and its chart files, proving the deck contract complete without Microsoft 365. It is a test fixture, not shipped; its tests skip without python-pptx.
 - `awb.py state` prints the ledger's open questions and those whose answering findings are all flagged or superseded. `awb-status` reports ledger counts, open questions by answerer, and those unsettled answers, and suggests `awb-scope`, `awb-eda`, or `awb-brainstorm` from them.
+- Print-only `install_helpers.py --mcp-config copilot|claude|codex` entries for user-level MCP registration, with absolute interpreter and server paths, host-native JSON or TOML, and a separate merge destination. Unsupported hosts and mixed install/registration arguments are refused without writes.
+- A user-level VS Code package reviewer with only file read/search and `awb/read` tools, plus a Copilot subagent launch branch that reports unavailable tools as a failed review.
 
 ### Changed
 
@@ -37,6 +39,9 @@ All notable changes to this project are recorded in this file. The format is bas
 - `awb-clean` passes a composite grain as one comma-separated `--key`. Each `--key` is checked as a separate key, so repeating it tests alternative keys, not one key of several columns.
 - `awb-eda` takes a composite grain the same way: a comma-separated `--key`, or a comma-separated settings `key` string or list item, gives the columns of one declared key. Previously `--key a,b` looked for one column named `a,b` and reported `key-missing`. `--key` is given once: a repeated `--key`, which `awb-clean` reads as alternative keys, exits 2 instead of checking one weaker composite key, and so does a `--key` naming no column.
 - `awb-package` passes every represented result to `export`, with or without evidence, so `export` reports the missing evidence instead of the agent silently dropping those results from the manifest. It then stops and reports, as for `exports_blocked`, when a result without evidence is serialized by a `--chart` or `--dataset`, or has an `export_checks` entry, and when no `--result` in a `--result`-only run has evidence. Otherwise it reruns without those results and restores their `results` entries and producing state by hand after each run.
+- Generated workbench instructions name the seven `awb` MCP tools as the server lists them, use them for CLI commands when the host offers the server, retain the CLI fallback, and pass the absolute project root explicitly.
+- Installation uses shared skills in `~/.agents/skills`, per-skill Claude Code symlinks with a copy-both fallback, per-host server registration, and VS Code Local workspace and approval steps. `awb-init` reports registration output when the host has no registered `awb` server.
+- Design notes record the user-level reviewer as a deliberate vendor-specific exception that is never generated into projects.
 
 ### Fixed
 
@@ -53,6 +58,7 @@ These come from the tool-call audit in `docs/tool-call-audit-2026-10-11/`, which
 - `awb-eda` names the `state issues` and `state next` commands. `analysis.md` says `state finding` takes `--text`, `--status`, `--reason`, and `--caveat` in one call.
 - `record_cleaning.py` sets the canonical view's catalog row when a publication row has the same name. Previously it refused with `several rows are named <dataset>`, because the `catalog_row` that `publish` prints is named after the dataset, like its view. Two rows with one name that are not views still refuse. A blind rerun of the audit found this in both of its runs.
 - `export` records every represented result and its evidence path in a new manifest field, `results`, including results it does not serialize. `awb-status` reads it to report `rerun_since_draft` for each package: the represented results whose evidence was recorded after the draft was last revised. It also suggests revising the draft. A manifest written before `results` existed reports this as unknown. Previously a rerun that changed a packaged result left the draft and its release reported as current.
+- Copilot compatibility research resolves issue #50's source labels and pinned citations, instruction discovery settings, sandbox and approval precision, managed allowlist matchers, skill shadowing limits, and reviewer tool naming, now traced in pinned VS Code source and kept in the field-test checklist.
 
 ### Added
 
