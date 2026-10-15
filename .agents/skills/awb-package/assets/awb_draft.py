@@ -158,8 +158,9 @@ def _evidence_files(root, investigation):
 # line. title: a heading's text as it shows, code spans and autolinks unwrapped, so formatting never sets
 # two headings apart. group: the paragraph or heading the line belongs to, None for blank, fence, and
 # hidden lines. start: the line opens a paragraph. declares: it opens a top-level paragraph at column 0,
-# the only place a **Claim strength:** line counts.
-_Line = namedtuple("_Line", "number kind level title plain prose spaced links group start declares")
+# the only place a **Claim strength:** line counts. item: the list depth of the item the line opens, 1 for a
+# top-level item, else 0. inside: the line is in a list item or block quote.
+_Line = namedtuple("_Line", "number kind level title plain prose spaced links group start declares item inside")
 
 _FENCE = re.compile(r"( {0,3})(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
@@ -317,7 +318,7 @@ def _view(text):
 
     def row(number, kind, leaf="", **fields):
         rows.append({"number": number, "kind": kind, "leaf": leaf, "level": 0, "title": None, "group": None,
-                     "start": False, "inside": False, "indent": 0, **fields})
+                     "start": False, "inside": False, "indent": 0, "item": 0, **fields})
 
     for number, line in enumerate(text.splitlines(), start=1):
         line = line.expandtabs(4)
@@ -358,6 +359,7 @@ def _view(text):
         if matched < len(stack) and not lazy:
             del stack[matched:]
             para = False
+        item = 0
         while not lazy:
             if quote := _QUOTE.match(rest):
                 stack.append(None)
@@ -365,6 +367,7 @@ def _view(text):
             elif (width := _item_width(rest, para)) is not None:
                 stack.append([width, not rest[width:].strip()])
                 rest = rest[width:]
+                item = item or sum(container is not None for container in stack)
             else:
                 break
             para = False
@@ -434,6 +437,7 @@ def _view(text):
             group += 1
             row(number, "text", rest, group=group, start=True, inside=inside, indent=indent)
             para = True
+        rows[-1]["item"] = item
     if fence is not None:
         refuse(fence[1], "a code fence never closed", "a fence closed by a matching fence line")
     if comment is not None:
@@ -467,7 +471,8 @@ def _view(text):
                    "a line opening a top-level paragraph at the start of its line, outside lists and quotes")
         view.append(_Line(entry["number"], entry["kind"], entry["level"],
                           _collapse(_shown(entry["plain"])) if entry["kind"] == "heading" else None, entry["plain"],
-                          entry["prose"], entry["spaced"], entry["links"], entry["group"], entry["start"], declares))
+                          entry["prose"], entry["spaced"], entry["links"], entry["group"], entry["start"], declares,
+                          entry["item"], entry["inside"]))
     return view, sorted(forms)
 
 
@@ -1475,12 +1480,276 @@ def compare_trees(local_dir: str | os.PathLike, copy_dir: str | os.PathLike) -> 
     return _compare(_scan(local_dir), _scan(copy_dir))
 
 
+# ---------------------------------------------------------------- the deck outline
+#
+# findings.md is the deck's only source: `parse_outline` derives its slide structure as the file renders
+# (`_view`), and nothing writes that structure down, so the outline stays the one source of truth. The
+# rules a builder follows are package-format/deck-rules.md; `outline_problems` and `check_charts` check the
+# parts of them a parse can settle.
+
+# A chart specification is a paragraph, or a list item, that renders opening with "Chart N."; its fields
+# are the list items directly under it, each opening with its field name, until a blank line follows one.
+_CHART_SPEC = re.compile(r"[ \t]*Chart (\d+)\.(?=\s|$)")
+_CHART_FIELD = re.compile(r"(Data|Highlight|Axis|Interval|Source|Caveat|Alt text):(?=\s|$)\s*(.*)")
+_HEADLINE = re.compile(r"Headline:(?=\s|$)\s*(.*)")
+_NOTES = re.compile(r"Notes:(?=\s|$)\s*(.*)")
+_FINDINGS_SECTION = "Findings"
+HEADLINE_WORDS = 15
+SLIDE_BULLETS = 5
+# Form -> (roles it needs, roles it may add, roles it may repeat); every other role is named once.
+CHART_FORMS = {
+    "Horizontal bar": (("category", "value"), ("series",), ("value",)),
+    "Bar with intervals": (("category", "value", "lower", "upper"), (), ()),
+    "Line": (("category", "value"), ("series",), ("value",)),
+    "Column": (("category", "value"), ("series",), ("value",)),
+    "Stacked bar": (("category", "value"), ("series",), ("value",)),
+    "Scatter": (("x", "y"), ("label", "fit"), ()),
+    "Table": (("column",), (), ("column",)),
+}
+_FORM_NAMES = {form.lower(): form for form in CHART_FORMS}
+_WORD = re.compile(r"\w")
+
+
+def _blocks(lines):
+    """A region's rendered blocks, its heading line left out: {"kind", "line", "depth", "first", "text"}.
+
+    kind is "paragraph", "item" (a list item, depth 1 at the top level), or "heading" (level 4 to 6). first is
+    the opening line's plain text, which the chart check reads as `check_charts` always has; text is the
+    whole block as it shows, whitespace collapsed. gap marks a blank line before the block.
+    """
+    blocks, gap = [], False
+    for line in lines[1:] if lines and lines[0].kind == "heading" and 1 <= lines[0].level <= 3 else lines:
+        if line.kind == "heading":
+            blocks.append({"kind": "heading", "line": line.number, "depth": 0, "first": line.title,
+                           "text": line.title, "gap": gap})
+            gap = False
+            continue
+        if line.kind not in ("text", "html"):
+            continue
+        text = _collapse(_shown(line.plain))
+        if line.item:
+            blocks.append({"kind": "item", "line": line.number, "depth": line.item, "first": line.plain,
+                           "text": text, "gap": gap})
+        elif text and (line.start and (not line.inside or _CHART_SPEC.match(line.plain)) or not blocks):
+            blocks.append({"kind": "paragraph", "line": line.number, "depth": 0, "first": line.plain,
+                           "text": text, "gap": gap})
+        elif text:
+            blocks[-1]["text"] = _collapse(f"{blocks[-1]['text']} {text}")
+        else:
+            gap = True
+            continue
+        gap = False
+    return blocks
+
+
+def _chart(block):
+    number = int(_CHART_SPEC.match(block["first"])[1])
+    written, _, comparison = re.sub(r"^Chart \d+\.", "", block["text"]).partition(":")
+    written = _collapse(written)
+    return {"number": number, "line": block["line"], "form": _FORM_NAMES.get(written.lower()),
+            "written": written, "comparison": comparison.strip(), "fields": {}, "slide": None}
+
+
+def _slide(heading, first, lines):
+    """One region read as a slide: headline, bullets, chart specifications, notes, and anything else."""
+    blocks = _blocks(lines)
+    slide = {"line": first, "heading": heading, "opening": blocks[0]["line"] if blocks else None, "headlines": [],
+             "bullets": [], "notes": [], "after_notes": None, "charts": [], "extra": []}
+    chart = None
+    for block in blocks:
+        if slide["notes"] and slide["after_notes"] is None:
+            slide["after_notes"] = block["line"]
+        text = block["text"]
+        if chart is not None and block["kind"] == "item" and not (block["gap"] and chart["fields"]) \
+                and (field := _CHART_FIELD.match(text)) and field[1] not in chart["fields"]:
+            chart["fields"][field[1]] = field[2].strip()
+            continue
+        chart = None
+        if block["kind"] != "heading" and _CHART_SPEC.match(block["first"]):
+            chart = _chart(block)
+            slide["charts"].append(chart)
+        elif block["kind"] == "item":
+            if block["depth"] == 1 or not slide["bullets"]:
+                slide["bullets"].append({"line": block["line"], "text": text, "sub": []})
+            else:
+                slide["bullets"][-1]["sub"].append(text)
+        elif block["kind"] == "paragraph" and (match := _HEADLINE.match(text)):
+            slide["headlines"].append({"line": block["line"], "text": match[1].strip()})
+        elif block["kind"] == "paragraph" and (match := _NOTES.match(text)):
+            slide["notes"].append({"line": block["line"], "text": match[1].strip()})
+        else:
+            slide["extra"].append({"line": block["line"], "text": text})
+    return slide
+
+
+def parse_outline(text: str) -> dict:
+    """Derive the deck from findings.md text as it renders, writing nothing.
+
+    Returns {"title", "slides", "charts", "stray"}. title is the `#` heading's slide or None: {"line",
+    "text", "subtitle", "notes", ...}. slides are the deck's other slides in order, one per `##` section
+    except Findings and one per `###` finding: {"line", "section", "finding", "heading", "headline",
+    "bullets", "notes", "chart", ...}, where headline is the `###` heading or the first **Headline:** text,
+    bullets are {"line", "text", "sub"} with nested items in sub, notes is the first **Notes:** text, and
+    chart is the slide's first chart number. charts lists every chart specification in file order:
+    {"number", "line", "form", "written", "comparison", "fields", "slide"}, form being the canonical
+    CHART_FORMS name or None, fields each field's text by name, and slide the index of its slide in
+    slides, or None on the title slide or outside any slide. stray lists text outside every slide, and
+    any second `#` heading, as {"where", "line", "text"}. The remaining slide keys keep what the checks report:
+    every **Headline:** and **Notes:** paragraph, the first block after the notes, every chart, and text
+    that is none of these.
+    """
+    return _outline(_view(text)[0])
+
+
+def _outline(view):
+    outline = {"title": None, "slides": [], "charts": [], "stray": []}
+    section = None
+    for level, heading, first, lines in _regions(view):
+        read = _slide(heading, first, lines)
+        if level == 1 and outline["title"] is None:
+            # The subtitle is the paragraph the title slide opens with.
+            subtitle = read["extra"].pop(0) if read["extra"] and read["extra"][0]["line"] == read["opening"] else None
+            outline["title"] = {**read, "text": heading, "subtitle": subtitle and subtitle["text"],
+                                "notes": read["notes"][0]["text"] if read["notes"] else None}
+            outline["charts"] += read["charts"]
+            continue
+        if level == 2:
+            section = heading
+        if level in (0, 1) or (level == 2 and heading == _FINDINGS_SECTION):
+            where = ("before the deck title" if level == 0 else "under a second # heading" if level == 1
+                     else "under Findings before its first finding slide")
+            if level == 1:
+                outline["stray"].append({"where": "a second # heading", "line": first, "text": heading})
+            for block in sorted(read["headlines"] + read["notes"] + read["bullets"] + read["charts"] + read["extra"],
+                                key=lambda block: block["line"]):
+                outline["stray"].append({"where": where, "line": block["line"],
+                                         "text": block.get("text") or f"Chart {block['number']}."})
+            outline["charts"] += read["charts"]
+            continue
+        index = len(outline["slides"])
+        for chart in read["charts"]:
+            chart["slide"] = index
+        outline["charts"] += read["charts"]
+        finding = level == 3
+        headline = heading if finding else read["headlines"][0]["text"] if read["headlines"] else None
+        outline["slides"].append({**read, "section": section, "finding": finding, "headline": headline,
+                                  "notes": read["notes"][0]["text"] if read["notes"] else None,
+                                  "notes_lines": [n["line"] for n in read["notes"]],
+                                  "chart": read["charts"][0]["number"] if read["charts"] else None})
+    return outline
+
+
+def read_outline(path: str | os.PathLike) -> dict:
+    """`parse_outline` of the findings.md at path."""
+    return parse_outline(Path(path).read_text(encoding="utf-8"))
+
+
+def _words(text):
+    return sum(bool(_WORD.search(token)) for token in text.split())
+
+
+def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
+    """List each break of the slide rules in findings.md: {"slide", "line", "problem"}.
+
+    Every slide after the title has a headline of at most HEADLINE_WORDS words (its `###` heading, or one
+    **Headline:** line), at most SLIDE_BULLETS bullets, at most one chart, and one **Notes:** paragraph that
+    ends it, and holds nothing else. The title slide is the `#` heading with its subtitle line; a `###`
+    finding slide sits under ## Findings.
+    """
+    outline = read_outline(findings_path)
+    rows = []
+
+    def row(slide, line, problem):
+        rows.append({"slide": slide, "line": line, "problem": problem})
+
+    title = outline["title"]
+    if title is None:
+        row("title", 1, "findings.md has no # deck title heading; open it with one and its subtitle line")
+    else:
+        if not title["subtitle"]:
+            row("title", title["line"], "the title slide has no subtitle line under the # heading")
+        for block in sorted(title["headlines"] + title["bullets"] + title["extra"] + title["charts"],
+                            key=lambda block: block["line"]):
+            row("title", block["line"], "the title slide holds only the # heading, its subtitle line, and notes; "
+                                        "move this to a slide")
+    for stray in outline["stray"]:
+        row(stray["where"], stray["line"], "a second # heading; the deck has one title slide, so make this a ## "
+            "slide or remove it" if stray["where"] == "a second # heading" else
+            f"text {stray['where']} is on no slide; move it onto a slide")
+    for slide in outline["slides"]:
+        name, line = slide["heading"], slide["line"]
+        if slide["finding"] and slide["section"] != _FINDINGS_SECTION:
+            row(name, line, "a ### finding slide outside the ## Findings section; move it under ## Findings")
+        if slide["finding"] and slide["headlines"]:
+            row(name, slide["headlines"][0]["line"], "a finding slide's ### heading is its headline; remove the "
+                                                     "**Headline:** line")
+        elif not slide["finding"] and not slide["headlines"]:
+            row(name, line, "no **Headline:** line; open the slide with one")
+        elif not slide["finding"] and len(slide["headlines"]) > 1:
+            row(name, slide["headlines"][1]["line"], f"{len(slide['headlines'])} **Headline:** lines; keep one")
+        if slide["headline"] is not None:
+            words = _words(slide["headline"])
+            if not words:
+                row(name, line, "the headline is empty; state the slide's point with its key number")
+            elif words > HEADLINE_WORDS:
+                row(name, line, f"the headline has {words} words; keep it to {HEADLINE_WORDS}")
+        if len(slide["bullets"]) > SLIDE_BULLETS:
+            row(name, slide["bullets"][SLIDE_BULLETS]["line"],
+                f"{len(slide['bullets'])} bullets; keep it to {SLIDE_BULLETS} and move the rest to another slide "
+                "or into the notes")
+        if len(slide["charts"]) > 1:
+            row(name, slide["charts"][1]["line"], f"{len(slide['charts'])} charts; a slide carries at most one")
+        for extra in slide["extra"]:
+            row(name, extra["line"], "text outside the headline, bullets, chart, and notes; make it a bullet or "
+                                     "move it into the notes")
+        if not slide["notes_lines"]:
+            row(name, line, "no **Notes:** paragraph; end the slide with one")
+        elif len(slide["notes_lines"]) > 1:
+            row(name, slide["notes_lines"][1], f"{len(slide['notes_lines'])} **Notes:** paragraphs; merge them "
+                                               "into one")
+        elif slide["after_notes"] is not None and slide["after_notes"] not in {e["line"] for e in slide["extra"]}:
+            row(name, slide["after_notes"], "text after the **Notes:** paragraph; the notes end the slide")
+    return rows
+
+
+def chart_data(chart: dict) -> tuple[list, list[str]]:
+    """A chart specification's **Data:** line as [(role, column header)] in order, and its problems."""
+    form = chart["form"]
+    if "Data" not in chart["fields"]:
+        return [], ["no **Data:** line under the specification"]
+    pairs, problems = [], []
+    for entry in (part.strip() for part in chart["fields"]["Data"].split(";")):
+        role, colon, header = entry.partition(":")
+        role, header = role.strip().lower(), header.strip()
+        if not entry:
+            continue
+        if not colon or not header or not role.isalpha():
+            problems.append(f"**Data:** entry {entry!r} is not role: column header")
+        else:
+            pairs.append((role, header))
+    if form is None:
+        return pairs, problems
+    needed, optional, repeated = CHART_FORMS[form]
+    allowed = needed + optional
+    roles = Counter(role for role, _ in pairs)
+    for role in roles:
+        if role not in allowed:
+            problems.append(f"**Data:** role {role} is not one a {form} takes ({', '.join(allowed)})")
+        elif roles[role] > 1 and role not in repeated:
+            problems.append(f"**Data:** names more than one {role} column")
+    for role in needed:
+        if not roles[role]:
+            problems.append(f"**Data:** names no {role} column, which a {form} needs")
+    if roles["series"] and roles["value"] > 1:
+        problems.append("**Data:** names a series column and more than one value column; name one value with "
+                        "a series, or drop the series")
+    return pairs, problems
+
+
 # ---------------------------------------------------------------- chart files
 
 # A package's charts/ holds one CSV per **Chart N.** specification in findings.md, named chart-N.csv
 # in specification order: a header row of display names and the plotted values, nothing else.
-# A specification is a paragraph, or a list item, that renders opening with "Chart N.".
-_CHART_SPEC = re.compile(r"[ \t]*Chart (\d+)\.(?=\s|$)")
 _CHART_FILE = re.compile(r"chart-([1-9]\d*)\.csv")
 # An underscore or a dot between letters marks a column name or code, not a display name.
 _IDENTIFIER = re.compile(r"[A-Za-z0-9]_[A-Za-z0-9]|[A-Za-z]\.[A-Za-z]")
@@ -1524,9 +1793,12 @@ def write_charts(charts_dir: str | os.PathLike, charts: list) -> list[Path]:
 
 
 def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike) -> list[dict]:
-    """Match the chart specifications in findings.md with the chart files."""
+    """Match the chart specifications in findings.md with the chart files, and each specification with its
+    form and file: one of CHART_FORMS, a **Data:** line naming that form's roles, and each named column in
+    the file's header."""
     view = _read_view(findings_path)[0]
-    numbers = [int(match[1]) for line in view if line.start and (match := _CHART_SPEC.match(line.plain))]
+    charts = _outline(view)["charts"]
+    numbers = [chart["number"] for chart in charts]
     # A spec line that continues the paragraph or bullet above it renders inside that block, so it is no spec.
     continued = {int(match[1]) for line in view if line.kind == "text" and not line.start
                  and (match := _CHART_SPEC.match(line.plain))}
@@ -1551,11 +1823,25 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
         rows.append({"chart": f"Chart {number}", "problem": (
             f"Chart {number}'s specification continues the paragraph or bullet above it; leave a blank line before "
             "it" if number in continued else "chart file has no specification in findings")})
+    headers = {}
     for number in sorted(specified & files.keys()):
-        with files[number].open(encoding="utf-8") as stream:
-            lines = [line for line, _ in zip(stream, range(2)) if line.strip()]
+        with files[number].open(encoding="utf-8", newline="") as stream:
+            lines = list(csv.reader(line for line, _ in zip(stream, range(2)) if line.strip()))
         if len(lines) < 2:
             rows.append({"chart": f"Chart {number}", "problem": "chart file has no data rows"})
+        headers[number] = lines[0] if lines else []
+    for chart in charts:
+        label = f"Chart {chart['number']}"
+        if chart["form"] is None:
+            rows.append({"chart": label, "problem": f"names no chart form ({chart['written'] or 'none written'}); "
+                                                    f"open the specification with one of: {', '.join(CHART_FORMS)}"})
+        pairs, problems = chart_data(chart)
+        rows += [{"chart": label, "problem": problem} for problem in problems]
+        if chart["number"] in headers:
+            for header in dict.fromkeys(header for _, header in pairs):
+                if header not in headers[chart["number"]]:
+                    rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv has no column "
+                                                            f"{header!r}, which **Data:** names"})
     return rows
 
 
@@ -1563,7 +1849,7 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
 
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
-            and report["charts"] == [] and report["headings"] == [] and report["markdown"] == []
+            and report["outline"] == [] and report["charts"] == [] and report["headings"] == [] and report["markdown"] == []
             and report["claims"] == [] and report["questions"] == []
             and report["verify"] == [] and report["flag_entries"] == [] and report["numbers"] == []
             and not report["numbers_problems"])
@@ -1574,7 +1860,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
-              "charts": None, "headings": None, "markdown": None, "claims": None, "questions": None,
+              "outline": None, "charts": None, "headings": None, "markdown": None, "claims": None, "questions": None,
               "numbers": None, "numbers_problems": [], "inventory": None, "verify": None,
               "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
     if not draft.is_dir():
@@ -1589,6 +1875,10 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         report["findings"] = check_findings(findings_path, names=names, roots=recorded)
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"findings check: {error}")
+    try:
+        report["outline"] = outline_problems(findings_path)
+    except (OSError, UnicodeError) as error:
+        report["errors"].append(f"outline check: {error}")
     try:
         report["charts"] = check_charts(findings_path, draft / "charts")
     except (OSError, UnicodeError) as error:
@@ -1683,13 +1973,21 @@ def _package_arguments(parser, *, package=True):
 def cli_check_draft(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py check-draft", formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Run every mechanical draft check (internal names in findings.md, chart files, "
+        description="Run every mechanical draft check (internal names in findings.md, the slide rules, chart "
+                    "specifications and files, "
                     "matching finding headings, the Markdown subset, causal wording against claim strength, "
                     "each represented result's question in methodology.md, numbers in both narratives, the "
                     "manifest inventory, and state.md's current flags) and rewrite the manifest inventory, "
                     "stamping revised_at when it changes; --verify-only checks a release candidate and writes "
                     "nothing.",
-        epilog="Prints one JSON line.\nclaims lists each causal phrase (line, section, phrase, claim, results) "
+        epilog="Prints one JSON line.\noutline lists, as slide, line, and problem, each break of the slide "
+               "rules: a missing # title or subtitle, text outside every slide, a ### finding outside ## Findings, "
+               "a missing, repeated, empty, or over-15-word headline, more than five bullets, more than one chart, "
+               "text that is no headline, bullet, chart, or notes, and a missing, repeated, or non-final **Notes:** "
+               "paragraph.\ncharts lists, as chart and problem, a specification numbered out of order, without "
+               "a file, or without a form from deck-rules.md; a **Data:** line missing, malformed, or not naming "
+               "its form's roles; a column it names that the file lacks; and a chart file without a "
+               "specification or data rows, or a foreign file.\nclaims lists each causal phrase (line, section, phrase, claim, results) "
                "in a findings.md slide, heading included, above its claim strength: a ### finding slide is held to the weakest "
                "Claim in state.md among the results its methodology.md section cites (all represented results "
                "when it cites none), and the title and other slides that state conclusions to the strongest; "
@@ -1713,7 +2011,7 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
                "that is neither none nor a list of places, and an unknown disposition.\nquestions lists each "
                "manifest results entry without a question, or whose question methodology.md does not repeat "
-               "verbatim.\nExit 0 only when names_problems, findings, charts, headings, markdown, claims, "
+               "verbatim.\nExit 0 only when names_problems, findings, outline, charts, headings, markdown, claims, "
                "questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
                "are all empty.")
     _package_arguments(parser)

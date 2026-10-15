@@ -25,9 +25,13 @@ LATE = (["Region", "Closed late (%)"], [["North", "21.0"], ["East", "18.0"], ["W
 TREND = (["Month", "Cases"], [["Jan", "1204"], ["Feb", "1310"]])
 
 
+DATA = {1: "category: Region; value: Closed late (%)", 2: "category: Month; value: Cases"}
+
+
 def findings(tmp_path, *numbers):
     path = tmp_path / "findings.md"
-    path.write_text("".join(f"### Finding\n\n**Chart {n}.** Horizontal bar: late share by region\n\n"
+    path.write_text("".join(f"### Finding\n\n**Chart {n}.** Horizontal bar: late share by region\n"
+                            f"- **Data:** {DATA.get(n, 'category: Region; value: Cases')}\n\n"
                             for n in numbers), encoding="utf-8")
     return path
 
@@ -78,7 +82,7 @@ def test_check_charts_clean_package_returns_no_rows(tmp_path):
 def test_check_charts_reports_each_mismatch(tmp_path):
     directory = tmp_path / "charts"
     directory.mkdir()
-    (directory / "chart-1.csv").write_text("Region,Cases\n")
+    (directory / "chart-1.csv").write_text("Region,Closed late (%)\n")
     (directory / "chart-3.csv").write_text("Region,Cases\nWest,4\n")
     (directory / "chart-4.csv").write_text("Region,Cases\nWest,4\n")
     (directory / "late.png").write_bytes(b"")
@@ -98,10 +102,10 @@ def test_check_charts_spec_continuing_a_block(tmp_path, above):
     # specification, and the row says how to make it one.
     charts.write_charts(tmp_path / "charts", [LATE])
     path = tmp_path / "findings.md"
-    path.write_text(f"### H\n\n{above}\n**Chart 1.** Horizontal bar: rate by region\n- **Data:** Region\n")
+    path.write_text(f"### H\n\n{above}\n**Chart 1.** Horizontal bar: rate by region\n- **Data:** category: Region; value: Closed late (%)\n")
     assert charts.check_charts(path, tmp_path / "charts") == [{"chart": "Chart 1", "problem": (
         "Chart 1's specification continues the paragraph or bullet above it; leave a blank line before it")}]
-    path.write_text(f"### H\n\n{above}\n\n**Chart 1.** Horizontal bar: rate by region\n- **Data:** Region\n")
+    path.write_text(f"### H\n\n{above}\n\n**Chart 1.** Horizontal bar: rate by region\n- **Data:** category: Region; value: Closed late (%)\n")
     assert charts.check_charts(path, tmp_path / "charts") == []
 
 
@@ -117,5 +121,5 @@ def test_charts_without_pandas(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "pandas", None)
     bare = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bare)
-    bare.write_charts(tmp_path / "charts", [TREND])
+    bare.write_charts(tmp_path / "charts", [LATE])
     assert bare.check_charts(findings(tmp_path, 1), tmp_path / "charts") == []
