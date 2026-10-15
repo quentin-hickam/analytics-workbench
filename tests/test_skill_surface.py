@@ -337,7 +337,7 @@ def test_first_pass_answers_keep_to_the_evidence():
     invariants = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Analytical invariants').split())
     # A saved query's figure is exploration until run.py records it as a result.
     assert "can become a finding; present other query output, saved queries' too, as exploration" in invariants
-    for rule in ('offer an untested one as a question, not an answer',
+    for rule in ('offer an untested explanation as a question, not an answer',
                  'Record what the user recalls as their statement, not as confirmed',
                  'name what a comparison leaves uncontrolled when a decision rests on it'):
         assert rule in invariants
@@ -443,10 +443,14 @@ def test_analysis_records_its_questions_under_the_one_they_serve():
     assert ("Record a question the analysis raises, such as whether a dip is seasonal, with "
             "`awb.py questions add --origin analysis` and the question it serves as `--parent`.") in add
     assert 'so only a question the user asks is a root' in add
+    # Chat-driven work reads no guide, so the always-loaded rule names the parent too.
+    agents = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Record maintenance').split())
+    assert ("record a question the work raises with `questions add --parent <question it serves>`"
+            in agents)
     # A ledger written before roots meant the user's questions is re-parented when scoping next runs.
     sharpen = ' '.join((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8').split())
     assert ("A root the user did not ask, which an older ledger may hold, takes as parent the user's "
-            "question it serves.") in sharpen
+            "question it serves, recorded first as a root from the brief when the ledger lacks it.") in sharpen
 
 
 def test_guide_commit_points_follow_the_commits_line():
@@ -461,9 +465,32 @@ def test_guide_commit_points_follow_the_commits_line():
     assert ("commit these first when README's `Commits:` line says `as I go`; otherwise suggest committing "
             "them, unless you already suggested a commit this session.") in data
     assert 'Suggest committing these first' not in data
+    # A kept reference document follows the same line.
+    assert ("under `foundation/references/<source-id>/`; commit it when README's `Commits:` line says "
+            "`as I go`, otherwise suggest committing it, unless you already suggested a commit this session.") in data
+    assert 'and suggest committing it.' not in data
 
 
 def test_exploration_asks_the_users_questions_in_its_report():
     report = ' '.join(section((ROOT / '.agents/skills/awb-explore/SKILL.md').read_text(encoding='utf-8'),
                               '## 6. Report').split())
     assert 'the ledger questions added, asking in the report each one the user can settle' in report
+
+
+def test_brainstorm_asks_the_users_questions_in_its_report():
+    # A kept question the user can settle is asked, never sent to another skill; only a
+    # stakeholder's question and a scope change go through `awb-scope`.
+    report = ' '.join(section((ROOT / '.agents/skills/awb-brainstorm/SKILL.md').read_text(encoding='utf-8'),
+                              '## 4. Report').split())
+    assert 'questions for the user or a stakeholder through `awb-scope`' not in report
+    assert 'asking in the report each kept question the user can settle' in report
+    assert "a stakeholder's question through `awb-scope`" in report
+
+
+def test_status_reports_git_unavailable_with_its_impact():
+    status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
+    assert 'When `git.available` is false, report its `reason`. ' not in status
+    assert ('When `git.available` is false, report its `reason` with what it means for the user: status '
+            'cannot tell what is uncommitted or whether the state is out of date, and evidence records '
+            'file checksums instead of a commit SHA; say whether they must act, such as by installing Git '
+            'or putting the project in a repository.') in status

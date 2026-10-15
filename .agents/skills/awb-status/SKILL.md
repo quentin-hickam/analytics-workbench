@@ -17,7 +17,7 @@ python3 <skill-directory>/scripts/collect_status.py <project-root>
 
 Add `--probe-upstream` only when the user asks whether landed sources changed upstream. It sends HEAD requests only, one per landed file whose `provenance.json` records an HTTP URL with an ETag or Last-Modified, skipping a file when a later acquisition of the same source records the same URL (later by `completed_at`, then by acquisition ID for the same second), and none to a host and port, directly or by redirect, after one request to it times out (10 s). It follows a redirect only to an http(s) URL and changes nothing.
 
-When `workbench` is false, stop and suggest `awb-init`. Treat `null`, `unknown`, and each `uncertainties` entry as a targeted lookup: read only the named record or field. Report missing records as missing. When `git.available` is false, report its `reason`. Leave history, source data, and other investigations' conclusions unread.
+When `workbench` is false, stop and suggest `awb-init`. Treat `null`, `unknown`, and each `uncertainties` entry as a targeted lookup: read only the named record or field. Report missing records as missing. When `git.available` is false, report its `reason` with what it means for the user: status cannot tell what is uncommitted or whether the state is out of date, and evidence records file checksums instead of a commit SHA; say whether they must act, such as by installing Git or putting the project in a repository. Leave history, source data, and other investigations' conclusions unread.
 
 ## Report
 

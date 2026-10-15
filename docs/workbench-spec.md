@@ -63,7 +63,7 @@ Each analytical process owns its DuckDB session and loads shared SQL definitions
 
 The active question determines preparation effort. Inspect candidate sources only far enough to assess relevance and fitness, then prepare the sources needed for the investigation. If a source proves irrelevant, record the reason and stop work on it. Broader preparation requires an explicit user request.
 
-The source register records each assessment's basis. A data dictionary, manual, codebook, or schema export that an assessment or catalog entry relies on is kept in `foundation/references/<source-id>/` and suggested for commit, and the register and catalog link it. Material whose license or confidentiality bars committing it stays out of Git like a landed original: the register records its retained location and checksum instead. The status skill reports a source assessed from documentation with no recorded reference.
+The source register records each assessment's basis. A data dictionary, manual, codebook, or schema export that an assessment or catalog entry relies on is kept in `foundation/references/<source-id>/` and committed as the README's `Commits` line says, and the register and catalog link it. Material whose license or confidentiality bars committing it stays out of Git like a landed original: the register records its retained location and checksum instead. The status skill reports a source assessed from documentation with no recorded reference.
 
 An investigation may motivate preparation, but reusable cleaning and normalization rules and knowledge about data limitations belong to the shared foundation. Investigation-specific populations, periods, filters, exclusions, and assumptions remain with that investigation.
 

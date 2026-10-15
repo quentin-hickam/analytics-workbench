@@ -4,7 +4,7 @@ One data foundation serves every investigation: source knowledge and references,
 
 ## Start or resume
 
-For investigation work, resume README's active investigation with `python3 src/awb.py state` (`--investigation <name>` for another) and name it briefly; read history when prior reasoning matters. Switch with `state switch <name>`. When an ask could belong to several investigations, ask which before changing records.
+For investigation work, resume README's active investigation with `python3 src/awb.py state` (`--investigation <name>` for another) and name it; read history when prior reasoning matters. Switch with `state switch <name>`. When an ask could belong to several investigations, ask which before changing records.
 
 Use the workbench skills even for work you start; take a new business question or a consequential scope change, such as a broader population, through `awb-scope`.
 
@@ -33,7 +33,7 @@ A turn that changed workbench records ends with one plain line: what changed for
 
 The active question bounds preparation, and exploratory work stays in the investigation until deliberately promoted; broader preparation needs an explicit request.
 
-Compute before interpreting: read other investigations' conclusions only once this one has results, unless asked. Preserve results that challenge the expected explanation, and offer an untested one as a question, not an answer.
+Compute before interpreting: read other investigations' conclusions only once this one has results, unless asked. Preserve results that challenge the expected explanation, and offer an untested explanation as a question, not an answer.
 
 Only a result from the investigation's `run.py`, run with its settings, can become a finding; present other query output, saved queries' too, as exploration. Record what the user recalls as their statement, not as confirmed, and name what a comparison leaves uncontrolled when a decision rests on it. Word a finding no more strongly than its Claim in `state.md`: an association never drives, causes, or leads to anything.
 
@@ -41,8 +41,8 @@ Only a result from the investigation's `run.py`, run with its settings, can beco
 
 Settle ambiguous terms with concrete examples and the data. Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and dataset, view, and cache descriptions in `foundation/catalog.md`; never in context maps or ADRs.
 
-Change findings, issues, and next steps with `awb.py state finding`, `state issues`, and `state next`; record a question the work raises with `awb.py questions add`, and the user's answer with `questions answer`. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. Record a reader the user names in the brief's Audience section.
+Change findings, issues, and next steps with `awb.py state finding`, `state issues`, and `state next`; record a question the work raises with `questions add --parent <question it serves>`, and the user's answer with `questions answer`. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. Record a reader the user names in the brief's Audience section.
 
-Commit when asked; when README's `Commits:` line says `as I go`, which you set when asked, also commit analytical code as you go. Otherwise suggest a commit at most once a session while analytical code is uncommitted, so evidence carries a SHA.
+Commit when asked; when README's `Commits:` line says `as I go`, which you set when asked, also commit analytical code as you go. Otherwise suggest one at most once a session while analytical code is uncommitted, so evidence carries a SHA.
 
 Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen. Take a user's correction to a package draft through `awb-package`, which keeps one later drafts could repeat in `foundation/review-rules.md`.

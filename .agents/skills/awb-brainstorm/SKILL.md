@@ -47,4 +47,4 @@ From the project root, with `--origin brainstorm`, the priority the ranking impl
 
 ## 4. Report
 
-Report the questions added, the counts parked and declined, and what comes next: data questions through `awb-explore` or analysis, questions for the user or a stakeholder through `awb-scope`, and each scope change through `awb-scope`.
+Report the questions added, the counts parked and declined, and what comes next: data questions through `awb-explore` or analysis, asking in the report each kept question the user can settle, a stakeholder's question through `awb-scope`, and each scope change through `awb-scope`.
