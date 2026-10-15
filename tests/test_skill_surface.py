@@ -494,3 +494,60 @@ def test_status_reports_git_unavailable_with_its_impact():
             'cannot tell what is uncommitted or whether the state is out of date, and evidence records '
             'file checksums instead of a commit SHA; say whether they must act, such as by installing Git '
             'or putting the project in a repository.') in status
+
+
+def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
+    # The review holds a checked or reconciliation sentence to a recorded result or check, pairing with the
+    # warning state finding gives, and the package contract tells the writer so; a re-review after repairs may
+    # be scoped, judging rules added or changed since in full, but never the last one before the request's
+    # final check-draft or the one that completes it, and release always runs the full review.
+    def read(path):
+        return ' '.join((ROOT / '.agents/skills' / path).read_text(encoding='utf-8').split())
+
+    review = read('awb-package/references/review.md')
+    package = read('awb-package/SKILL.md')
+    release = read('awb-release/SKILL.md')
+    reviewer = read('awb-package/assets/awb-package-reviewer.agent.md')
+    provenance = read('awb-init/references/provenance.md')
+
+    assert ('asserts that something was checked or verified, reconciles, sums or adds up to, or matches cites the '
+            'recorded result or check that establishes it') in review
+    assert 'A sentence without one is a narrative problem' in review
+    assert '`awb.py state finding`' in review and 'pair' in review
+    assert 'asserts a reconciliation or a completed check' in review and 'asserts a reconciliation or a completed' \
+        in provenance
+    assert 'Report every violation and narrative problem in this one pass, quoting each' in review
+    assert 'settle everything it reports, as above, before the review runs again' in review
+    assert ('Within one `awb-package` request, the review run again after repairs may be a scoped re-review: '
+            'give the reviewer the prior report and a diff') in review
+    assert ('a full review is still required before the request\'s final `check-draft`, and `awb-release` always '
+            'runs the full review') in review
+    assert '`review (scoped):`' in review
+    # The draft is outside Git, so the diff is taken against a copy kept when the prior review was launched,
+    # and with no copy the next review is full; a slide or document rule is judged on each slide or file a
+    # changed line falls in.
+    assert '`diff -u <copy> <current file>`' in review and 'Git-ignored `deliveries/` folder' in review
+    # The scoped diff is made against the prior review's copy before that copy is replaced; replacing it first
+    # would leave an empty diff.
+    diff_at = review.index('For a scoped re-review, first make the diff against the copy the prior review left')
+    copy_at = review.index('Then, for every review `awb-package` launches, full or scoped, and after any scoped '
+                           'diff is made, copy those files to the scratch folder, replacing the copy an earlier '
+                           'review left')
+    assert diff_at < copy_at
+    assert 'whenever `awb-package` launches a review, first copy' not in review
+    assert 'When no copy of what the prior review read was kept, the next review is a full one' in review
+    assert 'for a `slide` or `document` rule, on each slide or file that holds one' in review
+    assert 'the caller settles them all before the next review' in review
+    assert ('judge each rule added or changed since, as the diff of `foundation/review-rules.md` shows, against '
+            'every narrative in full') in review
+    assert ('Only a full review, whose last line opens `review:`, can complete a request or a release; a scoped '
+            're-review, whose last line opens `review (scoped):`, never does') in review
+    assert 'for a scoped re-review, the prior report and the diff' in review
+    assert '`slide` rule' in review and '`document` rule' in review
+    assert 'scoped re-review' in package and 'the last review before the final `check-draft` is a full one' in package
+    assert 'the last review is a full review, passed and not stale' in package
+    contract = read('awb-package/references/package-contract.md')
+    assert ('A sentence asserting that something was checked or verified, reconciles, sums or adds up to, or matches '
+            'cites the check that establishes it') in contract
+    assert 'Run the full read-only review' in release and 'never a scoped re-review' in release
+    assert 'one pass' in reviewer and 'scoped' in reviewer and 'the evidence a narrative cites' in reviewer
