@@ -1865,7 +1865,7 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
 # ---------------------------------------------------------------- check-draft
 
 def storyline_problems(root, investigation, draft, represented, provenance):
-    """Accepted input: PR #52's outline Markdown subset, with ### finding headlines matched
+    """Accepted input: the outline reader's Markdown subset (references/helpers.md), with ### finding headlines matched
     exactly to ### methodology headings. The matching section names represented results using
     the existing _cited grammar (bounded result IDs or evidence/<ID>.json links, outside
     comments). Only those results' recorded settings `answers` supply ledger question IDs.
@@ -1878,6 +1878,9 @@ def storyline_problems(root, investigation, draft, represented, provenance):
     as a citation; the reader cannot judge whether that evidence supports the audience's claim.
     Ties keep the author's slide order. Existing markdown/headings checks refuse unsupported
     Markdown and missing/repeated methodology headings.
+
+    A row names each slide outside the longest run of finding slides already in order, so moving
+    one slide reports that slide alone rather than every slide it shifted.
     """
     tree = provenance.question_tree(root, investigation)
     ranks = {q["id"]: (("must", "should", "could").index(q["priority"]), position)
@@ -1901,11 +1904,26 @@ def storyline_problems(root, investigation, draft, represented, provenance):
         ranked.append((ranks[question] if question else (3, 0), slide, question))
     ordered = sorted(range(len(ranked)), key=lambda i: ranked[i][0])
     positions = {index: position for position, index in enumerate(ordered, 1)}
+    in_order = _longest_ordered_run([rank for rank, _, _ in ranked])
     rows = [{"slide": slide["heading"], "line": slide["line"], "position": index + 1,
              "expected_position": positions[index], "question": question,
              "problem": f"finding slide is out of place; move it to finding position {positions[index]}"}
-            for index, (_, slide, question) in enumerate(ranked) if positions[index] != index + 1]
+            for index, (_, slide, question) in enumerate(ranked) if index not in in_order]
     return rows, unlinked
+
+
+def _longest_ordered_run(ranks):
+    """Indices of a longest non-decreasing subsequence of ranks: the slides that can stay where they are."""
+    tails, previous = [], [None] * len(ranks)  # tails[k]: index ending the best run of length k + 1
+    for i, rank in enumerate(ranks):
+        k = bisect.bisect_right([ranks[t] for t in tails], rank)
+        previous[i] = tails[k - 1] if k else None
+        tails[k:k + 1] = [i]
+    kept, i = set(), tails[-1] if tails else None
+    while i is not None:
+        kept.add(i)
+        i = previous[i]
+    return kept
 
 
 def open_question_problems(root, investigation, draft, provenance):
@@ -1924,7 +1942,7 @@ def open_question_problems(root, investigation, draft, provenance):
     alternate matching form. Notes remain presenter context and do not satisfy a question.
     """
     questions = [q for q in provenance.question_tree(root, investigation) if q["priority"] == "must"
-                 and q["display_status"] in ("open", "parked", "answered (awaiting recheck)")]
+                 and q["display_status"] in ("open", "parked", provenance.AWAITING_RECHECK)]
     expected = Counter(_collapse(_shown(_inline(q["text"])[0])) for q in questions)
     slides = read_outline(draft / "findings.md")["slides"]
     opened = [(i, slide) for i, slide in enumerate(slides) if not slide["finding"] and slide["heading"] == "Open questions"]
@@ -2011,6 +2029,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"markdown check: {error}")
     # Without findings.json the table renders empty, so any row is drift.
+    provenance = None  # loaded once; the ledger checks below reuse it
     try:
         provenance = _load_provenance(root)
         if not hasattr(provenance, "findings_drift"):
@@ -2022,11 +2041,12 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
                                     f"--investigation {investigation}")
     except (OSError, ValueError) as error:
         report["errors"].append(f"findings drift: {error}")
-    try:
-        report["open_questions"], report["open_questions_count"] = open_question_problems(
-            root, investigation, draft, _load_provenance(root))
-    except (OSError, ValueError, AttributeError) as error:
-        report["errors"].append(f"open questions check: {error}")
+    if provenance is not None:
+        try:
+            report["open_questions"], report["open_questions_count"] = open_question_problems(
+                root, investigation, draft, provenance)
+        except (OSError, ValueError, AttributeError) as error:
+            report["errors"].append(f"open questions check: {error}")
     try:
         flags = state_flags(root, investigation)
     except ValueError as error:
@@ -2058,12 +2078,12 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
                 report["claims"] = claim_problems(draft, [r["result_id"] for r in represented], claims)
             except (OSError, UnicodeError) as error:
                 report["errors"].append(f"claims check: {error}")
-        try:
-            provenance = _load_provenance(root)
-            report["storyline"], report["unlinked_findings"] = storyline_problems(
-                root, investigation, draft, [r["result_id"] for r in represented], provenance)
-        except (OSError, ValueError, AttributeError) as error:
-            report["errors"].append(f"storyline check: {error}")
+        if provenance is not None:
+            try:
+                report["storyline"], report["unlinked_findings"] = storyline_problems(
+                    root, investigation, draft, [r["result_id"] for r in represented], provenance)
+            except (OSError, ValueError, AttributeError) as error:
+                report["errors"].append(f"storyline check: {error}")
         if not verify_only:
             rows = inventory(draft)
             if rows != record.get("inventory"):
@@ -2114,7 +2134,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "rules: a missing # title or subtitle, text outside every slide, a ### finding outside ## Findings, "
                "a missing, repeated, empty, or over-15-word headline, more than five bullets except on Open questions, more than one chart, "
                "text that is no headline, bullet, chart, or notes, and a missing, repeated, or non-final **Notes:** "
-               "paragraph.\nstoryline lists each finding slide out of priority/tree order; unlinked_findings "
+               "paragraph.\nstoryline lists the finding slides to move, those outside the longest run already in "
+               "priority/tree order, each with its expected position; unlinked_findings "
                "names slides with no declared ledger answer, which go last and are informational.\n"
                "open_questions lists presence, placement, and exact-question-bullet problems on Open questions; "
                "open_questions_count is the required count, including parked questions and answers awaiting recheck.\n"

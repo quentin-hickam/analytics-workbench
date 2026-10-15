@@ -1712,22 +1712,23 @@ def storyline_fixture(project):
     return draft
 
 
+# Only slides outside the longest run already in order are reported, so one moved slide is one row.
 @pytest.mark.parametrize("headlines, misplaced", [
     (["Customer rates differ", "Regional rates differ", "Coverage remains limited"], []),
     (["Regional rates differ", "Customer rates differ", "Coverage remains limited"],
-     ["Regional rates differ", "Customer rates differ"]),
+     [("Regional rates differ", "Q-002", 2)]),
     (["Coverage remains limited", "Customer rates differ", "Regional rates differ"],
-     ["Coverage remains limited", "Customer rates differ", "Regional rates differ"]),
+     [("Coverage remains limited", None, 3)]),
+    (["Coverage remains limited", "Regional rates differ", "Customer rates differ"],
+     [("Coverage remains limited", None, 3), ("Regional rates differ", "Q-002", 2)]),
 ])
 def test_check_draft_orders_findings_from_priority_then_tree(project, capsys, headlines, misplaced):
     draft = storyline_fixture(project)
     write(draft, "findings.md", "# Order quality\nOperations leads, all regions\n\n## Findings\n\n" +
           "".join(f"### {headline}\n\n- Rates vary across groups.\n\n**Notes:** Compare the groups.\n\n" for headline in headlines))
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
-    assert [row["slide"] for row in report["storyline"]] == misplaced
+    assert [(row["slide"], row["question"], row["expected_position"]) for row in report["storyline"]] == misplaced
     assert report["unlinked_findings"] == ["Coverage remains limited"]
-    if misplaced:
-        assert next(row["question"] for row in report["storyline"] if row["slide"] == "Regional rates differ") == "Q-002"
     assert report["passed"] is (not misplaced), report
     assert code == (1 if misplaced else 0)
     # Read-only verification uses the same checks and reports the same rows.
@@ -1869,7 +1870,7 @@ def test_storyline_should_precedes_could_and_ties_keep_order(project, capsys):
           "### Regional rates differ\n\n**Notes:** Compare regions.\n")
     _, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert [(row["slide"], row["question"], row["expected_position"]) for row in report["storyline"]] == [
-        ("Customer rates differ", "Q-004", 2), ("Regional rates differ", "Q-001", 1)]
+        ("Customer rates differ", "Q-004", 2)]
     # Equal question priority and position leave the author's ordering intact.
     path.write_text(path.read_text().replace('answers = ["Q-004"]', 'answers = ["Q-001"]'))
     code, report = run(project, capsys, "check-draft", "inv", "pkg")

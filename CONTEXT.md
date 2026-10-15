@@ -83,7 +83,10 @@ The user's choice for a flagged finding that a draft represents: revalidate it, 
 A numbered rule, `R-<area>-NNN`, recorded from a correction the user made while reviewing a package draft, which every later review of a draft checks. Its ID is never renumbered or reused.
 
 **Question ledger**:
-An investigation's record of every question it has raised, answered or not, with who can answer each: the user, a stakeholder, or the data. It lives in `questions.json`, rendered whole to `questions.md`. A data question is answered only by a recorded result whose settings declare it; a question is never deleted, and a scope change supersedes an answered one. Data problems, actions, and settled decisions are not questions and stay in the state and brief.
+An investigation's record of every question it has raised, answered or not, with who can answer each: the user, a stakeholder, or the data. It lives in `questions.json`, rendered whole to `questions.md`. A data question is answered only by a recorded result whose settings declare it; a question is never deleted, and a scope change supersedes an answered one. Questions form a tree: each has a parent question or is a root, and a priority of must, should, or could. A package's finding slides follow that tree, and its **Open questions** slide lists the unanswered must questions. Data problems, actions, and settled decisions are not questions and stay in the state and brief.
+
+**Awaiting recheck**:
+The derived display status `answered (awaiting recheck)` of an answered data question with at least one flagged or superseded answering finding. It is computed from the current findings each time it is shown; the question's stored status stays answered. It describes the question; a flagged finding itself is awaiting revalidation.
 
 **Investigation state**:
 The current understanding of an investigation, including its active question, findings, unresolved issues, and next steps.

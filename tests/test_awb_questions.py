@@ -413,12 +413,35 @@ def test_cli_tree_priority_and_render(project, capsys):
     assert "Q-003 open [data, analytical, must; parent: root]" in cli(project, capsys, "list")[1]
 
 
+def test_cli_tree_sorts_ids_by_number_and_indents_under_listed_parents(project, capsys):
+    def question(text, *options):
+        return cli(project, capsys, "add", text, "--kind", "analytical", "--answerer", "data",
+                   "--origin", "scope", *options)
+
+    assert question("Parked root?", "--status", "parked", "--reason", "later")[0] == 0
+    assert question("Open child?", "--parent", "Q-001")[0] == 0
+    assert question("Open grandchild?", "--parent", "Q-002")[0] == 0
+    # The default open-only list drops the parked root, so its child is not indented under nothing.
+    assert cli(project, capsys, "list")[1].splitlines() == [
+        "Q-002 open [data, analytical, should; parent: Q-001] Open child?",
+        "  Q-003 open [data, analytical, should; parent: Q-002] Open grandchild?"]
+    path = project / INV / "questions.json"
+    content = json.loads(path.read_text())
+    # Two roots of equal priority: Q-999 sorts before Q-1000 by number, not as text.
+    content["questions"] = [dict(q, parent="") for q in content["questions"][:2]]
+    content["questions"][0]["id"], content["questions"][1]["id"] = "Q-1000", "Q-999"
+    path.write_text(json.dumps(content))
+    assert cli(project, capsys, "render")[0] == 0
+    assert [line.split()[0] for line in cli(project, capsys, "list", "--all")[1].splitlines()] == ["Q-999", "Q-1000"]
+
+
 @pytest.mark.parametrize("action, options, message", [
     ("add", ["--parent", "Q-999"], "no question Q-999"),
     ("edit", ["--parent", "Q-999"], "no question Q-999"),
     ("edit", ["--parent", "Q-001"], "cycle"),
     ("edit", ["--parent", "Q-003"], "cycle"),
     ("add", ["--parent", "first"], "parent must be"),
+    ("add", ["--parent", "Q-\u0660\u0660\u0661"], "parent must be"),
     ("edit", ["--parent", " Q-002 "], "parent must be"),
     ("add", ["--priority", "high"], "invalid choice"),
     ("edit", ["--priority", "MUST"], "invalid choice"),
