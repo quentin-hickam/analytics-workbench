@@ -6,5 +6,5 @@
 
 ### Fixed
 
-- `scripts/build-dist.sh` refused to build the archive, because the README's MCP server section linked `docs/copilot-compat.md` outside a `dist:exclude` block. That sentence now sits in its own excluded block, and `tests/test_skill_surface.py` checks the README as the script reads it: the archive copy has balanced markers and no `docs/` link, and every link resolves in the repository and in the archive.
+- `scripts/build-dist.sh` refused to build the archive, because the README's MCP server section linked `docs/copilot-compat.md` outside a `dist:exclude` block. That sentence now sits in its own excluded block, and `tests/test_skill_surface.py` checks the README as the script reads it: the archive copy has balanced markers and no `docs/` link, and every link names a tracked file and resolves, anchors included, in the repository and in the archive copy.
 - The README's **How it works** no longer says the builder receives the chosen datasets. As `START-HERE.md` and `assembly/m365.md` say, datasets and any methods note travel beside the deck and are not attached.

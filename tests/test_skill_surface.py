@@ -2,6 +2,9 @@
 
 import json
 import os
+import posixpath
+import subprocess
+import tempfile
 from pathlib import Path
 import re
 
@@ -668,31 +671,38 @@ def heading_anchors(text):
     without a closing run of `#` after a space, stripped and lowercased, each
     character other than an ASCII letter, digit, space, hyphen, or underscore dropped,
     then each space made a hyphen. A fence opens at a line of three or more backticks
-    or tildes after any spaces, and closes at the next such line of the same
-    character, at least as long, with nothing after it. Refuse with ValueError,
-    outside fences: any other line of one to six `#` then a space, a tab, or nothing,
-    such as an indented heading or one with no text; a line starting `<` that is not
-    a whole one-line HTML comment; and a backtick fence line whose info text holds a
-    backtick, which is a code span. Refuse a heading holding a character outside
+    or tildes after zero to three spaces, and closes at the next such line of the
+    same character, at least as long, after zero to three spaces, with nothing after
+    it; a fence-like line indented four or more spaces inside a fence is its content.
+    Refuse with ValueError, outside fences: any other line of one to six `#` then a
+    space, a tab, or nothing, such as an indented heading or one with no text; a line
+    starting `<` that is not a whole one-line HTML comment; a backtick fence line
+    whose info text holds a backtick, which is a code span; and a fence-like line
+    indented four or more spaces, which an indented code block or a nested list item
+    holds. Refuse a heading holding a character outside
     printable ASCII, `*`, `[`, `<`, an entity such as `&amp;`, or a `_` not between
     two letters or digits, since the rule above is GitHub's for plain ASCII text and
     these render as other text. Known limits: a repeated heading's `-1` suffix and Setext
     headings are not produced, and a heading inside a blockquote gives no anchor, so a
-    link to one fails; an indented code block's lines are read like any other, so a
-    ``` line inside one opens a fence that hides the headings after it.
+    link to one fails; a fence in a list item closed by a line indented four or more
+    spaces stays open and hides the headings after it, so a link to one fails.
     """
     anchors, fence = set(), None
     for line in text.split('\n'):
-        fence_line = re.match(r' *(`{3,}|~{3,})(.*)$', line)
+        fence_line = re.match(r'( *)(`{3,}|~{3,})(.*)$', line)
+        if fence_line:
+            indent, run, info = fence_line.groups()
         if fence:
-            if (fence_line and fence_line[1][0] == fence[0] and len(fence_line[1]) >= len(fence)
-                    and not fence_line[2].strip()):
+            if (fence_line and len(indent) <= 3 and run[0] == fence[0] and len(run) >= len(fence)
+                    and not info.strip()):
                 fence = None
             continue
         if fence_line:
-            if fence_line[1][0] == '`' and '`' in fence_line[2]:
+            if len(indent) > 3:
+                raise ValueError(f'fence indented four or more spaces: {line!r}')
+            if run[0] == '`' and '`' in info:
                 raise ValueError(f'code span, not a fence: {line!r}')
-            fence = fence_line[1]
+            fence = run
             continue
         if re.match(r' *<', line) and not re.fullmatch(r'<!--.*-->', line):
             raise ValueError(f'raw HTML line: {line!r}')
@@ -721,6 +731,7 @@ def heading_anchors(text):
     ('~~~\n# not a heading\n~~~\n', set()),
     ('````md\n```\n# inside\n````\n## After\n', {'after'}),
     ('- item\n  ```sh\n  # comment\n  ```\n', set()),
+    ('```md\n    ```\n# x\n```\n', set()),
     ('<!-- dist:exclude -->\n## A\n', {'a'}),
     ('## Café\n', None),
     ('## A — B\n', None),
@@ -735,6 +746,7 @@ def heading_anchors(text):
     ('<details>\n# x\n</details>\n', None),
     ('<!--\n# x\n-->\n', None),
     ('```a`b\n# x\n', None),
+    ('    ```\n# x\n    ```\n', None),
 ])
 def test_heading_anchors_accepted_and_refused_forms(text, expected):
     if expected is None:
@@ -792,51 +804,80 @@ def test_archive_readme_accepted_and_refused_forms(text, expected):
 
 
 def unresolved_links(text, source):
-    """Each relative link in text whose file `source` maps to nothing, or whose
-    anchor names no heading there; `source` maps a link path to a file or None."""
+    """Each relative link in text whose path `source` maps to no file, or whose anchor
+    names no heading there; `source` maps a link path to the linked file's text or
+    None, and a bare `#anchor` is read against text itself."""
     unresolved = []
     for target in markdown_links(text):
         if re.match(r'https?://', target):
             continue
         path, _, anchor = target.partition('#')
-        file = source(path)
-        if file is None or not file.is_file():
-            unresolved.append(target)
-        elif anchor and anchor not in heading_anchors(text if not path else file.read_text(encoding='utf-8')):
+        linked = source(path) if path else text
+        if linked is None or anchor and anchor not in heading_anchors(linked):
             unresolved.append(target)
     return unresolved
 
 
-def test_readme_links_resolve():
-    # Every relative link in the repository README names a file that exists, and every anchor a heading in it.
-    text = README.read_text(encoding='utf-8')
-    assert unresolved_links(text, lambda path: ROOT / path if path else README) == []
+def tracked_files():
+    listed = subprocess.run(['git', 'ls-files', '-z'], cwd=ROOT, capture_output=True, check=True)
+    return set(listed.stdout.decode('utf-8').split('\0')) - {''}
+
+
+def repository_source(tracked):
+    # A link resolves on GitHub only to a tracked file inside the repository: an absolute path, a path out
+    # of the repository, and an untracked local file name nothing there.
+    def source(path):
+        path = posixpath.normpath(path)
+        return (ROOT / path).read_text(encoding='utf-8') if path in tracked else None
+    return source
 
 
 # scripts/build-dist.sh's archive holds the skill folders at its top level, beside these files.
 ARCHIVE_FILES = ('CHANGELOG.md', 'LICENSE', 'README.md')
 
 
+def archive_source(archive, tracked):
+    # The archive's README.md is the archive copy, so its anchors are read there, not in the repository's.
+    # The script copies only tracked files, and its allowlist names every skill folder.
+    def source(path):
+        if path == 'README.md':
+            return archive
+        if path in ARCHIVE_FILES:
+            return (ROOT / path).read_text(encoding='utf-8')
+        if f'.agents/skills/{path}' in tracked:
+            return (ROOT / '.agents/skills' / path).read_text(encoding='utf-8')
+        return None
+    return source
+
+
+def test_readme_links_resolve():
+    # Every relative link in the repository README names a tracked file, and every anchor a heading in it.
+    text = README.read_text(encoding='utf-8')
+    assert unresolved_links(text, repository_source(tracked_files())) == []
+
+
 def test_archive_readme_links_only_what_the_archive_holds():
     # build-dist.sh drops the dist:exclude blocks, rewrites skill links, and refuses a docs/ link or a stray
-    # marker in what is left; every link left must name a file the archive holds. The script copies only
-    # tracked files, and its allowlist names every skill folder.
-    import subprocess
-
+    # marker in what is left; every link left must name a file the archive holds.
     archive = archive_readme(README.read_text(encoding='utf-8'))
     assert '](docs/' not in archive
-    listed = subprocess.run(['git', 'ls-files', '-z', '--', '.agents/skills'], cwd=ROOT,
-                            capture_output=True, check=True)
-    tracked = set(listed.stdout.decode('utf-8').split('\0'))
+    assert unresolved_links(archive, archive_source(archive, tracked_files())) == []
 
-    def source(path):
-        if not path or path in ARCHIVE_FILES:
-            return ROOT / (path or 'README.md')
-        if f'.agents/skills/{path}' in tracked:
-            return ROOT / '.agents/skills' / path
-        return None
 
-    assert unresolved_links(archive, source) == []
+def test_unresolved_links_refuse_what_github_and_the_archive_do_not_hold():
+    tracked = tracked_files()
+    repository = repository_source(tracked)
+    outside = f'../{ROOT.name}/README.md'
+    with tempfile.NamedTemporaryFile(dir=ROOT, suffix='.md') as untracked:
+        name = Path(untracked.name).name
+        text = f'[a](/etc/hosts)\n[b]({outside})\n[c]({name})\n[d](README.md)\n[e](./LICENSE)\n'
+        assert unresolved_links(text, repository) == ['/etc/hosts', outside, name]
+    readme = README.read_text(encoding='utf-8')
+    archive = archive_readme(readme)
+    dropped = sorted(heading_anchors(readme) - heading_anchors(archive))
+    assert dropped, 'the archive copy drops no heading'
+    text = archive + f'[x](README.md#{dropped[0]})\n[y](#{dropped[0]})\n[z](README.md#what-you-get)\n'
+    assert unresolved_links(text, archive_source(archive, tracked)) == [f'README.md#{dropped[0]}', f'#{dropped[0]}']
 
 
 def test_readme_opens_with_what_you_get_and_the_analyst_quick_start():

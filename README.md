@@ -28,7 +28,7 @@ A Microsoft 365 Copilot license is needed only for the Copilot route.
 
 Each time you mark the package delivered, it becomes the next numbered release: 001, then 002, and so on. A release is frozen: it never changes, and later edits go into the next one. Each release is copied to the folder you name for releases; when the agent cannot reach that folder, it tells you what to copy there.
 
-Along the way, answers come in chat, and the project folder keeps the record: for each investigation, its brief, its findings, its question ledger, and a history of decisions, with the saved queries and checked data behind them. A later session picks up from these files.
+Along the way, answers come in chat, and the project folder keeps the record: for each investigation, its brief, its findings, its question ledger (the list of every question it has raised, answered or not), and a history of decisions, with the saved queries and checked data behind them. A later session picks up from these files.
 
 ## Quick-start for analysts
 
@@ -70,7 +70,7 @@ The agent asks in plain words, with its recommendation and the alternative.
    A request that names a mode gets it, and one that gives the storyline or asks for the full draft gets draft-then-review. Otherwise the agent uses the mode you chose before, or preview-and-wait. With the headlines it reports the slide count against your length and, when there are too many, proposes what moves to the appendix. You can reorder the findings without changing which questions matter most. In either mode, a choice still open that would change the deck, such as wording for your audience you have not approved, stops the draft and is asked with the headlines.
 6. **Release questions**, when you mark the package delivered: whether any draft label left in the deck's title or headings, such as DRAFT, should stay, and whether to accept any warning the final review raises.
 
-You are asked for a disposition only when a finding the draft shows is flagged, while drafting or at release. With no flagged findings, the question never comes up.
+A finding is flagged when a later correction to the shared data, or a changed input, may affect it. Your decision on a flagged finding is its disposition; [Words you will meet](#words-you-will-meet) lists the choices. You are asked for a disposition only when a finding the draft shows is flagged, while drafting or at release. With no flagged findings, the question never comes up.
 
 ### The usual requests, in order
 
@@ -113,7 +113,7 @@ The [UX simulation synthesis](docs/ux-simulation-2026-10-15/README.md) has each 
 - The agent commits code only when you ask, and reminds you at most once a session. Say "commit as you go" to switch.
 - Your host may ask you to approve a command or tool call. That is the host's own prompt, not the workbench's.
 - Setup may suggest, in one line, registering the workbench's `awb` tool server with your host. It cuts down those approvals, and the work runs without it; [Install and administer](#install-and-administer) covers it.
-- The checks have limits. The package check confirms that every number in the narratives traces to a recorded result or is listed, with its reason, as coming from elsewhere, such as a fact you gave or a figure from an earlier release. A separate read-only reviewer reads the wording against your review rules and the evidence. Neither redoes the analysis, so read the headlines and caveats yourself.
+- The checks have limits. The package check confirms that every number in the deck outline, the methodology reference, and any methods note traces to a recorded result or is listed, with its reason, as coming from elsewhere, such as a fact you gave or a figure from an earlier release. A separate read-only reviewer reads the wording against your review rules and the evidence. Neither redoes the analysis, so read the headlines and caveats yourself.
 
 ## Included skills
 
