@@ -158,9 +158,10 @@ def _evidence_files(root, investigation):
 # line. title: a heading's text as it shows, code spans and autolinks unwrapped, so formatting never sets
 # two headings apart. group: the paragraph or heading the line belongs to, None for blank, fence, and
 # hidden lines. start: the line opens a paragraph. declares: it opens a top-level paragraph at column 0,
-# the only place a **Claim strength:** line counts. item: the list depth of the item the line opens, 1 for a
-# top-level item, else 0. listed: the line is in a list item, so a paragraph it opens continues that item; a
-# paragraph opened in a block quote outside any list is a block of its own.
+# the only place a **Claim strength:** line counts. item: the list depth of the item the line opens (1 at the
+# top level), or 0 when the line opens no item. listed: the list depth of the item the line is in, 0 outside
+# any list; a paragraph it opens continues an item of that depth (see `_blocks`), and a paragraph opened in a
+# block quote outside any list is a block of its own.
 _Line = namedtuple("_Line", "number kind level title plain prose spaced links group start declares item listed")
 
 _FENCE = re.compile(r"( {0,3})(`{3,}|~{3,})")
@@ -319,7 +320,7 @@ def _view(text):
 
     def row(number, kind, leaf="", **fields):
         rows.append({"number": number, "kind": kind, "leaf": leaf, "level": 0, "title": None, "group": None,
-                     "start": False, "inside": False, "indent": 0, "item": 0, "listed": False, **fields})
+                     "start": False, "inside": False, "indent": 0, "item": 0, "listed": 0, **fields})
 
     for number, line in enumerate(text.splitlines(), start=1):
         line = line.expandtabs(4)
@@ -373,7 +374,7 @@ def _view(text):
                 break
             para = False
         inside, indent = bool(stack), _indent(rest)
-        listed = any(container is not None for container in stack)
+        listed = sum(container is not None for container in stack)
 
         if not rest.strip():
             row(number, "text")
@@ -1532,7 +1533,11 @@ def _blocks(lines):
         if line.item:
             blocks.append({"kind": "item", "line": line.number, "depth": line.item, "first": line.plain,
                            "text": text, "gap": gap})
-        elif text and (line.start and (not line.listed or _CHART_SPEC.match(line.plain)) or not blocks):
+        # A paragraph in a list item continues the block before it only when that block is an item of the same
+        # depth; after a deeper item it would join the wrong one, so it stands alone and is reported.
+        elif text and (not blocks or line.start and (not line.listed or _CHART_SPEC.match(line.plain)
+                                                     or blocks[-1]["kind"] != "item"
+                                                     or blocks[-1]["depth"] != line.listed)):
             blocks.append({"kind": "paragraph", "line": line.number, "depth": 0, "first": line.plain,
                            "text": text, "gap": gap})
         elif text:
@@ -1612,7 +1617,8 @@ def _outline(view):
             # The subtitle is the paragraph the title slide opens with.
             subtitle = read["extra"].pop(0) if read["extra"] and read["extra"][0]["line"] == read["opening"] else None
             outline["title"] = {**read, "text": heading, "subtitle": subtitle and subtitle["text"],
-                                "notes": read["notes"][0]["text"] if read["notes"] else None}
+                                "notes": read["notes"][0]["text"] if read["notes"] else None,
+                                "notes_lines": [n["line"] for n in read["notes"]]}
             outline["charts"] += read["charts"]
             continue
         if level == 2:
@@ -1674,6 +1680,9 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
                             key=lambda block: block["line"]):
             row("title", block["line"], "the title slide holds only the # heading, its subtitle line, and notes; "
                                         "move this to a slide")
+        if len(title["notes_lines"]) > 1:
+            row("title", title["notes_lines"][1], f"{len(title['notes_lines'])} **Notes:** paragraphs; merge them "
+                                                  "into one")
     for stray in outline["stray"]:
         row(stray["where"], stray["line"], "a second # heading; the deck has one title slide, so make this a ## "
             "slide or remove it" if stray["where"] == "a second # heading" else

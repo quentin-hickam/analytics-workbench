@@ -1,8 +1,8 @@
 # Kept cases:
 # test_parse_outline_derives_the_deck: the title slide, one slide per ## section but Findings and per ### finding, with section, headline, bullets and nested bullets, notes, and chart; every chart with its form, comparison, fields, and slide; nothing is written.
-# test_parse_outline_reads_as_it_renders: a comment hides a bullet, a fence is no bullet, a chart's fields end at a blank line so a later Caveat bullet stays on the slide, a list-item specification is a chart, a field already given is a bullet, and a wrapped bullet is one bullet, a block quote inside it included.
+# test_parse_outline_reads_as_it_renders: a comment hides a bullet, a fence is no bullet, a chart's fields end at a blank line so a later Caveat bullet stays on the slide, a list-item specification is a chart, a field already given is a bullet, and a wrapped bullet is one bullet, a block quote inside it included; a paragraph back at a bullet's depth after its nested chart joins no field.
 # test_outline_problems_clean_deck: a deck following every slide rule has no rows; a 15-word headline and five bullets pass.
-# test_outline_problems_rows: each slide rule broken gives its row with slide, line, and problem, a block quote outside a list being a paragraph of its own; a deck without its # heading also has its subtitle on no slide, and one without ## Findings has each finding outside it.
+# test_outline_problems_rows: each slide rule broken gives its row with slide, line, and problem, a block quote outside a list being a paragraph of its own, as is a paragraph back at a bullet's depth after a deeper item, and the title slide's notes counted too; a deck without its # heading also has its subtitle on no slide, and one without ## Findings has each finding outside it.
 # test_chart_data_reads_roles: role: header pairs in order, case-insensitive roles, headers kept whole, colons in a header kept.
 # test_check_charts_every_form_passes: a specification in each of the seven forms, its Data line naming that form's roles, and a file with those columns passes.
 # test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, a column the file lacks, and a file column no role names give one row each.
@@ -152,6 +152,12 @@ onto a second line
         (1, "Column", {"Data": "category: Month; value: Cases"}),
         (2, "Table", {"Data": "column: Month; column: Cases"})]
     assert slide["extra"] == [] and slide["notes"] == "N"
+    # A paragraph back at the bullet's depth after a nested chart's fields joins neither the bullet nor a field.
+    nested = draft.parse_outline("# T\nSub\n\n## A\n\n- West.\n  - **Chart 1.** Table: grid\n"
+                                 "    - **Alt text:** Grid.\n\n  **Caveat:** March.\n")
+    slide = nested["slides"][0]
+    assert ([b["text"] for b in slide["bullets"]], nested["charts"][0]["fields"], slide["extra"]) == (
+        ["West."], {"Alt text": "Grid."}, [{"line": 10, "text": "Caveat: March."}])
 
 
 def test_outline_problems_clean_deck(tmp_path):
@@ -223,6 +229,17 @@ LONG = " ".join(["word"] * 15) + " 21%"
     (NOTES, NOTES + "\n**Notes:** More.\n", ("How we know", 50, "2 **Notes:** paragraphs; merge them into one")),
     (NOTES, NOTES + "\n- A bullet after the notes.\n",
      ("How we know", 50, "text after the **Notes:** paragraph; the notes end the slide")),
+    ("first half of the year\n", "first half of the year\n\n**Notes:** Introduce.\n\n**Notes:** More.\n",
+     ("title", 6, "2 **Notes:** paragraphs; merge them into one")),
+    ("  - January was the lowest month.\n",
+     "  - January was the lowest month.\n\n  **Caveat:** March records are incomplete.\n",
+     ("Late claims rose each month in the west", 37, "text outside the headline, bullets, chart, and notes; make it a "
+                                                     "bullet or move it into the notes")),
+    ("- Claims are counted once.\n", "- Claims are counted once.\n  - **Chart 3.** Table: the grid\n"
+                                     "    - **Data:** column: Region\n    - **Alt text:** Regional grid.\n\n"
+                                     "  **Caveat:** March records are incomplete.\n",
+     ("How we know", 51, "text outside the headline, bullets, chart, and notes; make it a bullet or move it into "
+                         "the notes")),
 ])
 def test_outline_problems_rows(tmp_path, old, new, expected):
     assert old in DECK
