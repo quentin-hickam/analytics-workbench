@@ -4,8 +4,10 @@ A test fixture, kept out of the distributed archive. It proves the deck contract
 package-format/deck-rules.md is complete enough to build a deck from without Microsoft 365: everything it
 places comes from the outline `awb_draft.parse_outline` derives and from the chart files. It follows the
 content rules (one slide per outline slide, headlines, bullets, and notes verbatim, every chart drawn from
-its file at the file's values, intervals as error bars, source and alt text from the specification) and
-leaves styling, sections, and theme to the builders users run. Like any builder that cannot ask, it
+its file at the file's values, intervals as error bars, the source line with what the intervals mean and
+the caveat's reason, and alt text from the specification) and leaves styling, sections, and theme to the
+builders users run. It marks no value with the caveat's asterisk: **Caveat:** names that value only in
+words. Like any builder that cannot ask, it
 refuses a draft that `check-draft`'s outline and chart checks fail, naming each row.
 
     python3 tests/deck_renderer.py <draft directory> <output.pptx>
@@ -70,6 +72,14 @@ def _number(text, where):
         raise ContractError([{"chart": where, "problem": f"value {text!r} is not a number"}]) from None
 
 
+def _required(text, where):
+    """A number the chart cannot draw without; a blank cell is refused."""
+    if (number := _number(text, where)) is None:
+        raise ContractError([{"chart": where, "problem": "a bar's value, lower, or upper cell is blank; "
+                                                    "each interval needs all three"}])
+    return number
+
+
 def _roles(pairs, role):
     return [header for name, header in pairs if name == role]
 
@@ -85,7 +95,12 @@ def category_data(chart, headers, rows):
     if _roles(pairs, "series"):
         categories = list(dict.fromkeys(row[category] for row in rows))
         series, value = column[_roles(pairs, "series")[0]], column[values[0]]
-        cells = {(row[category], row[series]): _number(row[value], where) for row in rows}
+        cells = {}
+        for row in rows:
+            if (row[category], row[series]) in cells:
+                raise ContractError([{"chart": where, "problem": f"{row[category]!r} and {row[series]!r} repeat a "
+                                                                 "row, so one point would hide the other"}])
+            cells[row[category], row[series]] = _number(row[value], where)
         names = list(dict.fromkeys(row[series] for row in rows))
         return categories, [(name, [cells.get((c, name)) for c in categories]) for name in names]
     return [row[category] for row in rows], [(name, [_number(row[column[name]], where) for row in rows])
@@ -96,8 +111,8 @@ def _error_bars(chart, pairs, headers, rows, where):
     """Custom error bars from the file's lower and upper columns, on the one bar series."""
     column = {header: index for index, header in enumerate(headers)}
     value, lower, upper = (column[_roles(pairs, role)[0]] for role in ("value", "lower", "upper"))
-    plus = [_number(row[upper], where) - _number(row[value], where) for row in rows]
-    minus = [_number(row[value], where) - _number(row[lower], where) for row in rows]
+    plus = [_required(row[upper], where) - _required(row[value], where) for row in rows]
+    minus = [_required(row[value], where) - _required(row[lower], where) for row in rows]
     ser = chart._chartSpace.xpath(".//c:ser")[0]
     bars = etree.SubElement(ser, qn("c:errBars"))
     for tag, val in (("c:errBarType", "both"), ("c:errValType", "cust"), ("c:noEndCap", "0")):
@@ -219,10 +234,9 @@ def render(draft_dir, output):
             body.width = Inches(4.4)
             frame = _place_chart(slide, chart, draft_dir)
             frame._element.xpath("./*[1]/p:cNvPr")[0].set("descr", chart["fields"].get("Alt text", ""))
-            lines = [(0, chart["fields"]["Source"])] if chart["fields"].get("Source") else []
-            caveat = chart["fields"].get("Caveat", "")
-            if caveat and caveat.lower() != "none":
-                lines.append((0, f"* {caveat}"))
+            given = {name: text for name, text in chart["fields"].items() if text and text.lower() != "none"}
+            source = "; ".join(given[name] for name in ("Source", "Interval") if name in given)
+            lines = [(0, text) for text in (source, given.get("Caveat") and f"* {given['Caveat']}") if text]
             if lines:
                 source = slide.shapes.add_textbox(Inches(5.0), Inches(6.3), Inches(4.6), Inches(0.8))
                 _text(source.text_frame, lines)

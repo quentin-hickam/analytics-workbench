@@ -1,8 +1,9 @@
 # Kept cases:
 # test_renderer_builds_every_slide_verbatim: the reference renderer builds the title slide and one slide per outline slide in order, with headlines, bullets and nested bullets, and notes verbatim, and leaves the draft untouched.
-# test_renderer_draws_every_form_from_its_file: each of the seven forms is drawn from its chart file at the file's values and order: bar, column, line, and stacked types with a series pivoted, intervals as custom error bars, scatter points and fit, a table's cells; alt text and the source and caveat line come from the specification.
+# test_renderer_draws_every_form_from_its_file: each of the seven forms is drawn from its chart file at the file's values and order: bar, column, line, and stacked types with a series pivoted, intervals as custom error bars, scatter points and fit, a table's cells; alt text and the source line (with the **Interval:** text) and caveat line come from the specification.
 # test_renderer_is_deterministic: two renders of one draft are byte-identical.
 # test_renderer_refuses_a_draft_breaking_the_contract: an outline or chart row stops the render, naming the rows, and writes nothing.
+# test_renderer_refuses_data_it_cannot_draw: a repeated category and series pair, or a blank interval cell, stops the render with a ContractError instead of dropping a row or crashing.
 # The python-pptx tests skip when the package is missing; the renderer is a test fixture, never shipped.
 
 import importlib.util
@@ -44,7 +45,7 @@ def findings():
 - **Data:** {data}
 - **Highlight:** none
 - **Axis:** zero baseline
-- **Interval:** none
+- **Interval:** {'bars show 95% intervals' if form == 'Bar with intervals' else 'none'}
 - **Source:** source {n}
 - **Caveat:** {'none' if n % 2 else f'value {n} is partial'}
 - **Alt text:** alt text {n}
@@ -150,7 +151,8 @@ def test_renderer_draws_every_form_from_its_file(package, tmp_path):
         assert frame._element.xpath("./*[1]/p:cNvPr")[0].get("descr") == f"alt text {n}"
         source = [shape.text_frame.text for shape in slide.shapes
                   if shape.has_text_frame and shape.text_frame.text.startswith("source")]
-        assert source == [f"source {n}" if n % 2 else f"source {n}\n* value {n} is partial"]
+        expected = f"source {n}; bars show 95% intervals" if n == 2 else f"source {n}"
+        assert source == [expected if n % 2 else f"{expected}\n* value {n} is partial"]
 
 
 def test_renderer_is_deterministic(package, tmp_path):
@@ -172,4 +174,18 @@ def test_renderer_refuses_a_draft_breaking_the_contract(package, tmp_path, old, 
     with pytest.raises(renderer.ContractError) as refused:
         renderer.render(package, tmp_path / "deck.pptx")
     assert [{key: value for key, value in found.items() if key != "line"} for found in refused.value.rows] == [row]
+    assert not (tmp_path / "deck.pptx").exists()
+
+
+@pytest.mark.parametrize("number, content, problem", [
+    (3, "Month,Region,Cases\nJan,West,12\nJan,West,99\nFeb,West,15\n",
+     "'Jan' and 'West' repeat a row, so one point would hide the other"),
+    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,21,,25\nEast,5,4,6.5\n",
+     "a bar's value, lower, or upper cell is blank; each interval needs all three"),
+])
+def test_renderer_refuses_data_it_cannot_draw(package, tmp_path, number, content, problem):
+    (package / f"charts/chart-{number}.csv").write_text(content, encoding="utf-8")
+    with pytest.raises(renderer.ContractError) as refused:
+        renderer.render(package, tmp_path / "deck.pptx")
+    assert refused.value.rows == [{"chart": f"Chart {number}", "problem": problem}]
     assert not (tmp_path / "deck.pptx").exists()
