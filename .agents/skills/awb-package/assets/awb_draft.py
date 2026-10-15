@@ -586,7 +586,8 @@ _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 def _unfenced(path):
     """Yield (line number, line, opens a fence) for each line outside fenced code and HTML comments."""
     text = Path(path).read_text(encoding="utf-8")
-    text = _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
+    # A blanked comment keeps every line break str.splitlines() sees, so line numbers match `_view`'s.
+    text = _COMMENT.sub(lambda match: " " + "\n" * (len(match.group(0).splitlines()) - 1), text)
     fence = None
     for number, line in enumerate(text.splitlines(), start=1):
         if fence is not None:
@@ -2126,7 +2127,8 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     except (OSError, ValueError) as error:
         report["errors"].append(f"manifest: {error}")
 
-    # Every number in either narrative traces to a represented result or is allowed with a reason.
+    # Every number in either narrative traces to a represented result or is allowed with a reason; a Claim
+    # strength line the claims check accepts repeats state.md and is skipped.
     if record is not None:
         allowed, problems = allowed_numbers(record)
         values, more = recorded_values(root, investigation, record.get("results"))

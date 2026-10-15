@@ -1777,6 +1777,24 @@ def test_numbers_skip_a_claim_strength_line_the_claims_check_accepts(project, ca
     assert draft.check_numbers(path, [Decimal(4)], claim_lines={13}) == []
 
 
+@pytest.mark.parametrize("brk", [" ", "\x0c", "\x85"])
+def test_numbers_count_lines_as_the_claims_check_does_after_a_comment(project, capsys, brk):
+    # A comment holding a line break that str.splitlines() sees but "\n" does not must not shift the numbers
+    # check's line numbers off the claims check's, or the skip lands on the line after the accepted claim.
+    comment = f"## Findings\n<!-- note{brk}more -->"
+    claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace("## Findings", comment)
+                .replace(DISCOUNT_CLAIM, f"{DISCOUNT_CLAIM}\nacross 77 stores"))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["claims"] == []
+    assert report["numbers"] == [{"file": "methodology.md", "line": 16, "text": "77"}]
+    write(project, "investigations/inv/state.md", STATE.format(status="supported", reason="").replace(
+        "causal (experiment: randomized discount test)", HOLDOUT))
+    claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace("## Findings", comment)
+                .replace(DISCOUNT_CLAIM, f"**Claim strength:** {HOLDOUT}\nacross 77 stores"))
+    report = run(project, capsys, "check-draft", "inv", "pkg")[1]
+    assert report["claims"] == [] and report["numbers"] == [{"file": "methodology.md", "line": 16, "text": "77"}]
+
+
 def storyline_fixture(project):
     state = project / "investigations/inv/state.md"
     write(project, "investigations/inv/state.md", state.read_text().replace("causal (experiment: randomized discount test)", "association"))
