@@ -253,6 +253,13 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     # and with no copy the next review is full; a slide or document rule is judged on each slide or file a
     # changed line falls in.
     assert '`diff -u <copy> <current file>`' in review and 'Git-ignored `deliveries/` folder' in review
+    # The scoped diff is made against the prior review's copy before that copy is replaced; replacing it first
+    # would leave an empty diff.
+    diff_at = review.index('For a scoped re-review, first make the diff against the copy the prior review left')
+    copy_at = review.index('Only after that diff is made, and for every review `awb-package` launches, full or '
+                           'scoped, copy those files to the scratch folder, replacing the copy an earlier review left')
+    assert diff_at < copy_at
+    assert 'whenever `awb-package` launches a review, first copy' not in review
     assert 'When no copy of what the prior review read was kept, the next review is a full one' in review
     assert 'for a `slide` or `document` rule, on each slide or file that holds one' in review
     assert 'the caller settles them all before the next review' in review
