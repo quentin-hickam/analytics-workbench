@@ -2,7 +2,8 @@
 """Install the workbench helpers, guides, and references README; declare their packages; upgrade shipped copies;
 print a host's registration command and user-level awb MCP server entry.
 
-Run with the interpreter that will run the project's analysis:
+Run with the interpreter that will run the project's analysis, which it records as README's
+`Project interpreter`:
     install_helpers.py [PROJECT_ROOT]                    install missing helpers, workbench guides, and the
                                                          foundation/references/ README; write requirements.txt
                                                          if absent
@@ -42,13 +43,26 @@ Install/check modes print one line of JSON:
   requirements, python, packages, install   the third-party packages the helpers and the run.py
                      template need, where they are declared, and whether this interpreter imports them;
                      requirements.unread lists the requirements.txt lines and includes the provenance
-                     helper's reader could not read, which may declare a package listed as missing
+                     helper's reader could not read, which may declare a package listed as missing;
+                     install is `<python> -m pip install <packages>`, or `uv pip install --python <python>
+                     <packages>` when this interpreter has no pip and its pyvenv.cfg records uv or uv is
+                     on PATH; a written requirements.txt names the same tool in its header
+  interpreter        README's `Project interpreter: <path>` line for this interpreter, the path relative
+                     to the project inside it (in_project) and absolute outside it, with its status:
+                     written, current, replaced (was names the old value, which named no file), missing
+                     (--check), unrecorded without a readable README.md, or overridden when $AWB_PYTHON
+                     names this interpreter, which leaves the line as it is. A README naming another
+                     existing interpreter, or repeating the line, is an error: rerun with that
+                     interpreter, or edit the line to switch. So is a project .venv or venv interpreter
+                     other than this one while README records none: rerun with it, or name the
+                     interpreter to use on the line.
 Package formats stay absent until awb-package copies them with --package-formats.
 The project's install receipt, .awb-receipt.json, maps each file this script installed or replaced to
 its SHA-256: a file matching its entry is unmodified. A file without an entry is customized unless
 it equals the shipped asset.
 Existing dependency files are only read, and no package is installed. Exit status: 0 done; 1 not a
-workbench, Python too old, or an unreadable receipt, nothing written; 2 unusable arguments.
+workbench, Python too old, an unreadable receipt, README naming another interpreter, or a project
+venv passed over, nothing written; 2 unusable arguments.
 """
 
 import argparse
@@ -64,6 +78,8 @@ import sys
 from pathlib import Path
 
 SKILLS = Path(__file__).resolve().parents[2]
+# The CLI asset reads README's Project interpreter line; the installer writes it with the same reader.
+CLI = Path(__file__).resolve().parents[1] / "assets/awb_cli.py"
 RECEIPT = ".awb-receipt.json"
 PYTHON = (3, 10)
 # Project path -> asset under the skills directory, for every file the skills copy into a project.
@@ -159,6 +175,112 @@ def _declared(root):
     return files, names, unread
 
 
+def _cli():
+    spec = importlib.util.spec_from_file_location("awb_asset_cli", CLI)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _interpreter_text(root):
+    """This interpreter as README records it, and whether it is inside the project: project-relative
+    there, absolute elsewhere. Its directories are resolved, never the file, which in a virtual
+    environment links to a base interpreter without the environment's packages."""
+    path = Path(os.path.abspath(sys.executable))
+    try:
+        return (path.parent.resolve() / path.name).relative_to(root).as_posix(), True
+    except ValueError:
+        return str(path), False
+
+
+def _interpreter(root, check):
+    """(report, error, README text to write or None) for README's Project interpreter line."""
+    cli = _cli()
+    value, in_project = _interpreter_text(root)
+    report = {"line": f"{cli.INTERPRETER_LINE} {value}", "in_project": in_project}
+    # AWB_PYTHON overrides README for awb.py and the MCP server, which runs this script under it.
+    configured = cli.locate(os.environ["AWB_PYTHON"]) if os.environ.get("AWB_PYTHON") else None
+    if configured and cli.same_interpreter(configured):
+        return {**report, "status": "overridden"}, None, None
+    status, recorded, detail = cli.read_interpreter(root)
+    if status == "refused" and recorded is None:
+        return report, f"{detail}; keep one, then rerun", None
+    if status == "recorded":
+        if cli.same_interpreter(detail):
+            return {**report, "status": "current"}, None, None
+        return report, (f"README's Project interpreter is {recorded}, not this interpreter ({sys.executable}); "
+                        "rerun with it, or edit that line to switch"), None
+    # With no interpreter recorded, awb.py runs the project's own venv: record that one, not this one.
+    venv, _ = cli.project_venv(root)
+    if venv is not None and not cli.same_interpreter(venv):
+        return report, (f"the project has its own interpreter, {venv.relative_to(root).as_posix()}, and README "
+                        "records none; rerun with it, or name the interpreter to use on README's Project "
+                        "interpreter line"), None
+    was = {"was": recorded} if status == "refused" else {}
+    try:
+        # Lines keep their endings, so a CRLF README keeps them and untouched lines keep their bytes.
+        lines = re.findall(r"[^\n]*\n|[^\n]+", (root / "README.md").read_bytes().decode("utf-8"))
+    except (OSError, UnicodeError):
+        return {**report, "status": "unrecorded"}, None, None
+    if check:
+        return {**report, "status": "missing", **was}, None, None
+    newline = "\r\n" if lines and lines[0].endswith("\r\n") else "\n"
+    entry = report["line"] + newline
+    found = [i for i, line in enumerate(lines) if line.startswith(cli.INTERPRETER_LINE)]
+    if found:
+        lines[found[0]] = entry
+    else:
+        # A new line goes after the Commits line, else Active investigation, else at the end.
+        anchors = [next((i for i, line in enumerate(lines) if line.startswith(label)), None)
+                   for label in ("Commits:", "Active investigation:")]
+        anchor = next((i for i in anchors if i is not None), None)
+        if anchor is None:
+            while lines and not lines[-1].strip():
+                lines.pop()
+            anchor = len(lines) - 1
+        if anchor >= 0 and not lines[anchor].endswith("\n"):
+            lines[anchor] += newline
+        lines[anchor + 1:anchor + 1] = [newline, entry] if anchor >= 0 else [entry]
+    return {**report, "status": "replaced" if was else "written", **was}, None, "".join(lines)
+
+
+def _has_pip():
+    return importlib.util.find_spec("pip") is not None
+
+
+def _made_by_uv(text):
+    """Whether pyvenv.cfg text records that uv made the environment.
+
+    Accepted input: one `key = value` per line, read as Python's site module reads it: the key is
+    the text before the first `=`, stripped and lowercased, and the value the text after it, stripped.
+    True for a line whose key is `uv` with a nonempty value, as uv writes `uv = <version>`. Every
+    other line is refused as a record: one without `=`, a comment, another key such as `uvx`, and a
+    value that merely names uv.
+    """
+    for line in text.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip().lower() == "uv" and value.strip():
+            return True
+    return False
+
+
+def _uses_uv(prefix):
+    """Whether packages go in through uv: the interpreter has no pip, and uv made its environment or is
+    on PATH."""
+    if _has_pip():
+        return False
+    try:
+        recorded = _made_by_uv((Path(prefix) / "pyvenv.cfg").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError):
+        recorded = False
+    return recorded or shutil.which("uv") is not None
+
+
+def _pip_install(python, prefix):
+    """The command that installs packages into `python`, whose environment is `prefix`."""
+    return f"uv pip install --python {python}" if _uses_uv(prefix) else f"{python} -m pip install"
+
+
 def _copy(asset, target):
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(asset, target)
@@ -183,6 +305,9 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
     except (OSError, ValueError) as error:
         return {"project": str(root), "workbench": True,
                 "error": f"{RECEIPT} is unreadable ({error}); restore it from Git"}
+    interpreter, error, readme = _interpreter(root, check)
+    if error:
+        return {"project": str(root), "workbench": True, "interpreter": interpreter, "error": error}
     copies = _copies()
     unknown = set(replace) - {path for path, _ in copies}
     if unknown:
@@ -237,14 +362,19 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
             result["retired"] = retired
     if written != receipt:
         (root / RECEIPT).write_text(json.dumps(dict(sorted(written.items())), indent=2) + "\n")
+    if readme is not None:
+        (root / "README.md").write_bytes(readme.encode("utf-8"))
+    result["interpreter"] = interpreter
 
     requirements = sorted(REQUIREMENTS.values(), key=str.lower)
     declared_in, declared, unread = _declared(root)
     declared_in = ", ".join(declared_in)
     if not declared_in:
         if not check:
+            command = (f"uv pip install --python {_interpreter_text(root)[0]}" if _uses_uv(sys.prefix)
+                       else "python3 -m pip install")
             (root / "requirements.txt").write_text(
-                "# Packages the workbench helpers in src/ need; install with python3 -m pip install -r requirements.txt\n"
+                f"# Packages the workbench helpers in src/ need; install with {command} -r requirements.txt\n"
                 + "".join(f"{requirement}\n" for requirement in requirements))
         result["requirements"] = {"path": "requirements.txt", "status": "absent" if check else "written",
                                   "packages": requirements}
@@ -270,7 +400,7 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
     result["python"] = python
     result["packages"] = packages
     if absent:
-        result["install"] = f"{sys.executable} -m pip install {' '.join(absent)}"
+        result["install"] = f"{_pip_install(sys.executable, sys.prefix)} {' '.join(absent)}"
     return result
 
 

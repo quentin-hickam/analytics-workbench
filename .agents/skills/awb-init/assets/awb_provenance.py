@@ -2669,9 +2669,10 @@ def cli_stale(root: Path, argv: list[str]) -> int:
                "for an include or a disagreeing #egg= a reason in parentheses; an unreadable "
                "requirements.txt is '<file> (<reason>)'), and findings. A runtime mismatch is "
                "a warning to decide on a rerun, not stale, and flags nothing; an unread line's packages "
-               "are recorded once it names them, as with #egg=NAME or NAME @ REFERENCE. Run stale with the interpreter that runs run.py: a "
-               "version mismatch on every result at once usually means a different interpreter, not an "
-               "upgrade. A finding whose linked evidence file is missing is listed under results. Exit 0 "
+               "are recorded once it names them, as with #egg=NAME or NAME @ REFERENCE. awb.py runs stale "
+               "under README's Project interpreter: a version mismatch on every result at once usually means "
+               "run.py recorded them under another interpreter, not an upgrade. A finding whose linked "
+               "evidence file is missing is listed under results. Exit 0 "
                "whether or not anything is stale; 2 for an unknown investigation.")
     parser.add_argument("--investigation", metavar="NAME",
                         help="check only this investigation, by its directory name under investigations/")

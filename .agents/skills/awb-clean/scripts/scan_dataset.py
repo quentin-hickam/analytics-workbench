@@ -127,7 +127,8 @@ def _connect(root, need_views):
     try:
         import duckdb
     except ImportError as error:
-        raise RuntimeError("the scan needs the duckdb package in the project's Python environment") from error
+        raise RuntimeError("the scan needs the duckdb package: run it with README's Project interpreter, "
+                           "or install duckdb there") from error
     helper = root / "src/preparation/landing.py"
     if helper.is_file():
         # Load views exactly as analytical sessions do.

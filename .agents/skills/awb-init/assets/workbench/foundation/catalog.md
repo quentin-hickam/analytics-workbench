@@ -2,13 +2,15 @@
 
 Describe shared datasets, canonical views, and deliberate caches. Keep business-term definitions in `glossary.md` and source acquisition details in `sources.md`.
 
-## Published datasets and views
+`awb-clean`'s `record_cleaning.py` sets cells in the section below, **Published datasets and views**: keep its heading and table as written, with any guidance above the table and every row directly under the table's last row.
 
-| Name | Kind | Grain | Inputs | Definition or location | Preparation rules | Quality constraints | Availability or refresh notes |
-| --- | --- | --- | --- | --- | --- | --- | --- |
+## Published datasets and views
 
 For canonical views, identify the Git-managed definition loaded into each process-local analytical session. Name the publication each view reads, such as `data/parquet/<dataset>/<publication-id>/`, whose `publication.json` records its inputs, conversion commit, file checksums, and the outcomes of the checks declared in `foundation/datasets.toml`; switching a view to a newer publication is a deliberate preparation change recorded here. For published files, give the validated Parquet location; cleanliness comes from the quality record, not conversion.
 
 Where a row relies on a source reference, link it in the cell it supports as the source's Notes in `sources.md` do, such as a codebook behind a decoded column under Preparation rules.
 
 Record expensive, rebuildable caches as Kind `cache`: purpose under Preparation rules, inputs and settings under Inputs, location under Definition or location, and rebuild method and freshness decision under Availability or refresh notes.
+
+| Name | Kind | Grain | Inputs | Definition or location | Preparation rules | Quality constraints | Availability or refresh notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |

@@ -170,7 +170,7 @@ def open_session(root):
     try:
         return module.session(root)
     except ImportError as error:
-        raise ScanError(f"{error}; install duckdb in the interpreter that runs the project") from error
+        raise ScanError(f"{error}; run the scan with README's Project interpreter, or install duckdb there") from error
 
 
 def publication_name(root, path):

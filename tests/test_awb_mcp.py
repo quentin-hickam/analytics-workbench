@@ -2,6 +2,7 @@
 # test_handshake_ping_and_tool_list: initialize answers 2025-11-25, echoes an earlier legacy version but not 2025-03-26 (which requires batches), and answers 2025-11-25 to an unknown one; initialized gets no reply; ping answers {}; tools/list gives seven tools, readOnlyHint true only on read, openWorldHint true only on read, destructiveHint left to its default (true), no outputSchema; stdout carries only JSON-RPC lines.
 # test_unknown_methods_fail_at_once: server/discover and any other unknown request get -32601 at once; a bad line gets -32700, a non-2.0 message, one with an id and neither method nor result, or one whose id is not a string, number, or null -32600, an unknown tool or a non-string tool name -32602; the server keeps serving.
 # test_setup_installs_into_a_folder_without_helpers: setup round trip: check writes nothing, then install writes src/awb.py and the receipt; a folder without workbench markers exits 1 with the installer's hint.
+# test_setup_runs_under_awb_python_over_a_recorded_interpreter: with AWB_PYTHON set, setup runs under it while README records another interpreter, reports the line overridden, and leaves it as written.
 # test_read_commands_round_trip_and_write_nothing: every read command without DuckDB (state, questions, stale, review-rules, check-draft, status, help) runs its helper and leaves the project, .git included, unchanged.
 # test_records_round_trip: records adds a question, edits next steps, adds a review rule and one with --scope, flags through stdin, and runs clean-record, each writing its record.
 # test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit; read returns both changes while keeping its answer, and attempts to change answered question content or replace its answer are refused.
@@ -18,6 +19,8 @@
 # test_clip_stays_within_the_limit_and_counts_the_cut: the cut output never exceeds the limit, the note states the number of characters actually cut, and a limit below 1000 is raised to 1000.
 # test_read_writes_no_bytecode_and_reads_no_shared_cache: a read subprocess runs with bytecode writes off and no PYTHONPYCACHEPREFIX, even one the server inherits, so it reads no bytecode from a cache directory; a write subprocess keeps Python's cache settings.
 # test_root_uris_are_unquoted_once: a root URI's percent escapes are decoded once.
+# test_clean_record_passes_new_issues: records clean-record passes a decisions `new` list through stdin, writing an analyst-authored quality row with the next DQ- ID, its evidence, and no scan link; the records description names `new`.
+# test_subprocess_interpreter_follows_the_project: AWB_PYTHON wins, then README's Project interpreter line, then .venv or venv, then the server's own interpreter, as src/awb.py resolves it.
 
 import importlib.util
 import json
@@ -228,6 +231,23 @@ def test_setup_installs_into_a_folder_without_helpers(tmp_path, connect):
     text, error = client.call("setup", project=str(bare))
     assert error and '"workbench": false' in text and "exit status 1" in text
     assert list(bare.iterdir()) == []
+
+
+def test_setup_runs_under_awb_python_over_a_recorded_interpreter(tmp_path, connect):
+    root = scaffold(tmp_path / "wb")
+    other = tmp_path / "other/bin/python"
+    other.parent.mkdir(parents=True)
+    other.write_text("#!/bin/sh\n")
+    readme = root / "README.md"
+    readme.write_text(readme.read_text().replace("Project interpreter: not yet recorded",
+                                                 f"Project interpreter: {other}"))
+    before = readme.read_bytes()
+    client = connect(cwd=root)  # the server runs helpers under AWB_PYTHON, this interpreter
+    for check in (True, False):
+        text, error = client.call("setup", check=check)
+        assert not error and text.endswith("exit status 0"), text
+        assert json.loads(text.split("\n\n")[0])["interpreter"]["status"] == "overridden"
+    assert readme.read_bytes() == before and (root / "src/awb.py").is_file()
 
 
 def test_read_commands_round_trip_and_write_nothing(workbench, connect):
@@ -579,3 +599,43 @@ def test_root_uris_are_unquoted_once(monkeypatch):
     server = load_server(monkeypatch)
     path = Path("/tmp/sales 100%25 done")
     assert server._root_paths([{"uri": path.as_uri()}, {"uri": "https://example.invalid/x"}]) == [path]
+
+
+def test_clean_record_passes_new_issues(workbench, connect):
+    scan = {"schema": "awb-scan/1", "name": "orders", "target": {"kind": "view", "label": "view orders", "path": None},
+            "scanned_at": "2026-10-09T10:00:00+00:00", "issues": [], "baseline": None, "delta": None}
+    (workbench / "foundation/scans").mkdir(parents=True)
+    (workbench / "foundation/scans/orders.json").write_text(json.dumps(scan))
+    (workbench / INV / "exploration").mkdir()
+    (workbench / INV / "exploration/march-gap.sql").write_text("SELECT 1\n")
+    decisions = {"new": [{"object": "view `orders`", "observation": "March has no orders from the west region",
+                          "evidence": f"{INV}/exploration/march-gap.sql", "impact": "Understates March",
+                          "treatment": "None in the foundation; investigations decide", "status": "open"}],
+                 "date": "2026-10-09"}
+    client = connect(cwd=workbench)
+    tools = {tool["name"]: tool for tool in client.request("tools/list")["result"]["tools"]}
+    assert "`new`" in tools["records"]["description"]
+    text, error = client.call("records", command="clean-record", args=["orders"], stdin=json.dumps(decisions))
+    assert not error, text
+    assert json.loads(text.split("\n\n")[0])["quality_ids"] == {"N1": "DQ-001"}
+    quality = (workbench / "foundation/quality.md").read_text()
+    assert (f"| DQ-001 | view `orders` | March has no orders from the west region; evidence `{INV}/exploration/march-gap.sql` | "
+            "Understates March | None in the foundation; investigations decide | open |") in quality
+    assert not (workbench / "foundation/quality.json").exists()
+
+
+def test_subprocess_interpreter_follows_the_project(tmp_path, monkeypatch):
+    server = load_server(monkeypatch)
+    monkeypatch.delenv("AWB_PYTHON", raising=False)
+    assert server._python(tmp_path) == sys.executable
+    venv = tmp_path / ".venv/bin/python"
+    venv.parent.mkdir(parents=True)
+    venv.write_text("")
+    assert server._python(tmp_path) == str(venv)
+    recorded = tmp_path / "tools/python"
+    recorded.parent.mkdir()
+    recorded.write_text("")
+    (tmp_path / "README.md").write_text("# P\n\nProject interpreter: tools/python\n")
+    assert server._python(tmp_path) == str(recorded)
+    monkeypatch.setenv("AWB_PYTHON", "/opt/python")
+    assert server._python(tmp_path) == "/opt/python"
