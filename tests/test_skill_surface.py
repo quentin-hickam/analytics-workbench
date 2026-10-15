@@ -256,8 +256,9 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     # The scoped diff is made against the prior review's copy before that copy is replaced; replacing it first
     # would leave an empty diff.
     diff_at = review.index('For a scoped re-review, first make the diff against the copy the prior review left')
-    copy_at = review.index('Only after that diff is made, and for every review `awb-package` launches, full or '
-                           'scoped, copy those files to the scratch folder, replacing the copy an earlier review left')
+    copy_at = review.index('Then, for every review `awb-package` launches, full or scoped, and after any scoped '
+                           'diff is made, copy those files to the scratch folder, replacing the copy an earlier '
+                           'review left')
     assert diff_at < copy_at
     assert 'whenever `awb-package` launches a review, first copy' not in review
     assert 'When no copy of what the prior review read was kept, the next review is a full one' in review
