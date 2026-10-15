@@ -5,6 +5,7 @@
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten, revised_at stamped only when it changes, other manifest fields kept; nothing is written outside the draft.
 # test_evidence_older_than_scoped_3_is_reported_for_rerun: check-draft and export --result refuse awb-evidence/1 and unscoped /3 with a rerun instruction.
 # test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
+# test_check_draft_reports_outline_and_chart_spec_rows: a headline over 15 words, a chart form outside the seven, a Data column the chart file lacks, and a file column no Data role names fail check-draft with outline and charts rows in both modes, and release refuses on them.
 # test_check_draft_requires_each_question_in_methodology: export's questions pass once methodology repeats them; a question methodology lacks or rewords, a results entry without a question, and a manifest without results fail check-draft's questions, and release refuses on the check.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
@@ -75,7 +76,9 @@ SETTINGS = (b"[parameters]\nminimum_count = 5\nstart = 2026-01-01\n\n"
             b'[results.r-002]\nquestion = "Which regions close claims late?"\n')
 STALE_SETTINGS = SETTINGS.replace(b"minimum_count = 5", b"minimum_count = 6")
 RESULT = "region,late_rate,n\nW,21.349,10\nE,2.675,8\n"
-FINDINGS = "# Order quality\n\n### Late orders rose in the west\n\n**Chart 1.** Bar: late share by region\n"
+CHART_SPEC = "**Chart 1.** Horizontal bar: late share by region\n- **Data:** category: Region; value: Closed late (%)\n"
+FINDINGS = ("# Order quality\nOperations leads, all regions\n\n## Findings\n\n### Late orders rose in the west\n\n"
+            + CHART_SPEC + "\n**Notes:** The west leads the regions.\n")
 QUESTIONS = {"r-001": "How many claims closed late?", "r-002": "Which regions close claims late?"}
 METHODOLOGY = ("# Methodology\n\n## Findings\n\n### Late orders rose in the west\n\n"
                "**Claim strength:** association\n\n"
@@ -170,7 +173,7 @@ def project(tmp_path):
     draft = tmp_path / "deliveries/inv/pkg/draft"
     write(draft, "findings.md", FINDINGS)
     write(draft, "methodology.md", METHODOLOGY)
-    write(draft, "charts/chart-1.csv", "Region,Late (%)\nWest,21\n")
+    write(draft, "charts/chart-1.csv", "Region,Closed late (%)\nWest,21\n")
     write(tmp_path, "investigations/inv/results/r-001.csv", RESULT)
     write(tmp_path, "investigations/inv/results/r-002.csv", "region\nW\n")
     write(draft, "manifest.json", json.dumps({
@@ -249,15 +252,38 @@ def test_check_draft_reports_each_helper_problem(project, capsys):
         path.unlink()
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"]
-    assert report["findings"] == [{"line": 7, "kind": "name", "text": "orders_view"},
-                                  {"line": 7, "kind": "path", "text": "inv/notes"}]
-    assert report["charts"] == [{"chart": "Chart 2", "problem": "no chart file for this specification"}]
+    assert report["findings"] == [{"line": 13, "kind": "name", "text": "orders_view"},
+                                  {"line": 13, "kind": "path", "text": "inv/notes"}]
+    assert report["charts"] == [{"chart": "Chart 2", "problem": "no chart file for this specification"},
+                                {"chart": "Chart 2", "problem": "no **Data:** line under the specification"}]
     assert report["headings"] == [
         {"heading": "East held steady", "problem": "methodology.md has no ### section with this exact heading"}]
     assert report["markdown"] == []
     assert report["names_problems"] == [
         "no settings found: investigations/inv/settings.toml is absent and no evidence records a settings file"]
     assert report["verify"] == []
+
+
+def test_check_draft_reports_outline_and_chart_spec_rows(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    long = "Late orders rose in the west, the region with the most stores and the busiest carrier"
+    write(draft, "findings.md", FINDINGS.replace("Horizontal bar", "Pie").replace("Closed late (%)", "Late share"))
+    write(draft, "methodology.md", METHODOLOGY.replace("Late orders rose in the west", long))
+    write(draft, "findings.md", (draft / "findings.md").read_text().replace("Late orders rose in the west", long))
+    for argv in (("check-draft", "inv", "pkg"), ("check-draft", "inv", "pkg", "--verify-only")):
+        code, report = run(project, capsys, *argv)
+        assert code == 1 and not report["passed"]
+        assert report["outline"] == [{"slide": long, "line": 6, "problem": "the headline has 16 words; keep it to 15"}]
+        assert report["charts"] == [
+            {"chart": "Chart 1", "problem": "names no chart form (Pie); open the specification with one of: "
+                                            "Horizontal bar, Bar with intervals, Line, Column, Stacked bar, Scatter, "
+                                            "Table"},
+            {"chart": "Chart 1", "problem": "chart-1.csv has no column 'Late share', which **Data:** names"},
+            {"chart": "Chart 1", "problem": "chart-1.csv column 'Closed late (%)' is named by no **Data:** role; "
+                                            "name it, or export the chart without it"}]
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
+    assert len(report["check"]["outline"]) == 1 and len(report["check"]["charts"]) == 3
 
 
 def set_results(project, results):
@@ -368,6 +394,9 @@ def set_manifest(project, **fields):
 
 
 TRACED = """# Order quality, January to June 2026
+Operations leads, all regions
+
+## Findings
 
 ### Late orders rose in the west
 
@@ -375,7 +404,8 @@ TRACED = """# Order quality, January to June 2026
 - Ten checks covered 3 rows; regions needed at least 5 orders.
 - Missing regions were 0.0% of rows, and 1,240 orders were reviewed.
 
-**Chart 1.** Bar: late share by region
+""" + CHART_SPEC + """
+**Notes:** The west leads the regions.
 """
 
 
@@ -395,7 +425,7 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
     # A number no represented result produced fails with its file and line, in both modes and at release.
     write(draft, "findings.md", TRACED.replace("21.3%", "23.1%"))
     write(draft, "methodology.md", METHODOLOGY + "\nAbout 40 stores.\n")
-    rows = [{"file": "findings.md", "line": 5, "text": "23.1%"},
+    rows = [{"file": "findings.md", "line": 8, "text": "23.1%"},
             {"file": "methodology.md", "line": 13, "text": "40"}]
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"] and report["numbers"] == rows
@@ -413,7 +443,7 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
     code, _ = run(project, capsys, "export", "inv", "pkg", "--result", "r-002")
     assert code == 0 and manifest(project)["allowed_numbers"] == allowed  # export keeps the hand-recorded field
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
-    assert code == 1 and {"file": "findings.md", "line": 5, "text": "2.7%"} in report["numbers"]
+    assert code == 1 and {"file": "findings.md", "line": 8, "text": "2.7%"} in report["numbers"]
 
 
 def test_check_draft_reports_number_problems(project, capsys):
@@ -851,7 +881,7 @@ def test_export_checks_follow_the_represented_set(project, capsys):
     code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
     assert code == 0 and manifest(project)["export_checks"] == checks
     write(project, "investigations/inv/settings.toml", SETTINGS)
-    write(project / "deliveries/inv/pkg/draft", "findings.md", FINDINGS.replace("**Chart 1.** Bar: late share by region\n", ""))
+    write(project / "deliveries/inv/pkg/draft", "findings.md", FINDINGS.replace(CHART_SPEC, ""))
     code, out = run(project, capsys, "export", "inv", "pkg", "--no-datasets", "--result", "r-002")
     assert code == 0 and out["charts"] == [] and out["check_charts"] == []
     record = manifest(project)
@@ -878,7 +908,7 @@ def test_export_names_every_gap_and_blocks_stale_results(project, capsys):
     assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes() == before
     write(project, "investigations/inv/settings.toml", SETTINGS)
     write(project, "deliveries/inv/pkg/draft/datasets/old.csv", "a\n1\n")
-    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,late_rate", "--no-datasets")
     assert code == 0 and manifest(project)["dataset_selection"] == "none"
     assert not (project / "deliveries/inv/pkg/draft/datasets").exists()
     with pytest.raises(SystemExit):
@@ -1210,12 +1240,54 @@ def test_check_draft_refuses_causal_wording_above_claim_strength(project, capsys
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
     assert [row["phrase"] for row in report["check"]["claims"]] == ["drives"]
-    claim_draft(project, CLAIM_FINDINGS.replace("The new carrier drives the rise", "Late orders rose"))
+    claim_draft(project, DECK_FINDINGS)
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
-    assert code == 0 and report["passed"] and report["claims"] == []
+    assert code == 0 and report["passed"] and report["claims"] == [] and report["outline"] == []
 
 
 CLEAN_FINDINGS = CLAIM_FINDINGS.replace("The new carrier drives the rise", "Late orders rose")
+# CLEAN_FINDINGS with every slide's notes and the chart's Data line, so the whole draft passes.
+DECK_FINDINGS = """# Order quality for the operations team
+Operations leads, all regions, January to June 2026
+
+## Answer
+
+**Headline:** Discounts drive 4 points fewer late orders
+
+**Notes:** The discount test is the answer.
+
+## Findings
+
+### Late orders rose in the west
+
+- Late orders rose to 21%, a data-driven view.
+- West volume, <!-- causes --> its comment unread, is flat.
+
+""" + CHART_SPEC + """
+**Notes:** The west leads the regions.
+
+### Discounts cut late orders by 4 points
+
+- Randomized discounts led to 4 points fewer late orders.
+
+**Notes:** Stores were assigned at random.
+
+## How we know
+
+**Headline:** Totals reconcile to the ledger
+
+- June is short due to a feed outage.
+
+**Notes:** The ledger is the finance team's.
+
+## Limitations and open caveats
+
+**Headline:** Holiday volume may move late orders
+
+- Late orders may rise because of holiday volume.
+
+**Notes:** Holiday weeks are in the period.
+"""
 WEST = "### Late orders rose in the west"
 HEADLINE = "The new carrier drives late orders up in the west"
 WEST_BULLET = "- Late orders rose to 21%, a data-driven view."
@@ -1516,7 +1588,8 @@ def test_names_and_charts_read_the_same_rendered_text(project):
     # whole, so the names scan and the chart check read it as the claims check does (round 3, both reviews):
     # chart-1.csv now has its specification.
     path.write_text("Read from orders\\_view, orders&#95;view, orders​_view, and orders_**view**.\n"
-                    "Result r\\-009, r&#45;009, and [r-009](../evidence/r-009.json).\n\n**Chart &#49;.** Bar\n")
+                    "Result r\\-009, r&#45;009, and [r-009](../evidence/r-009.json).\n\n"
+                    + CHART_SPEC.replace("Chart 1.", "Chart &#49;."))
     assert draft.check_findings(path, names=["orders_view", "r-009"]) == (
         [{"line": 1, "kind": "name", "text": "orders_view"}] * 4 + [{"line": 2, "kind": "name", "text": "r-009"}] * 3)
     assert draft.check_charts(path, path.parent / "charts") == []

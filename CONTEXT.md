@@ -62,7 +62,7 @@ A finding whose result evidence no longer matches the current producing code, vi
 A collection of audience-facing outputs, with an internal methodology reference, representing an investigation at a particular point, with provenance identifying the code, inputs, and analytical parameters that produced it.
 
 **Package format**:
-The shared conventions for package structure and presentation, including the audience-facing findings document written as a deck outline, the internal methodology reference, the chart files, and the M365 assembly instructions under which M365 builds the PowerPoint deck. It is independent of an investigation's scope, narrative, and results.
+The shared conventions for package structure and presentation, including the audience-facing findings document written as a deck outline, the internal methodology reference, the chart files, the deck rules any builder follows to build the deck from the outline, and the assembly file for each builder, such as Microsoft 365 Copilot's PowerPoint agent. It is independent of an investigation's scope, narrative, and results.
 
 **Cache**:
 A stored result retained to avoid expensive recomputation of an analysis or data preparation step.

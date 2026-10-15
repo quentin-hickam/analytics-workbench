@@ -11,7 +11,7 @@ Packaging **serializes** recorded results: it reuses recorded evidence, exports,
 
 1. **Establish** the investigation, package name, dataset selection, and Audience.
 2. **Gather** the record on the read path the change needs.
-3. **Write** `findings.md`, with every **Chart N.** specification, and `methodology.md` from the project's templates, and copy `m365-assembly.md`. This creates the draft.
+3. **Write** `findings.md`, with every **Chart N.** specification, and `methodology.md` from the project's templates, and copy the deck rules and assembly files. This creates the draft.
 4. **Export the files and provenance** with `export` on every revision, then review the flags.
 5. **Review** the narratives with a read-only reviewer against every review rule.
 6. **Check** last with `check-draft`, until done.
@@ -43,7 +43,7 @@ Create the draft at the contract's paths, or revise the same files. A draft in a
 - Before writing, give each column a chart or dataset will export a display name from the glossary in `foundation/display.toml`, e.g. `[columns]` then `return_rate = "Return rate"`; **Data:** lines and dataset headers use these names.
 - `findings.md` is the deck outline under the slide rules and translation rule in `package-format/findings-template.md`; its **Answer** slide is the executive summary.
 - `methodology.md` follows `package-format/methodology-template.md` in the workbench's own vocabulary.
-- Copy `package-format/m365-assembly.md` into the draft unchanged.
+- Copy `package-format/deck-rules.md` and `package-format/assembly/m365.md` into the draft unchanged, at the same paths under it.
 - When a revision brings in facts the investigation records lack, such as a limitation the user supplies, record them in the investigation's `history.md` as record maintenance with the revision, so neither narrative states more than the records.
 
 ## 4. Export the files and provenance
@@ -73,7 +73,7 @@ A `numbers` row is a number no represented result records. Repair it by the firs
 
 Report the review's last line and any accepted `warning` violations, the draft path, the audience `findings.md` is written for, the included datasets, each chart with the result it serializes, provenance gaps, and unresolved caveats. Say it is a working copy the next revision overwrites; marking it delivered freezes it as a numbered release. When a represented flagged finding lacks an applicable disposition, say `awb-release` will ask for one before releasing.
 
-Tell the user how to build the deck: in a Microsoft 365 Copilot app chat, add the PowerPoint agent, attach `findings.md`, every file in `charts/`, `methodology.md`, and `m365-assembly.md`, and ask for a deck built under those instructions. Datasets travel beside the deck and are not attached.
+Tell the user how to build the deck: in a Microsoft 365 Copilot app chat, add the PowerPoint agent, attach `findings.md`, every file in `charts/`, `methodology.md`, `deck-rules.md`, and `assembly/m365.md`, and ask for a deck built under those instructions. Datasets travel beside the deck and are not attached.
 
 ## Delivery milestone
 

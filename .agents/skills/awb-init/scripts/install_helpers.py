@@ -70,7 +70,8 @@ COPIED = {
     "foundation/references/README.md": "awb-init/assets/workbench/foundation/references/README.md",
     "package-format/findings-template.md": "awb-package/assets/package-format/findings-template.md",
     "package-format/methodology-template.md": "awb-package/assets/package-format/methodology-template.md",
-    "package-format/m365-assembly.md": "awb-package/assets/package-format/m365-assembly.md",
+    "package-format/deck-rules.md": "awb-package/assets/package-format/deck-rules.md",
+    "package-format/assembly/m365.md": "awb-package/assets/package-format/assembly/m365.md",
     "package-format/manifest-template.md": "awb-package/assets/package-format/manifest-template.md",
 }
 # Project paths the skills once copied and no longer ship; --upgrade reports them and removes unmodified

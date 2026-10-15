@@ -189,14 +189,14 @@ def test_receipt_alone_decides_earlier(project, imports_ok):
 
 def test_package_formats_install_on_request(project, imports_ok):
     formats = {path for path in ASSETS if path.startswith("package-format/")}
-    earlier(project, {"package-format/m365-assembly.md": earlier_version("package-format/m365-assembly.md")})
+    earlier(project, {"package-format/deck-rules.md": earlier_version("package-format/deck-rules.md")})
     assert not formats & set(installer.install(project)["files"])
     result = installer.install(project, package_formats=True)
     assert {path: result["files"][path] for path in formats} == {
-        path: "earlier" if path == "package-format/m365-assembly.md" else "installed" for path in formats}
-    assert {path: receipt(project)[path] for path in formats - {"package-format/m365-assembly.md"}} == {
-        path: sha(ASSETS[path].read_bytes()) for path in formats - {"package-format/m365-assembly.md"}}
-    assert receipt(project)["package-format/m365-assembly.md"] == sha(earlier_version("package-format/m365-assembly.md"))
+        path: "earlier" if path == "package-format/deck-rules.md" else "installed" for path in formats}
+    assert {path: receipt(project)[path] for path in formats - {"package-format/deck-rules.md"}} == {
+        path: sha(ASSETS[path].read_bytes()) for path in formats - {"package-format/deck-rules.md"}}
+    assert receipt(project)["package-format/deck-rules.md"] == sha(earlier_version("package-format/deck-rules.md"))
 
 
 def test_check_writes_nothing(project, imports_ok):
@@ -315,7 +315,7 @@ RETIRED = ["package-format/journal-template.md", "package-format/executive-summa
 def upgradable(project, monkeypatch):
     monkeypatch.setattr(installer, "RETIRED", RETIRED)  # the skills retire none today
     earlier(project, {
-        "package-format/m365-assembly.md": earlier_version("package-format/m365-assembly.md"),
+        "package-format/deck-rules.md": earlier_version("package-format/deck-rules.md"),
         "workbench-guides/analysis.md": earlier_version("workbench-guides/analysis.md"),
         "package-format/journal-template.md": earlier_version("package-format/journal-template.md"),
         "src/presentation/style.py": earlier_version("src/presentation/style.py"),
@@ -339,7 +339,7 @@ def test_upgrade_check_classifies_without_writing(upgradable, imports_ok):
     assert snapshot(upgradable) == before
     files = result["files"]
     assert files["package-format/findings-template.md"] == "current"
-    assert files["package-format/m365-assembly.md"] == "earlier"
+    assert files["package-format/deck-rules.md"] == "earlier"
     assert files["workbench-guides/analysis.md"] == "earlier"
     assert files["src/provenance.py"] == "customized"
     assert result["customized"] == {"src/provenance.py": str(SKILLS / "awb-init/assets/awb_provenance.py")}
@@ -353,12 +353,12 @@ def test_upgrade_check_classifies_without_writing(upgradable, imports_ok):
 
 def test_upgrade_replaces_only_earlier_copies(upgradable, imports_ok):
     result = installer.install(upgradable, upgrade=True)
-    assert result["files"]["package-format/m365-assembly.md"] == "replaced"
+    assert result["files"]["package-format/deck-rules.md"] == "replaced"
     assert result["files"]["workbench-guides/analysis.md"] == "replaced"
-    assert (upgradable / "package-format/m365-assembly.md").read_bytes() == \
-        ASSETS["package-format/m365-assembly.md"].read_bytes()
+    assert (upgradable / "package-format/deck-rules.md").read_bytes() == \
+        ASSETS["package-format/deck-rules.md"].read_bytes()
     assert receipt(upgradable) == {
-        **{path: sha(ASSETS[path].read_bytes()) for path in ("package-format/m365-assembly.md", "workbench-guides/analysis.md")},
+        **{path: sha(ASSETS[path].read_bytes()) for path in ("package-format/deck-rules.md", "workbench-guides/analysis.md")},
         **{path: sha(earlier_version(path)) for path in
            ("package-format/journal-template.md", "src/presentation/style.py", "src/packaging/findings.py")}}
     assert (upgradable / "src/provenance.py").read_bytes() == b"# our own provenance\n"
@@ -391,7 +391,7 @@ def test_cli_arguments(upgradable):
     assert run("--replace", "src/provenance.py").returncode == 2
     assert run("--upgrade", "--replace", "README.md").returncode == 2
     result = run("--upgrade", "--check", "--replace", "src/provenance.py", "--replace",
-                 "package-format/m365-assembly.md")
+                 "package-format/deck-rules.md")
     assert result.returncode == 0
     assert json.loads(result.stdout)["files"]["src/provenance.py"] == "customized"
 
