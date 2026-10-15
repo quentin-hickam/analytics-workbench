@@ -19,9 +19,10 @@
 # test_session_refuses_a_project_root_containing_a_comma: regression: comma-containing project root is rejected before opening a connection.
 # test_cli_sql_prints_first_rows_and_total_and_writes_full_result: sql runs a project-relative query file or SQL text, prints a capped Markdown table and the total, and writes CSV or Parquet.
 # test_cli_sql_reports_failures_on_one_line: SQL errors, failing view files and non-query SQL print one stderr line and return 1; a bad --out extension is a usage error.
-# test_cli_sql_read_only_runs_select_and_refuses_every_write: --read-only prints SELECT results and refuses COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, a setting PRAGMA, CALL, CREATE, and INSERT, and a SELECT calling a table function that writes (enable_profiling, enable_logging, checkpoint), directly or through a view, macro, subquery, or query(), before any statement runs, and refuses --out, leaving the project unchanged; profile --read-only does the same; a read-only PRAGMA, SHOW, SUMMARIZE, PIVOT with IN, and information_schema still run.
+# test_cli_sql_read_only_runs_select_and_refuses_every_write: --read-only prints SELECT results and refuses COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, a setting PRAGMA, CALL, CREATE, and INSERT, and a SELECT calling a table function that writes (enable_profiling, enable_logging, checkpoint), directly or through a view, macro, subquery, or query(), and any call of query, query_table, json_execute_serialized_sql, or a macro calling one (histogram_values), however named or quoted, before any statement runs, and refuses --out, leaving the project unchanged; profile --read-only does the same; a read-only PRAGMA, SHOW, SUMMARIZE, PIVOT with IN, information_schema, and a column or CTE named query still run.
+# test_read_only_sql_refuses_a_plan_that_differs_at_the_run: a query() whose SQL reads range(1) under EXPLAIN and enables profiling at the run is refused before any statement runs; no file is written, the session's profiling stays off, and the session still answers.
 # test_profile_runs_with_a_landing_helper_older_than_read_only: profile without --read-only calls session(root) alone, so a landing helper without the read_only keyword still profiles.
-# test_read_only_session_checks_view_files_before_any_runs_and_locks_configuration: a read-only session refuses a view file holding anything but CREATE and SELECT (a writable or READ_ONLY ATTACH, ATTACH then DETACH, COPY) before any statement runs, and a CREATE or SELECT whose plan calls a writing table function or cannot be checked (a PIVOT without IN), creating and changing no file, while the default session still loads them; a PIVOT view with IN loads; the loaded session's configuration is locked and spills go to a private directory outside the project.
+# test_read_only_session_checks_view_files_before_any_runs_and_locks_configuration: a read-only session refuses a view file holding anything but CREATE and SELECT (a writable or READ_ONLY ATTACH, ATTACH then DETACH, COPY) before any statement runs, and a CREATE or SELECT whose plan calls a writing table function or cannot be checked (a PIVOT without IN), or that calls query, query_table, or a macro calling one, creating and changing no file, while the default session still loads them; a PIVOT view with IN loads; the loaded session's configuration is locked and spills go to a private directory outside the project.
 # test_cli_land_copies_files_retains_and_writes_ledger_rows: land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
 # test_cli_land_skips_unusable_retention_location: unrecorded, none chosen, unreachable and non-filesystem locations skip retention and record this checkout only.
 # test_cli_land_creates_a_missing_ledger_from_the_template: missing sources.md is written from the template with the row, reported as created.
@@ -511,6 +512,27 @@ def _files(root):
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
 
+def bypass(target):
+    """A SELECT whose query() reads range(1) under EXPLAIN and enables profiling to target when it runs."""
+    return ("FROM query(CASE WHEN current_query() LIKE 'EXPLAIN%' THEN 'FROM range(1)' ELSE "
+            f"'FROM enable_profiling(format := ''json'', save_location := ''{target}'')' END); "
+            "SELECT count(*) FROM orders")
+
+
+def test_read_only_sql_refuses_a_plan_that_differs_at_the_run(tmp_path):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    before = _files(tmp_path)
+    with landing.session(tmp_path, read_only=True) as connection:
+        with pytest.raises(ValueError, match=r"read-only: refused query\(\)"):
+            landing.read_only_sql(connection, bypass(tmp_path / "p.json"))
+        assert landing.read_only_sql(connection, "SELECT count(*) FROM orders").fetchall() == [(5,)]
+        settings = dict(connection.execute("SELECT name, value FROM duckdb_settings() "
+                                           "WHERE name IN ('enable_profiling', 'profiling_output')").fetchall())
+    assert settings["enable_profiling"] in (None, "") and settings["profiling_output"] == ""
+    assert _files(tmp_path) == before
+
+
 def test_cli_sql_read_only_runs_select_and_refuses_every_write(tmp_path, capsys):
     pytest.importorskip("duckdb")
     sql_project(tmp_path)
@@ -537,7 +559,12 @@ def test_cli_sql_read_only_runs_select_and_refuses_every_write(tmp_path, capsys)
               f"FROM enable_logging(storage := 'file', storage_path := '{tmp_path / 'logdir'}')",
               f"SELECT (SELECT count(*) FROM enable_profiling(save_location := '{tmp_path / 'p.txt'}'))",
               f"FROM query('FROM enable_logging(storage := ''file'', storage_path := ''{tmp_path / 'logdir'}'')')",
-              "FROM profiled", "FROM logged()", "FROM checkpoint()", "FROM truncate_duckdb_logs()"]
+              "FROM profiled", "FROM logged()", "FROM checkpoint()", "FROM truncate_duckdb_logs()",
+              # dynamic SQL, whose plan at the run can differ from the plan checked, and macros calling it
+              bypass(tmp_path / "p.json"), "FROM query('FROM orders')", "FROM query_table('orders')",
+              "SELECT * FROM system.main.QUERY('FROM orders')", "FROM \"Query\"('FROM orders')",
+              "SELECT (SELECT count(*) FROM query('FROM orders'))", "FROM histogram_values(orders, id)",
+              "FROM json_execute_serialized_sql(json_serialize_sql('SELECT 1'))"]
     for query in writes:
         assert landing.cli_sql(tmp_path, ["--read-only", query]) == 1, query
         captured = capsys.readouterr()
@@ -551,8 +578,9 @@ def test_cli_sql_read_only_runs_select_and_refuses_every_write(tmp_path, capsys)
     capsys.readouterr()
     assert validate.cli_profile(tmp_path, ["--read-only", "orders"]) == 0
     assert "rows: 5" in capsys.readouterr().out
-    for query in ("PRAGMA table_info('orders')", "SHOW TABLES", "SUMMARIZE orders", "FROM query('FROM orders')",
-                  "PIVOT orders ON note IN ('a|b') USING count(*)", "FROM information_schema.columns"):
+    for query in ("PRAGMA table_info('orders')", "SHOW TABLES", "SUMMARIZE orders", "SELECT 'é' AS query",
+                  "PIVOT orders ON note IN ('a|b') USING count(*)", "FROM information_schema.columns",
+                  "WITH query AS (FROM orders) SELECT count(*) FROM query"):
         assert landing.cli_sql(tmp_path, ["--read-only", query]) == 0, query
     capsys.readouterr()
     assert _files(tmp_path) == before
@@ -585,6 +613,11 @@ def test_read_only_session_checks_view_files_before_any_runs_and_locks_configura
                  f"CREATE TABLE t AS FROM enable_profiling(save_location := '{tmp_path / 'p.json'}'); SELECT 1;",
                  f"SELECT * FROM enable_logging(storage := 'file', storage_path := '{tmp_path / 'logdir'}');",
                  "PIVOT orders ON note USING count(*);",  # run as CREATE TYPE, then SELECT
+                 # dynamic SQL in a view or macro body, or in a view file's SELECT
+                 "CREATE VIEW extra AS FROM query('SELECT 7 AS n');",
+                 "CREATE MACRO extra(t) AS TABLE FROM query_table(t);",
+                 "CREATE VIEW extra AS FROM histogram_values(orders, id);",
+                 bypass(tmp_path / "v.json") + ";",
                  f"CREATE VIEW extra AS SELECT 7 AS n; COPY (SELECT 1) TO '{tmp_path / 'copy.csv'}';"):
         view.write_text(text)
         before = _files(tmp_path)
