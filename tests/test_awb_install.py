@@ -18,11 +18,10 @@
 # test_upgrade_replaces_only_earlier_copies: --upgrade rewrites earlier helpers, package formats and guides, records them in the receipt, and leaves customized ones byte for byte.
 # test_upgrade_replace_and_remove_retired: named customized copies are replaced; unmodified retired files are removed with their emptied directory and receipt entry; customized retired files stay.
 # test_cli_arguments: --replace repeats one path per flag, needs --upgrade, and rejects an uncopied path with exit 2.
-# test_print_copilot_server_entry_without_writing: JSON stdio entry and default/overridden destination; both option spellings print without writing.
-# test_print_claude_user_server_entry_without_writing: user-scope JSON entry and destination, without writing.
+# test_print_json_server_entry_without_writing: copilot and claude print the same JSON stdio entry with their own destination (COPILOT_HOME moves only copilot's); both option spellings print without writing.
 # test_print_codex_server_entry_with_quoted_unicode_paths: native TOML with absolute paths and safe quoting; default/overridden destination, without writing.
 # test_server_entry_refusals_write_nothing: exact host choices and print-only mode refuse unknown/missing values, unknown/abbreviated options, and install arguments with exit 2 and no stdout or writes.
-# test_awb_init_installs_agents_mapping_and_resolving_guides: adapting the root template then running the installer preserves one MCP/CLI mapping and both resolving guide links.
+# test_awb_init_installs_agents_mapping_and_resolving_guides: adapting the root template then running the installer preserves one MCP/CLI rule and both resolving guide links.
 # test_instruction_and_reviewer_tools_exist_in_server_tools_list: names in AGENTS.md and the read-only reviewer agree with the running server's public tools/list.
 
 import ast
@@ -401,8 +400,10 @@ def test_cli_arguments(upgradable):
     (["--mcp-config", "copilot"], None, "home/.copilot/mcp-config.json"),
     (["--mcp-config=copilot"], None, "home/.copilot/mcp-config.json"),
     (["--mcp-config", "copilot"], "copilot config", "copilot config/mcp-config.json"),
+    (["--mcp-config", "claude"], None, "home/.claude.json"),
+    (["--mcp-config", "claude"], "copilot config", "home/.claude.json"),
 ])
-def test_print_copilot_server_entry_without_writing(tmp_path, arguments, copilot_home, destination):
+def test_print_json_server_entry_without_writing(tmp_path, arguments, copilot_home, destination):
     env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
     env.pop("COPILOT_HOME", None)
     if copilot_home is not None:
@@ -415,19 +416,6 @@ def test_print_copilot_server_entry_without_writing(tmp_path, arguments, copilot
         "type": "stdio", "command": sys.executable,
         "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")], "env": {}}}}
     assert str(tmp_path / destination) in result.stderr
-    assert snapshot(tmp_path) == before
-
-
-def test_print_claude_user_server_entry_without_writing(tmp_path):
-    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
-    before = snapshot(tmp_path)
-    result = subprocess.run([sys.executable, str(SCRIPT), "--mcp-config", "claude"],
-                            cwd=tmp_path, env=env, capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"mcpServers": {"awb": {
-        "type": "stdio", "command": sys.executable,
-        "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")], "env": {}}}}
-    assert str(tmp_path / "home/.claude.json") in result.stderr
     assert snapshot(tmp_path) == before
 
 
@@ -495,18 +483,9 @@ def test_awb_init_installs_agents_mapping_and_resolving_guides(tmp_path):
     rules = [line for line in agents.splitlines() if line.startswith("When the host offers the `awb` MCP server")]
     assert len(rules) == 1
     rule = rules[0]
-    for mapping in (
-        "`awb/read` for state reads, questions list, SQL/profile reads, stale, review-rules check, check-draft --verify-only and help",
-        "`awb/records` for state/questions/review-rules edits and cleaning records",
-        "`awb/data` for land/retain/publish, writing or refused SQL/profile, and EDA/cleaning scans",
-        "`awb/package` for export/check-draft",
-        "`awb/release` for release/copy-releases",
-        "`awb/run` for investigation run.py",
-        "`awb/setup` for helper installation",
-        "Otherwise use the CLI",
-        "Pass the absolute workbench root as `project`",
-    ):
-        assert mapping in rule
+    for phrase in ("and the CLI otherwise", "Each tool's description lists its commands",
+                   "Pass the absolute project root as `project`"):
+        assert phrase in rule
     for guide in ("workbench-guides/data.md", "workbench-guides/analysis.md"):
         assert f"]({guide})" in agents and (tmp_path / guide).is_file()
 
@@ -524,9 +503,10 @@ def test_instruction_and_reviewer_tools_exist_in_server_tools_list(tmp_path):
     response = [json.loads(line) for line in result.stdout.splitlines()]
     tools = {tool["name"]: tool for tool in response[1]["result"]["tools"]}
     agents = (SKILLS / "awb-init/assets/workbench/AGENTS.md").read_text()
-    named = set(re.findall(r"`awb/([^`]+)`", agents))
-    assert named == {"read", "records", "data", "run", "package", "release", "setup"}
-    assert named <= tools.keys()
+    rule = next(line for line in agents.splitlines() if line.startswith("When the host offers the `awb` MCP server"))
+    # Every code span in the rule other than the server and argument names is a tool name, named as tools/list does.
+    named = set(re.findall(r"`([^`]+)`", rule)) - {"awb", "project"}
+    assert named == tools.keys()
 
     reviewer = (SKILLS / "awb-package/assets/awb-package-reviewer.agent.md").read_text()
     frontmatter = reviewer.split("---", 2)[1]

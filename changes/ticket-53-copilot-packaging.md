@@ -5,10 +5,10 @@
 
 ### Changed
 
-- Generated workbench instructions map CLI operations to the seven merged MCP tools when available, retain the CLI fallback, and pass the absolute project root explicitly.
+- Generated workbench instructions name the seven `awb` MCP tools as the server lists them, use them for CLI commands when the host offers the server, retain the CLI fallback, and pass the absolute project root explicitly.
 - Installation uses shared skills in `~/.agents/skills`, per-skill Claude Code symlinks with a copy-both fallback, per-host server registration, and VS Code Local workspace and approval steps. `awb-init` reports registration output when the host has no registered `awb` server.
 - Design notes record the user-level reviewer as a deliberate vendor-specific exception that is never generated into projects.
 
 ### Fixed
 
-- Copilot compatibility research resolves issue #50's source labels and pinned citations, instruction discovery settings, sandbox and approval precision, managed allowlist matchers, skill shadowing limits, and reviewer tool-name verification checklist.
+- Copilot compatibility research resolves issue #50's source labels and pinned citations, instruction discovery settings, sandbox and approval precision, managed allowlist matchers, skill shadowing limits, and reviewer tool naming, now traced in pinned VS Code source and kept in the field-test checklist.

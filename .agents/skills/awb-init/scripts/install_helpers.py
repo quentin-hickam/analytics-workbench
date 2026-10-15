@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Install the workbench helpers, guides, and references README; declare their packages; upgrade shipped copies.
+"""Install the workbench helpers, guides, and references README; declare their packages; upgrade shipped copies;
+print a host's user-level awb MCP server entry.
 
 Run with the interpreter that will run the project's analysis:
     install_helpers.py [PROJECT_ROOT]                    install missing helpers, workbench guides, and the
@@ -10,7 +11,7 @@ Run with the interpreter that will run the project's analysis:
                                                          package formats, workbench guides, and that README
     install_helpers.py [PROJECT_ROOT] --upgrade --replace PATH [--replace PATH]... [--remove-retired]
     install_helpers.py [PROJECT_ROOT] --check ...        report the same without writing
-    install_helpers.py --mcp-config HOST                print a user-level MCP entry; never write it
+    install_helpers.py --mcp-config HOST                 print a user-level MCP entry; never write it
 
 Accepted input (--mcp-config): argparse accepts the exact, case-sensitive host tokens copilot,
 claude, codex, supplied as --mcp-config HOST or --mcp-config=HOST. No project root or install flags
@@ -262,6 +263,42 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
     return result
 
 
+def _toml(value):
+    """A TOML value for a string, a list of strings, or a table of them; JSON strings are TOML basic strings."""
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{_toml(key)} = {_toml(item)}" for key, item in value.items()) + "}"
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _home(variable, default):
+    return Path(os.environ.get(variable) or Path.home() / default)
+
+
+def _json_entry(entry):
+    return json.dumps({"mcpServers": {"awb": entry}}, indent=2)
+
+
+def _codex_entry(entry):
+    return "[mcp_servers.awb]\n" + "\n".join(f"{key} = {_toml(entry[key])}" for key in ("command", "args", "env"))
+
+
+# Host -> (its user-level configuration file, the entry rendered in that file's format).
+SERVER_HOSTS = {
+    "copilot": (lambda: _home("COPILOT_HOME", ".copilot") / "mcp-config.json", _json_entry),
+    "claude": (lambda: Path.home() / ".claude.json", _json_entry),
+    "codex": (lambda: _home("CODEX_HOME", ".codex") / "config.toml", _codex_entry),
+}
+
+
+def print_server_entry(host):
+    """Print the awb server entry for host's user-level configuration, naming that file on stderr; write nothing."""
+    destination, render = SERVER_HOSTS[host]
+    entry = {"type": "stdio", "command": str(Path(sys.executable).absolute()),
+             "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")], "env": {}}
+    print(render(entry))
+    print(f"Merge the awb entry into {destination()}; preserve other configuration.", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                      allow_abbrev=False)
@@ -275,24 +312,14 @@ def main():
                         help="with --upgrade, also replace this customized copy, by project path; repeat for each")
     parser.add_argument("--remove-retired", action="store_true",
                         help="with --upgrade, delete retired files the project left unmodified")
-    parser.add_argument("--mcp-config", choices=("copilot", "claude", "codex"),
-                        help="print the user-level server entry only")
+    parser.add_argument("--mcp-config", choices=tuple(SERVER_HOSTS), metavar="HOST",
+                        help="print HOST's user-level server entry only: " + ", ".join(SERVER_HOSTS))
     args = parser.parse_args()
     if args.mcp_config:
         if (args.project_root is not None or args.check or args.upgrade or args.package_formats
                 or args.replace or args.remove_retired):
             parser.error("--mcp-config cannot be combined with a project root or install flags")
-        destination = (Path(os.environ.get("COPILOT_HOME") or Path.home() / ".copilot") / "mcp-config.json"
-                       if args.mcp_config == "copilot" else Path.home() / ".claude.json")
-        entry = {"type": "stdio", "command": str(Path(sys.executable).absolute()),
-                 "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")], "env": {}}
-        if args.mcp_config == "codex":
-            destination = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "config.toml"
-            print('[mcp_servers.awb]\ncommand = ' + json.dumps(entry["command"], ensure_ascii=False)
-                  + '\nargs = ' + json.dumps(entry["args"], ensure_ascii=False) + '\nenv = {}')
-        else:
-            print(json.dumps({"mcpServers": {"awb": entry}}, indent=2))
-        print(f"Merge the awb entry into {destination}; preserve other configuration.", file=sys.stderr)
+        print_server_entry(args.mcp_config)
         return 0
     if (args.replace or args.remove_retired) and not args.upgrade:
         parser.error("--replace and --remove-retired need --upgrade")
