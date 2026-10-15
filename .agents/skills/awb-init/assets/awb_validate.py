@@ -16,6 +16,7 @@ import json
 import numbers
 import re
 import sys
+from collections.abc import Hashable
 from pathlib import Path
 
 import pandas as pd
@@ -46,12 +47,15 @@ def _plain_value(value):
 
 
 def profile(frame, *, max_distinct=20) -> dict:
-    """Return row count and per-column dtype, null rate, distinct count, and frequent samples."""
+    """Return row count and per-column dtype, null rate, distinct count, and frequent samples. Maps,
+    lists, and structs, which pandas holds as dicts and arrays, are counted by each value's text."""
     _require_frame(frame)
     if max_distinct < 0:
         raise ValueError("max_distinct must be 0 or more")
     columns = {}
     for name, series in frame.items():
+        if series.dtype == object and not series.map(lambda value: isinstance(value, Hashable)).all():
+            series = series.map(str, na_action="ignore").astype(object)
         counts = series.value_counts()
         counts = counts[counts > 0]  # categorical counts list unused categories; keep observed ones
         columns[str(name)] = {

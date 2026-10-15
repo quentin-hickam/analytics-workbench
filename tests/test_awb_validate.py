@@ -12,6 +12,7 @@
 # test_absent_judgments_are_not_assessed_beside_measured_checks: regression: absent judgments remain not-applicable beside measured checks.
 # test_row_counts_accepts_numpy_integer_and_rejects_bool: regression: numpy integer row count accepted and bool rejected.
 # test_profile_rejects_negative_limit_and_keeps_samples_strict_json: regressions: negative max_distinct rejected and inf samples serialize as strict JSON.
+# test_profile_counts_map_list_and_struct_values_by_their_text: a column of dicts or arrays, such as DuckDB's histogram() map, a list or a struct, is counted by each value's text, keeping nulls as nulls.
 # test_cli_profile_summarizes_a_view_and_saves_the_full_profile: profile through src/awb.py resolves a view name, prints row count and per-column type, null rate and distinct count, and saves profile() unchanged.
 # test_cli_profile_samples_results_above_max_rows_repeatably: a result above --max-rows is profiled on a seeded sample and the JSON records sampled_from.
 # test_cli_profile_reports_unknown_names_and_missing_landing_helper: an unknown bare name or a project without src/preparation/landing.py prints one stderr line and returns 1.
@@ -168,6 +169,17 @@ def test_profile_rejects_negative_limit_and_keeps_samples_strict_json():
         validation.profile(pd.DataFrame({"id": [1]}), max_distinct=-1)
     result = validation.profile(pd.DataFrame({"x": [float("inf"), 1.5]}))
     assert result["columns"]["x"]["sample_values"] == ["inf", 1.5]
+    json.dumps(result, allow_nan=False)
+
+
+def test_profile_counts_map_list_and_struct_values_by_their_text():
+    frame = pd.DataFrame({"h": [{"a": 1}, {"a": 1}, None, {"b": 2}],
+                          "l": [np.array([1, 2]), np.array([1, 2]), np.array([3]), None]})
+    result = validation.profile(frame)
+    assert result["columns"]["h"] == {"dtype": "object", "null_rate": 0.25, "distinct_count": 2,
+                                      "sample_values": ["{'a': 1}", "{'b': 2}"]}
+    assert result["columns"]["l"] == {"dtype": "object", "null_rate": 0.25, "distinct_count": 2,
+                                      "sample_values": ["[1 2]", "[3]"]}
     json.dumps(result, allow_nan=False)
 
 
