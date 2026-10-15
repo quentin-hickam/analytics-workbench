@@ -12,6 +12,14 @@
 # test_unreadable_requirements_are_unchecked: a requirements.txt that exists but cannot be read is unchecked, not incomplete with every package missing.
 # test_unchecked_requirements_keep_unread: when pyproject.toml cannot be parsed, for want of tomllib or as malformed TOML, the unchecked status still lists the requirements.txt lines the reader could not read.
 # test_missing_packages_get_an_install_command: a package that fails to import is reported with a pip command for this interpreter.
+# test_pyvenv_cfg_records_uv_accepted_and_refused_forms: a pyvenv.cfg records uv only on a `uv = <version>` line, key matched in any case; other keys, comments, and an empty value do not.
+# test_uv_environment_without_pip_gets_a_uv_hint: an interpreter without pip whose pyvenv.cfg records uv, or with uv on PATH, gets `uv pip install --python <interpreter>` as its hint and requirements header; with pip, or with neither, the pip hint and header are unchanged.
+# test_readme_gains_the_project_interpreter_line: the installer writes `Project interpreter: <path>` over `not yet recorded`, reports it current on a rerun, and inserts a missing line after Commits, else Active investigation, else at the end, keeping a CRLF README's line endings; --check reports it missing and writes nothing.
+# test_project_interpreter_inside_the_project_is_recorded_relative: a virtual environment's interpreter inside the project is recorded by its project-relative path and reported in_project.
+# test_recorded_interpreter_is_kept_or_replaced: a README naming another existing interpreter, or repeating the line, refuses with exit 1 and writes nothing, with or without --check; a recorded interpreter that no longer exists is replaced and named under was; a link to this interpreter outside any virtual environment is this interpreter.
+# test_project_venv_is_kept_while_readme_records_none: a project with its own .venv or venv interpreter, run under another while README records none, refuses with exit 1 and writes nothing, with or without --check; README naming this interpreter lets it run.
+# test_hardlinked_interpreter_in_another_prefix_is_refused: outside a virtual environment, a hard link to this interpreter's binary in another directory is another interpreter: README naming it refuses, and so does a project .venv that is such a link while README records none; nothing is written.
+# test_awb_python_naming_this_interpreter_leaves_the_readme_line: with AWB_PYTHON naming this interpreter, by path or by name on PATH, the line is reported overridden and neither refused nor written, over another recorded interpreter or a project venv; AWB_PYTHON naming another interpreter changes nothing.
 # test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks; without the provenance asset an existing requirements.txt is reported unchecked, not a crash.
 # test_refuses_non_workbench_old_python_and_unreadable_receipt: none of these writes anything.
 # test_refuses_readme_only_directory: README.md is not a marker; reports missing markers and initialization guidance with exit 1, without writing.
@@ -282,6 +290,209 @@ def test_missing_packages_get_an_install_command(project, monkeypatch):
     result = installer.install(project, check=True)
     assert result["packages"]["duckdb"] == "missing" and result["packages"]["pandas"] == "ok"
     assert result["install"] == f"{sys.executable} -m pip install duckdb"
+
+
+def no_duckdb(name):
+    if name == "duckdb":
+        raise ImportError(name)
+
+
+def executable(path, text="#!/bin/sh\n"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    path.chmod(0o755)
+    return path
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("home = /usr/bin\nuv = 0.5.1\nversion_info = 3.12.3\n", True),
+    ("uv=0.4.18", True),
+    ("  UV = 0.4.18  \n", True),
+    ("home = /usr/bin\ninclude-system-site-packages = false\n", False),
+    ("uv =\n", False),
+    ("uvx = 1\n", False),
+    ("# uv = 0.5.1\n", False),
+    ("uv\n", False),
+    ("home = /opt/uv/python\n", False),
+    ("command = uv venv\n", False),
+])
+def test_pyvenv_cfg_records_uv_accepted_and_refused_forms(text, expected):
+    assert installer._made_by_uv(text) is expected
+
+
+def test_uv_environment_without_pip_gets_a_uv_hint(project, tmp_path, monkeypatch):
+    monkeypatch.setattr(installer.importlib, "import_module", no_duckdb)
+    monkeypatch.setattr(installer, "_has_pip", lambda: False)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+    venv = tmp_path / "uv-venv"
+    venv.mkdir()
+    (venv / "pyvenv.cfg").write_text("home = /usr/bin\nimplementation = CPython\nuv = 0.5.1\n")
+    python = str(venv / "bin/python")
+    assert installer._pip_install(python, str(venv)) == f"uv pip install --python {python}"
+    # Without pip and with no uv record or uv on PATH, the hint is the pip one, unchanged.
+    (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+    assert installer._pip_install(python, str(venv)) == f"{python} -m pip install"
+    assert installer.install(project)["install"] == f"{sys.executable} -m pip install duckdb"
+    assert "install with python3 -m pip install -r requirements.txt" in (project / "requirements.txt").read_text()
+    # uv on PATH serves an interpreter without pip, and the requirements header names the same command.
+    executable(tmp_path / "empty-bin/uv")
+    (project / "requirements.txt").unlink()
+    result = installer.install(project)
+    assert result["install"] == f"uv pip install --python {sys.executable} duckdb"
+    header = (project / "requirements.txt").read_text().splitlines()[0]
+    assert header.endswith(f"install with uv pip install --python {os.path.abspath(sys.executable)} -r requirements.txt")
+    # An interpreter with pip keeps the pip hint even where uv is on PATH.
+    monkeypatch.setattr(installer, "_has_pip", lambda: True)
+    assert installer.install(project, check=True)["install"] == f"{sys.executable} -m pip install duckdb"
+
+
+def template_readme(root, text=None):
+    path = root / "README.md"
+    path.write_text((SKILLS / "awb-init/assets/workbench/README.md").read_text() if text is None else text)
+    return path
+
+
+def interpreter_lines(root):
+    return [line for line in (root / "README.md").read_text().splitlines() if line.startswith("Project interpreter:")]
+
+
+def test_readme_gains_the_project_interpreter_line(project, imports_ok):
+    running = os.path.abspath(sys.executable)
+    template_readme(project)
+    assert interpreter_lines(project) == ["Project interpreter: not yet recorded"]
+    before = snapshot(project)
+    result = installer.install(project, check=True)
+    assert result["interpreter"] == {"line": f"Project interpreter: {running}", "in_project": False, "status": "missing"}
+    assert snapshot(project) == before
+    result = installer.install(project)
+    assert result["interpreter"] == {"line": f"Project interpreter: {running}", "in_project": False, "status": "written"}
+    assert interpreter_lines(project) == [f"Project interpreter: {running}"]
+    assert installer.install(project)["interpreter"]["status"] == "current"
+    # A README without the line gains it directly after the Commits line, else after Active investigation.
+    for text, after in (("# P\n\nActive investigation: none\n\nCommits: on request\n\nMore.\n", "Commits: on request"),
+                        ("# P\n\nActive investigation: none\n\nMore.\n", "Active investigation: none"),
+                        ("# P\n", "# P")):
+        template_readme(project, text)
+        assert installer.install(project)["interpreter"]["status"] == "written"
+        lines = (project / "README.md").read_text().splitlines()
+        at = lines.index(after)
+        assert lines[at + 1:at + 3] == ["", f"Project interpreter: {running}"]
+        assert interpreter_lines(project) == [f"Project interpreter: {running}"]
+    # A CRLF README keeps its line endings.
+    (project / "README.md").write_bytes(b"# P\r\n\r\nCommits: on request\r\n")
+    installer.install(project)
+    assert (project / "README.md").read_bytes() == \
+        f"# P\r\n\r\nCommits: on request\r\n\r\nProject interpreter: {running}\r\n".encode()
+
+
+def test_project_interpreter_inside_the_project_is_recorded_relative(project, imports_ok, monkeypatch):
+    template_readme(project)
+    venv_python = executable(project / ".venv/bin/python")
+    monkeypatch.setattr(sys, "executable", str(venv_python))
+    result = installer.install(project)
+    assert result["interpreter"] == {"line": "Project interpreter: .venv/bin/python", "in_project": True,
+                                     "status": "written"}
+    assert interpreter_lines(project) == ["Project interpreter: .venv/bin/python"]
+
+
+def test_recorded_interpreter_is_kept_or_replaced(project, tmp_path, imports_ok):
+    running = os.path.abspath(sys.executable)
+    other = executable(tmp_path / "other/bin/python")
+    readme = template_readme(project, f"# P\n\nCommits: on request\n\nProject interpreter: `{other}`\n")
+    before = snapshot(project)
+    for check in (False, True):
+        result = installer.install(project, check=check)
+        assert "Project interpreter" in result["error"] and str(other) in result["error"]
+        assert snapshot(project) == before
+    completed = subprocess.run([sys.executable, str(SCRIPT), str(project)], capture_output=True, text=True)
+    assert completed.returncode == 1 and "error" in json.loads(completed.stdout) and snapshot(project) == before
+    # A repeated line is refused the same way.
+    readme.write_text(f"Project interpreter: {running}\nProject interpreter: {running}\n")
+    assert "repeats" in installer.install(project)["error"]
+    # A recorded interpreter that no longer exists is replaced, and the result names it.
+    readme.write_text("# P\n\nProject interpreter: .venv/bin/python\n")
+    result = installer.install(project)
+    assert result["interpreter"] == {"line": f"Project interpreter: {running}", "in_project": False,
+                                     "status": "replaced", "was": ".venv/bin/python"}
+    assert interpreter_lines(project) == [f"Project interpreter: {running}"]
+    # Another name for this interpreter's binary, outside any virtual environment, is this interpreter.
+    if os.name != "nt" and sys.prefix == sys.base_prefix:
+        alias = tmp_path / "alias/bin/python"
+        alias.parent.mkdir(parents=True)
+        os.symlink(sys.executable, alias)
+        readme.write_text(f"# P\n\nProject interpreter: {alias}\n")
+        assert installer.install(project)["interpreter"]["status"] == "current"
+
+
+@pytest.mark.parametrize("folder", [".venv", "venv"])
+def test_project_venv_is_kept_while_readme_records_none(project, imports_ok, folder):
+    running = os.path.abspath(sys.executable)
+    template_readme(project)
+    executable(project / folder / "bin/python")
+    before = snapshot(project)
+    for check in (False, True):
+        result = installer.install(project, check=check)
+        assert result["error"] == (f"the project has its own interpreter, {folder}/bin/python, and README records "
+                                   "none; rerun with it, or name the interpreter to use on README's Project "
+                                   "interpreter line")
+        assert snapshot(project) == before
+    completed = subprocess.run([sys.executable, str(SCRIPT), str(project)], capture_output=True, text=True,
+                               env={k: v for k, v in os.environ.items() if k != "AWB_PYTHON"})
+    assert completed.returncode == 1 and "error" in json.loads(completed.stdout) and snapshot(project) == before
+    # Naming this interpreter on the line is the choice to use it over the project's own.
+    template_readme(project, f"# P\n\nProject interpreter: {running}\n")
+    assert installer.install(project)["interpreter"]["status"] == "current"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_hardlinked_interpreter_in_another_prefix_is_refused(project, tmp_path, imports_ok, monkeypatch):
+    # This interpreter runs from one prefix; a package manager linked the same binary into another.
+    base = executable(tmp_path / "base/bin/python3")
+    monkeypatch.setattr(sys, "executable", str(base))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "base"))
+    monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "base"))
+    monkeypatch.delenv("AWB_PYTHON", raising=False)
+    env = tmp_path / "env/bin/python3"
+    env.parent.mkdir(parents=True)
+    os.link(base, env)
+    template_readme(project, f"# P\n\nProject interpreter: {env}\n")
+    before = snapshot(project)
+    result = installer.install(project)
+    assert "rerun with it" in result["error"] and str(env) in result["error"] and snapshot(project) == before
+    # The project's own environment linked the same way is kept while README records none.
+    template_readme(project)
+    (project / ".venv/bin").mkdir(parents=True)
+    os.link(base, project / ".venv/bin/python")
+    before = snapshot(project)
+    result = installer.install(project)
+    assert "the project has its own interpreter, .venv/bin/python" in result["error"] and snapshot(project) == before
+
+
+def test_awb_python_naming_this_interpreter_leaves_the_readme_line(project, tmp_path, imports_ok, monkeypatch):
+    running = os.path.abspath(sys.executable)
+    other = executable(tmp_path / "other/bin/python")
+    readme = template_readme(project, f"# P\n\nProject interpreter: {other}\n")
+    overridden = {"line": f"Project interpreter: {running}", "in_project": False, "status": "overridden"}
+    for configured, path in ((sys.executable, None), (os.path.basename(sys.executable), os.path.dirname(sys.executable))):
+        monkeypatch.setenv("AWB_PYTHON", configured)
+        if path:
+            monkeypatch.setenv("PATH", path)
+        for check in (False, True):
+            result = installer.install(project, check=check)
+            assert "error" not in result and result["interpreter"] == overridden
+            assert interpreter_lines(project) == [f"Project interpreter: {other}"]
+    completed = subprocess.run([sys.executable, str(SCRIPT), str(project)], capture_output=True, text=True,
+                               env={**os.environ, "AWB_PYTHON": sys.executable})
+    assert completed.returncode == 0 and json.loads(completed.stdout)["interpreter"]["status"] == "overridden"
+    # A project venv is passed over the same way, and README keeps its line.
+    template_readme(project)
+    executable(project / ".venv/bin/python")
+    assert installer.install(project)["interpreter"] == overridden
+    assert interpreter_lines(project) == ["Project interpreter: not yet recorded"]
+    # AWB_PYTHON naming another interpreter changes nothing: README's still refuses this one.
+    monkeypatch.setenv("AWB_PYTHON", str(other))
+    readme.write_text(f"# P\n\nProject interpreter: {other}\n")
+    assert "rerun with it" in installer.install(project)["error"]
 
 
 def test_absent_mapped_asset_is_skipped(project, monkeypatch, imports_ok):

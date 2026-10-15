@@ -21,7 +21,7 @@ Packaging **serializes** recorded results: it reuses recorded evidence, exports,
 
 Identify the investigation and package. When the request corrects a draft the user is reviewing, record the correction as a review rule first when later drafts could repeat it, as [references/review.md](references/review.md) says under **After the review**. When the request could refer to more than one investigation, ask which before changing package files. Use the package name the user gives; otherwise reuse the existing package's name, or derive a short, stable one from the investigation and a purpose word and report it. Keep one package per investigation unless another has an independent scope or delivery schedule.
 
-From the project root, install the missing shared formats with `python3 <awb-init skill directory>/scripts/install_helpers.py . --package-formats`, which preserves existing files and records what it installs in `.awb-receipt.json`.
+From the project root, install the missing shared formats with README's `Project interpreter`: `python3 <awb-init skill directory>/scripts/install_helpers.py . --package-formats`, which preserves existing files and records what it installs in `.awb-receipt.json`.
 
 For a new package, ask which audience-facing datasets to include and explicitly offer **none**; there is no default export set. A revision inherits the selection in the current manifest unless the user changes it or it no longer fits the package scope; when it no longer fits, explain why and ask for a new selection before exporting.
 

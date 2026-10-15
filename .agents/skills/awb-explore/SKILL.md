@@ -13,7 +13,7 @@ Use the investigation the user names, otherwise the README's active one; for one
 
 ## 2. Scan
 
-From the project root, with the interpreter that runs the project's analysis:
+From the project root, with README's `Project interpreter`:
 
 ```sh
 python3 <skill-directory>/scripts/eda_scan.py <project-root> <view-or-publication> [options]

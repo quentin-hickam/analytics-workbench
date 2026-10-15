@@ -598,3 +598,79 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
             'cites the check that establishes it') in contract
     assert 'Run the full read-only review' in release and 'never a scoped re-review' in release
     assert 'one pass' in reviewer and 'scoped' in reviewer and 'the evidence a narrative cites' in reviewer
+
+
+def test_commands_state_the_cli_fallback_scripts_by_path_and_the_interpreter():
+    commands = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Commands').split())
+    # A refused or missing write tool falls back to the command line, said once; working tools stay first.
+    assert ('If a write tool is refused or unavailable, run its CLI command, '
+            'keep using the tools that work, and say so once.') in commands
+    # The scan and record scripts live in their skill folders and are never awb.py subcommands.
+    assert 'Skill scripts run by path, never as `awb.py` commands.' in commands
+    # One interpreter, recorded once: the installer writes the README line the commands mean.
+    assert "In every workbench command, `python3` means README's `Project interpreter`." in commands
+    readme = (ROOT / '.agents/skills/awb-init/assets/workbench/README.md').read_text(encoding='utf-8')
+    assert re.search(r'^Project interpreter: not yet recorded$', readme, re.M)
+    for skill in ('awb-clean', 'awb-explore', 'awb-package'):
+        text = ' '.join((ROOT / f'.agents/skills/{skill}/SKILL.md').read_text(encoding='utf-8').split())
+        assert "README's `Project interpreter`" in text, skill
+
+
+def test_no_code_history_means_no_commits_or_suggestions():
+    readme = (ROOT / '.agents/skills/awb-init/assets/workbench/README.md').read_text(encoding='utf-8')
+    assert re.search(r'^Code history: Git$', readme, re.M)
+    agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
+    assert "While README's `Code history:` line says `none`, make and suggest no commits." in agents
+    analysis = ' '.join((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/analysis.md')
+                        .read_text(encoding='utf-8').split())
+    assert "While README's `Code history:` line says `none`, do neither." in analysis
+    # The guide and skill that suggest a commit at a step say so too, where the step is read.
+    data = ' '.join((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/data.md')
+                    .read_text(encoding='utf-8').split())
+    # Both the reference-document and the publication commit points say so where the step is read.
+    assert data.count("While README's `Code history:` line says `none`, do neither.") == 2
+    clean = ' '.join((ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8').split())
+    assert ("Commit `foundation/quality.json` together with `foundation/quality.md` when you commit as README's "
+            "`Commits:` line allows, never while its `Code history:` line says `none`") in clean
+    init = ' '.join(section((ROOT / '.agents/skills/awb-init/SKILL.md').read_text(encoding='utf-8'),
+                            '## 1. Resolve the target').split())
+    assert '`Code history: none (<reason>)`' in init
+    # A project that later gains a repository goes back to Git, at a rerun or a repair.
+    assert 'set the line back to `Code history: Git`' in init
+    repair = ' '.join((ROOT / '.agents/skills/awb-init/references/repair.md').read_text(encoding='utf-8').split())
+    assert "set it back to `Code history: Git`" in repair
+
+
+def ledger_ids(text):
+    """Accepted input: any text. Returns each ledger-style ID, `Q-` and one or more digits,
+    in order; a `Q-` preceded by a letter, a digit, or `-` (as in `DQ-004`) is part of another
+    word and refused, as is `Q-` without a digit. Known limits: a plain substring scan, so an
+    ID inside a URL or code is found too."""
+    return re.findall(r'(?<![A-Za-z0-9-])Q-\d+', text)
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('Use {Q-004} or Q-12.', ['Q-004', 'Q-12']),
+    ('`Q-007` beside plain text', ['Q-007']),
+    ('such as DQ-004', []),
+    ('x-Q-004 and AQ-1', []),
+    ('Q- and Q-ID', []),
+])
+def test_ledger_id_scanner_accepted_and_refused_forms(text, expected):
+    assert ledger_ids(text) == expected
+
+
+def test_quality_ids_in_shipped_help_are_dq_never_ledger_ids():
+    # Ledger questions are Q-NNN; quality IDs are DQ-NNN, so no cleaning help names a quality ID like Q-004.
+    import subprocess
+    import sys
+    scripts = ROOT / '.agents/skills/awb-clean/scripts'
+    texts = {name: subprocess.run([sys.executable, str(scripts / name), '--help'], capture_output=True,
+                                  text=True, check=True).stdout
+             for name in ('record_cleaning.py', 'scan_dataset.py')}
+    for path in [ROOT / '.agents/skills/awb-clean/SKILL.md', *sorted((ROOT / '.agents/skills/awb-clean/references').glob('*.md')),
+                 ROOT / '.agents/skills/awb-init/assets/workbench/foundation/quality.md']:
+        texts[str(path.relative_to(ROOT))] = path.read_text(encoding='utf-8')
+    assert {name: ledger_ids(text) for name, text in texts.items() if ledger_ids(text)} == {}
+    assert 'DQ-004' in texts['record_cleaning.py'] and 'DQ-004' in texts['.agents/skills/awb-clean/SKILL.md']
+    assert 'DQ-NNN' in texts['.agents/skills/awb-init/assets/workbench/foundation/quality.md']
