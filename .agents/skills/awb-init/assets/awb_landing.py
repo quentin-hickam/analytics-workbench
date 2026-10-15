@@ -1163,13 +1163,14 @@ def session(project_root: str | Path, *,
     must sort after it; use numeric prefixes, for example 01_base.sql and
     02_derived.sql.
 
-    read_only=True opens a session that writes nothing: no extension installs, no
-    persistent secrets, spill files in a private temporary directory removed at exit,
-    and configuration locked once the views load. View files may then hold only CREATE
-    and SELECT statements, checked in every file before any runs, so a view file's
-    ATTACH, COPY, or other statement is refused rather than run; each statement's calls
-    and plan are then checked as read_only_sql() checks one, just before it runs. Run queries in
-    the session through read_only_sql().
+    read_only=True opens a session that writes nothing: no extension installs (one already
+    installed loads when a statement needs it), no persistent secrets, spill files in a
+    private temporary directory removed at exit, and configuration locked once the views
+    load. View files may then hold only CREATE and SELECT statements, checked in every file
+    before any runs, so a view file's ATTACH, COPY, or other statement is refused rather
+    than run; each statement's calls and plan are then checked as read_only_sql() checks
+    one, just before it runs, and a macro it creates is refused if its body in the catalog
+    calls dynamic SQL. Run queries in the session through read_only_sql().
     """
     try:
         import duckdb
@@ -1206,7 +1207,9 @@ def session(project_root: str | Path, *,
                 if read_only:  # what runs is the parsed statement whose kind, calls and plan were checked
                     for statement in statements:
                         _refuse_writing_plan(connection, statement)
+                        before = _dynamic_names(connection)
                         connection.execute(statement.query)
+                        _refuse_new_dynamic_macros(connection, before)
                 else:
                     connection.execute(text)
             except Exception as error:
@@ -1224,30 +1227,44 @@ def session(project_root: str | Path, *,
 # any table function not listed here is refused, as is a statement whose plan EXPLAIN cannot show.
 # Limits: scalar functions are not checked (none of DuckDB's writes a file while logging is off and the
 # configuration locked), and EXPLAIN binds a statement before it is checked, which DuckDB's own table
-# functions do without writing; an extension's table function is refused, but only once bound.
+# functions do without writing; an extension's table function not listed is refused, but only once bound.
+# read_xlsx, from DuckDB's excel extension, is listed so that a read-only query can read a landed Excel
+# file: its arguments name a file, a sheet, a range and how to read cells, never an output, and an xlsx
+# file is written only by COPY, which is refused. The session installs no extension but loads one already
+# installed when a statement needs it; without the excel extension, read_xlsx or FROM 'book.xlsx' is
+# refused with a hint to install it once without --read-only.
 # The plan checked must be the plan that runs, so a read-only session also refuses, by name and before
 # EXPLAIN, every function that turns a runtime string into SQL or a table reference: its text is bound
 # anew at each bind, and current_query(), random() or now() can pick another table function at the run
-# than at the check. Macros calling one, DuckDB's histogram_values included, are refused with it. Without
-# them every table function a statement binds is named in its text or in a view or macro body fixed
-# before the check; what still varies between check and run is values, such as which files a glob reads.
+# than at the check. Macros calling one, DuckDB's histogram_values and histogram table macros included,
+# are refused with it. These are table functions, so a table macro calling one is refused only where it
+# is called as a table function, and DuckDB's histogram() aggregate, which shares a table macro's name,
+# still runs; a scalar macro calling one is refused wherever it is called. A CREATE statement's body is
+# read the same way when it parses alone (_create_body); one that does not is checked by token, so there
+# the histogram() aggregate is refused too. Once a view file's CREATE runs, a macro it made is checked
+# again from DuckDB's own parse of its body in the catalog (_refuse_new_dynamic_macros), so a misread
+# split of the CREATE's text cannot leave the session holding one. Without these dynamic functions,
+# every table function a statement binds is named in its text or in a view or macro body fixed before
+# the check; what still varies between check and run is values, such as which files a glob reads.
 DYNAMIC_SQL_FUNCTIONS = frozenset({"query", "query_table", "json_execute_serialized_sql"})
 READ_TABLE_FUNCTIONS = frozenset("""
     seq_scan range generate_series unnest repeat repeat_row glob summary sniff_csv read_text read_blob
     read_csv read_csv_auto read_parquet parquet_scan parquet_metadata parquet_schema parquet_file_metadata
     parquet_kv_metadata read_json read_json_auto read_json_objects read_json_objects_auto read_ndjson
-    read_ndjson_auto read_ndjson_objects json_each json_tree duckdb_columns duckdb_constraints
+    read_ndjson_auto read_ndjson_objects json_each json_tree read_xlsx duckdb_columns duckdb_constraints
     duckdb_databases duckdb_dependencies duckdb_extensions duckdb_functions duckdb_indexes duckdb_keywords
     duckdb_schemas duckdb_sequences duckdb_settings duckdb_tables duckdb_types duckdb_views
     pragma_table_info pragma_show pragma_version pragma_database_size pragma_storage_info
     pragma_platform pragma_collations pg_timezone_names icu_calendar_names""".split())
+# The read list's table functions that come from an extension rather than DuckDB itself, and the extension.
+EXTENSION_READ_FUNCTIONS = {"read_xlsx": "excel"}
 
 
 def read_only_sql(connection, text):
     """Run SQL text in a read-only session(): only SELECT statements, refusing COPY, ATTACH, INSTALL,
     LOAD, EXPORT, SET, a PRAGMA that sets, CALL, CREATE, and every other kind, and a SELECT whose plan
-    calls a table function outside READ_TABLE_FUNCTIONS or any of DYNAMIC_SQL_FUNCTIONS, before any
-    statement runs. Returns the last statement's relation, as connection.sql() does."""
+    calls a table function outside READ_TABLE_FUNCTIONS or that calls dynamic SQL (_refuse_dynamic_sql),
+    before any statement runs. Returns the last statement's relation, as connection.sql() does."""
     import duckdb
     statements = duckdb.extract_statements(text)  # parsed once, so what runs is what was checked
     _refuse_statements(statements, ("SELECT",), "(only SELECT runs here, and a PIVOT is one only with an IN "
@@ -1260,14 +1277,26 @@ def read_only_sql(connection, text):
 
 
 def _refuse_writing_plan(connection, statement):
-    """Raise unless one parsed statement calls none of DYNAMIC_SQL_FUNCTIONS and the plan DuckDB would
-    run for it calls only READ_TABLE_FUNCTIONS. EXPLAIN binds the statement, expanding views and macros,
+    """Raise unless one parsed statement calls no dynamic SQL (_refuse_dynamic_sql) and the plan DuckDB
+    would run for it calls only READ_TABLE_FUNCTIONS. EXPLAIN binds the statement, expanding views and macros,
     without running it; the name check runs again after it, since binding can load an extension's macros."""
     _refuse_dynamic_sql(connection, statement)
     text = statement.query
     try:
         plan = json.loads(connection.execute("EXPLAIN (FORMAT json) " + text).fetchall()[0][1])
-    except Exception as error:  # a PIVOT without IN, or SQL that does not bind
+    except Exception as error:  # a PIVOT without IN, SQL that does not bind, or an extension not installed
+        called, message = _called_names(text), str(error)
+        for name, extension in sorted(EXTENSION_READ_FUNCTIONS.items()):
+            # called by name, or a file such as 'book.xlsx' whose replacement scan loads the extension
+            needed = name in called or f'extension "{extension}"' in message \
+                or f"extension '{extension}'" in message
+            if needed and connection.execute("SELECT installed FROM duckdb_extensions() WHERE extension_name = ?",
+                                             [extension]).fetchall() != [(True,)]:
+                raise ValueError(
+                    f"read-only: {name} needs DuckDB's {extension} extension, which is not installed, and a "
+                    f"read-only session installs none; install it once without --read-only, "
+                    f'python3 src/awb.py sql "INSTALL {extension}; SELECT 1" (over MCP, the data tool\'s sql), '
+                    "then run this again") from error
         raise ValueError(f"read-only: refused a statement whose plan cannot be checked ({error}); "
                          "run it without --read-only") from error
     table_functions = {name for (name,) in connection.execute(
@@ -1285,33 +1314,155 @@ def _refuse_writing_plan(connection, statement):
 
 
 def _refuse_dynamic_sql(connection, statement):
-    """Raise when one parsed statement calls a function of DYNAMIC_SQL_FUNCTIONS, or a macro calling one,
-    found by name in its parse tree (json_serialize_sql), or in its tokens for a CREATE, which the
-    serializer does not take. A statement neither can read is refused."""
+    """Raise when one parsed statement calls dynamic SQL: a function of DYNAMIC_SQL_FUNCTIONS, or a table
+    macro calling one, called as a table function, or a scalar macro calling one, called anywhere. Calls
+    are read from the statement's parse tree (json_serialize_sql); for a CREATE, which the serializer does
+    not take, from the tree of its body and the tokens before it (_create_body), or from all its tokens,
+    matching any position, when its body does not parse alone. A statement none of these can read is
+    refused."""
     try:
-        dynamic = set(DYNAMIC_SQL_FUNCTIONS)
-        macros = connection.execute("SELECT DISTINCT lower(function_name), macro_definition "
-                                    "FROM duckdb_functions() WHERE macro_definition IS NOT NULL").fetchall()
-        while more := {name for name, body in macros if name not in dynamic and _called_names(body) & dynamic}:
-            dynamic |= more  # a macro calling a dynamic function, directly or through other macros
+        tables, scalars = _dynamic_names(connection)
         tree = json.loads(connection.execute("SELECT json_serialize_sql(?)", [statement.query]).fetchone()[0])
+        by_token = False
         if not tree.get("error"):
-            called, nodes = set(), [tree]
-            while nodes:
-                node = nodes.pop()
-                if isinstance(node, dict) and isinstance(node.get("function_name"), str):
-                    called.add(node["function_name"].lower())
-                nodes.extend(node.values() if isinstance(node, dict) else node if isinstance(node, list) else ())
+            table_calls, calls = _calls(tree)
         elif getattr(statement.type, "name", "") == "CREATE":
-            called = _called_names(statement.query)
+            table_calls, calls, by_token = _create_calls(connection, statement.query, tables | scalars)
         else:
             raise ValueError(tree.get("error_message"))
+        found = table_calls & (tables | scalars) | calls & scalars
     except Exception as error:
         raise ValueError(f"read-only: refused a statement whose calls cannot be read ({error}); "
                          "run it without --read-only") from error
-    if found := sorted(called & dynamic):
-        raise ValueError(f"read-only: refused {found[0]}(), which builds SQL from a string each time it is "
-                         "bound, so the plan checked need not be the plan that runs; run it without --read-only")
+    if found := sorted(found):
+        # a name refused here only because by-token reading counts a table macro's call in any position
+        where = (" (this CREATE's calls were checked by token, in any position, which also refuses the "
+                 "histogram() aggregate)") if by_token and set(found) <= tables - scalars - DYNAMIC_SQL_FUNCTIONS \
+            else ""
+        raise ValueError(f"read-only: refused {found[0]}(){where}, which builds SQL from a string each time it "
+                         "is bound, so the plan checked need not be the plan that runs; run it without --read-only")
+
+
+def _refuse_new_dynamic_macros(connection, before):
+    """Raise when the catalog now has a macro calling dynamic SQL that was not in before, the result of
+    _dynamic_names() just before a statement ran: a check of DuckDB's own parse of a created macro's body,
+    behind the split of the CREATE statement's text (_create_body) that _refuse_dynamic_sql reads."""
+    after = _dynamic_names(connection)
+    if new := sorted((after[0] - before[0]) | (after[1] - before[1])):
+        raise ValueError(f"read-only: refused {new[0]}(), a macro just created that calls dynamic SQL, which "
+                         "builds SQL from a string each time it is bound, so the plan checked need not be the "
+                         "plan that runs; run it without --read-only")
+
+
+def _dynamic_names(connection):
+    """Return the names that call dynamic SQL as table functions (DYNAMIC_SQL_FUNCTIONS and the table
+    macros calling one) and as scalar functions (the scalar macros calling one), directly or through
+    other macros. A macro body that does not parse alone counts every name its tokens call."""
+    tables, scalars = set(DYNAMIC_SQL_FUNCTIONS), set()
+    macros = []
+    for name, table, body, tree in connection.execute(
+            "SELECT DISTINCT lower(function_name), function_type = 'table_macro', macro_definition, "
+            "json_serialize_sql(CASE WHEN function_type = 'table_macro' THEN macro_definition "
+            "ELSE 'SELECT ' || macro_definition END) FROM duckdb_functions() "
+            "WHERE macro_definition IS NOT NULL").fetchall():
+        tree = json.loads(tree)
+        table_calls, calls = (_called_names(body),) * 2 if tree.get("error") else _calls(tree)
+        macros.append((name, table, table_calls, calls))
+    while more := [(name, table) for name, table, table_calls, calls in macros
+                   if name not in (tables if table else scalars)
+                   and (table_calls & (tables | scalars) or calls & scalars)]:
+        for name, table in more:
+            (tables if table else scalars).add(name)
+    return tables, scalars
+
+
+def _parse_tree(connection, text):
+    """Return the parse tree json_serialize_sql gives SQL text, or None when it takes no such text."""
+    tree = json.loads(connection.execute("SELECT json_serialize_sql(?)", [text]).fetchone()[0])
+    return None if tree.get("error") else tree
+
+
+def _calls(tree):
+    """Return the lowercased names a parse tree calls as table functions, and those it calls anywhere."""
+    tables, calls, nodes = set(), set(), [tree]
+    while nodes:
+        node = nodes.pop()
+        if isinstance(node, dict):
+            if isinstance(node.get("function_name"), str):
+                calls.add(node["function_name"].lower())
+            if node.get("type") == "TABLE_FUNCTION":
+                function = node.get("function")
+                if not (isinstance(function, dict) and isinstance(function.get("function_name"), str)):
+                    raise ValueError("a table function reference without a function name")
+                tables.add(function["function_name"].lower())
+            nodes.extend(node.values())
+        elif isinstance(node, list):
+            nodes.extend(node)
+    return tables, calls
+
+
+def _create_calls(connection, text, dynamic):
+    """Return the names a CREATE statement calls as table functions, those it calls anywhere, and whether
+    they were read by token: from its body's parse tree, with every name called before the body counted as
+    a table function, when _create_body finds a body whose tree holds each name of dynamic that its tokens
+    call; else every name its tokens call, counted as both."""
+    split = _create_body(text)
+    if split is not None:
+        prefix, body, kind = split
+        tree = _parse_tree(connection, body if kind == "select" else "SELECT " + body)
+        if tree is not None:
+            table_calls, calls = _calls(tree)
+            if _called_names(body) & dynamic <= calls:
+                return _called_names(prefix) | table_calls, calls, False
+    names = _called_names(text)
+    return names, names, True
+
+
+def _create_body(text):
+    """Split a CREATE statement into the text before its body, the body, and how the body parses alone.
+
+    Closed grammar, on DuckDB's tokens, each read as the word at its start, so a comment glued to a
+    token, as in AS/**/ or (/*)*/, is not part of it: CREATE, then tokens up to the first AS keyword
+    outside parentheses, then the body. Before that AS, the first of the keywords VIEW, TABLE, MACRO, and FUNCTION
+    names the kind. The body of a VIEW or TABLE is a query ("select"); a MACRO's or FUNCTION's is TABLE
+    and a query ("select"), or an expression ("expression"), parsed as SELECT <body>. Anything else, such
+    as CREATE TYPE or a CREATE TABLE without AS, returns None."""
+    import duckdb
+    data = text.encode("utf-8")  # token positions are byte offsets
+    tokens = duckdb.tokenize(text)
+    # a token's word is matched at its start, as _called_names reads it: DuckDB emits no comment tokens, so
+    # a comment glued to a token, as in AS/**/ or (/*)*/, is part of its span but not of its word
+    spans = [(_token_word(data[start:end].decode("utf-8")), kind.name, start)
+             for (start, kind), end in zip(tokens, [after for after, _ in tokens[1:]] + [len(data)])]
+    if not spans or spans[0][0].upper() != "CREATE":
+        return None
+    depth, object_kind = 0, None
+    for index, (word, kind, start) in enumerate(spans):
+        if kind == "operator":
+            depth += (word == "(") - (word == ")")
+        elif kind == "keyword" and depth == 0:
+            if object_kind is None and word.upper() in ("VIEW", "TABLE", "MACRO", "FUNCTION"):
+                object_kind = word.upper()
+            elif word.upper() == "AS":
+                rest = spans[index + 1:]
+                if object_kind is None:
+                    return None
+                if object_kind in ("VIEW", "TABLE"):
+                    body_kind = "select"
+                elif rest and rest[0][1] == "keyword" and rest[0][0].upper() == "TABLE":
+                    body_kind, rest = "select", rest[1:]
+                else:
+                    body_kind = "expression"
+                if not rest:
+                    return None
+                return data[:start].decode("utf-8"), data[rest[0][2]:].decode("utf-8"), body_kind
+    return None
+
+
+def _token_word(span):
+    """Return the word at the start of a token's span (a quoted name, a name, or one character), or ""."""
+    word = re.match(r'"(?:[^"]|"")*"|[\w$]+|\S', span)
+    return word.group() if word else ""
 
 
 def _called_names(text):
@@ -1375,8 +1526,11 @@ def cli_sql(root: Path, argv: list[str]) -> int:
     parser.add_argument("--out", help="write the full result to this project-relative .csv or .parquet file")
     parser.add_argument("--read-only", action="store_true",
                         help="write nothing: run only SELECT statements whose table functions read files or the "
-                             "catalog, in a session that installs no extension and spills outside the project; "
-                             "refuses --out")
+                             "catalog and build no SQL from a string (query, query_table, the histogram table "
+                             "macro; the histogram() aggregate runs), in a session that installs no extension "
+                             "and spills outside the project; read_xlsx needs DuckDB's excel extension installed "
+                             "once without --read-only; a view file's CREATE whose body does not parse alone is "
+                             "checked by token, refusing histogram() there too; refuses --out")
     args = parser.parse_args(argv)
     if args.limit < 0:
         parser.error("--limit must be 0 or more")

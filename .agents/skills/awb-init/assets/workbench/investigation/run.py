@@ -63,8 +63,9 @@ def produce(connection, sql, parameters):
 # default. It returns (frame, measured), where measured holds validation spec entries only
 # known at run time, such as row_counts or joins.left_rows. run.py gives the module run() above
 # before loading it. Read further data through saved queries listed in settings so their views are
-# recorded, and list any other file it imports or reads in its table's code = [...], since evidence
-# records only declared files as the result's code. Example, producers/orders-by-month.py:
+# recorded, and list any other file it imports or reads, or the result's queries read directly, in
+# its table's code = [...], since evidence records only declared files as the result's code.
+# Example, producers/orders-by-month.py:
 #
 # def produce(connection, sql, parameters):
 #     before = int(run(connection, sql[1], parameters)["orders"].iloc[0])  # unfiltered count
@@ -76,7 +77,9 @@ def producer(result_id):
     path = HERE / producer_path(result_id)
     if not path.is_file():
         return produce
-    spec = importlib.util.spec_from_file_location("producer_" + re.sub(r"\W", "_", result_id), path)
+    # Each character other than a letter or digit becomes _ and its hex code, so no two IDs share a name.
+    name = "producer_" + "".join(c if c.isalnum() else f"_{ord(c):02x}" for c in result_id)
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     module.run = run
     # Registered as an import is, so dataclasses and pickle can look the module up by name.

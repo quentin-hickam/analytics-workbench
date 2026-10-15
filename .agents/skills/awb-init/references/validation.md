@@ -4,7 +4,7 @@ Call the project copy at `src/exploration/validate.py`.
 
 `validate(frame, spec) -> list[dict]` always returns seven checks in order: `columns`, `row_counts`, `joins`, `nulls`, `scope`, `metrics`, `values`. Each check has exactly `name`, `outcome`, `detail` strings; outcomes are `pass`, `fail`, `not-applicable`. A missing spec key records `not-applicable` with `not assessed`, which is not a pass. Empty mechanical specifications assess zero items and pass; use substantive checks for the actual result.
 
-`profile(frame, *, max_distinct=20) -> dict` returns `row_count` plus each column's `dtype`, `null_rate`, `distinct_count`, and most frequent `sample_values`. Expand beyond the sample when the business interpretation depends on other distinct values.
+`profile(frame, *, max_distinct=20) -> dict` returns `row_count` plus each column's `dtype`, `null_rate`, `distinct_count`, and most frequent `sample_values`. Maps, lists, and structs, such as a `histogram()` result, are counted and sampled by each value's full text, such as `[1, 2]` or `{0: 3}`. Expand beyond the sample when the business interpretation depends on other distinct values.
 
 ## Specification in settings
 
