@@ -1,10 +1,11 @@
 # Kept cases:
 # test_renderer_builds_every_slide_verbatim: the reference renderer builds the title slide and one slide per outline slide in order, with headlines, bullets and nested bullets, and notes verbatim, and leaves the draft untouched.
 # test_renderer_draws_every_form_from_its_file: each of the seven forms is drawn from its chart file at the file's values and order: bar, column, line, and stacked types with a series pivoted, intervals as custom error bars, each bar, column, and line value axis from zero, scatter points and fit, a table's cells; alt text and the source line (with the **Interval:** text) and caveat line come from the specification.
-# test_renderer_line_axis_follows_axis_field: a line chart's value axis starts at zero unless **Axis:** asks for a non-zero baseline.
+# test_renderer_line_axis_follows_axis_field: a line chart's value axis includes zero unless **Axis:** says non-zero baseline, which then joins the source line; other wording, the template's "reason for another" included, keeps zero, and so does a column chart whose **Axis:** says non-zero baseline, leaving it out of the source line.
+# test_renderer_value_axis_spans_zero_and_every_value: a bar, column, or line axis pins zero as its minimum when every value and interval bound is zero or more, and as its maximum when every one is zero or less and one is below zero; it pins an interval bound that reaches past every value, whichever side of zero it lies on; otherwise it leaves the bound automatic, so mixed-sign and all-negative values and every interval stay visible.
 # test_renderer_is_deterministic: two renders of one draft are byte-identical.
 # test_renderer_refuses_a_draft_breaking_the_contract: an outline or chart row stops the render, naming the rows, and writes nothing.
-# test_renderer_refuses_data_it_cannot_draw: a repeated category and series pair, or a blank interval cell, stops the render with a ContractError instead of dropping a row or crashing.
+# test_renderer_refuses_data_it_cannot_draw: a repeated category and series pair, a blank interval cell, or a negative part of a stacked bar stops the render with a ContractError instead of dropping a row or crashing.
 # The python-pptx tests skip when the package is missing; the renderer is a test fixture, never shipped.
 
 import importlib.util
@@ -157,14 +158,47 @@ def test_renderer_draws_every_form_from_its_file(package, tmp_path):
         assert source == [expected if n % 2 else f"{expected}\n* value {n} is partial"]
 
 
-def test_renderer_line_axis_follows_axis_field(package, tmp_path):
+def source_line(slide):
+    return [shape.text_frame.text for shape in slide.shapes
+            if shape.has_text_frame and shape.text_frame.text.startswith("source")]
+
+
+@pytest.mark.parametrize("number, axis, minimum, source", [
+    (3, "non-zero baseline, to show the small monthly change", None,
+     "source 3; non-zero baseline, to show the small monthly change"),
+    (3, "Nonzero baseline: monthly changes are small", None, "source 3; Nonzero baseline: monthly changes are small"),
+    (3, "cases, starting at 8 to show the small monthly change", 0, "source 3"),
+    (3, "non-zero", 0, "source 3"),
+    (4, "non-zero baseline, because the counts are large", 0, "source 4\n* value 4 is partial"),
+])
+def test_renderer_line_axis_follows_axis_field(package, tmp_path, number, axis, minimum, source):
     findings_path = package / "findings.md"
     text = findings_path.read_text(encoding="utf-8")
-    line = text.index("**Chart 3.**")
-    findings_path.write_text(text[:line] + text[line:].replace("zero baseline", "non-zero baseline", 1),
-                             encoding="utf-8")
-    frame = frames(list(deck(package, tmp_path).slides)[4])[0]
-    assert frame.chart.chart_type == XL_CHART_TYPE.LINE_MARKERS and frame.chart.value_axis.minimum_scale is None
+    line = text.index(f"**Chart {number}.**")
+    findings_path.write_text(text[:line] + text[line:].replace("zero baseline", axis, 1), encoding="utf-8")
+    slide = list(deck(package, tmp_path).slides)[number + 1]
+    frame = frames(slide)[0]
+    assert frame.chart.chart_type == (XL_CHART_TYPE.LINE_MARKERS if number == 3 else XL_CHART_TYPE.COLUMN_CLUSTERED)
+    assert (frame.chart.value_axis.minimum_scale, frame.chart.value_axis.maximum_scale) == (minimum, None)
+    assert source_line(slide) == [source]
+
+
+@pytest.mark.parametrize("number, content, minimum, maximum", [
+    (3, "Month,Region,Cases\nJan,West,-4.3\nFeb,West,2\nJan,East,1\n", None, None),
+    (3, "Month,Region,Cases\nJan,West,-4\nFeb,West,-6\nJan,East,-1\n", None, 0),
+    (3, "Month,Region,Cases\nJan,West,0\nFeb,West,0\n", 0, None),
+    (1, "Region,Closed late (%)\nWest,-2.5\nEast,-0.5\nNorth,-8\n", None, 0),
+    (4, "Month,Cases,Late\nJan,-3,1\nFeb,2,-5\n", None, None),
+    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,2,-1,5\nEast,5,4,6.5\n", -1, 6.5),
+    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,2,1,3\nEast,5,4,4.5\n", 0, None),
+    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,-2,-3,-0.5\nEast,-5,-7,-4\n", -7, 0),
+    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,-2,-3,1\nEast,-5,-7,-4\n", -7, 1),
+    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,-2,-3,-1\nEast,3,2,4\n", -3, 4),
+])
+def test_renderer_value_axis_spans_zero_and_every_value(package, tmp_path, number, content, minimum, maximum):
+    (package / f"charts/chart-{number}.csv").write_text(content, encoding="utf-8")
+    axis = frames(list(deck(package, tmp_path).slides)[number + 1])[0].chart.value_axis
+    assert (axis.minimum_scale, axis.maximum_scale) == (minimum, maximum)
 
 
 def test_renderer_is_deterministic(package, tmp_path):
@@ -194,6 +228,8 @@ def test_renderer_refuses_a_draft_breaking_the_contract(package, tmp_path, old, 
      "'Jan' and 'West' repeat a row, so one point would hide the other"),
     (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,21,,25\nEast,5,4,6.5\n",
      "a bar's value, lower, or upper cell is blank; each interval needs all three"),
+    (5, "Region,Late,On time\nWest,-21,79\nEast,5,95\n",
+     "value -21 is below zero, which a Stacked bar cannot show as a part of a whole"),
 ])
 def test_renderer_refuses_data_it_cannot_draw(package, tmp_path, number, content, problem):
     (package / f"charts/chart-{number}.csv").write_text(content, encoding="utf-8")

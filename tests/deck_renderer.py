@@ -4,10 +4,12 @@ A test fixture, kept out of the distributed archive. It proves the deck contract
 package-format/deck-rules.md is complete enough to build a deck from without Microsoft 365: everything it
 places comes from the outline `awb_draft.parse_outline` derives and from the chart files. It follows the
 content rules (one slide per outline slide, headlines, bullets, and notes verbatim, every chart drawn from
-its file at the file's values, intervals as error bars, the source line with what the intervals mean and
-the caveat's reason, and alt text from the specification) and leaves styling, sections, and theme to the
-builders users run. It marks no value with the caveat's asterisk: **Caveat:** names that value only in
-words. Like any builder that cannot ask, it
+its file at the file's values, each bar, column, and line value axis spanning zero and every value and
+interval bound unless a line chart's **Axis:** says non-zero baseline, a Stacked bar's parts zero or more,
+intervals as error bars, the source line with the baseline's reason, what the
+intervals mean, and the caveat's reason, and alt text from the specification) and leaves styling, sections,
+and theme to the builders users run. It marks no value with the caveat's asterisk: **Caveat:** names that
+value only in words. Like any builder that cannot ask, it
 refuses a draft that `check-draft`'s outline and chart checks fail, naming each row.
 
     python3 tests/deck_renderer.py <draft directory> <output.pptx>
@@ -46,6 +48,7 @@ _FIXED_TIME = datetime(2000, 1, 1)
 _ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 _TITLE, _CONTENT = 0, 1  # the default template's layouts
 _CHART_BOX = (Inches(5.0), Inches(1.6), Inches(4.6), Inches(4.6))
+_NON_ZERO = re.compile(r"\bnon-?zero baseline\b", re.IGNORECASE)
 
 
 class ContractError(ValueError):
@@ -129,6 +132,12 @@ def _error_bars(chart, pairs, headers, rows, where):
     ser.find(qn("c:cat")).addprevious(bars)
 
 
+def non_zero_baseline(chart):
+    """Whether a Line specification's **Axis:** says non-zero baseline (or nonzero, in any case); any other
+    wording, and any other form, keeps zero on the value axis."""
+    return chart["form"] == "Line" and bool(_NON_ZERO.search(chart["fields"].get("Axis", "")))
+
+
 def _place_chart(slide, chart, draft_dir):
     """Draw a chart specification from its file; return the graphic frame."""
     headers, rows = read_chart(Path(draft_dir) / "charts" / f"chart-{chart['number']}.csv")
@@ -161,6 +170,15 @@ def _place_chart(slide, chart, draft_dir):
                 point.data_label.text_frame.text = row[label]
         return frame
     categories, series = category_data(chart, headers, rows)
+    plotted = [value for _, values in series for value in values if value is not None]
+    drawn = list(plotted)  # the series values alone, which the automatic scale always holds
+    if form == "Stacked bar" and min(plotted, default=0) < 0:
+        raise ContractError([{"chart": where, "problem": f"value {min(plotted):g} is below zero, which a Stacked bar "
+                                                         "cannot show as a part of a whole"}])
+    if form == "Bar with intervals":
+        column = {header: index for index, header in enumerate(headers)}
+        plotted += [number for role in ("lower", "upper") for row in rows
+                    if (number := _number(row[column[_roles(pairs, role)[0]]], where)) is not None]
     data = CategoryChartData()
     data.categories = categories
     for name, values in series:
@@ -168,9 +186,22 @@ def _place_chart(slide, chart, draft_dir):
     frame = slide.shapes.add_chart(CHART_TYPES[form], *_CHART_BOX, data)
     if form in ("Horizontal bar", "Bar with intervals", "Stacked bar"):
         frame.chart.category_axis.reverse_order = True  # the file's first row on top
-    # Values start at zero; a line chart leaves it to the axis only when **Axis:** asks for a non-zero baseline.
-    if form != "Line" or not re.search(r"non-?zero", chart["fields"].get("Axis", ""), re.IGNORECASE):
-        frame.chart.value_axis.minimum_scale = 0
+    # The value axis spans zero and every plotted value and interval bound, so a negative value stays in view.
+    # The automatic scale always holds the series values, and across both signs it holds zero too. It may leave
+    # out zero on the side all of them lie on, and an interval bound drawn as a custom error bar, so those are
+    # pinned: zero on a one-signed axis, and a bound that reaches past every value. Pinning a bound can move
+    # zero off a gridline, which costs less than a hidden observation. A line chart leaves the bounds to the
+    # axis when **Axis:** says non-zero baseline.
+    if plotted and not non_zero_baseline(chart):
+        lowest, highest = min(plotted), max(plotted)
+        if lowest >= 0:
+            frame.chart.value_axis.minimum_scale = 0
+        elif lowest < min(drawn, default=0):
+            frame.chart.value_axis.minimum_scale = lowest
+        if highest <= 0 and lowest < 0:
+            frame.chart.value_axis.maximum_scale = 0
+        elif highest > max(drawn, default=0):
+            frame.chart.value_axis.maximum_scale = highest
     if form == "Bar with intervals":
         _error_bars(frame.chart, pairs, headers, rows, where)
     frame.chart.has_legend = len(series) > 1
@@ -236,7 +267,9 @@ def render(draft_dir, output):
             frame = _place_chart(slide, chart, draft_dir)
             frame._element.xpath("./*[1]/p:cNvPr")[0].set("descr", chart["fields"].get("Alt text", ""))
             given = {name: text for name, text in chart["fields"].items() if text and text.lower() != "none"}
-            source = "; ".join(given[name] for name in ("Source", "Interval") if name in given)
+            # A non-zero baseline's reason is in **Axis:**, and deck-rules.md keeps it in the source line.
+            shown = ("Source", "Axis", "Interval") if non_zero_baseline(chart) else ("Source", "Interval")
+            source = "; ".join(given[name] for name in shown if name in given)
             lines = [(0, text) for text in (source, given.get("Caveat") and f"* {given['Caveat']}") if text]
             if lines:
                 source = slide.shapes.add_textbox(Inches(5.0), Inches(6.3), Inches(4.6), Inches(0.8))
