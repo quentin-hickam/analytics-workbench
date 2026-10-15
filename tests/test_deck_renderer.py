@@ -2,7 +2,7 @@
 # test_renderer_builds_every_slide_verbatim: the reference renderer builds the title slide and one slide per outline slide in order, with headlines, bullets and nested bullets, and notes verbatim, and leaves the draft untouched.
 # test_renderer_draws_every_form_from_its_file: each of the seven forms is drawn from its chart file at the file's values and order: bar, column, line, and stacked types with a series pivoted, intervals as custom error bars, each bar, column, and line value axis from zero, scatter points and fit, a table's cells; alt text and the source line (with the **Interval:** text) and caveat line come from the specification.
 # test_renderer_line_axis_follows_axis_field: a line chart's value axis includes zero unless **Axis:** says non-zero baseline, which then joins the source line; other wording, the template's "reason for another" included, keeps zero, and so does a column chart whose **Axis:** says non-zero baseline, leaving it out of the source line.
-# test_renderer_value_axis_spans_zero_and_every_value: a bar, column, or line axis pins zero as its minimum when every value and interval bound is zero or more, as its maximum when every one is zero or less, an upper bound above zero included, and leaves both bounds automatic across both signs, so mixed-sign and all-negative values stay visible with zero on a gridline.
+# test_renderer_value_axis_spans_zero_and_every_value: a bar, column, or line axis pins zero as its minimum when every value and interval bound is zero or more, and as its maximum when every one is zero or less and one is below zero; it pins an interval bound that reaches past every value, whichever side of zero it lies on; otherwise it leaves the bound automatic, so mixed-sign and all-negative values and every interval stay visible.
 # test_renderer_is_deterministic: two renders of one draft are byte-identical.
 # test_renderer_refuses_a_draft_breaking_the_contract: an outline or chart row stops the render, naming the rows, and writes nothing.
 # test_renderer_refuses_data_it_cannot_draw: a repeated category and series pair, a blank interval cell, or a negative part of a stacked bar stops the render with a ContractError instead of dropping a row or crashing.
@@ -189,9 +189,11 @@ def test_renderer_line_axis_follows_axis_field(package, tmp_path, number, axis, 
     (3, "Month,Region,Cases\nJan,West,0\nFeb,West,0\n", 0, None),
     (1, "Region,Closed late (%)\nWest,-2.5\nEast,-0.5\nNorth,-8\n", None, 0),
     (4, "Month,Cases,Late\nJan,-3,1\nFeb,2,-5\n", None, None),
-    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,2,-1,5\nEast,5,4,6.5\n", None, None),
-    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,-2,-3,-0.5\nEast,-5,-7,-4\n", None, 0),
-    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,-2,-3,1\nEast,-5,-7,-4\n", None, None),
+    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,2,-1,5\nEast,5,4,6.5\n", -1, 6.5),
+    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,2,1,3\nEast,5,4,4.5\n", 0, None),
+    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,-2,-3,-0.5\nEast,-5,-7,-4\n", -7, 0),
+    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,-2,-3,1\nEast,-5,-7,-4\n", -7, 1),
+    (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,-2,-3,-1\nEast,3,2,4\n", -3, 4),
 ])
 def test_renderer_value_axis_spans_zero_and_every_value(package, tmp_path, number, content, minimum, maximum):
     (package / f"charts/chart-{number}.csv").write_text(content, encoding="utf-8")
