@@ -20,6 +20,7 @@
 # test_cli_sql_prints_first_rows_and_total_and_writes_full_result: sql runs a project-relative query file or SQL text, prints a capped Markdown table and the total, and writes CSV or Parquet.
 # test_cli_sql_reports_failures_on_one_line: SQL errors, failing view files and non-query SQL print one stderr line and return 1; a bad --out extension is a usage error.
 # test_cli_sql_read_only_runs_select_and_refuses_every_write: --read-only prints SELECT results and refuses COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, PRAGMA, CALL, CREATE, and INSERT before any statement runs, and refuses --out, leaving the project unchanged; profile --read-only does the same.
+# test_profile_runs_with_a_landing_helper_older_than_read_only: profile without --read-only calls session(root) alone, so a landing helper without the read_only keyword still profiles.
 # test_read_only_session_checks_view_files_before_any_runs_and_locks_configuration: a read-only session refuses a view file holding anything but CREATE and SELECT (a writable or READ_ONLY ATTACH, ATTACH then DETACH, COPY) before any statement runs, creating and changing no file, while the default session still loads them; a dynamic PIVOT loads; the loaded session's configuration is locked and spills go to a private directory outside the project.
 # test_cli_land_copies_files_retains_and_writes_ledger_rows: land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
 # test_cli_land_skips_unusable_retention_location: unrecorded, none chosen, unreachable and non-filesystem locations skip retention and record this checkout only.
@@ -65,6 +66,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import types
 from datetime import datetime
 from pathlib import Path
 
@@ -541,6 +543,18 @@ def test_cli_sql_read_only_runs_select_and_refuses_every_write(tmp_path, capsys)
     assert validate.cli_profile(tmp_path, ["--read-only", "orders"]) == 0
     assert "rows: 5" in capsys.readouterr().out
     assert _files(tmp_path) == before
+
+
+def test_profile_runs_with_a_landing_helper_older_than_read_only(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    spec = importlib.util.spec_from_file_location("awb_validate_older_landing", ASSET.parent / "awb_validate.py")
+    validate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(validate)
+    older = types.SimpleNamespace(**{**vars(landing), "session": lambda root: landing.session(root)})
+    monkeypatch.setattr(validate, "_landing", lambda root: older)
+    assert validate.cli_profile(tmp_path, ["orders"]) == 0
+    assert "rows: 5" in capsys.readouterr().out
 
 
 def test_read_only_session_checks_view_files_before_any_runs_and_locks_configuration(tmp_path):

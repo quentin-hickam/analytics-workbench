@@ -211,7 +211,9 @@ def cli_profile(root: Path, argv: list[str]) -> int:
     try:
         landing = _landing(root)
         out = landing._under(root, args.out) if args.out else None
-        with landing.session(root, read_only=args.read_only) as connection:
+        # A landing helper older than read_only still profiles without --read-only.
+        session = landing.session(root, read_only=True) if args.read_only else landing.session(root)
+        with session as connection:
             if _IDENTIFIER.fullmatch(args.source) and connection.execute(
                     "SELECT 1 FROM information_schema.tables WHERE lower(table_name) = lower(?)",
                     [args.source]).fetchall():
