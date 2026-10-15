@@ -6,7 +6,7 @@
 
 Start a fresh subagent, so the agent that wrote the draft does not review it. Give it the investigation, the package, the absolute project root, and the absolute path of this file, and tell it to follow **Brief**. Scope its tools by host:
 
-- In VS Code Copilot, use `runSubagent` under the installed user-level `awb-package-reviewer` custom agent, whose definition ships at `../assets/awb-package-reviewer.agent.md`. It has only file read/search and `awb/read`; run the check with `command: "review-rules"`, `project`, `investigation`, and `package`. If the reviewer agent is unavailable, report the failure and stop; name the remedy: install the reviewer agent per the README and choose the Local session target. If its `awb/read` call is unavailable or fails, the reviewer reports `command failed` with the diagnostic and the remedy: register the `awb` server, or choose the Local session target. Never substitute an unrestricted subagent or `awb/*`.
+- In VS Code Copilot, use `runSubagent` under the installed user-level `awb-package-reviewer` custom agent, whose definition ships at `../assets/awb-package-reviewer.agent.md`. It has only file read/search and `awb/read`; run the check with `command: "review-rules"`, `project`, `investigation`, and `package`. If the reviewer agent is unavailable, stop and tell the user to install it per the README and choose the Local session target; a failed `awb/read` call is a command problem the reviewer reports. Never substitute an unrestricted subagent or `awb/*`.
 - In Claude Code, use a subagent type without edit tools, such as the built-in `Plan`, or a custom one whose `tools` are `Read`, `Grep`, `Glob`, and `Bash`; a skill's `allowed-tools` only pre-approves tools and restricts nothing.
 - In Codex, whose subagents inherit the session's sandbox and tools, start a fresh subagent all the same; the limit to read tools is then the brief's instruction alone.
 - Only in a host with no subagents, follow **Brief** yourself, changing no file and running no command that writes until the report is complete, then act on it as **After the review** says. In `awb-package` that is a self-review by the agent that wrote the draft.
@@ -23,7 +23,7 @@ You review the package draft at `deliveries/<investigation>/<package>/draft/`. R
 4. Report exactly this, and nothing else, since the caller must account for every rule verdict and diagnostic before summarizing them in chat:
    - one line per rule in the command's order: `<ID> pass`, `<ID> retired`, or `<ID> violation <severity> <file>:<line> "<short quote>"`, with the rule's `error` or `warning`, one line per violation;
    - one line per step 3 problem: `narrative <file>:<line> "<short quote>" <what is wrong>`;
-   - the command's `problems` and `errors` verbatim, or `command failed` with its output when it could not complete (for an unavailable or failed `awb/read` call, include the remedy from **Launch**); and
+   - the command's `problems` and `errors` verbatim, or `command failed` with its output when it did not run; and
    - a last line, `review: clean` when there is no violation, no narrative problem, and the command exited 0, or otherwise `review: <v> violations (<e> error), <n> narrative problems, <c> command problems`, where command problems count the `problems` and `errors` entries, or 1 when the command failed.
 
 ## After the review

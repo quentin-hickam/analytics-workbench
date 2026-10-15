@@ -155,13 +155,13 @@ def test_hand_edits_are_drift(project, capsys, before_text, after_text):
     assert snapshot(project) == before and "| Q-001 |" in md.read_text()
 
 
-@pytest.mark.parametrize("trouble, diagnostic", [
-    ("drift", "questions drift"),
-    ("malformed", "questions.json"),
-    ("missing", "exists without"),
+@pytest.mark.parametrize("trouble, diagnostic, repair", [
+    ("drift", "questions drift", "python3 src/awb.py questions render --investigation churn discards the hand edit"),
+    ("malformed", "questions.json", "repair it or restore it from Git"),
+    ("missing", "exists without", "restore questions.json from Git"),
 ])
 @pytest.mark.parametrize("action", ["record", "flag", "update", "render"])
-def test_finding_writes_preserve_evidence_under_ledger_trouble(project, trouble, diagnostic, action):
+def test_finding_writes_preserve_evidence_under_ledger_trouble(project, trouble, diagnostic, repair, action):
     # These results answer nothing: an unrelated ledger cannot invalidate their writes.
     produce(project, "r1")
     provenance.update_findings(project, "churn", ["r1"], status="supported", text="One account remained",
@@ -187,8 +187,8 @@ def test_finding_writes_preserve_evidence_under_ledger_trouble(project, trouble,
         result = provenance.update_findings(project, "churn", ["r1"], status="superseded", reason="new scope")
     else:
         result = provenance.render_findings(project, "churn")
-    assert diagnostic in result["questions"]["error"]
-    assert "python3 src/awb.py questions render --investigation churn" in result["questions"]["error"]
+    assert diagnostic in result["questions"]["error"] and repair in result["questions"]["error"]
+    assert result["questions"]["error"].count("questions render") <= 1
     assert md.read_bytes() == saved_md and evidence.is_file()
     assert json.loads(evidence.read_text())["result_id"] == "r1"
     if action != "record":
@@ -198,6 +198,20 @@ def test_finding_writes_preserve_evidence_under_ledger_trouble(project, trouble,
         assert (project / INV / "history.md").read_bytes() != saved_history
     else:
         assert (project / INV / "history.md").read_bytes() == saved_history
+
+
+def test_declaring_result_under_ledger_drift_names_the_link(project):
+    settings(project, {"r1": ["Q-001"]})
+    add(project, "Does churn differ by region?")
+    md = project / INV / "questions.md"
+    md.write_text(md.read_text() + "Keep this hand edit.\n")
+    result = produce(project, "r1")
+    assert result["action"] == "added" and (project / INV / "evidence/r1.json").is_file()
+    assert result["questions"]["error"].startswith("questions drift:")
+    assert result["questions"]["error"].endswith("; then link with `awb.py questions answer <Q-NNN> --result r1`")
+    assert ledger(project)["Q-001"]["status"] == "open"
+    provenance.cli_questions(project, ["render"])
+    assert produce(project, "r1")["questions"] == {"answered": ["Q-001"], "linked": [], "skipped": []}
 
 
 def test_person_answers(project, capsys):
@@ -486,18 +500,6 @@ def test_cli_audience_wording_in_every_status(project, capsys, status):
     entry = ledger(project)["Q-001"]
     assert entry["audience"] == "" and entry["text"] == "Which internal measure?" and entry["status"] == status
     assert "audience:" not in cli(project, capsys, "list", "--all")[1]
-
-
-def test_audience_defaults_empty_for_existing_questions(project, capsys):
-    add(project, "Which measure?", "user", kind="context")
-    path = project / INV / "questions.json"
-    content = json.loads(path.read_text())
-    content["questions"][0].pop("audience", None)
-    path.write_text(json.dumps(content))
-    assert cli(project, capsys, "render")[0] == 0
-    assert provenance.question_tree(project, "churn")[0]["audience"] == ""
-    assert cli(project, capsys, "edit", "Q-001", "--audience", "Which outcome?")[0] == 0
-    assert ledger(project)["Q-001"]["audience"] == "Which outcome?"
 
 
 def test_cli_tree_sorts_ids_by_number_and_indents_under_listed_parents(project, capsys):

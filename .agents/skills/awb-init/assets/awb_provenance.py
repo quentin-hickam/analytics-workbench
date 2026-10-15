@@ -1188,8 +1188,9 @@ def _write_findings(root, investigation, mutate, *, check=False, render=False, r
         if ledger.entries:
             question_view = [_Text(ledger.md_path, ledger.md_label, ledger.rendered(_status_map(findings.entries)))]
     except StateError as error:
-        # Findings and their evidence remain writable even when the question view cannot be refreshed.
-        result["questions"] = {"error": f"{error}; python3 src/awb.py questions render --investigation {investigation}"}
+        # Findings and their evidence remain writable even when the question view cannot be refreshed;
+        # each ledger error names its own repair.
+        result["questions"] = {"error": str(error)}
     if check or not findings.changed:
         return result
     state = findings.state
@@ -1385,15 +1386,17 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
         if base / "findings.json" not in replaced:
             evidence_path.unlink(missing_ok=True)
         raise
-    # A ledger problem never blocks a finding write; report it and leave questions.md untouched.
-    if "questions" in result and "error" in result["questions"]:
-        return result
+    # A ledger problem never blocks a finding write: the finding stays recorded, questions.md is left
+    # as it is, and a result declaring answers is linked once the ledger is repaired.
+    link = f"; then link with `awb.py questions answer <Q-NNN> --result {result_id}`"
     try:
         if _declared_answers(root, investigation, result_id)[1]:
-            result["questions"] = link_answers(root, investigation, result_id, today=today)
+            if "error" in result.get("questions", {}):
+                result["questions"]["error"] += link
+            else:
+                result["questions"] = link_answers(root, investigation, result_id, today=today)
     except StateError as error:
-        result["questions"] = {"error": f"{error}; link with `awb.py questions answer <Q-NNN> "
-                                        f"--result {result_id}`"}
+        result["questions"] = {"error": f"{error}{link}"}
     return result
 
 
@@ -1621,8 +1624,6 @@ class _Ledger:
                 raise ValueError(f"expected {_LEDGER_SCHEMA} questions list")
             self.entries, seen = content["questions"], set()
             for entry in self.entries:
-                if isinstance(entry, dict):
-                    entry.setdefault("audience", "")  # Earlier ledgers have no audience wording.
                 problem = _question_problem(entry)
                 if problem or entry["id"] in seen:
                     raise ValueError(f"invalid question {entry.get('id') if isinstance(entry, dict) else entry!r}: "
@@ -1631,7 +1632,7 @@ class _Ledger:
             for entry in self.entries:
                 self.check_parent(entry["id"], entry["parent"])
         except (OSError, ValueError, KeyError, TypeError) as error:
-            raise StateError(f"{self.label}: {error}") from error
+            raise StateError(f"{self.label}: {error}; repair it or restore it from Git") from error
 
     def get(self, question_id):
         entry = next((e for e in self.entries if e["id"] == question_id), None)

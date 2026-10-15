@@ -137,8 +137,8 @@ def test_repository_has_no_retired_skill_outside_changelog():
 
 def question_add_priorities(text):
     """Accepted input: LF text with literal `python3 src/awb.py questions add `
-    examples, either on an indented command line or inside single-backtick inline
-    code. Arguments occupy that line/span, use POSIX shlex quoting, and contain
+    examples, either as a whole line (leading whitespace allowed) or inside
+    single-backtick inline code. Arguments occupy that line/span, use POSIX shlex quoting, and contain
     --priority followed by must, should, could, or the placeholder <priority>.
     Each whole-word 'questions add' occurrence must belong to such an example;
     refuse other spellings/contexts, missing/invalid priorities, broken quotes,

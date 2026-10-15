@@ -1926,7 +1926,7 @@ def _longest_ordered_run(ranks):
     return kept
 
 
-def open_question_problems(root, investigation, draft, provenance, *, names=(), roots=()):
+def open_question_problems(root, investigation, draft, provenance, *, names, roots):
     """Accepted input: exactly one ## Open questions slide iff required questions exist,
     immediately after ## Limitations and open caveats and before ## What changed since the
     last version when present. Its body is top-level Markdown list items (bullet or numbered,
@@ -1940,7 +1940,8 @@ def open_question_problems(root, investigation, draft, provenance, *, names=(), 
     structural forms. Known limits: this compares rendered text, not paraphrases or audience
     suitability. Question IDs and added owner commentary do not match; audience wording (or
     text when unset) must be single-line inline text. When unset text fails the names check,
-    a row directs the caller to questions edit --audience. Block markup/comments in that wording
+    a row directs the caller to questions edit --audience; that scan skips any part of the text the
+    outline reader refuses, which the slide's own names check still covers. Block markup/comments in that wording
     are not an alternate matching form. Notes remain presenter context and do not satisfy a question.
     """
     questions = [q for q in provenance.question_tree(root, investigation) if q["priority"] == "must"

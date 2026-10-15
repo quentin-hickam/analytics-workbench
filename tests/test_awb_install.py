@@ -638,12 +638,13 @@ def instruction_rule():
     return rules[0]
 
 
+# (skill, script): [(what the rule routes, tool, command)]
 SCRIPT_ROUTES = {
-    ("awb-status", "collect_status.py"): [("read", "status")],
-    ("awb-explore", "eda_scan.py"): [("data", "eda-scan"), ("read", "eda-show")],
-    ("awb-clean", "scan_dataset.py"): [("data", "clean-scan")],
-    ("awb-clean", "record_cleaning.py"): [("records", "clean-record")],
-    ("awb-init", "install_helpers.py"): [("setup", None)],
+    ("awb-status", "collect_status.py"): [("collect_status.py", "read", "status")],
+    ("awb-explore", "eda_scan.py"): [("eda_scan.py", "data", "eda-scan"), ("--show", "read", "eda-show")],
+    ("awb-clean", "scan_dataset.py"): [("scan_dataset.py", "data", "clean-scan")],
+    ("awb-clean", "record_cleaning.py"): [("record_cleaning.py", "records", "clean-record")],
+    ("awb-init", "install_helpers.py"): [("install_helpers.py", "setup", None)],
 }
 
 
@@ -651,7 +652,7 @@ def test_instruction_and_reviewer_tools_exist_in_server_tools_list(server_tools,
     tools = server_tools
     reserved = {"awb", "project", "awb.py", "investigations/<name>/run.py", "--show"}
     reserved.update(script for _, script in SCRIPT_ROUTES)
-    reserved.update(command for routes in SCRIPT_ROUTES.values() for _, command in routes if command)
+    reserved.update(command for routes in SCRIPT_ROUTES.values() for _, _, command in routes if command)
     named = set(code_spans(instruction_rule)) - reserved
     assert named == tools.keys()
     assert "`awb.py` commands" in instruction_rule
@@ -662,12 +663,10 @@ def test_instruction_and_reviewer_tools_exist_in_server_tools_list(server_tools,
         description = tool["inputSchema"]["properties"]["project"]["description"]
         assert "Pass it on every call" in description
         assert "otherwise omit" not in description
-    for (_, script), routes in SCRIPT_ROUTES.items():
-        for tool, command in routes:
+    for routes in SCRIPT_ROUTES.values():
+        for subject, tool, command in routes:
             route = f"`{tool}`" + (f" command `{command}`" if command else "")
-            assert f"`{script}` through {route}" in instruction_rule or (
-                script == "eda_scan.py" and command == "eda-show"
-                and f"`--show` through {route}" in instruction_rule)
+            assert f"`{subject}` through {route}" in instruction_rule
             if command:
                 assert command in tools[tool]["inputSchema"]["properties"]["command"]["enum"]
 
