@@ -220,3 +220,35 @@ def test_headline_checkpoint_names_both_modes_and_never_waits_unconditionally():
                  if path.is_file() and path.suffix in ('.md', '.py')
                  for phrase in retired if phrase in ' '.join(path.read_text(encoding='utf-8').split())]
     assert offenders == []
+
+
+def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
+    # The review holds a checked or reconciliation sentence to a recorded result or check, pairing with the
+    # warning state finding gives; a re-review after repairs may be scoped, but never the last one before
+    # the request's final check-draft, and release always runs the full review.
+    def read(path):
+        return ' '.join((ROOT / '.agents/skills' / path).read_text(encoding='utf-8').split())
+
+    review = read('awb-package/references/review.md')
+    package = read('awb-package/SKILL.md')
+    release = read('awb-release/SKILL.md')
+    reviewer = read('awb-package/assets/awb-package-reviewer.agent.md')
+    provenance = read('awb-init/references/provenance.md')
+
+    assert ('asserts that something was checked or verified, reconciles, sums or adds up to, or matches cites the '
+            'recorded result or check that establishes it') in review
+    assert 'A sentence without one is a narrative problem' in review
+    assert '`awb.py state finding`' in review and 'pair' in review
+    assert 'asserts a reconciliation or a completed check' in review and 'asserts a reconciliation or a completed' \
+        in provenance
+    assert 'Report every violation and narrative problem in this one pass, quoting each' in review
+    assert 'settle everything it reports, as above, before the review runs again' in review
+    assert ('Within one `awb-package` request, the review run again after repairs may be a scoped re-review: '
+            'give the reviewer the prior report and a diff') in review
+    assert ('a full review is still required before the request\'s final `check-draft`, and `awb-release` always '
+            'runs the full review') in review
+    assert '`review (scoped):`' in review
+    assert '`slide` rule' in review and '`document` rule' in review
+    assert 'scoped re-review' in package and 'the last review before the final `check-draft` is a full one' in package
+    assert 'Run the full read-only review' in release and 'never a scoped re-review' in release
+    assert 'one pass' in reviewer and 'scoped' in reviewer

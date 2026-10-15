@@ -17,8 +17,13 @@
 # test_only_review_rules_turns_off_bytecode_writes: the dispatcher sets sys.dont_write_bytecode for review-rules alone, so other commands keep the bytecode cache of the packages they import.
 # test_rule_file_that_is_not_a_file_is_an_error: a directory or a dangling symbolic link at the rule file's path is an error, not no rules; check exits 1 and add refuses without a traceback.
 # test_add_to_an_empty_rule_file_writes_the_header: add to an empty rule file writes the header before the first rule.
-# test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes, blank, or holding bytes that are not UTF-8, an unknown severity, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
+# test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes, blank, or holding bytes that are not UTF-8, an unknown severity or scope, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
 # test_pattern_round_trips_through_backticks: a pattern holding backticks, or the word none, is written in backticks and read back as the same expression.
+# test_slide_scope_lists_one_entry_per_slide: a Scope: slide rule with three matching bullets on one slide lists one entry with its heading, heading line, and three lines; methodology.md and the note give one entry per #, ##, or ### section.
+# test_slide_scope_reads_sections_as_they_render: a # line in fenced code opens no section, text before the first heading is an entry with no heading, and a line holding another break keeps grep -n's numbering.
+# test_document_scope_lists_one_entry_per_file: add --scope document writes the Scope field after Pattern; check lists one entry per file, at most 20 lines with more_lines beyond; --scope line is written, an absent scope is not, and both list lines as before with no scope key.
+# test_scope_field_accepted_and_refused_forms: Scope line, slide, or document is accepted; any other value, a blank one included, is a problem, the rule is unchecked, and add refuses until it is repaired.
+# test_repeated_scope_line_is_reported: a second Scope line in a rule is a problem at its line.
 # test_package_and_release_invoke_the_read_only_review: both skills link the review brief and run it before their final command; the brief has a fresh subagent review in every host with subagents, Codex included, and the writer review only where there are none; it limits the reviewer to reads, shell reads included, and the read-only command, running no command that writes, asks one line per rule, ends with a summary line counting violations, narrative problems, and command problems, any of which blocks, defines when a review is stale, and with AGENTS.md says which corrections become rules.
 
 import importlib.util
@@ -71,9 +76,10 @@ def run(project, capsys, *argv):
 
 
 def add(project, capsys, area="periods", severity="error", rule="Compare only complete months.",
-        fix="Drop the partial month.", pattern=None):
+        fix="Drop the partial month.", pattern=None, scope=None):
     argv = ["review-rules", "add", "--area", area, "--severity", severity, "--rule", rule, "--fix", fix]
-    return run(project, capsys, *argv, *(["--pattern", pattern] if pattern is not None else []))
+    return run(project, capsys, *argv, *(["--pattern", pattern] if pattern is not None else []),
+               *(["--scope", scope] if scope is not None else []))
 
 
 def snapshot(root, *, caches=False):
@@ -235,12 +241,12 @@ def test_wrapped_field_line_is_reported(project, capsys):
                     "  partial months.\n- Pattern: none\n- Fix: Drop it.\n")
     code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
     assert code == 1 and out["problems"] == [
-        {"rule": "R-periods-001", "line": 7, "problem": "line is not a - Severity, Rule, Pattern, Fix, or Added field"}]
+        {"rule": "R-periods-001", "line": 7, "problem": "line is not a - Severity, Rule, Pattern, Scope, Fix, or Added field"}]
 
 
 @pytest.mark.parametrize("tail, expected", [
     ("- Fix: Replace\n#hashtags with plain words.\n",
-     [{"rule": "R-wording-001", "line": 8, "problem": "line is not a - Severity, Rule, Pattern, Fix, or Added field"}]),
+     [{"rule": "R-wording-001", "line": 8, "problem": "line is not a - Severity, Rule, Pattern, Scope, Fix, or Added field"}]),
     ("- Fix: Count\n# of customers, not users.\n",
      [{"line": 8, "problem": "heading after the first rule is not a ## R-<area>-NNN rule heading"}]),
     ("- Fix: Rename.\n\n## Notes\n\nSee the style guide.\n",
@@ -389,6 +395,7 @@ def test_add_to_an_empty_rule_file_writes_the_header(project, capsys):
     {"area": "Periods"}, {"area": "periods_x"}, {"area": "-periods"}, {"area": "periods-001"}, {"area": "2024"},
     {"rule": "two\nlines"}, {"rule": "Never compare\u2028partial months."}, {"fix": "a\x85b"},
     {"pattern": "a\vb"}, {"fix": "  "}, {"severity": "retired"}, {"pattern": "(unclosed"}, {"pattern": ""},
+    {"scope": "page"}, {"scope": "Slide"}, {"scope": ""},
     {"pattern": "x{4294967296}"}, {"rule": "Never compare\udc85partial months."}, {"fix": "a\udcffb"},
     {"pattern": "a\udc85"}])  # argv holds bytes that are not UTF-8 as lone surrogates
 def test_add_rejects_unusable_arguments(project, capsys, change):
@@ -405,6 +412,110 @@ def test_pattern_round_trips_through_backticks(project, capsys):
     rows = run(project, capsys, "review-rules", "check", "inv", "pkg")[1]["rules"]
     assert [(r["status"], [m["line"] for m in r.get("matches", [])]) for r in rows] == [
         ("matched", [1]), ("matched", [2])]
+
+
+DECK = ("# Orders\n\nOctober to the 12th.\n\n## Answer\n\n- Sales rose in the partial month.\n\n## Findings\n\n"
+        "### Sales rose 4% in October\n\n- The partial month rose.\n- Returns fell in the partial month.\n"
+        "- The partial month is short.\n\n### Returns fell\n\n- Returns fell.\n")
+
+
+def test_slide_scope_lists_one_entry_per_slide(project, capsys):
+    # One wording rule gives one verdict per slide: three bullets on one slide are one entry with three lines.
+    draft = project / "deliveries/inv/pkg/draft"
+    (draft / "findings.md").write_text(DECK)
+    (draft / "methodology-note.md").write_text("# How we measured\n\nThe partial month ends on the 12th.\n\n"
+                                               "## Method\n\nNo partial month is compared.\n")
+    code, out = add(project, capsys, pattern="partial month", scope="slide")
+    assert code == 0 and out["added"] == "R-periods-001"
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 0 and out["problems"] == []
+    assert out["rules"] == [{"id": "R-periods-001", "severity": "error", "status": "matched", "scope": "slide",
+                             "matches": [
+        {"file": "findings.md", "heading": "Answer", "line": 5, "lines": [
+            {"line": 7, "text": "- Sales rose in the partial month."}]},
+        {"file": "findings.md", "heading": "Sales rose 4% in October", "line": 11, "lines": [
+            {"line": 13, "text": "- The partial month rose."},
+            {"line": 14, "text": "- Returns fell in the partial month."},
+            {"line": 15, "text": "- The partial month is short."}]},
+        {"file": "methodology.md", "heading": "Sales rose 4% in the partial month of October", "line": 3, "lines": [
+            {"line": 3, "text": "### Sales rose 4% in the partial month of October"}]},
+        {"file": "methodology-note.md", "heading": "How we measured", "line": 1, "lines": [
+            {"line": 3, "text": "The partial month ends on the 12th."}]},
+        {"file": "methodology-note.md", "heading": "Method", "line": 5, "lines": [
+            {"line": 7, "text": "No partial month is compared."}]}]}]
+
+
+def test_slide_scope_reads_sections_as_they_render(project, capsys):
+    # A # line in fenced code opens no section; text before the first heading is its own entry with no heading;
+    # a line holding another break is not split, so every line is numbered as grep -n numbers it.
+    draft = project / "deliveries/inv/pkg/draft"
+    (draft / "findings.md").write_text("partial month first\n\n# Orders\n\n```\n# partial month in code\n```\n\n"
+                                       "Intro\u2028pasted\n\n## Answer\n\n- partial month again\n")
+    add(project, capsys, pattern="partial month", scope="slide")
+    matches = run(project, capsys, "review-rules", "check", "inv", "pkg")[1]["rules"][0]["matches"]
+    assert [(m["file"], m["heading"], m["line"], [line["line"] for line in m["lines"]]) for m in matches] == [
+        ("findings.md", None, 1, [1]), ("findings.md", "Orders", 3, [6]), ("findings.md", "Answer", 11, [13]),
+        ("methodology.md", "Sales rose 4% in the partial month of October", 3, [3])]
+
+
+def test_document_scope_lists_one_entry_per_file(project, capsys):
+    code, out = add(project, capsys, pattern="partial month", scope="document")
+    assert code == 0 and "- Pattern: `partial month`\n- Scope: document\n- Fix: " in (project / RULES).read_text()
+    (project / "deliveries/inv/pkg/draft/findings.md").write_text(DECK)
+    row = run(project, capsys, "review-rules", "check", "inv", "pkg")[1]["rules"][0]
+    assert row["scope"] == "document" and row["status"] == "matched"
+    assert [(m["file"], [line["line"] for line in m["lines"]]) for m in row["matches"]] == [
+        ("findings.md", [7, 13, 14, 15]), ("methodology.md", [3])]
+    assert "heading" not in row["matches"][0]
+    # A document entry lists at most 20 lines and counts the rest.
+    (project / "deliveries/inv/pkg/draft/findings.md").write_text("".join(f"partial month {n}\n" for n in range(25)))
+    entry = run(project, capsys, "review-rules", "check", "inv", "pkg")[1]["rules"][0]["matches"][0]
+    assert len(entry["lines"]) == 20 and entry["more_lines"] == 5
+    # Line scope, written or left out, lists lines as before, and a check row names no scope.
+    add(project, capsys, pattern="partial month 3", scope="line")
+    add(project, capsys, pattern="partial month 4")
+    text = (project / RULES).read_text()
+    assert "- Pattern: `partial month 3`\n- Scope: line\n" in text and "`partial month 4`\n- Fix" in text
+    rows = run(project, capsys, "review-rules", "check", "inv", "pkg")[1]["rules"][1:]
+    assert [(r.get("scope"), [m["line"] for m in r["matches"]]) for r in rows] == [(None, [4]), (None, [5])]
+
+
+@pytest.mark.parametrize("value, problem", [
+    ("line", None), ("slide", None), ("document", None), ("slide  ", None),
+    ("Slide", "unknown scope 'Slide'; use line, slide, or document"),
+    ("slides", "unknown scope 'slides'; use line, slide, or document"),
+    ("per slide", "unknown scope 'per slide'; use line, slide, or document"),
+    ("`slide`", "unknown scope '`slide`'; use line, slide, or document"),
+    ("none", "unknown scope 'none'; use line, slide, or document"),
+    ("", "unknown scope ''; use line, slide, or document")])
+def test_scope_field_accepted_and_refused_forms(project, capsys, value, problem):
+    # Scope is optional; when present it is exactly line, slide, or document. Anything else is a problem:
+    # check exits 1 with the rule unchecked, and add refuses until it is repaired, as for other fields.
+    path = project / RULES
+    path.parent.mkdir(parents=True)
+    path.write_text("# Review rules\n\n## R-periods-001\n\n- Severity: error\n- Rule: r\n- Pattern: `partial`\n"
+                    f"- Scope: {value}\n- Fix: f\n")
+    before = path.read_text()
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    if problem is None:
+        assert code == 0 and out["problems"] == [] and out["rules"][0]["status"] == "matched"
+        assert add(project, capsys)[1]["added"] == "R-periods-002"
+        return
+    assert code == 1 and out["problems"] == [{"rule": "R-periods-001", "problem": problem}]
+    assert out["rules"] == [{"id": "R-periods-001", "severity": "error", "status": "unchecked"}]
+    code, out = add(project, capsys)
+    assert code == 1 and out["added"] is None and path.read_text() == before
+    path.write_text(before.replace(f"- Scope: {value}\n", "- Scope: slide\n"))
+    assert add(project, capsys)[1]["added"] == "R-periods-002"
+
+
+def test_repeated_scope_line_is_reported(project, capsys):
+    path = project / RULES
+    path.parent.mkdir(parents=True)
+    path.write_text("# Review rules\n\n## R-periods-001\n\n- Severity: error\n- Rule: r\n- Pattern: none\n"
+                    "- Scope: slide\n- Scope: line\n- Fix: f\n")
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 1 and out["problems"] == [{"rule": "R-periods-001", "line": 9, "problem": "repeated Scope line"}]
 
 
 def test_package_and_release_invoke_the_read_only_review():
