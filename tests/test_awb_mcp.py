@@ -8,6 +8,8 @@
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
 # test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, read shows sql, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
 # test_read_sql_refuses_writes: read sql and profile refuse COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, CREATE, a SELECT calling enable_profiling with save_location or enable_logging with file storage, and a query() whose SQL differs between the plan check and the run, and write no file; read refuses arguments outside its command and help topics outside the helpers.
+# test_read_runs_the_histogram_aggregate_and_refuses_the_histogram_macro: read sql and profile run the histogram() aggregate, directly and from a view file, and refuse FROM histogram(...), the table macro that calls query_table, writing nothing.
+# test_read_queries_a_landed_excel_file_through_a_view: with the excel extension installed, read sql and profile query a landed .xlsx through a view and write nothing; skipped where the extension cannot be loaded.
 # test_write_tools_refuse_bad_arguments: unknown commands, non-string args, unknown keys, and a run of an absent investigation are error results naming the problem, and nothing runs.
 # test_project_root_resolution: the project argument wins over roots; one root is used; several roots without an argument name each; without roots the working directory is used; each candidate needs src/awb.py; a relative project is refused.
 # test_no_workbench: a read in a folder without src/awb.py, by argument, root, or working directory, is an error result pointing at awb-init; setup alone accepts it.
@@ -369,6 +371,56 @@ def test_read_sql_refuses_writes(workbench, connect):
         for command in ("sql", "profile"):
             text, error = client.call("read", command=command, query=query)
             assert error and "read-only: refused" in text, (command, query)
+    assert snapshot(workbench) == before
+
+
+@needs_duckdb
+def test_read_runs_the_histogram_aggregate_and_refuses_the_histogram_macro(workbench, connect):
+    client = connect(cwd=workbench)
+    (workbench / "foundation/views/02_spread.sql").write_text(
+        "CREATE VIEW spread AS SELECT histogram(region) AS h FROM orders;\n")
+    before = snapshot(workbench)
+    text, error = client.call("read", command="sql", query="SELECT histogram(region) AS h FROM orders")
+    assert not error and "{'east': 1, 'west': 2}" in text, text
+    text, error = client.call("read", command="sql", query="SELECT h FROM spread")
+    assert not error and "{'east': 1, 'west': 2}" in text, text
+    text, error = client.call("read", command="profile", query="SELECT histogram(id) AS h FROM orders")
+    assert not error and text.startswith("rows: 1"), text
+    for command in ("sql", "profile"):
+        text, error = client.call("read", command=command, query="FROM histogram(orders, region)")
+        assert error and "read-only: refused histogram()" in text, (command, text)
+    assert snapshot(workbench) == before
+
+
+def excel_loads():
+    """Whether DuckDB's excel extension is installed here, so a session can load it without installing."""
+    import duckdb
+    try:
+        with duckdb.connect(config={"autoinstall_known_extensions": False}) as connection:
+            connection.execute("LOAD excel")
+        return True
+    except duckdb.Error:
+        return False
+
+
+@needs_duckdb
+def test_read_queries_a_landed_excel_file_through_a_view(workbench, connect):
+    if not excel_loads():
+        pytest.skip("needs DuckDB's excel extension installed")
+    import duckdb
+    book = workbench / "data/raw/books/a1/book.xlsx"
+    book.parent.mkdir(parents=True)
+    with duckdb.connect() as connection:
+        connection.execute("LOAD excel")  # COPY's xlsx format does not load it on its own
+        connection.execute(f"COPY (SELECT 'north' AS region, 4 AS n) TO '{book}' (FORMAT xlsx, HEADER true)")
+    (workbench / "foundation/views/02_book.sql").write_text(
+        "CREATE VIEW book AS FROM read_xlsx('data/raw/books/a1/book.xlsx');\n")
+    client = connect(cwd=workbench)
+    before = snapshot(workbench)
+    text, error = client.call("read", command="sql", query="SELECT region, n FROM book")
+    assert not error and "| north | 4" in text, text
+    text, error = client.call("read", command="profile", query="book")
+    assert not error and text.startswith("rows: 1"), text
     assert snapshot(workbench) == before
 
 
