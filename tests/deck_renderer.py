@@ -185,11 +185,15 @@ def _place_chart(slide, chart, draft_dir):
     frame = slide.shapes.add_chart(CHART_TYPES[form], *_CHART_BOX, data)
     if form in ("Horizontal bar", "Bar with intervals", "Stacked bar"):
         frame.chart.category_axis.reverse_order = True  # the file's first row on top
-    # The value axis spans zero and every plotted value and interval bound, so a negative value stays in view;
-    # a line chart leaves the bounds to the axis when **Axis:** says non-zero baseline.
+    # The value axis spans zero and every plotted value and interval bound, so a negative value stays in view.
+    # Zero is pinned only on the side all of them lie on, where the automatic scale could leave it out; across
+    # both signs the automatic scale holds every value and puts zero on a gridline, which a minimum pinned at
+    # the lowest value would not. A line chart leaves the bounds to the axis when **Axis:** says non-zero
+    # baseline.
     if not non_zero_baseline(chart):
-        frame.chart.value_axis.minimum_scale = min([0, *plotted])
-        if max(plotted, default=0) < 0:
+        if min(plotted, default=0) >= 0:
+            frame.chart.value_axis.minimum_scale = 0
+        elif max(plotted) <= 0:
             frame.chart.value_axis.maximum_scale = 0
     if form == "Bar with intervals":
         _error_bars(frame.chart, pairs, headers, rows, where)

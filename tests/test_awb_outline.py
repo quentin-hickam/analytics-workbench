@@ -6,7 +6,7 @@
 # test_chart_data_reads_roles: role: header pairs in order, case-insensitive roles, headers kept whole, colons in a header kept.
 # test_check_charts_every_form_passes: a specification in each of the seven forms, its Data line naming that form's roles, and a file with those columns passes.
 # test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, a column the file lacks, and a file column no role names give one row each; an interval role on a form without intervals says only a Bar with intervals draws them, and an unnamed column there says so if it holds interval bounds.
-# test_chart_fields_read_past_a_nested_item: an item nested under a field is kept out of the fields and the bullets and reported, and the fields after it still count; a blank line before the nested item changes none of this; a later paragraph in a field is reported; a field-named item back at a shallower depth is a bullet.
+# test_chart_fields_read_past_a_nested_item: an item nested under a field is kept out of the fields and the bullets and reported, and the fields after it still count; a blank line before the nested item changes none of this; a later paragraph in a field is reported, after a nested item too, and the fields after it still count; a paragraph at a nested specification's own depth is outside the fields; a field-named item back at a shallower depth is a bullet.
 # test_check_draft_help_lists_every_chart_row: the check-draft --help epilog names the unnamed-column and field-list chart rows.
 
 import importlib.util
@@ -353,6 +353,23 @@ def test_chart_fields_read_past_a_nested_item(tmp_path):
     assert loose["charts"][0]["fields"] == {"Data": "category: M; value: C", "Source": "s", "Alt text": "a"}
     assert loose["charts"][0]["inside"] == [{"line": 13, "field": "Data", "kind": "item"}]
     assert loose["slides"][0]["bullets"] == [{"line": 8, "text": "West.", "sub": []}]
+    # A paragraph back at the field's depth after a nested item renders inside the field too, so it is reported
+    # and the fields go on; one at the depth of a nested specification's own item is outside the fields.
+    after = draft.parse_outline("# T\nSub\n\n## A\n\n**Headline:** H\n\n**Chart 1.** Line: x\n"
+                                "- **Data:** category: M; value: C\n  - Cases are counted at closure.\n\n"
+                                "  More on the data.\n- **Source:** s\n- **Alt text:** a\n\n- West.\n"
+                                "  - **Chart 2.** Table: grid\n    - **Data:** column: Region\n"
+                                "      - Regions as filed.\n\n      More on the regions.\n    - **Alt text:** Grid.\n\n"
+                                "    Under the specification.\n\n**Notes:** N\n")
+    first, second = after["charts"]
+    assert first["fields"] == {"Data": "category: M; value: C", "Source": "s", "Alt text": "a"}
+    assert first["inside"] == [{"line": 10, "field": "Data", "kind": "item"},
+                               {"line": 12, "field": "Data", "kind": "paragraph"}]
+    assert second["fields"] == {"Data": "column: Region", "Alt text": "Grid."}
+    assert second["inside"] == [{"line": 19, "field": "Data", "kind": "item"},
+                                {"line": 21, "field": "Data", "kind": "paragraph"}]
+    assert after["slides"][0]["bullets"] == [{"line": 16, "text": "West.", "sub": []}]
+    assert after["slides"][0]["extra"] == [{"line": 24, "text": "Under the specification."}]
     # A field-named item back at a shallower depth renders outside the specification, so it is a bullet.
     nested = draft.parse_outline("# T\nSub\n\n## A\n\n- West.\n  - **Chart 1.** Table: grid\n"
                                  "    - **Data:** column: Region\n      - Regions as filed.\n"

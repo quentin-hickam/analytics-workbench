@@ -1521,7 +1521,8 @@ def _blocks(lines):
     kind is "paragraph", "item" (a list item, depth 1 at the top level), or "heading" (level 4 to 6). first is
     the opening line's plain text, which the chart check reads as `check_charts` always has; text is the
     whole block as it shows, whitespace collapsed. gap marks a blank line before the block. An item that
-    holds later paragraphs, a block quote's included, lists their first lines in "paragraphs".
+    holds later paragraphs, a block quote's included, lists their first lines in "paragraphs"; a paragraph
+    records in "listed" the list depth it sits in, 0 outside every list.
     """
     blocks, gap = [], False
     for line in lines[1:] if lines and lines[0].kind == "heading" and 1 <= lines[0].level <= 3 else lines:
@@ -1542,7 +1543,7 @@ def _blocks(lines):
                                                      or blocks[-1]["kind"] != "item"
                                                      or blocks[-1]["depth"] != line.listed)):
             blocks.append({"kind": "paragraph", "line": line.number, "depth": 0, "first": line.plain,
-                           "text": text, "gap": gap})
+                           "text": text, "gap": gap, "listed": line.listed})
         elif text:
             if line.start:
                 blocks[-1].setdefault("paragraphs", []).append(line.number)
@@ -1572,9 +1573,12 @@ def _slide(heading, first, lines):
         if slide["notes"] and slide["after_notes"] is None:
             slide["after_notes"] = block["line"]
         text = block["text"]
-        # An item deeper than the fields renders inside the last one, a blank line before it or not.
-        if chart is not None and block["kind"] == "item" and depth is not None and block["depth"] > depth:
-            chart["inside"].append({"line": block["line"], "field": list(chart["fields"])[-1], "kind": "item"})
+        # An item deeper than the fields renders inside the last one, a blank line before it or not, and so does
+        # a paragraph at the fields' list depth or deeper that a nested item kept from joining its field.
+        if chart is not None and depth is not None and (
+                block["kind"] == "item" and block["depth"] > depth
+                or block["kind"] == "paragraph" and block["listed"] >= depth and not _CHART_SPEC.match(block["first"])):
+            chart["inside"].append({"line": block["line"], "field": list(chart["fields"])[-1], "kind": block["kind"]})
             continue
         if chart is not None and block["kind"] == "item" and not (block["gap"] and chart["fields"]):
             if (depth is None or block["depth"] == depth) and (field := _CHART_FIELD.match(text)) \
