@@ -40,14 +40,14 @@ Read `foundation/quality.md` only when a flag's reason cites a correction you mu
 
 ## 5. Copy to storage
 
-Report the `storage` row: where the release was copied and whether the copy verified. When its status is `unrecorded`, ask where released packages are kept, record the storage line as below, run `python3 src/awb.py copy-releases <investigation> <package>`, and report its rows the same way; when `none chosen`, warn that this checkout holds the only copy.
+Report the `storage` row: where the release was copied and whether the copy verified; for `unreachable`, tell the user in plain words what to copy and where, from its `instruction` (`<location>/<investigation>/<package>/released/<n>/`). When its status is `unrecorded`, ask where released packages are kept, record the storage line as below, run `python3 src/awb.py copy-releases <investigation> <package>`, and report its rows the same way; when `none chosen`, warn that this checkout holds the only copy.
 
 To record the storage line, `Released packages are kept at: <location>` in the project README, write the user's answer on that line, adding the line when absent after the README's `Active investigation` line and any `Landed data is kept at` line, and preserving every other line. When the user declines, record `none chosen` and warn that releases will exist only in this checkout. Record a location whenever the user names one.
 
 ## Record storage without releasing
 
-When the user asks only to record or change where released packages are kept, record the storage line as above and create no release. Then run `python3 src/awb.py copy-releases <investigation>` once per investigation with releases, and report each release's `storage` row as in **5. Copy to storage**.
+When the user asks only to record or change where released packages are kept, record the storage line as above and create no release. Then run `python3 src/awb.py copy-releases <investigation>` once per investigation with releases, and report each release's `storage` row as in **5. Copy to storage**, copy instruction included.
 
 ## Report
 
-Report the review's outcome and any accepted `warning` violations, then from the `release` output: `release` and `release_number`; `datasets`, or none; `dispositions`, separating those marked `new` (absent from the prior release's manifest) from those carried forward; `provenance_gaps`; each `checkout_only_acquisitions` entry as an acquisition held only in this checkout; and the storage result.
+Report the review's outcome and any accepted `warning` violations, then from the `release` output: `release` and `release_number`; `datasets`, or none; `dispositions`, separating those marked `new` (absent from the prior release's manifest) from those carried forward; `provenance_gaps`; each `checkout_only_acquisitions` entry as an acquisition held only in this checkout; and the storage result as in **5. Copy to storage**, copy instruction included.

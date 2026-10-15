@@ -35,6 +35,8 @@ Cover the business question, population or scope, the decision it supports or an
 
 **Sort every question by who can answer it.** Look facts up yourself in the repository, catalog, and source systems, and answer a question a quick lookup settles. Ask the user only for decisions and context only they hold. Record a question the data must answer through analysis with `--answerer data`, and one only someone else can answer with `--answerer stakeholder`, naming them in the question. Never put a data question to the user.
 
+**Give each recorded question a priority and parent**: `must` when the decision cannot be made without its answer, `could` when the answer only refines it, `should` otherwise; the parent is the question it serves, empty for a root.
+
 **Record meanings where they belong.** Shared meanings go in `foundation/glossary.md`, an investigation's departure in its brief's Local terms section, dataset and view descriptions in `foundation/catalog.md`, consequential analytical decisions in its history; never in `CONTEXT.md` or ADRs.
 
 The interview is done when the question, population, purpose, and usefulness criteria are each settled in the brief or held open as a ledger question with its answerer, such as a usefulness threshold only a stakeholder owns, which that brief section names by ID; every other material unknown is an open ledger question with its answerer; and no answer received is still vague. Write the records without a separate confirmation round.
@@ -44,15 +46,15 @@ The interview is done when the question, population, purpose, and usefulness cri
 Ledger commands run from the project root; `python3 src/awb.py questions --help` gives every argument. Add each question the interview leaves open, and each answered context question that later analysis relies on, such as a stakeholder's definition:
 
 ```sh
-python3 src/awb.py questions add "<one-line question>" --kind context|decision|analytical --answerer user|stakeholder|data --origin scope --unblocks "<what an answer decides>"
+python3 src/awb.py questions add "<one-line question>" --kind context|decision|analytical --answerer user|stakeholder|data --origin scope --priority <priority> --parent "<parent ID or empty>" --unblocks "<what an answer decides>"
 python3 src/awb.py questions answer Q-NNN --text "<the answer>" --by "<the user or a named stakeholder>"
 ```
 
 A settled scope or purpose decision belongs in the brief, not the ledger. A data question is answered only by a recorded result whose settings table declares it; `workbench-guides/analysis.md` says how.
 
 - **New.** Create `investigations/<slug>/`, its slug named for the question rather than the population so a rescope keeps it right. Adapt the [brief](../awb-init/assets/workbench/investigation/brief.md), [state](../awb-init/assets/workbench/investigation/state.md), and [history](../awb-init/assets/workbench/investigation/history.md), and copy [run.py](../awb-init/assets/workbench/investigation/run.py) with its [settings.toml](../awb-init/assets/workbench/investigation/settings.toml); populate them with settled facts, and record an inherited method in the brief's Starting method section. Make it active with `python3 src/awb.py state switch <slug>`, then add the open questions and write into each held-open brief section the ID `add` printed; with none, `python3 src/awb.py questions render` writes the empty ledger.
-- **Sharpen.** Revise the brief sections the answers changed, and add or answer ledger questions.
-- **Rescope.** Revise the brief, the population and period in `settings.toml`, and the state to the settled scope. Write a history entry for the scope change naming the findings it supersedes. Supersede each ledger question the change invalidates, keeping its answer, and add its replacement: `python3 src/awb.py questions status Q-NNN --set superseded --reason "<the change>"`; point any brief section that named the superseded question at its replacement's ID.
+- **Sharpen.** Revise the brief sections the answers changed, add or answer ledger questions, and adjust priority and parent as roles change: `python3 src/awb.py questions edit Q-NNN --priority <priority> --parent "<parent ID or empty>"`.
+- **Rescope.** Revise the brief, the population and period in `settings.toml`, and the state to the settled scope. Write a history entry for the scope change naming the findings it supersedes. Supersede each ledger question the change invalidates, keeping its answer, and add its replacement: `python3 src/awb.py questions status Q-NNN --set superseded --reason "<the change>"`; point any brief section that named the superseded question at its replacement's ID. Adjust surviving questions' priority and parent as in Sharpen.
 
 An investigation without `questions.json` predates the ledger: move each item of its brief's Material unknowns, and each Next steps item phrased as a question, into the ledger, then leave Material unknowns with the template's pointer line and drop the moved steps with `python3 src/awb.py state next --drop <number>`.
 

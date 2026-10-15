@@ -133,3 +133,70 @@ def test_repository_has_no_retired_skill_outside_changelog():
         if mentions_retired_skill(entry) or mentions_retired_skill(data):
             offenders.append(str(path.relative_to(ROOT)))
     assert offenders == [], offenders
+
+
+def question_add_priorities(text):
+    """Accepted input: LF text with literal `python3 src/awb.py questions add `
+    examples, either as a whole line (leading whitespace allowed) or inside
+    single-backtick inline code. Arguments occupy that line/span, use POSIX shlex quoting, and contain
+    --priority followed by must, should, could, or the placeholder <priority>.
+    Each whole-word 'questions add' occurrence must belong to such an example;
+    refuse other spellings/contexts, missing/invalid priorities, broken quotes,
+    backtick nesting and shell continuations with ValueError. Other prose is
+    ignored. Known limits: a repository example convention, not a Markdown or
+    shell interpreter; argument meanings beyond priority are not validated.
+    """
+    import shlex
+
+    commands = []
+    for line in text.splitlines():
+        mentions = re.findall(r"\bquestions add\b", line)
+        if not mentions:
+            continue
+        spans = line.split("`")
+        if len(spans) % 2 == 0 or any(not span for span in spans[1::2]):
+            raise ValueError("use closed single-backtick command spans")
+        candidates = spans[1::2] if len(spans) > 1 else [line.strip()]
+        found = [span for span in candidates if span.startswith("python3 src/awb.py questions add ")]
+        if len(found) != len(mentions):
+            raise ValueError("use a literal single-line questions add command")
+        for command in found:
+            if "\\" in command:
+                raise ValueError("shell escapes and continuations are outside the example grammar")
+            args = shlex.split(command)
+            priorities = [args[i + 1] if i + 1 < len(args) else None
+                          for i, arg in enumerate(args) if arg == "--priority"]
+            if len(priorities) != 1 or priorities[0] not in ("must", "should", "could", "<priority>"):
+                raise ValueError("questions add needs one --priority must|should|could|<priority>")
+            commands.append(priorities[0])
+    return commands
+
+
+@pytest.mark.parametrize("text, expected", [
+    ('python3 src/awb.py questions add "Which region?" --priority must', ["must"]),
+    ('  python3 src/awb.py questions add "Which region?" --priority should', ["should"]),
+    ('Use `python3 src/awb.py questions add "Which region?" --priority could`.', ["could"]),
+    ('Use `python3 src/awb.py questions add "<question>" --priority <priority>`.', ["<priority>"]),
+    ('Ordinary prose; questions added.', []),
+    ('python3 src/awb.py questions add "Which region?"', None),
+    ('python3 src/awb.py questions add "Which region?" --priority urgent', None),
+    ('python3 src/awb.py questions add "Which region?" --priority', None),
+    ('python3 src/awb.py questions add "Which region?" --priority must --priority could', None),
+    ('python3 src/awb.py questions add "Which region?" --priority must --priority', None),
+    ('Use questions add with a priority.', None),
+    ('`python3 src/awb.py questions add "Which region?" --priority must', None),
+    ('``python3 src/awb.py questions add "Which region?" --priority must``', None),
+    ('python3 src/awb.py questions add "Which region? --priority must', None),
+    ('python3 src/awb.py questions add "Which region?" \\\n --priority must', None),
+])
+def test_question_add_example_accepted_and_refused_forms(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            question_add_priorities(text)
+    else:
+        assert question_add_priorities(text) == expected
+
+
+@pytest.mark.parametrize("path", shipped_skills(ROOT), ids=lambda path: path.parent.name)
+def test_every_question_add_example_carries_priority(path):
+    question_add_priorities(path.read_text(encoding="utf-8"))

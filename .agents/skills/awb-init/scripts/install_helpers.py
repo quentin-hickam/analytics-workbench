@@ -298,6 +298,14 @@ def print_server_entry(host):
              "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")], "env": {}}
     print(render(entry))
     print(f"Merge the awb entry into {destination()}; preserve other configuration.", file=sys.stderr)
+    old_python = sys.version_info < (3, 10)
+    virtual = sys.prefix != sys.base_prefix
+    if old_python:
+        print("Warning: this interpreter is older than Python 3.10.", file=sys.stderr)
+    if virtual:
+        print("Warning: this interpreter runs in a virtual environment.", file=sys.stderr)
+    if old_python or virtual:
+        print("Use a stable Python 3.10+ interpreter outside a project virtual environment.", file=sys.stderr)
 
 
 def main():

@@ -17,7 +17,7 @@ Read each guide once per session. Existing project conventions win; surface any 
 
 ## Commands
 
-When the host offers the `awb` MCP server, use its tools for the CLI commands below, and the CLI otherwise: `read` for commands that only read; `records`, `data`, `run`, `package`, `release`, and `setup` for those that write. Each tool's description lists its commands. Pass the absolute project root as `project` and translate CLI arguments to the tool's schema.
+When the host offers the `awb` MCP server, use its tools for `awb.py` commands, and the CLI otherwise: `read` for commands that only read; `records`, `data`, `package`, and `release` for those that write. Route `investigations/<name>/run.py` through `run`; `collect_status.py` through `read` command `status`; `eda_scan.py` through `data` command `eda-scan`, or `--show` through `read` command `eda-show`; `scan_dataset.py` through `data` command `clean-scan`; `record_cleaning.py` through `records` command `clean-record`; and `install_helpers.py` through `setup`. Each tool's description lists its commands. Pass the absolute project root as `project` on every call and translate CLI arguments to the tool's schema.
 
 Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists them and `<command> --help` their arguments. Compute through saved queries: run every query with `awb.py sql`, and counts, null rates, and distinct values with `awb.py profile`; save a query you run twice as `investigations/<name>/exploration/<topic>.sql` and rerun it by path. Run the project's helpers, customized or not, as black boxes; open one's source only to adapt or debug it. When a helper or package is missing, repair through `awb-init`. Keep complete records in files.
 

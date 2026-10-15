@@ -1,6 +1,6 @@
 # Analytical implementation, validation, and evidence
 
-Paths below that begin with `references/` or `assets/` are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (Codex).
+Paths below that begin with `references/` or `assets/` are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (VS Code Copilot and Codex).
 
 ## Structure
 

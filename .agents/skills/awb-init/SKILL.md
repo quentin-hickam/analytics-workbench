@@ -29,7 +29,7 @@ Adapt asset files to the target; their instructional comments and example rows a
 
 1. Adapt the [orientation](assets/workbench/README.md), [ignore rules](assets/workbench/.gitignore), and [agent instructions](assets/workbench/AGENTS.md) into missing root files; merge `.gitignore` rules one by one, each negation after every rule it overrides. A repair reconciles existing ones through references/repair.md.
 2. When merging into an existing `AGENTS.md`, link both guides relatively and check the links resolve.
-3. Install the project helpers, workbench guides, and the `foundation/references/` folder, and declare the helpers' packages, with the interpreter that will run the project's analysis, such as its virtual environment. Run it as a black box; `--check` reports without writing. A repair runs it from references/repair.md instead.
+3. Install the project helpers, workbench guides, and the `foundation/references/` folder, and declare the helpers' packages, with the interpreter that will run the project's analysis, such as its virtual environment. Use the `awb` MCP server's `setup` tool when the host offers it. Run the installer as a black box; `--check` reports without writing. A repair runs it from references/repair.md instead.
 
    ```sh
    python3 <skill-directory>/scripts/install_helpers.py <project-root>
@@ -54,7 +54,7 @@ Report:
 - unresolved decisions, file conflicts, and files left for the user to decide;
 - any host instruction file from step 1, with its import line;
 - installer items needing attention;
-- if the host's MCP status has no `awb` registration, the registration destination from `python3 <skill-directory>/scripts/install_helpers.py --mcp-config <host>` (`copilot`, `claude`, or `codex`) and how to obtain its entry; show the entry when the user asks. Leave merging user configuration to the user. If registered but unavailable, report the host's diagnostic instead;
+- if the host's MCP status has no `awb` registration, offer in one line the entry and destination that `python3 <skill-directory>/scripts/install_helpers.py --mcp-config <host>` (`copilot`, `claude`, or `codex`) prints, run with a stable Python 3.10+ interpreter outside any project virtual environment, with any interpreter warning. Leave merging user configuration to the user. If registered but unavailable, report the host's diagnostic instead;
 - which lazy directories were deferred;
 - how work continues: a new question or scope change through `awb-scope`, analysis through normal requests, a package only when the user asks `awb-package` for one; and
 - the active investigation from `awb-scope`'s report, or that none exists, followed by a suggestion to use `awb-status` to see where things stand and what to ask next.

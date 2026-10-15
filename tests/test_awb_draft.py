@@ -1736,7 +1736,8 @@ def test_check_draft_orders_findings_from_priority_then_tree(project, capsys, he
     assert verified["storyline"] == report["storyline"]
 
 
-@pytest.mark.parametrize("required, body, placement, problem", [
+@pytest.mark.parametrize("required, body, placement, problem, text, audience", [
+    (*case, "What caused the delay?", "") for case in [
     (False, None, "after", None),
     (False, "- What caused the delay?", "after", "no unanswered must"),
     (True, None, "after", "missing Open questions"),
@@ -1753,11 +1754,19 @@ def test_check_draft_orders_findings_from_priority_then_tree(project, capsys, he
     (True, "- What caused the delay?", "twice", "exactly one"),
     (True, "What caused the delay?", "after", "missing question"),
     (True, "- What caused the delay?\n\n**Chart 2.** Table: supporting rates\n- **Data:** column: Rate", "after", "takes no chart"),
+]] + [
+    (True, "- Why were orders late?", "after", None, "What caused the delay?", "Why were orders late?"),
+    (True, "- Why were orders late?", "after", None, "What caused the delay?", "Why were **orders** late?"),
+    (True, "- What caused the delay?", "after", "missing question", "What caused the delay?", "Why were orders late?"),
+    (True, "- Does late_rate differ?", "after", 'questions edit Q-001 --audience "<wording>"', "Does late_rate differ?", ""),
+    (True, "- Does performance differ?", "after", 'questions edit Q-001 --audience "<wording>"', "Does late_rate differ?", ""),
+    (True, "- Do orders differ?", "after", None, "Does orders_view differ?", "Do orders differ?"),
+    (True, "- Does orders_view differ?", "after", 'questions edit Q-001 --audience "<wording>"', "Does orders_view differ?", ""),
 ])
-def test_check_draft_open_questions_rows(project, capsys, required, body, placement, problem):
+def test_check_draft_open_questions_rows(project, capsys, required, body, placement, problem, text, audience):
     provenance = load(project / "src/provenance.py", "ledger_open_fixture")
-    provenance.add_question(project, "inv", "What caused the delay?", kind="context", answerer="user",
-                            origin="scope", priority="must" if required else "could")
+    provenance.add_question(project, "inv", text, kind="context", answerer="user",
+                            origin="scope", priority="must" if required else "could", audience=audience)
     # A parked must remains unresolved; set-aside and settled questions are excluded.
     for text, state in (("Which period?", "declined"), ("Which definition?", "superseded"), ("Which scope?", "answered")):
         entry = provenance.add_question(project, "inv", text, kind="context", answerer="user", origin="scope", priority="must")
@@ -1787,13 +1796,15 @@ def test_open_questions_includes_parked_and_recheck_without_truncation(project, 
     questions = ["Which regions need review?", "Which period applies?", "Which owner decides?",
                  "Which population matters?", "Which definition applies?", "Which caveat matters?"]
     for index, text in enumerate(questions):
-        provenance.add_question(project, "inv", text, kind="context", answerer="data" if index == 0 else "user",
+        provenance.add_question(project, "inv", "Which regions in orders_view need review?" if index == 0 else text, kind="context", answerer="data" if index == 0 else "user",
                                 origin="scope", priority="must")
     settings = project / "investigations/inv/settings.toml"
     settings.write_text(settings.read_text().replace('[results.r-001]', '[results.r-001]\nanswers = ["Q-001"]'))
     provenance.answer_question(project, "inv", "Q-001", results=["r-001"])
     provenance.set_question(project, "inv", ["Q-002"], "parked", reason="Waiting on owner")
     provenance.flag_findings(project, "inv", [{"result": "r-001", "reason": "Changed input"}])
+    assert provenance.question_tree(project, "inv")[0]["display_status"] == "answered (awaiting recheck)"
+    provenance.edit_question(project, "inv", "Q-001", audience="Which regions need review?")
     draft = project / "deliveries/inv/pkg/draft"
     record = manifest(project)
     record["revalidation_flags"] = [{"finding": "West volume is stable", "reason": "Changed input", "represented_in": "none", "disposition": "none"}]
@@ -1804,6 +1815,10 @@ def test_open_questions_includes_parked_and_recheck_without_truncation(project, 
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert report["open_questions_count"] == 6
     assert report["open_questions"] == [] and report["outline"] == [] and code == 0, report
+    assert report["findings"] == [] and report["passed"], report
+    entry = provenance.question_tree(project, "inv")[0]
+    assert entry["text"] == "Which regions in orders_view need review?" and entry["priority"] == "must"
+    assert entry["status"] == "answered"
     write(draft, "findings.md", before_open + opened.replace("- Which regions need review?\n", ""))
     _, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert any(row.get("question") == "Which regions need review?" and row["problem"] == "missing question"

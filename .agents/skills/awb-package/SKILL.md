@@ -42,7 +42,7 @@ When a brief section names a ledger question ID, resolve it with that list. An `
 
 ### Review the headlines
 
-For a new draft, write the title slide and every slide headline in storyline order, including the conditional **Open questions** slide, before writing the full slide bodies. Show these headlines to the user and ask them to approve or reorder them; wait for their answer before expanding the slides. Apply an approved reorder consistently with the ledger's parent and priority fields so the draft still satisfies the contract. A revision that keeps the storyline skips this step; a changed storyline returns here before full slides are rewritten.
+For each required question whose text is not in the audience's words, set audience wording with `python3 src/awb.py questions edit Q-NNN --audience "<wording>"`, leaving its text unchanged. For a new draft, write the title slide and every slide headline in storyline order, including the conditional **Open questions** slide, before writing the full slide bodies. Show these headlines, and the required questions as the slide words them, to the user and ask them to approve or reorder them; wait for their answer before expanding the slides. Apply an approved reorder through the ledger's parent and priority fields; when they cannot express it without changing what they mean, tell the user and keep the derived order. A revision that keeps the storyline skips this step, but new audience wording still needs the user's approval. A changed storyline returns here before full slides are rewritten.
 
 ### Write the full slides
 

@@ -39,7 +39,7 @@ Finish with up to five requests whose state applies, risk rows first, then progr
 
 | State | Request | Handler | Kind |
 | --- | --- | --- | --- |
-| `active.counts` has `revalidation-needed` | "Rerun the flagged findings" | `python3 investigations/<name>/run.py` | risk |
+| `active.counts` has `revalidation-needed` | "Recheck the findings awaiting recheck" | `python3 investigations/<name>/run.py` | risk |
 | A package's `unmatched_flags` is above zero | "Revise the <package> draft to carry the new caveats" | `awb-package` | risk |
 | A package's `rerun_since_draft` lists results | "Revise the <package> draft to the rerun results" | `awb-package` | risk |
 | A release exists and `release_storage` is `unrecorded` or `unreachable` | "Record where releases are kept" | `awb-release` | risk |
@@ -49,7 +49,7 @@ Finish with up to five requests whose state applies, risk rows first, then progr
 | An `uncertainties` entry names a missing standard record, or the user mentions newer workbench skills | "Bring the workbench up to date" | `awb-init` | risk |
 | No active investigation | "Start an investigation into <question>" | `awb-scope` | progress |
 | The brief or state records an open scope or purpose decision | "Resolve the <topic> scope change" | `awb-scope` | progress |
-| `questions` is null for the active investigation and no `uncertainties` entry names its ledger | "Start the question ledger for <investigation>" | `awb-scope` | progress |
+| `questions` is null for the active investigation and no `uncertainties` entry names its ledger | "Start tracking open questions for <investigation>" | `awb-scope` | progress |
 | `questions.open_by_answerer` counts `user` or `stakeholder` questions | "Work through the open questions" | `awb-scope` | progress |
 | `questions.open_by_answerer` counts `data` questions | "Explore <dataset> to answer <question in plain words>" | `awb-explore` | progress |
 | `questions.counts` has answered questions and at most two open ones | "What else should we ask?" | `awb-brainstorm` | progress |

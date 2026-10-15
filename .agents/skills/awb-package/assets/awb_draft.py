@@ -1926,30 +1926,39 @@ def _longest_ordered_run(ranks):
     return kept
 
 
-def open_question_problems(root, investigation, draft, provenance):
+def open_question_problems(root, investigation, draft, provenance, *, names, roots):
     """Accepted input: exactly one ## Open questions slide iff required questions exist,
     immediately after ## Limitations and open caveats and before ## What changed since the
     last version when present. Its body is top-level Markdown list items (bullet or numbered,
     inline markup and wrapped continuations as the existing outline reader accepts), exactly
-    the required ledger texts rendered by _inline/_shown with whitespace collapsed, once each.
+    each required question's audience wording when set, otherwise its text, rendered by
+    _inline/_shown with whitespace collapsed, once each.
 
     Required means priority must and status open, parked, or answered (awaiting recheck).
     Declined and superseded questions are set aside. Nested bullets, charts, missing/repeated
     questions and any other bullet text are reported; outline/markdown checks report other
     structural forms. Known limits: this compares rendered text, not paraphrases or audience
-    suitability. Question IDs and added owner commentary do not match; ledger wording must be
-    audience-ready single-line inline text. Block markup/comments in that wording are not an
-    alternate matching form. Notes remain presenter context and do not satisfy a question.
+    suitability. Question IDs and added owner commentary do not match; audience wording (or
+    text when unset) must be single-line inline text. When unset text fails the names check,
+    a row directs the caller to questions edit --audience; that scan skips any part of the text the
+    outline reader refuses, which the slide's own names check still covers. Block markup/comments in that wording
+    are not an alternate matching form. Notes remain presenter context and do not satisfy a question.
     """
     questions = [q for q in provenance.question_tree(root, investigation) if q["priority"] == "must"
                  and q["display_status"] in ("open", "parked", provenance.AWAITING_RECHECK)]
-    expected = Counter(_collapse(_shown(_inline(q["text"])[0])) for q in questions)
+    expected = Counter(_collapse(_shown(_inline(q["audience"] or q["text"])[0])) for q in questions)
     slides = read_outline(draft / "findings.md")["slides"]
     opened = [(i, slide) for i, slide in enumerate(slides) if not slide["finding"] and slide["heading"] == "Open questions"]
     rows = []
 
     def row(problem, line=None, **details):
         rows.append({"slide": "Open questions", "line": line, "problem": problem, **details})
+
+    pattern = _name_pattern(names)
+    for question in questions:
+        if not question["audience"] and _scan_paragraph(_view(question["text"])[0], set(roots) | set(names), pattern):
+            row(f'use audience wording: questions edit {question["id"]} --audience "<wording>"',
+                question=question["text"])
 
     if not expected:
         if opened:
@@ -2044,7 +2053,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     if provenance is not None:
         try:
             report["open_questions"], report["open_questions_count"] = open_question_problems(
-                root, investigation, draft, provenance)
+                root, investigation, draft, provenance, names=names, roots=recorded)
         except (OSError, ValueError, AttributeError) as error:
             report["errors"].append(f"open questions check: {error}")
     try:
