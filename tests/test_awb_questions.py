@@ -423,16 +423,17 @@ def test_resume_and_list_show_finding_status(project, capsys):
 def test_status_collector_reads_the_ledger(project):
     assert status.collect(project)["active"]["questions"] is None
     add(project, "Does churn differ by region?")
-    add(project, "Which churn definition does finance use?", "stakeholder", kind="context")
-    add(project, "Is EMEA in scope?", "user", kind="decision", status="declined", reason="no")
+    add(project, "Which churn definition does finance use?", "stakeholder", kind="context", parent="Q-001",
+        priority="must")
+    add(project, "Is EMEA in scope?", "user", kind="decision", status="declined", reason="no", parent="Q-001")
     settings(project, {"r1": ["Q-001"]})
     produce(project, "r1")
     provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "region view corrected"}])
     questions = status.collect(project)["active"]["questions"]
-    # Every question here is a root, and none below a root is a must question.
+    # The user asked one question, the root; the stakeholder's definition and the decision serve it.
     assert questions == {"counts": {"answered (awaiting recheck)": 1, "open": 1, "declined": 1},
-                         "roots": {"answered (awaiting recheck)": 1, "open": 1, "declined": 1},
-                         "must_subquestions": {}, "open_by_answerer": {"stakeholder": 1},
+                         "roots": {"answered (awaiting recheck)": 1},
+                         "must_subquestions": {"open": 1}, "open_by_answerer": {"stakeholder": 1},
                          "open": ["Q-002 [stakeholder, context] Which churn definition does finance use?"],
                          "awaiting_recheck": ["Q-001 answered (awaiting recheck) [data, analytical] Does churn differ by region? -> r1 (revalidation-needed (was provisional))"]}
     (project / INV / "questions.json").write_text('{"schema": "awb-questions/1", "questions": [1]}')

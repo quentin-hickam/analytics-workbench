@@ -2376,7 +2376,8 @@ def cli_questions(root: Path, argv: list[str]) -> int:
         parser.add_argument("--audience", default="" if action == "add" else None,
                             help="audience wording for Open questions; empty clears it; whitespace is collapsed")
         parser.add_argument("--parent", default="" if action == "add" else None,
-                            help="existing question ID; empty for a root")
+                            help="the existing question ID this one serves; empty for a root, "
+                                 "a question the user asked")
         parser.add_argument("--priority", choices=_PRIORITIES, default="should" if action == "add" else None)
     try:
         args = parser.parse_args(argv[1:])

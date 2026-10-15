@@ -8,7 +8,7 @@ Existing project layouts remain authoritative. Read `references/landing.md` only
 
 Assess a candidate from its documentation or schema when that settles relevance and fitness; inspect records only from landed copies, landing only what the assessment needs. Record the assessment, its basis, and its references in `foundation/sources.md` under its rules.
 
-Keep each data dictionary, manual, codebook, or schema export that an assessment or catalog row relies on under `foundation/references/<source-id>/`, and suggest committing it unless README's `Code history:` line says `none`. Material whose license or confidentiality bars committing it stays out of Git, as a landed original does: keep it at a retained location outside the checkout and record that location and its SHA-256 as the source's reference, in the form `foundation/sources.md` gives. Link a reference from the catalog rows that rely on it as `foundation/catalog.md` describes.
+Keep each data dictionary, manual, codebook, or schema export that an assessment or catalog row relies on under `foundation/references/<source-id>/`; commit it when README's `Commits:` line says `as I go`, otherwise suggest committing it, unless you already suggested a commit this session. While README's `Code history:` line says `none`, do neither. Material whose license or confidentiality bars committing it stays out of Git, as a landed original does: keep it at a retained location outside the checkout and record that location and its SHA-256 as the source's reference, in the form `foundation/sources.md` gives. Link a reference from the catalog rows that rely on it as `foundation/catalog.md` describes.
 
 Land user-supplied or already-downloaded files:
 
@@ -30,7 +30,7 @@ Fetch scripts read credentials from environment variables; local values may sit 
 
 ## Publish and prepare
 
-Save the conversion as `src/preparation/<dataset>.sql`, one SELECT reading landed files by project-relative path. Declare the dataset's checks (columns and types, not-null, key and uniqueness, accepted values, ranges, row count) under `[datasets.<dataset>.checks]` in `foundation/datasets.toml`, starting from `assets/workbench/foundation/datasets.toml`, which documents the keys. Put a check a declaration cannot express in `src/preparation/<dataset>-check.sql`, a query over the view `publication` whose returned rows are failures. Unless README's `Code history:` line says `none`, suggest committing these first so the publication's `conversion_commit` holds them. Then publish:
+Save the conversion as `src/preparation/<dataset>.sql`, one SELECT reading landed files by project-relative path. Declare the dataset's checks (columns and types, not-null, key and uniqueness, accepted values, ranges, row count) under `[datasets.<dataset>.checks]` in `foundation/datasets.toml`, starting from `assets/workbench/foundation/datasets.toml`, which documents the keys. Put a check a declaration cannot express in `src/preparation/<dataset>-check.sql`, a query over the view `publication` whose returned rows are failures. So the publication's `conversion_commit` holds them, commit these first when README's `Commits:` line says `as I go`; otherwise suggest committing them, unless you already suggested a commit this session. While README's `Code history:` line says `none`, do neither. Then publish:
 
 ```
 python3 src/awb.py publish <dataset> <publication-id> --from <acquisition-dir> --sql <select.sql> [--check <check.sql>]

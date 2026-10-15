@@ -55,6 +55,8 @@ Report in plain words, in at most these five items, omitting any that do not app
 - each item the user must act on, with its impact: what it changes for them and what the workbench does meanwhile, such as installer items step 3.3 carries, unresolved decisions and file conflicts, no code history, or an `awb` MCP server the host has not registered or cannot start; and
 - the next request: answering the interview round, or `awb-status` to see where things stand.
 
+A repair report adds what [references/repair.md](references/repair.md) says to report, after these items.
+
 For an `awb` server the host's MCP status does not list, offer in one line the host's registration command that `python3 <skill-directory>/scripts/install_helpers.py --mcp-config <host>` (`copilot`, `claude`, or `codex`) prints, run with a stable Python 3.10+ interpreter outside any project virtual environment, with any interpreter warning, and its printed entry and destination as the fallback; until then, helpers run as terminal commands the host may ask the user to approve. Leave running the command and merging user configuration to the user. If registered but unavailable, report the host's diagnostic instead.
 
 Unless README's `Code history` line says `none`, commit when the user asks or as its `Commits` line allows, and after a repair suggest committing it as one commit so it can be reviewed and reverted as a unit. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, the user's business question has gone to `awb-scope`, and the work has stopped short of packages and analysis the user has not requested.

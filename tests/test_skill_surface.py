@@ -337,7 +337,7 @@ def test_first_pass_answers_keep_to_the_evidence():
     invariants = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Analytical invariants').split())
     # A saved query's figure is exploration until run.py records it as a result.
     assert "can become a finding; present other query output, saved queries' too, as exploration" in invariants
-    for rule in ('offer an untested one as a question, not an answer',
+    for rule in ('offer an untested explanation as a question, not an answer',
                  'Record what the user recalls as their statement, not as confirmed',
                  'name what a comparison leaves uncontrolled when a decision rests on it'):
         assert rule in invariants
@@ -407,6 +407,150 @@ def test_setup_report_has_at_most_five_items_and_keeps_the_host_instruction_file
     assert 1 <= len(items) <= 5, items
     assert sum('host instruction file' in item for item in items) == 1
     assert any('impact' in item for item in items)
+    # A repair reports more than setup does; step 5 says so rather than capping a repair at five items.
+    assert 'A repair report adds what [references/repair.md](references/repair.md) says to report' \
+           in ' '.join(report.split())
+
+
+def test_only_the_users_questions_are_roots():
+    # Status and the turn footer count the ledger's roots as the user's questions. A stakeholder's
+    # threshold or a deferred decision left as a root was counted as one the user asked, so scoping
+    # records each question the user asks as a root and puts every other question under one.
+    interview = ' '.join(section((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8'),
+                                 '## 2. Interview').split())
+    assert 'so a root is only a question the user asked: record each one they ask' in interview
+    assert ("Every other question, such as a stakeholder's threshold, a decision the user deferred, "
+            "or a method choice, takes as parent the user's question it serves") in interview
+    record = ' '.join(section((ROOT / '.agents/skills/awb-brainstorm/SKILL.md').read_text(encoding='utf-8'),
+                              '## 3. Record the choices').split())
+    assert 'empty for a root' not in record
+    assert 'leave the parent empty only when the user takes the question as one of their own' in record
+    # The footer names the user's questions as the roots and counts them only when they changed.
+    agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
+    assert ("ends with one plain line: what changed for the user's questions, the ledger's roots, "
+            "if anything, and the next step") in agents
+    status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
+    assert 'lead with `roots`, the questions the user asked' in status
+    assert 'Report `questions.counts`, the totals with every sub-question, only on request' in status
+
+
+def test_analysis_records_its_questions_under_the_one_they_serve():
+    # `questions add` defaults --parent to empty, so a question raised mid-analysis, such as whether a
+    # dip is seasonal, became a root and was counted as one the user asked. The analysis guide gives
+    # the analysis path the parent rule scoping, brainstorming, and exploration follow.
+    add = ' '.join(section((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/analysis.md')
+                           .read_text(encoding='utf-8'), '## Add a result').split())
+    assert ("Record a question the analysis raises, such as whether a dip is seasonal, with "
+            "`awb.py questions add --origin analysis` and the question it serves as `--parent`.") in add
+    assert 'so only a question the user asks is a root' in add
+    # Chat-driven work reads no guide, so the always-loaded rule names the parent too.
+    agents = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Record maintenance').split())
+    assert ("record a question the work raises with `questions add --parent <question it serves>`"
+            in agents)
+    # A ledger written before roots meant the user's questions is re-parented when scoping next runs.
+    sharpen = ' '.join((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8').split())
+    assert ("A root the user did not ask, which an older ledger may hold, takes as parent the user's "
+            "question it serves, recorded first as a root from the brief when the ledger lacks it.") in sharpen
+
+
+def test_guide_commit_points_follow_the_commits_line():
+    # The README promises at most one commit reminder a session under `on request`, and commits
+    # as the work goes under `as I go`; the rerun and publish points keep to both.
+    guides = ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides'
+    analysis = ' '.join((guides / 'analysis.md').read_text(encoding='utf-8').split())
+    assert ("Before rerunning a supported or flagged finding, commit its evidence when README's `Commits:` "
+            "line says `as I go`; otherwise suggest committing it, unless you already suggested a commit "
+            "this session.") in analysis
+    data = ' '.join((guides / 'data.md').read_text(encoding='utf-8').split())
+    assert ("commit these first when README's `Commits:` line says `as I go`; otherwise suggest committing "
+            "them, unless you already suggested a commit this session.") in data
+    assert 'Suggest committing these first' not in data
+    # A kept reference document follows the same line.
+    assert ("under `foundation/references/<source-id>/`; commit it when README's `Commits:` line says "
+            "`as I go`, otherwise suggest committing it, unless you already suggested a commit this session.") in data
+    assert 'and suggest committing it.' not in data
+
+
+def test_exploration_asks_the_users_questions_in_its_report():
+    report = ' '.join(section((ROOT / '.agents/skills/awb-explore/SKILL.md').read_text(encoding='utf-8'),
+                              '## 6. Report').split())
+    assert 'the ledger questions added, asking in the report each one the user can settle' in report
+
+
+def test_brainstorm_asks_the_users_questions_in_its_report():
+    # A kept question the user can settle is asked, never sent to another skill; only a
+    # stakeholder's question and a scope change go through `awb-scope`.
+    report = ' '.join(section((ROOT / '.agents/skills/awb-brainstorm/SKILL.md').read_text(encoding='utf-8'),
+                              '## 4. Report').split())
+    assert 'questions for the user or a stakeholder through `awb-scope`' not in report
+    assert 'asking in the report each kept question the user can settle' in report
+    assert "a stakeholder's question through `awb-scope`" in report
+
+
+def test_status_reports_git_unavailable_with_its_impact():
+    status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
+    assert 'When `git.available` is false, report its `reason`. ' not in status
+    assert ('When `git.available` is false, report its `reason` with what it means for the user: status '
+            'cannot tell what is uncommitted or whether the state is out of date, and evidence records '
+            'file checksums instead of a commit SHA; say whether they must act, such as by installing Git '
+            'or putting the project in a repository.') in status
+
+
+def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
+    # The review holds a checked or reconciliation sentence to a recorded result or check, pairing with the
+    # warning state finding gives, and the package contract tells the writer so; a re-review after repairs may
+    # be scoped, judging rules added or changed since in full, but never the last one before the request's
+    # final check-draft or the one that completes it, and release always runs the full review.
+    def read(path):
+        return ' '.join((ROOT / '.agents/skills' / path).read_text(encoding='utf-8').split())
+
+    review = read('awb-package/references/review.md')
+    package = read('awb-package/SKILL.md')
+    release = read('awb-release/SKILL.md')
+    reviewer = read('awb-package/assets/awb-package-reviewer.agent.md')
+    provenance = read('awb-init/references/provenance.md')
+
+    assert ('asserts that something was checked or verified, reconciles, sums or adds up to, or matches cites the '
+            'recorded result or check that establishes it') in review
+    assert 'A sentence without one is a narrative problem' in review
+    assert '`awb.py state finding`' in review and 'pair' in review
+    assert 'asserts a reconciliation or a completed check' in review and 'asserts a reconciliation or a completed' \
+        in provenance
+    assert 'Report every violation and narrative problem in this one pass, quoting each' in review
+    assert 'settle everything it reports, as above, before the review runs again' in review
+    assert ('Within one `awb-package` request, the review run again after repairs may be a scoped re-review: '
+            'give the reviewer the prior report and a diff') in review
+    assert ('a full review is still required before the request\'s final `check-draft`, and `awb-release` always '
+            'runs the full review') in review
+    assert '`review (scoped):`' in review
+    # The draft is outside Git, so the diff is taken against a copy kept when the prior review was launched,
+    # and with no copy the next review is full; a slide or document rule is judged on each slide or file a
+    # changed line falls in.
+    assert '`diff -u <copy> <current file>`' in review and 'Git-ignored `deliveries/` folder' in review
+    # The scoped diff is made against the prior review's copy before that copy is replaced; replacing it first
+    # would leave an empty diff.
+    diff_at = review.index('For a scoped re-review, first make the diff against the copy the prior review left')
+    copy_at = review.index('Then, for every review `awb-package` launches, full or scoped, and after any scoped '
+                           'diff is made, copy those files to the scratch folder, replacing the copy an earlier '
+                           'review left')
+    assert diff_at < copy_at
+    assert 'whenever `awb-package` launches a review, first copy' not in review
+    assert 'When no copy of what the prior review read was kept, the next review is a full one' in review
+    assert 'for a `slide` or `document` rule, on each slide or file that holds one' in review
+    assert 'the caller settles them all before the next review' in review
+    assert ('judge each rule added or changed since, as the diff of `foundation/review-rules.md` shows, against '
+            'every narrative in full') in review
+    assert ('Only a full review, whose last line opens `review:`, can complete a request or a release; a scoped '
+            're-review, whose last line opens `review (scoped):`, never does') in review
+    assert 'for a scoped re-review, the prior report and the diff' in review
+    assert '`slide` rule' in review and '`document` rule' in review
+    assert 'scoped re-review' in package and 'the last review before the final `check-draft` is a full one' in package
+    assert 'the last review is a full review, passed and not stale' in package
+    contract = read('awb-package/references/package-contract.md')
+    assert ('A sentence asserting that something was checked or verified, reconciles, sums or adds up to, or matches '
+            'cites the check that establishes it') in contract
+    assert 'Run the full read-only review' in release and 'never a scoped re-review' in release
+    assert 'one pass' in reviewer and 'scoped' in reviewer and 'the evidence a narrative cites' in reviewer
 
 
 def test_commands_state_the_cli_fallback_scripts_by_path_and_the_interpreter():
@@ -432,13 +576,12 @@ def test_no_code_history_means_no_commits_or_suggestions():
     assert "While README's `Code history:` line says `none`, make and suggest no commits." in agents
     analysis = ' '.join((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/analysis.md')
                         .read_text(encoding='utf-8').split())
-    assert "while its `Code history:` line says `none`, do neither" in analysis
+    assert "While README's `Code history:` line says `none`, do neither." in analysis
     # The guide and skill that suggest a commit at a step say so too, where the step is read.
     data = ' '.join((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/data.md')
                     .read_text(encoding='utf-8').split())
-    assert "suggest committing it unless README's `Code history:` line says `none`" in data
-    assert ("Unless README's `Code history:` line says `none`, suggest committing these first so the "
-            "publication's `conversion_commit` holds them") in data
+    # Both the reference-document and the publication commit points say so where the step is read.
+    assert data.count("While README's `Code history:` line says `none`, do neither.") == 2
     clean = ' '.join((ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8').split())
     assert "Unless README's `Code history:` line says `none`, commit `foundation/quality.json`" in clean
     init = ' '.join(section((ROOT / '.agents/skills/awb-init/SKILL.md').read_text(encoding='utf-8'),

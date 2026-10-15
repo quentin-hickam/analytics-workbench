@@ -71,7 +71,7 @@ Run `python3 src/awb.py export <investigation> <package> --chart <result>[:<colu
 
 ## 5. Review
 
-Once the narratives and flags are complete, run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against every rule in `foundation/review-rules.md` and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it. Act on its report as that file's **After the review** says.
+Once the narratives and flags are complete, run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against every rule in `foundation/review-rules.md` and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it. Act on its report as that file's **After the review** says. A review after repairs may be the scoped re-review that file describes, but the last review before the final `check-draft` is a full one.
 
 ## 6. Check
 
@@ -84,7 +84,7 @@ A `numbers` row is a number no represented result records. A `numbers` row on a 
 3. It is not a quantity, such as a date, a comparison year, a chart number, a tool version, or a week number: the check reports any number whose context leaves it in doubt, so reword where a context [helpers](references/helpers.md) lists would mark it, such as a comma after a date or year; otherwise, or when the records support it from elsewhere, such as a figure from an earlier release, a fact the user supplied that `history.md` records, or a number inside a result's question that `methodology.md` must repeat, list it in the manifest's `allowed_numbers` as `package-format/manifest-template.md` describes.
 4. It is computed from results that none records: only separately authorized analysis records it; until then, leave it out.
 
-**Done** when `check-draft` prints `passed: true` on the final files and the last review is passed and not stale, as [references/review.md](references/review.md) defines under **After the review**; that review confirms what `check-draft` cannot check, since `check-draft` proves only that each number is recorded somewhere. Any edit after `check-draft` reruns it. Report its outcome.
+**Done** when `check-draft` prints `passed: true` on the final files and the last review is a full review, passed and not stale, as [references/review.md](references/review.md) defines under **After the review**; that review confirms what `check-draft` cannot check, since `check-draft` proves only that each number is recorded somewhere. Any edit after `check-draft` reruns it. Report its outcome.
 
 ## 7. Report
 
