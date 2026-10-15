@@ -186,9 +186,9 @@ def same_interpreter(path):
     """Whether this process runs `path`: the same file once its directories are resolved, or the same
     virtual environment. A venv's python is never resolved, since it links to a base interpreter whose
     packages it does not see; outside virtual environments, two symbolic links to one binary, such as
-    python3 and the python3.13 it links to, are the same interpreter. A hard link to the binary in
-    another directory is not: package managers link one environment's interpreter from a shared cache,
-    and each copy sees its own prefix's packages."""
+    python3 and the python3.13 it links to, are the same interpreter. A hard link to the binary, under
+    another name or in another directory, is not: package managers link one environment's interpreter
+    from a shared cache, and each copy sees its own prefix's packages."""
     def place(name):
         name = Path(os.path.abspath(name))
         return os.path.normcase(os.path.join(os.path.realpath(name.parent), name.name))

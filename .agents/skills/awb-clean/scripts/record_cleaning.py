@@ -54,10 +54,11 @@ its first line starting with `|` is the header, the next is its `| --- |` separa
 are the `|` lines directly under that. A header without a separator, or a `|` line elsewhere in the
 section, such as a row added after prose that follows the table, refuses the call with its line
 number before anything is written; a header and separator there start a second table, which belongs
-under its own heading. Every call also reads the Correction record, when quality.md has one: each of
-its rows has the header's number of cells and a YYYY-MM-DD Date, so an issue row added at the end of
-the file, directly under that table, is refused with its line rather than read as a correction. A
-new row's ID is never one already in the first cell of a table row anywhere in quality.md.
+under its own heading. Every call also reads the Correction record, when quality.md has one, so its
+heading keeps its table even while that table has no rows: each of its rows has the header's number
+of cells and a YYYY-MM-DD Date, so an issue row added at the end of the file, directly under that
+table, is refused with its line rather than read as a correction. A new row's ID is never one
+already in the first cell of a table row anywhere in quality.md.
 """
 
 import argparse
