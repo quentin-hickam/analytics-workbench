@@ -8,6 +8,7 @@
 # test_check_draft_reports_outline_and_chart_spec_rows: a headline over 15 words, a chart form outside the seven, a Data column the chart file lacks, and a file column no Data role names fail check-draft with outline and charts rows in both modes, and release refuses on them.
 # test_check_draft_requires_each_question_in_methodology: export's questions pass once methodology repeats them; a question methodology lacks or rewords, a results entry without a question, and a manifest without results fail check-draft's questions, and release refuses on the check.
 # test_questions_check_reads_methodology_as_it_renders: a question wrapped, emphasized, linked, escaped, in a code span, heading, or list item, or after a comment block on its line matches; one only in a comment, inline or a block, in fenced code, split over two paragraphs, or reworded does not.
+# test_questions_check_matches_a_code_span_as_written: a question holding brackets, a tilde, an edge underscore, an asterisk, a character reference, or a backslash matches when a code span shows it exactly as written.
 # test_questions_check_refuses_a_commented_question: the issue's probe, a question only inside an HTML comment, fails check-draft's questions; a manifest question with inline markup matches as it renders.
 # test_check_draft_help_and_references_agree_on_the_rendered_reading: the check-draft help text, helpers.md, and the comment above _view name numbers as the only check that does not read the rendered view, and the help states how questions are read.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
@@ -301,6 +302,10 @@ def set_results(project, results):
     path.write_text(json.dumps(record))
 
 
+NOT_REPEATED = ("methodology.md does not repeat this question verbatim in text that renders, within one paragraph "
+                "or heading")
+
+
 def test_check_draft_requires_each_question_in_methodology(project, capsys):
     draft = project / "deliveries/inv/pkg/draft"
     write(draft, "methodology.md", METHODOLOGY.split("Question (r-002)")[0])
@@ -311,7 +316,7 @@ def test_check_draft_requires_each_question_in_methodology(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"] and report["questions"] == [
         {"result_id": "r-002", "question": QUESTIONS["r-002"],
-         "problem": "methodology.md does not repeat this question verbatim"}]
+         "problem": NOT_REPEATED}]
     write(draft, "methodology.md", METHODOLOGY.replace("Which regions close", "Which regions closed"))
     assert run(project, capsys, "check-draft", "inv", "pkg")[1]["questions"][0]["result_id"] == "r-002"
     write(draft, "methodology.md", METHODOLOGY)
@@ -358,7 +363,34 @@ def test_questions_check_reads_methodology_as_it_renders(project, place):
     record = json.loads((directory / "manifest.json").read_text())
     assert draft.question_problems(directory, record) == ([] if found else [
         {"result_id": "r-002", "question": QUESTIONS["r-002"],
-         "problem": "methodology.md does not repeat this question verbatim"}])
+         "problem": NOT_REPEATED}])
+
+
+# A question holding a markup character, written exactly inside a code span, which shows it as written.
+MARKUP_QUESTIONS = (
+    "Which regions [excluding test] close late?",
+    "Did ~5% of orders close late?",
+    "Which _id values repeat?",
+    "Is churn above 5*baseline?",
+    "Which AT&amp;T orders close late?",
+    "Which regions close late\\?",
+)
+
+
+@pytest.mark.parametrize("question", MARKUP_QUESTIONS)
+def test_questions_check_matches_a_code_span_as_written(project, question):
+    draft = load(project / "src/packaging/draft.py", "draft_markup_questions")
+    directory = project / "deliveries/inv/pkg/draft"
+    before = METHODOLOGY.split("Question (r-002)")[0]
+    write(directory, "methodology.md", before + f"\nQuestion (r-002): `{question}`\n")
+    record = json.loads((directory / "manifest.json").read_text())
+    for entry in record["results"]:
+        if entry["result_id"] == "r-002":
+            entry["question"] = question
+    assert draft.question_problems(directory, record) == []
+    # Without the code span r-002 fails, so the pass above is the code span's.
+    write(directory, "methodology.md", before + "\nQuestion (r-002): to come.\n")
+    assert [row["result_id"] for row in draft.question_problems(directory, record)] == ["r-002"]
 
 
 def test_questions_check_refuses_a_commented_question(project, capsys):

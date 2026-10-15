@@ -866,7 +866,8 @@ def question_problems(draft, record: dict) -> list[dict]:
 
     methodology.md is read as it renders (`_view`): each paragraph or heading's text as it shows, code spans
     unwrapped and whitespace collapsed, so a wrapped or formatted question matches and one in a comment or
-    fenced code does not. The question is rendered the same way, and must fall within one block.
+    fenced code does not. The question matches as written or rendered the same way, and must fall within one
+    block: as written, so a code span showing it exactly counts though it holds a markup character.
     """
     blocks = {}
     for line in _read_view(Path(draft) / "methodology.md")[0]:
@@ -883,9 +884,13 @@ def question_problems(draft, record: dict) -> list[dict]:
         if not isinstance(question, str) or not question.strip():
             problems.append({"result_id": result_id, "problem": "the manifest records no question for this "
                              "result; run export, or copy its question from settings into a hand-added entry"})
-        elif not (rendered := _collapse(_shown(_inline(question)[0]))) or not any(rendered in b for b in shown):
+            continue
+        # As written, or rendered as methodology.md is, so a question in a code span keeps its markup characters.
+        forms = [form for form in (_collapse(question), _collapse(_shown(_inline(question)[0]))) if form]
+        if not any(form in block for block in shown for form in forms):
             problems.append({"result_id": result_id, "question": question,
-                             "problem": "methodology.md does not repeat this question verbatim"})
+                             "problem": "methodology.md does not repeat this question verbatim in text that "
+                                        "renders, within one paragraph or heading"})
     return problems
 
 
@@ -1082,7 +1087,8 @@ def _claim_review(draft, represented, claims):
 NARRATIVES = ("findings.md", "methodology.md")
 # Reading fails safe: a number is skipped only in one of the contexts below, each of which marks it as no
 # quantity; every other number is read, so a doubtful one becomes a row the author clears by rewording or
-# by allowing it. references/helpers.md states the same list.
+# by allowing it. check_numbers also skips the accepted **Claim strength:** lines it is given (`claim_lines`),
+# whose numbers repeat the record. references/helpers.md states the same list, those lines last.
 _MONTH = (r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
           r"|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?")
 _DAY = r"(?:3[01]|[12][0-9]|0?[1-9])"
@@ -2197,8 +2203,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
                "that is neither none nor a list of places, and an unknown disposition.\nquestions lists each "
                "manifest results entry without a question, or whose question methodology.md does not repeat "
-               "verbatim within one paragraph or heading as it renders: a code span counts, and a question in a "
-               "comment or fenced code does not count.\nExit 0 only when names_problems, findings, outline, charts, "
+               "verbatim within one paragraph or heading as it renders, the question read as written or rendered the "
+               "same way: a code span counts, and a question in a comment or fenced code does not count.\nExit 0 only when names_problems, findings, outline, charts, "
                "headings, markdown, claims, "
                "questions, storyline, open_questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
                "are all empty.")
