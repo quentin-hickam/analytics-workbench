@@ -1225,11 +1225,11 @@ def session(project_root: str | Path, *,
 # Limits: scalar functions are not checked (none of DuckDB's writes a file while logging is off and the
 # configuration locked), and EXPLAIN binds a statement before it is checked, which DuckDB's own table
 # functions do without writing; an extension's table function not listed is refused, but only once bound.
-# read_xlsx, from DuckDB's excel extension, is listed so that a view can read a landed Excel file: its
-# arguments name a file, a sheet, a range and how to read cells, never an output, and an xlsx file is
-# written only by COPY, which is refused. The session installs no extension but loads one already
-# installed when a statement needs it; without the excel extension, read_xlsx is refused with a hint to
-# install it once through the write path.
+# read_xlsx, from DuckDB's excel extension, is listed so that a read-only query can read a landed Excel
+# file: its arguments name a file, a sheet, a range and how to read cells, never an output, and an xlsx
+# file is written only by COPY, which is refused. The session installs no extension but loads one already
+# installed when a statement needs it; without the excel extension, read_xlsx or FROM 'book.xlsx' is
+# refused with a hint to install it once without --read-only.
 # The plan checked must be the plan that runs, so a read-only session also refuses, by name and before
 # EXPLAIN, every function that turns a runtime string into SQL or a table reference: its text is bound
 # anew at each bind, and current_query(), random() or now() can pick another table function at the run
@@ -1238,8 +1238,8 @@ def session(project_root: str | Path, *,
 # is called as a table function, and DuckDB's histogram() aggregate, which shares a table macro's name,
 # still runs; a scalar macro calling one is refused wherever it is called. A CREATE statement's body is
 # read the same way when it parses alone (_create_body); one that does not is checked by token, so there
-# the histogram() aggregate is refused too. Without them every table function a statement binds is named
-# in its text or in a view or macro body fixed before the check; what still varies between check and
+# the histogram() aggregate is refused too. Without these dynamic functions, every table function a
+# statement binds is named in its text or in a view or macro body fixed before the check; what still varies between check and
 # run is values, such as which files a glob reads.
 DYNAMIC_SQL_FUNCTIONS = frozenset({"query", "query_table", "json_execute_serialized_sql"})
 READ_TABLE_FUNCTIONS = frozenset("""
@@ -1280,13 +1280,16 @@ def _refuse_writing_plan(connection, statement):
     try:
         plan = json.loads(connection.execute("EXPLAIN (FORMAT json) " + text).fetchall()[0][1])
     except Exception as error:  # a PIVOT without IN, SQL that does not bind, or an extension not installed
-        for name in sorted(_called_names(text) & EXTENSION_READ_FUNCTIONS.keys()):
-            extension = EXTENSION_READ_FUNCTIONS[name]
-            if connection.execute("SELECT installed FROM duckdb_extensions() WHERE extension_name = ?",
-                                  [extension]).fetchall() != [(True,)]:
+        called, message = _called_names(text), str(error)
+        for name, extension in sorted(EXTENSION_READ_FUNCTIONS.items()):
+            # called by name, or a file such as 'book.xlsx' whose replacement scan loads the extension
+            needed = name in called or f'extension "{extension}"' in message \
+                or f"extension '{extension}'" in message
+            if needed and connection.execute("SELECT installed FROM duckdb_extensions() WHERE extension_name = ?",
+                                             [extension]).fetchall() != [(True,)]:
                 raise ValueError(
                     f"read-only: {name} needs DuckDB's {extension} extension, which is not installed, and a "
-                    f"read-only session installs none; install it once through the write path, "
+                    f"read-only session installs none; install it once without --read-only, "
                     f'python3 src/awb.py sql "INSTALL {extension}; SELECT 1" (over MCP, the data tool\'s sql), '
                     "then run this again") from error
         raise ValueError(f"read-only: refused a statement whose plan cannot be checked ({error}); "
@@ -1315,10 +1318,11 @@ def _refuse_dynamic_sql(connection, statement):
     try:
         tables, scalars = _dynamic_names(connection)
         tree = json.loads(connection.execute("SELECT json_serialize_sql(?)", [statement.query]).fetchone()[0])
+        by_token = False
         if not tree.get("error"):
             table_calls, calls = _calls(tree)
         elif getattr(statement.type, "name", "") == "CREATE":
-            table_calls, calls = _create_calls(connection, statement.query, tables | scalars)
+            table_calls, calls, by_token = _create_calls(connection, statement.query, tables | scalars)
         else:
             raise ValueError(tree.get("error_message"))
         found = table_calls & (tables | scalars) | calls & scalars
@@ -1326,8 +1330,10 @@ def _refuse_dynamic_sql(connection, statement):
         raise ValueError(f"read-only: refused a statement whose calls cannot be read ({error}); "
                          "run it without --read-only") from error
     if found := sorted(found):
-        raise ValueError(f"read-only: refused {found[0]}(), which builds SQL from a string each time it is "
-                         "bound, so the plan checked need not be the plan that runs; run it without --read-only")
+        where = (" (this CREATE's body does not parse alone, so its calls are checked by token, and a "
+                 "histogram() aggregate is refused too)") if by_token else ""
+        raise ValueError(f"read-only: refused {found[0]}(){where}, which builds SQL from a string each time it "
+                         "is bound, so the plan checked need not be the plan that runs; run it without --read-only")
 
 
 def _dynamic_names(connection):
@@ -1378,10 +1384,10 @@ def _calls(tree):
 
 
 def _create_calls(connection, text, dynamic):
-    """Return the names a CREATE statement calls as table functions and those it calls anywhere: from its
-    body's parse tree, with every name called before the body counted as a table function, when
-    _create_body finds a body whose tree holds each name of dynamic that its tokens call; else every name
-    its tokens call, counted as both."""
+    """Return the names a CREATE statement calls as table functions, those it calls anywhere, and whether
+    they were read by token: from its body's parse tree, with every name called before the body counted as
+    a table function, when _create_body finds a body whose tree holds each name of dynamic that its tokens
+    call; else every name its tokens call, counted as both."""
     split = _create_body(text)
     if split is not None:
         prefix, body, kind = split
@@ -1389,9 +1395,9 @@ def _create_calls(connection, text, dynamic):
         if tree is not None:
             table_calls, calls = _calls(tree)
             if _called_names(body) & dynamic <= calls:
-                return _called_names(prefix) | table_calls, calls
+                return _called_names(prefix) | table_calls, calls, False
     names = _called_names(text)
-    return names, names
+    return names, names, True
 
 
 def _create_body(text):

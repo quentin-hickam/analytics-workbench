@@ -22,12 +22,12 @@
 # test_cli_sql_read_only_runs_select_and_refuses_every_write: --read-only prints SELECT results and refuses COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, a setting PRAGMA, CALL, CREATE, and INSERT, and a SELECT calling a table function that writes (enable_profiling, enable_logging, checkpoint), directly or through a view, macro, subquery, or query(), and any call of query, query_table, json_execute_serialized_sql, or a table macro calling one (histogram_values, histogram) as a table function, however named or quoted, before any statement runs, and refuses --out, leaving the project unchanged; profile --read-only does the same; a read-only PRAGMA, SHOW, SUMMARIZE, PIVOT with IN, information_schema, a column or CTE named query, and the histogram() aggregate still run, through sql and profile.
 # test_read_only_sql_refuses_a_plan_that_differs_at_the_run: a query() whose SQL reads range(1) under EXPLAIN and enables profiling at the run is refused before any statement runs; no file is written, the session's profiling stays off, and the session still answers.
 # test_profile_runs_with_a_landing_helper_older_than_read_only: profile without --read-only calls session(root) alone, so a landing helper without the read_only keyword still profiles.
-# test_read_only_session_checks_view_files_before_any_runs_and_locks_configuration: a read-only session refuses a view file holding anything but CREATE and SELECT (a writable or READ_ONLY ATTACH, ATTACH then DETACH, COPY) before any statement runs, and a CREATE or SELECT whose plan calls a writing table function or cannot be checked (a PIVOT without IN), or that calls query, query_table, or a macro calling one (the histogram table macro included, and a scalar macro calling query), or calls a dynamic name before its body, or whose body does not parse alone and so is checked by token (a macro with two bodies, CREATE TABLE ... WITH NO DATA, refusing the histogram() aggregate there), creating and changing no file, while the default session still loads them; a PIVOT view with IN loads; the loaded session's configuration is locked and spills go to a private directory outside the project.
+# test_read_only_session_checks_view_files_before_any_runs_and_locks_configuration: a read-only session refuses a view file holding anything but CREATE and SELECT (a writable or READ_ONLY ATTACH, ATTACH then DETACH, COPY) before any statement runs, and a CREATE or SELECT whose plan calls a writing table function or cannot be checked (a PIVOT without IN), or that calls query, query_table, or a macro calling one (the histogram table macro included, and a scalar macro calling query), or calls a dynamic name before its body, or whose body does not parse alone and so is checked by token (a macro with two bodies, CREATE TABLE ... WITH NO DATA, refusing the histogram() aggregate there with a message saying so), each dynamic row refused for the name it calls, creating and changing no file, while the default session still loads them; a PIVOT view with IN loads; the loaded session's configuration is locked and spills go to a private directory outside the project.
 # test_read_only_session_runs_the_histogram_aggregate_from_view_files: a view, temp view with a column list, table, table macro, scalar macro, or scalar macro holding a subquery whose body uses the histogram() aggregate loads in a read-only session and its query runs, as does one naming histogram(orders, id) only in a comment or a string, writing nothing.
 # test_create_body_splits_only_the_create_statements_its_grammar_accepts: _create_body's closed grammar splits a CREATE VIEW, TABLE, MACRO, or FUNCTION at its first AS outside parentheses into the text before it, the body, and whether the body is a query or an expression, and returns None for a CREATE TYPE or SEQUENCE, a table without AS, an AS with no body, a SELECT, and empty text.
 # test_read_only_sql_matches_a_scalar_macro_calling_dynamic_sql_anywhere: a scalar macro calling query(), directly or through another scalar macro, is refused in any position, a table macro calling query_table as a table function, while a scalar macro over an aggregate and histogram() run.
 # test_read_list_holds_read_xlsx_and_its_plan_passes_without_the_extension: read_xlsx is on the read list as the excel extension's function, so a plan calling it passes the check while another extension's table function is refused; runs without the extension.
-# test_read_only_sql_without_the_excel_extension_says_how_to_install_it: without the excel extension, read_xlsx in a query or a view file fails on one line saying it is not installed and how to install it once through the write path, writing nothing; skipped where the extension is installed.
+# test_read_only_sql_without_the_excel_extension_says_how_to_install_it: without the excel extension, read_xlsx or FROM 'book.xlsx' in a query, or read_xlsx in a view file, fails on one line saying it is not installed and how to install it once without --read-only, writing nothing; skipped where the extension is installed.
 # test_read_only_sql_reads_a_landed_excel_file_through_a_view: with the excel extension installed, sql and profile --read-only read a landed .xlsx through a view and directly, loading the extension without installing it, refuse COPY to xlsx, and write nothing; skipped where the extension cannot be loaded.
 # test_cli_land_copies_files_retains_and_writes_ledger_rows: land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
 # test_cli_land_skips_unusable_retention_location: unrecorded, none chosen, unreachable and non-filesystem locations skip retention and record this checkout only.
@@ -616,6 +616,19 @@ def test_read_only_session_checks_view_files_before_any_runs_and_locks_configura
         side.execute("CREATE TABLE extra AS SELECT 7 AS n")
     view = tmp_path / "foundation/views/02_side.sql"
     side, cache = tmp_path / "side.duckdb", tmp_path / "cache.duckdb"
+    token = "(this CREATE's body does not parse alone, so its calls are checked by token"
+    dynamic = {  # each refused for the dynamic name it calls
+        "CREATE VIEW extra AS FROM histogram(orders, id);": "refused histogram()",
+        "CREATE OR REPLACE TEMP VIEW extra (h) AS SELECT histogram(id) FROM orders, histogram(orders, id);":
+            "refused histogram(), which builds SQL",
+        "CREATE MACRO extra(t) AS TABLE FROM histogram(t, id);": "refused histogram()",
+        "CREATE MACRO extra() AS (SELECT count(*) FROM query('FROM orders'));": "refused query()",
+        "CREATE TEMP TABLE extra AS FROM query_table('orders');": "refused query_table()",
+        # a call before the body
+        "CREATE MACRO extra(t := query_table('orders')) AS TABLE SELECT 1 AS n;": "refused query_table()",
+        # a body that cannot be parsed alone is checked by token, so the aggregate is refused there
+        "CREATE MACRO extra(a) AS histogram(a), (a, b) AS histogram(b);": f"refused histogram() {token}",
+        "CREATE TABLE extra AS SELECT histogram(id) AS h FROM orders WITH NO DATA;": f"refused histogram() {token}"}
     for text in (f"ATTACH '{side}' AS side; CREATE VIEW extra AS SELECT * FROM side.extra;",
                  f"ATTACH '{side}' AS side (READ_ONLY); CREATE VIEW extra AS SELECT * FROM side.extra;",
                  f"ATTACH '{tmp_path / 'new.duckdb'}' AS new; CREATE VIEW extra AS SELECT 7 AS n;",
@@ -628,22 +641,14 @@ def test_read_only_session_checks_view_files_before_any_runs_and_locks_configura
                  "CREATE VIEW extra AS FROM query('SELECT 7 AS n');",
                  "CREATE MACRO extra(t) AS TABLE FROM query_table(t);",
                  "CREATE VIEW extra AS FROM histogram_values(orders, id);",
-                 "CREATE VIEW extra AS FROM histogram(orders, id);",
-                 "CREATE OR REPLACE TEMP VIEW extra (h) AS SELECT histogram(id) FROM orders, histogram(orders, id);",
-                 "CREATE MACRO extra(t) AS TABLE FROM histogram(t, id);",
-                 "CREATE MACRO extra() AS (SELECT count(*) FROM query('FROM orders'));",
-                 "CREATE TEMP TABLE extra AS FROM query_table('orders');",
-                 "CREATE MACRO extra(t := query_table('orders')) AS TABLE SELECT 1 AS n;",  # a call before the body
-                 # a body that cannot be parsed alone is checked by token, so the aggregate is refused there
-                 "CREATE MACRO extra(a) AS histogram(a), (a, b) AS histogram(b);",
-                 "CREATE TABLE extra AS SELECT histogram(id) AS h FROM orders WITH NO DATA;",
+                 *dynamic,
                  bypass(tmp_path / "v.json") + ";",
                  f"CREATE VIEW extra AS SELECT 7 AS n; COPY (SELECT 1) TO '{tmp_path / 'copy.csv'}';"):
         view.write_text(text)
         before = _files(tmp_path)
         with pytest.raises(RuntimeError, match="02_side.sql") as refused:
             landing.session(tmp_path, read_only=True)
-        assert "read-only: refused" in str(refused.value.__cause__), text
+        assert dynamic.get(text, "read-only: refused") in str(refused.value.__cause__), text
         assert _files(tmp_path) == before, text
     with landing.session(tmp_path) as connection:  # the default session keeps loading them
         assert connection.sql("SELECT n FROM extra").fetchall() == [(7,)]
@@ -760,11 +765,12 @@ def test_read_only_sql_without_the_excel_extension_says_how_to_install_it(tmp_pa
         pytest.skip("the excel extension is installed here")
     sql_project(tmp_path)
     before = _files(tmp_path)
-    hint = "install it once through the write path"
-    assert landing.cli_sql(tmp_path, ["--read-only", "FROM read_xlsx('data/raw/books/a1/book.xlsx')"]) == 1
-    error = capsys.readouterr().err
-    assert "read_xlsx needs DuckDB's excel extension, which is not installed" in error and hint in error
-    assert 'src/awb.py sql "INSTALL excel; SELECT 1"' in error and error.count("\n") == 1
+    hint = "install it once without --read-only"
+    for query in ("FROM read_xlsx('data/raw/books/a1/book.xlsx')", "FROM 'data/raw/books/a1/book.xlsx'"):
+        assert landing.cli_sql(tmp_path, ["--read-only", query]) == 1
+        error = capsys.readouterr().err
+        assert "read_xlsx needs DuckDB's excel extension, which is not installed" in error and hint in error, query
+        assert 'src/awb.py sql "INSTALL excel; SELECT 1"' in error and error.count("\n") == 1
     assert _files(tmp_path) == before
     (tmp_path / "foundation/views/02_book.sql").write_text(
         "CREATE VIEW book AS FROM read_xlsx('data/raw/books/a1/book.xlsx');")
