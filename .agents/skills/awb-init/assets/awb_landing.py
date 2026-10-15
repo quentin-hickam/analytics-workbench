@@ -1167,8 +1167,9 @@ def session(project_root: str | Path, *,
     persistent secrets, spill files in a private temporary directory removed at exit,
     and configuration locked once the views load. View files may then hold only CREATE
     and SELECT statements, checked in every file before any runs, so a view file's
-    ATTACH, COPY, or other statement is refused rather than run. Run queries in the
-    session through read_only_sql(), which admits only SELECT statements.
+    ATTACH, COPY, or other statement is refused rather than run; each statement's plan
+    is then checked as read_only_sql() checks one, just before it runs. Run queries in
+    the session through read_only_sql().
     """
     try:
         import duckdb
@@ -1201,7 +1202,12 @@ def session(project_root: str | Path, *,
         connection.execute("SET file_search_path = ?", [str(root)])
         for path, text in views:
             try:
-                connection.execute(text)
+                if read_only:  # what runs is the statement text whose plan was checked
+                    for statement in duckdb.extract_statements(text):
+                        _refuse_writing_plan(connection, statement.query)
+                        connection.execute(statement.query)
+                else:
+                    connection.execute(text)
             except Exception as error:
                 raise RuntimeError(f"Failed to load view file: {path}") from error
         if read_only:
@@ -1212,13 +1218,58 @@ def session(project_root: str | Path, *,
     return connection
 
 
+# Table functions a read-only session runs. DuckDB records no side effects for table functions, and
+# some write files from a SELECT (enable_profiling's save_location, enable_logging's file storage), so
+# any table function not listed here is refused, as is a statement whose plan EXPLAIN cannot show.
+# Limits: scalar functions are not checked (none of DuckDB's writes a file while logging is off and the
+# configuration locked), and EXPLAIN binds a statement before it is checked, which DuckDB's own table
+# functions do without writing; an extension's table function is refused, but only once bound.
+READ_TABLE_FUNCTIONS = frozenset("""
+    seq_scan range generate_series unnest repeat repeat_row glob summary sniff_csv read_text read_blob
+    read_csv read_csv_auto read_parquet parquet_scan parquet_metadata parquet_schema parquet_file_metadata
+    parquet_kv_metadata read_json read_json_auto read_json_objects read_json_objects_auto read_ndjson
+    read_ndjson_auto read_ndjson_objects json_each json_tree duckdb_columns duckdb_constraints
+    duckdb_databases duckdb_dependencies duckdb_extensions duckdb_functions duckdb_indexes duckdb_keywords
+    duckdb_schemas duckdb_sequences duckdb_settings duckdb_tables duckdb_types duckdb_views
+    pragma_table_info pragma_show pragma_version pragma_database_size pragma_storage_info
+    pragma_platform pragma_collations pg_timezone_names icu_calendar_names""".split())
+
+
 def read_only_sql(connection, text):
     """Run SQL text in a read-only session(): only SELECT statements, refusing COPY, ATTACH, INSTALL,
-    LOAD, EXPORT, SET, PRAGMA, CALL, CREATE, and every other kind before any statement runs. Returns
-    the last statement's relation, as connection.sql() does."""
+    LOAD, EXPORT, SET, a PRAGMA that sets, CALL, CREATE, and every other kind, and a SELECT whose plan
+    calls a table function outside READ_TABLE_FUNCTIONS, before any statement runs. Returns the last
+    statement's relation, as connection.sql() does."""
+    import duckdb
     _refuse_statements(text, ("SELECT",), "(only SELECT runs here, and a PIVOT is one only with an IN (...) "
                        "list of its values)")
-    return connection.sql(text)
+    statements = [statement.query for statement in duckdb.extract_statements(text)]
+    for statement in statements:
+        _refuse_writing_plan(connection, statement)
+    for statement in statements[:-1]:  # what runs is the statement text whose plan was checked
+        connection.execute(statement)
+    return connection.sql(statements[-1]) if statements else None
+
+
+def _refuse_writing_plan(connection, text):
+    """Raise unless the plan DuckDB would run for one statement calls only READ_TABLE_FUNCTIONS.
+    EXPLAIN binds the statement, expanding views, macros, and query(), without running it."""
+    try:
+        plan = json.loads(connection.execute("EXPLAIN (FORMAT json) " + text).fetchall()[0][1])
+    except Exception as error:  # a PIVOT without IN, or SQL that does not bind
+        raise ValueError(f"read-only: refused a statement whose plan cannot be checked ({error}); "
+                         "run it without --read-only") from error
+    table_functions = {name for (name,) in connection.execute(
+        "SELECT upper(function_name) FROM duckdb_functions() WHERE function_type = 'table'").fetchall()}
+    nodes = list(plan)
+    while nodes:
+        node = nodes.pop()
+        info = node.get("extra_info") if isinstance(node.get("extra_info"), dict) else {}
+        for name in ({node.get("name")} & table_functions) | {info.get("Function")} - {None}:
+            if str(name).lower() not in READ_TABLE_FUNCTIONS:
+                raise ValueError(f"read-only: refused table function {str(name).lower()}, which a read-only "
+                                 "session does not run; run it without --read-only")
+        nodes.extend(node.get("children") or [])
 
 
 def _refuse_statements(text, allowed, where):
@@ -1268,8 +1319,9 @@ def cli_sql(root: Path, argv: list[str]) -> int:
     parser.add_argument("--limit", type=int, default=20, help="rows to print (default 20)")
     parser.add_argument("--out", help="write the full result to this project-relative .csv or .parquet file")
     parser.add_argument("--read-only", action="store_true",
-                        help="write nothing: run only SELECT statements, refusing every other kind, in a "
-                             "session that installs no extension and spills outside the project; refuses --out")
+                        help="write nothing: run only SELECT statements whose table functions read files or the "
+                             "catalog, in a session that installs no extension and spills outside the project; "
+                             "refuses --out")
     args = parser.parse_args(argv)
     if args.limit < 0:
         parser.error("--limit must be 0 or more")

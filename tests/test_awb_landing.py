@@ -19,9 +19,9 @@
 # test_session_refuses_a_project_root_containing_a_comma: regression: comma-containing project root is rejected before opening a connection.
 # test_cli_sql_prints_first_rows_and_total_and_writes_full_result: sql runs a project-relative query file or SQL text, prints a capped Markdown table and the total, and writes CSV or Parquet.
 # test_cli_sql_reports_failures_on_one_line: SQL errors, failing view files and non-query SQL print one stderr line and return 1; a bad --out extension is a usage error.
-# test_cli_sql_read_only_runs_select_and_refuses_every_write: --read-only prints SELECT results and refuses COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, PRAGMA, CALL, CREATE, and INSERT before any statement runs, and refuses --out, leaving the project unchanged; profile --read-only does the same.
+# test_cli_sql_read_only_runs_select_and_refuses_every_write: --read-only prints SELECT results and refuses COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, a setting PRAGMA, CALL, CREATE, and INSERT, and a SELECT calling a table function that writes (enable_profiling, enable_logging, checkpoint), directly or through a view, macro, subquery, or query(), before any statement runs, and refuses --out, leaving the project unchanged; profile --read-only does the same; a read-only PRAGMA, SHOW, SUMMARIZE, PIVOT with IN, and information_schema still run.
 # test_profile_runs_with_a_landing_helper_older_than_read_only: profile without --read-only calls session(root) alone, so a landing helper without the read_only keyword still profiles.
-# test_read_only_session_checks_view_files_before_any_runs_and_locks_configuration: a read-only session refuses a view file holding anything but CREATE and SELECT (a writable or READ_ONLY ATTACH, ATTACH then DETACH, COPY) before any statement runs, creating and changing no file, while the default session still loads them; a dynamic PIVOT loads; the loaded session's configuration is locked and spills go to a private directory outside the project.
+# test_read_only_session_checks_view_files_before_any_runs_and_locks_configuration: a read-only session refuses a view file holding anything but CREATE and SELECT (a writable or READ_ONLY ATTACH, ATTACH then DETACH, COPY) before any statement runs, and a CREATE or SELECT whose plan calls a writing table function or cannot be checked (a PIVOT without IN), creating and changing no file, while the default session still loads them; a PIVOT view with IN loads; the loaded session's configuration is locked and spills go to a private directory outside the project.
 # test_cli_land_copies_files_retains_and_writes_ledger_rows: land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
 # test_cli_land_skips_unusable_retention_location: unrecorded, none chosen, unreachable and non-filesystem locations skip retention and record this checkout only.
 # test_cli_land_creates_a_missing_ledger_from_the_template: missing sources.md is written from the template with the row, reported as created.
@@ -519,6 +519,9 @@ def test_cli_sql_read_only_runs_select_and_refuses_every_write(tmp_path, capsys)
     validate_spec.loader.exec_module(validate)
     (tmp_path / "src/preparation").mkdir(parents=True)
     shutil.copyfile(ASSET, tmp_path / "src/preparation/landing.py")
+    (tmp_path / "foundation/views/02_writers.sql").write_text(  # loads; reading through either is refused
+        f"CREATE VIEW profiled AS FROM enable_profiling(save_location := '{tmp_path / 'v.json'}'); "
+        f"CREATE MACRO logged() AS TABLE FROM enable_logging(storage := 'file', storage_path := '{tmp_path / 'm'}');")
     before = _files(tmp_path)
     assert landing.cli_sql(tmp_path, ["--read-only", "queries/large.sql", "--limit", "1"]) == 0
     assert capsys.readouterr().out == "| id |\n|---|\n| 1 |\n1 of 4 rows shown\n"
@@ -528,7 +531,13 @@ def test_cli_sql_read_only_runs_select_and_refuses_every_write(tmp_path, capsys)
               "INSTALL httpfs", "LOAD httpfs", f"EXPORT DATABASE '{tmp_path / 'export'}'",
               f"SET temp_directory = '{tmp_path / 'spill'}'", "PRAGMA enable_profiling", "CALL checkpoint()",
               "CREATE TABLE t AS SELECT 1", "SELECT 1; CREATE TABLE t AS SELECT 1; SELECT 2",
-              "CREATE TABLE t (x INT); INSERT INTO t VALUES (1); SELECT * FROM t"]
+              "CREATE TABLE t (x INT); INSERT INTO t VALUES (1); SELECT * FROM t",
+              # SELECTs whose table functions write files, directly or through a view, macro, or query()
+              f"FROM enable_profiling(format := 'json', save_location := '{tmp_path / 'p.json'}'); FROM orders",
+              f"FROM enable_logging(storage := 'file', storage_path := '{tmp_path / 'logdir'}')",
+              f"SELECT (SELECT count(*) FROM enable_profiling(save_location := '{tmp_path / 'p.txt'}'))",
+              f"FROM query('FROM enable_logging(storage := ''file'', storage_path := ''{tmp_path / 'logdir'}'')')",
+              "FROM profiled", "FROM logged()", "FROM checkpoint()", "FROM truncate_duckdb_logs()"]
     for query in writes:
         assert landing.cli_sql(tmp_path, ["--read-only", query]) == 1, query
         captured = capsys.readouterr()
@@ -542,6 +551,10 @@ def test_cli_sql_read_only_runs_select_and_refuses_every_write(tmp_path, capsys)
     capsys.readouterr()
     assert validate.cli_profile(tmp_path, ["--read-only", "orders"]) == 0
     assert "rows: 5" in capsys.readouterr().out
+    for query in ("PRAGMA table_info('orders')", "SHOW TABLES", "SUMMARIZE orders", "FROM query('FROM orders')",
+                  "PIVOT orders ON note IN ('a|b') USING count(*)", "FROM information_schema.columns"):
+        assert landing.cli_sql(tmp_path, ["--read-only", query]) == 0, query
+    capsys.readouterr()
     assert _files(tmp_path) == before
 
 
@@ -568,16 +581,20 @@ def test_read_only_session_checks_view_files_before_any_runs_and_locks_configura
                  f"ATTACH '{side}' AS side (READ_ONLY); CREATE VIEW extra AS SELECT * FROM side.extra;",
                  f"ATTACH '{tmp_path / 'new.duckdb'}' AS new; CREATE VIEW extra AS SELECT 7 AS n;",
                  f"ATTACH '{cache}' AS cache; CREATE TABLE cache.saved AS SELECT 7 AS n; DETACH cache;",
+                 # statements of an allowed kind whose plan writes, or cannot be checked
+                 f"CREATE TABLE t AS FROM enable_profiling(save_location := '{tmp_path / 'p.json'}'); SELECT 1;",
+                 f"SELECT * FROM enable_logging(storage := 'file', storage_path := '{tmp_path / 'logdir'}');",
+                 "PIVOT orders ON note USING count(*);",  # run as CREATE TYPE, then SELECT
                  f"CREATE VIEW extra AS SELECT 7 AS n; COPY (SELECT 1) TO '{tmp_path / 'copy.csv'}';"):
         view.write_text(text)
         before = _files(tmp_path)
         with pytest.raises(RuntimeError, match="02_side.sql") as refused:
             landing.session(tmp_path, read_only=True)
-        assert "read-only: refused statement kind" in str(refused.value.__cause__), text
+        assert "read-only: refused" in str(refused.value.__cause__), text
         assert _files(tmp_path) == before, text
     with landing.session(tmp_path) as connection:  # the default session keeps loading them
         assert connection.sql("SELECT n FROM extra").fetchall() == [(7,)]
-    view.write_text("PIVOT orders ON note USING count(*);")  # CREATE TYPE, then SELECT
+    view.write_text("CREATE VIEW wide AS PIVOT orders ON note IN ('a|b') USING count(*);")
     with landing.session(tmp_path, read_only=True) as connection:
         settings = dict(connection.execute(
             "SELECT name, value FROM duckdb_settings() WHERE name IN ('lock_configuration', "

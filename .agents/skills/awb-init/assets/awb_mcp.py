@@ -158,9 +158,10 @@ TOOLS = [
         ("state", "questions", "review-rules", "clean-record"), stdin=True),
     _write_tool(
         "data", "Prepare workbench data",
-        "Land, retain, and publish data, run SQL or profiles that write files (--out) or need non-SELECT "
-        "statements, and write EDA and cleaning scans. command: land, retain, publish, sql, profile, "
-        "eda-scan (args: dataset and options), clean-scan (args: dataset and options).",
+        "Land, retain, and publish data, run SQL or profiles that write files (--out) or need what the read "
+        "tool refuses (non-SELECT statements, table functions other than file and catalog readers), and "
+        "write EDA and cleaning scans. command: land, retain, publish, sql, profile, eda-scan (args: dataset "
+        "and options), clean-scan (args: dataset and options).",
         ("land", "retain", "publish", "sql", "profile", "eda-scan", "clean-scan")),
     {"name": "run", "title": "Run investigation",
      "description": "Run an investigation's run.py: produce, validate, and record its results, writing "
