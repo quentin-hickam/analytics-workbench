@@ -2,6 +2,9 @@
 
 import json
 import os
+import posixpath
+import subprocess
+import tempfile
 from pathlib import Path
 import re
 
@@ -598,6 +601,326 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
             'cites the check that establishes it') in contract
     assert 'Run the full read-only review' in release and 'never a scoped re-review' in release
     assert 'one pass' in reviewer and 'scoped' in reviewer and 'the evidence a narrative cites' in reviewer
+
+
+README = ROOT / 'README.md'
+
+
+def markdown_links(text):
+    """Accepted input: LF Markdown whose links are all inline, `[label](target)`: the
+    target is one or more characters other than whitespace, `(`, `)`, `<`, and `>`,
+    closed by `)`. Returns every target in order, anchors included. Refuse with
+    ValueError a `](` whose target does not fit, such as one holding a space, a title,
+    angle brackets, or parentheses, or never closed; any `]:`, which every reference
+    definition holds wherever its target sits; any `][`, a full or collapsed
+    reference; an autolink, `<` then a scheme and `:`; and any `href=` or `src=`, by
+    which raw HTML names a target. Known limits: code spans and fences are read like
+    prose, so a `](` written in code must fit too, as scripts/build-dist.sh's own
+    check reads it; labels are not checked; GitHub's bare `https://` and `www.` links
+    are not returned, since they never name a repository file.
+    """
+    if ']:' in text:
+        raise ValueError('reference definitions are outside the link grammar')
+    if '][' in text:
+        raise ValueError('reference links are outside the link grammar')
+    if re.search(r'<[A-Za-z][A-Za-z0-9+.-]+:', text):
+        raise ValueError('autolinks are outside the link grammar')
+    if re.search(r'\b(?:href|src)\s*=', text, re.I):
+        raise ValueError('HTML links are outside the link grammar')
+    targets = []
+    for match in re.finditer(r'\]\(', text):
+        target = re.match(r'[^\s()<>]+\)', text[match.end():])
+        if not target:
+            raise ValueError(f'link target outside the grammar: {text[match.start():match.start() + 40]!r}')
+        targets.append(target[0][:-1])
+    return targets
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('See [a](b.md) and [`c`](https://x.y/z#q).\n', ['b.md', 'https://x.y/z#q']),
+    ('[a](docs/x.md#3-y)\n[b](#what-you-get)\n', ['docs/x.md#3-y', '#what-you-get']),
+    ('No links, [brackets] or (parentheses) here.\n', []),
+    ('Replace `<host>` in [a](b.md): `x[1]`.\n', ['b.md']),
+    ('[a](b c.md)\n', None),
+    ('[a](b.md "Title")\n', None),
+    ('[a](<b.md>)\n', None),
+    ('[a](b(c).md)\n', None),
+    ('[a]()\n', None),
+    ('[a](b.md\n', None),
+    ('[a]: b.md\n', None),
+    ('[a]:b.md\n[x][a]\n', None),
+    ('[a]:\nb.md\n', None),
+    ('- [a]: b.md\n', None),
+    ('See [x][a] and [y][].\n', None),
+    ('See <https://x.y>.\n', None),
+    ('Write to <mailto:a@b.c>.\n', None),
+    ('<a href="docs/x.md">x</a>\n', None),
+    ('<img src="docs/x.png">\n', None),
+])
+def test_markdown_links_accepted_and_refused_forms(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            markdown_links(text)
+    else:
+        assert markdown_links(text) == expected
+
+
+def heading_anchors(text):
+    """Accepted input: LF Markdown. Returns the anchor GitHub gives each ATX heading
+    outside fences, a line of one to six `#` at column 0, a space, and text: the text
+    without a closing run of `#` after a space, stripped and lowercased, each
+    character other than an ASCII letter, digit, space, hyphen, or underscore dropped,
+    then each space made a hyphen. A fence opens at a line of three or more backticks
+    or tildes after zero to three spaces, and closes at the next such line of the
+    same character, at least as long, after zero to three spaces, with nothing after
+    it; a fence-like line indented four or more spaces inside a fence is its content.
+    Refuse with ValueError, outside fences: any other line of one to six `#` then a
+    space, a tab, or nothing, such as an indented heading or one with no text; a line
+    starting `<` that is not a whole one-line HTML comment; a backtick fence line
+    whose info text holds a backtick, which is a code span; and a fence-like line
+    indented four or more spaces, which an indented code block or a nested list item
+    holds. Refuse a heading holding a character outside
+    printable ASCII, `*`, `[`, `<`, an entity such as `&amp;`, or a `_` not between
+    two letters or digits, since the rule above is GitHub's for plain ASCII text and
+    these render as other text. Known limits: a repeated heading's `-1` suffix and Setext
+    headings are not produced, and a heading inside a blockquote gives no anchor, so a
+    link to one fails; a fence in a list item closed by a line indented four or more
+    spaces stays open and hides the headings after it, so a link to one fails.
+    """
+    anchors, fence = set(), None
+    for line in text.split('\n'):
+        fence_line = re.match(r'( *)(`{3,}|~{3,})(.*)$', line)
+        if fence_line:
+            indent, run, info = fence_line.groups()
+        if fence:
+            if (fence_line and len(indent) <= 3 and run[0] == fence[0] and len(run) >= len(fence)
+                    and not info.strip()):
+                fence = None
+            continue
+        if fence_line:
+            if len(indent) > 3:
+                raise ValueError(f'fence indented four or more spaces: {line!r}')
+            if run[0] == '`' and '`' in info:
+                raise ValueError(f'code span, not a fence: {line!r}')
+            fence = run
+            continue
+        if re.match(r' *<', line) and not re.fullmatch(r'<!--.*-->', line):
+            raise ValueError(f'raw HTML line: {line!r}')
+        if not re.match(r' *#{1,6}(?:[ \t]|$)', line):
+            continue
+        match = re.fullmatch(r'#{1,6} (.*)', line)
+        heading = re.sub(r'(?:^|[ \t])#+[ \t]*$', '', match[1]).strip() if match else ''
+        if not heading:
+            raise ValueError(f'heading outside the grammar: {line!r}')
+        if not all(' ' <= character <= '~' for character in heading):
+            raise ValueError(f'heading outside printable ASCII: {heading!r}')
+        if re.search(r'[*\[<]|&#?\w+;|(?<![A-Za-z0-9])_|_(?![A-Za-z0-9])', heading):
+            raise ValueError(f'heading markup outside the grammar: {heading!r}')
+        anchors.add(re.sub(r'[^a-z0-9 _-]', '', heading.lower()).replace(' ', '-'))
+    return anchors
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('# Title\n## What you get\n', {'title', 'what-you-get'}),
+    ('## 3. Server configuration\n', {'3-server-configuration'}),
+    ('### Project instructions in `AGENTS.md`\n', {'project-instructions-in-agentsmd'}),
+    ('## Install and administer\n```sh\n# a comment\n```\n', {'install-and-administer'}),
+    ('#hashtag\n####### seven\n', set()),
+    ('## Title ##\n## C# and snake_case\n', {'title', 'c-and-snake_case'}),
+    ('## A & B\n', {'a--b'}),
+    ('~~~\n# not a heading\n~~~\n', set()),
+    ('````md\n```\n# inside\n````\n## After\n', {'after'}),
+    ('- item\n  ```sh\n  # comment\n  ```\n', set()),
+    ('```md\n    ```\n# x\n```\n', set()),
+    ('<!-- dist:exclude -->\n## A\n', {'a'}),
+    ('## Café\n', None),
+    ('## A — B\n', None),
+    ('## **Bold** _it_\n', None),
+    ('## __init__\n', None),
+    ('## See [x](y.md)\n', None),
+    ('## A <kbd>B</kbd>\n', None),
+    ('## A &amp; B\n', None),
+    ('   ## Indented\n', None),
+    ('#\tTab\n', None),
+    ('## ##\n', None),
+    ('<details>\n# x\n</details>\n', None),
+    ('<!--\n# x\n-->\n', None),
+    ('```a`b\n# x\n', None),
+    ('    ```\n# x\n    ```\n', None),
+])
+def test_heading_anchors_accepted_and_refused_forms(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            heading_anchors(text)
+    else:
+        assert heading_anchors(text) == expected
+
+
+DIST_OPEN, DIST_CLOSE = '<!-- dist:exclude -->', '<!-- /dist:exclude -->'
+
+
+def archive_readme(text):
+    """Accepted input: LF Markdown in which every `dist:exclude` marker is a whole
+    line, DIST_OPEN or DIST_CLOSE, alternating from DIST_OPEN and ending on
+    DIST_CLOSE. Returns the README scripts/build-dist.sh writes into the archive: each
+    block from DIST_OPEN through DIST_CLOSE dropped, and every `](.agents/skills/`
+    made `](`. Refuse with ValueError a marker inside a line of other text, two
+    DIST_OPEN or two DIST_CLOSE lines in a row, a DIST_CLOSE first, and a DIST_OPEN
+    never closed, which build-dist.sh would drop to the end of the file. Known limits:
+    the script's squeezing of repeated blank lines is left out, since it changes no
+    link.
+    """
+    kept, inside = [], False
+    for line in text.split('\n'):
+        if line in (DIST_OPEN, DIST_CLOSE):
+            if (line == DIST_OPEN) == inside:
+                raise ValueError(f'unbalanced marker: {line!r}')
+            inside = line == DIST_OPEN
+        elif 'dist:exclude' in line:
+            raise ValueError(f'marker inside a line: {line!r}')
+        elif not inside:
+            kept.append(line)
+    if inside:
+        raise ValueError('an exclude block is never closed')
+    return '\n'.join(kept).replace('](.agents/skills/', '](')
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    (f'a\n{DIST_OPEN}\nb\n{DIST_CLOSE}\nc\n', 'a\nc\n'),
+    ('[x](.agents/skills/awb-init/SKILL.md)\n', '[x](awb-init/SKILL.md)\n'),
+    (f'a\n{DIST_CLOSE}\n', None),
+    (f'{DIST_OPEN}\n{DIST_OPEN}\n{DIST_CLOSE}\n', None),
+    (f'{DIST_OPEN}\nb\n{DIST_CLOSE}\n{DIST_CLOSE}\n', None),
+    (f'{DIST_OPEN}\nb\n', None),
+    (f'text {DIST_OPEN}\n', None),
+    (f' {DIST_OPEN}\nb\n{DIST_CLOSE}\n', None),
+])
+def test_archive_readme_accepted_and_refused_forms(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            archive_readme(text)
+    else:
+        assert archive_readme(text) == expected
+
+
+def unresolved_links(text, source):
+    """Each relative link in text whose path `source` maps to no file, or whose anchor
+    names no heading there; `source` maps a link path to the linked file's text or
+    None, and a bare `#anchor` is read against text itself."""
+    unresolved = []
+    for target in markdown_links(text):
+        if re.match(r'https?://', target):
+            continue
+        path, _, anchor = target.partition('#')
+        linked = source(path) if path else text
+        if linked is None or anchor and anchor not in heading_anchors(linked):
+            unresolved.append(target)
+    return unresolved
+
+
+def tracked_files():
+    listed = subprocess.run(['git', 'ls-files', '-z'], cwd=ROOT, capture_output=True, check=True)
+    return set(listed.stdout.decode('utf-8').split('\0')) - {''}
+
+
+def repository_source(tracked):
+    # A link resolves on GitHub only to a tracked file inside the repository: an absolute path, a path out
+    # of the repository, and an untracked local file name nothing there.
+    def source(path):
+        path = posixpath.normpath(path)
+        return (ROOT / path).read_text(encoding='utf-8') if path in tracked else None
+    return source
+
+
+# scripts/build-dist.sh's archive holds the skill folders at its top level, beside these files.
+ARCHIVE_FILES = ('CHANGELOG.md', 'LICENSE', 'README.md')
+
+
+def archive_source(archive, tracked):
+    # The archive's README.md is the archive copy, so its anchors are read there, not in the repository's.
+    # The script copies only tracked files, and its allowlist names every skill folder.
+    def source(path):
+        if path == 'README.md':
+            return archive
+        if path in ARCHIVE_FILES:
+            return (ROOT / path).read_text(encoding='utf-8')
+        if f'.agents/skills/{path}' in tracked:
+            return (ROOT / '.agents/skills' / path).read_text(encoding='utf-8')
+        return None
+    return source
+
+
+def test_readme_links_resolve():
+    # Every relative link in the repository README names a tracked file, and every anchor a heading in it.
+    text = README.read_text(encoding='utf-8')
+    assert unresolved_links(text, repository_source(tracked_files())) == []
+
+
+def test_archive_readme_links_only_what_the_archive_holds():
+    # build-dist.sh drops the dist:exclude blocks, rewrites skill links, and refuses a docs/ link or a stray
+    # marker in what is left; every link left must name a file the archive holds.
+    archive = archive_readme(README.read_text(encoding='utf-8'))
+    assert '](docs/' not in archive
+    assert unresolved_links(archive, archive_source(archive, tracked_files())) == []
+
+
+def test_unresolved_links_refuse_what_github_and_the_archive_do_not_hold():
+    tracked = tracked_files()
+    repository = repository_source(tracked)
+    outside = f'../{ROOT.name}/README.md'
+    with tempfile.NamedTemporaryFile(dir=ROOT, suffix='.md') as untracked:
+        name = Path(untracked.name).name
+        text = f'[a](/etc/hosts)\n[b]({outside})\n[c]({name})\n[d](README.md)\n[e](./LICENSE)\n'
+        assert unresolved_links(text, repository) == ['/etc/hosts', outside, name]
+    readme = README.read_text(encoding='utf-8')
+    archive = archive_readme(readme)
+    dropped = sorted(heading_anchors(readme) - heading_anchors(archive))
+    assert dropped, 'the archive copy drops no heading'
+    text = archive + f'[x](README.md#{dropped[0]})\n[y](#{dropped[0]})\n[z](README.md#what-you-get)\n'
+    assert unresolved_links(text, archive_source(archive, tracked)) == [f'README.md#{dropped[0]}', f'#{dropped[0]}']
+
+
+def test_readme_opens_with_what_you_get_and_the_analyst_quick_start():
+    # The analyst's page comes first; install and host setup sit in one section below it.
+    text = README.read_text(encoding='utf-8')
+    headings = re.findall(r'^## (.+)$', text, re.M)
+    assert headings[:2] == ['What you get', 'Quick-start for analysts']
+    assert headings.index('Install and administer') > headings.index('Quick-start for analysts')
+    admin = section(text, '## Install and administer').split('\n')
+    for heading in ('### Requirements', '### Install', '#### Shared skills', '#### MCP server',
+                    '#### VS Code Local and package reviewer', '#### Project instructions in AGENTS.md'):
+        assert heading in admin
+
+
+def test_readme_says_what_the_analyst_gets_and_is_asked():
+    text = README.read_text(encoding='utf-8')
+    what = ' '.join(section(text, '## What you get').split())
+    for name in ('findings.md', 'charts/', 'methodology-note.md', 'methodology.md', 'deck-rules.md',
+                 'assembly/m365.md', 'START-HERE.md'):
+        assert f'`{name}`' in what, name
+    # Users expected slides: the package is the deck's sources, and Copilot is one builder of several.
+    assert 'not a .pptx' in what
+    assert 'by hand' in what and 'only for the Copilot route' in what
+    quick = ' '.join(section(text, '## Quick-start for analysts').split())
+    assert 'Python 3.10 or later' in quick
+    for term in ('Canonical view', 'Question ledger', 'Receipt', 'Disposition', 'Review rule'):
+        assert f'**{term}**' in quick, term
+    assert 'asked for a disposition only when a finding the draft shows is flagged' in quick
+    for mode in ('preview-and-wait', 'draft-then-review'):
+        assert mode in quick
+    # The requests come in the order an investigation usually takes them.
+    requests = ['Use awb-init', 'Use awb-scope', 'Use awb-clean', 'Use awb-explore', 'Use awb-status',
+                'Use awb-package', 'Use awb-release']
+    positions = [quick.find(request) for request in requests]
+    assert -1 not in positions and positions == sorted(positions), dict(zip(requests, positions))
+    assert 'awb-brainstorm' in quick
+    # The exchange count is a range from the recorded runs, not a promise.
+    assert '6 to 11' in quick
+    # The package check passes a number listed with its reason, so the limits say so.
+    assert 'traces to a recorded result or is listed, with its reason' in quick
+    # The builder gets only what START-HERE.md lists; datasets and the methods note are not attached.
+    how = ' '.join(section(text, '## How it works').split())
+    assert 'chosen exports' not in how and 'travel beside the deck and are not attached' in how
 
 
 def test_commands_state_the_cli_fallback_scripts_by_path_and_the_interpreter():
