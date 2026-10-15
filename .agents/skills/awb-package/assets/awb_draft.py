@@ -144,9 +144,10 @@ def _evidence_files(root, investigation):
 
 # ---------------------------------------------------------------- Markdown as it renders
 #
-# Every draft check reads findings.md and methodology.md through `_view`, one reading of what renders, so
-# a form that hides text from the reader hides it from every check, and a form that shows text shows it
-# to every check. The reading covers the Markdown subset helpers.md lists. A block form outside it that
+# Every draft check but numbers reads findings.md and methodology.md through `_view`, one reading of what
+# renders, so a form that hides text from the reader hides it from every such check, and a form that shows
+# text shows it to every such check. The numbers check reads source lines (`_unfenced`), as the check-draft
+# help text says. The reading covers the Markdown subset helpers.md lists. A block form outside it that
 # could hide or move text is refused (`markdown_problems`) rather than guessed at, so it never passes.
 
 # One source line as it renders. kind is "text", "heading", "fence" (a code fence's opening line),
@@ -585,7 +586,8 @@ _COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 def _unfenced(path):
     """Yield (line number, line, opens a fence) for each line outside fenced code and HTML comments."""
     text = Path(path).read_text(encoding="utf-8")
-    text = _COMMENT.sub(lambda match: " " + "\n" * match.group(0).count("\n"), text)
+    # A blanked comment keeps every line break str.splitlines() sees, so line numbers match `_view`'s.
+    text = _COMMENT.sub(lambda match: " " + "\n" * (len(match.group(0).splitlines()) - 1), text)
     fence = None
     for number, line in enumerate(text.splitlines(), start=1):
         if fence is not None:
@@ -862,9 +864,16 @@ def _regions(view):
 def question_problems(draft, record: dict) -> list[dict]:
     """List each manifest `results` entry whose question methodology.md does not repeat verbatim.
 
-    Runs of whitespace compare equal, so a wrapped line still matches.
+    methodology.md is read as it renders (`_view`): each paragraph or heading's text as it shows, code spans
+    unwrapped and whitespace collapsed, so a wrapped or formatted question matches and one in a comment or
+    fenced code does not. The question matches as written or rendered the same way, and must fall within one
+    block: as written, so a code span showing it exactly counts though it holds a markup character.
     """
-    methodology = " ".join((Path(draft) / "methodology.md").read_text(encoding="utf-8").split())
+    blocks = {}
+    for line in _read_view(Path(draft) / "methodology.md")[0]:
+        if line.group is not None:
+            blocks.setdefault(line.group, []).append(line.plain)
+    shown = [_collapse(_shown("\n".join(lines))) for lines in blocks.values()]
     entries = record.get("results")
     if not isinstance(entries, list):
         return [{"result_id": None, "problem": "the manifest records no results list; run export"}]
@@ -875,9 +884,13 @@ def question_problems(draft, record: dict) -> list[dict]:
         if not isinstance(question, str) or not question.strip():
             problems.append({"result_id": result_id, "problem": "the manifest records no question for this "
                              "result; run export, or copy its question from settings into a hand-added entry"})
-        elif " ".join(question.split()) not in methodology:
+            continue
+        # As written, or rendered as methodology.md is, so a question in a code span keeps its markup characters.
+        forms = [form for form in (_collapse(question), _collapse(_shown(_inline(question)[0]))) if form]
+        if not any(form in block for block in shown for form in forms):
             problems.append({"result_id": result_id, "question": question,
-                             "problem": "methodology.md does not repeat this question verbatim"})
+                             "problem": "methodology.md does not repeat this question verbatim in text that "
+                                        "renders, within one paragraph or heading"})
     return problems
 
 
@@ -1018,6 +1031,11 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
     states its strength on one `**Claim strength:**` line, a causal one as its results' Claim cell.
     Both files are read as they render (`_view`).
     """
+    return _claim_review(draft, represented, claims)[0]
+
+
+def _claim_review(draft, represented, claims):
+    """claim_problems' rows, and the methodology.md line numbers of the **Claim strength:** lines it accepts."""
     draft = Path(draft)
     levels = {result: _level(cell) for result, cell in claims.items()}
     rows = [{"result": r, "problem": "state.md has no findings row with a claim strength for this result"
@@ -1027,13 +1045,15 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
     sections = {}
     for level, heading, _, lines in _regions(_read_view(draft / "methodology.md")[0]):
         if level == 3:
-            section = sections.setdefault(heading, {"text": [], "declared": []})
+            section = sections.setdefault(heading, {"text": [], "declared": [], "lines": []})
             section["text"] += [" ".join([line.plain, *line.links]) for line in lines]
-            section["declared"] += [_claim_text(m[1]) for line in lines
-                                    if line.declares and (m := _CLAIM_LINE.match(line.plain))]
+            for line in lines:
+                if line.declares and (match := _CLAIM_LINE.match(line.plain)):
+                    section["declared"].append(_claim_text(match[1]))
+                    section["lines"].append(line.number)
     known = [levels[r] for r in represented if levels.get(r)]
     deck = max(known, key=_CLAIMS.index) if known else _CLAIMS[0]
-    declared = set()
+    declared, accepted = set(), set()
     for level, heading, first, lines in _regions(_read_view(draft / "findings.md")[0]):
         if level == 2 and heading in _UNCHECKED:
             continue
@@ -1042,9 +1062,11 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
             cited = _cited("\n".join(section["text"]) if section else "", represented) or list(represented)
             ceiling = _weakest(cited, levels)
             problem = None if heading in declared else _declaration_problem(section, cited, ceiling, claims)
-            declared.add(heading)
             if problem:
                 rows.append({"section": heading, "problem": f"{problem}; its results support {ceiling}"})
+            elif heading not in declared:
+                accepted.update(section["lines"])
+            declared.add(heading)
         else:
             cited, ceiling = list(represented), deck
         if ceiling == "causal":
@@ -1057,7 +1079,7 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
                          "problem": f"causal wording above the {ceiling} claim strength; reword it, since only "
                                     "an experiment or an identified natural experiment supports a causal claim"
                                     + ("; reword the methodology.md heading to match" if in_heading else "")})
-    return rows
+    return rows, accepted
 
 
 # ---------------------------------------------------------------- numbers in the narratives
@@ -1065,7 +1087,8 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
 NARRATIVES = ("findings.md", "methodology.md")
 # Reading fails safe: a number is skipped only in one of the contexts below, each of which marks it as no
 # quantity; every other number is read, so a doubtful one becomes a row the author clears by rewording or
-# by allowing it. references/helpers.md states the same list.
+# by allowing it. check_numbers also skips the accepted **Claim strength:** lines it is given (`claim_lines`),
+# whose numbers repeat the record. references/helpers.md states the same list, those lines last.
 _MONTH = (r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
           r"|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?")
 _DAY = r"(?:3[01]|[12][0-9]|0?[1-9])"
@@ -1368,18 +1391,20 @@ def _continues(previous, line):
     return int(numbered.group(1)) != 1 and not re.match(starts, previous)
 
 
-def check_numbers(path: str | os.PathLike, values, *, allowed=()) -> list[dict]:
+def check_numbers(path: str | os.PathLike, values, *, allowed=(), claim_lines=()) -> list[dict]:
     """List each number in a narrative file that no recorded value rounds to and `allowed` does not cover.
 
     `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
     text is written around it, matched on the text the number is read from, so any whitespace or a line
     wrap matches a space: a bare `40` covers every 40, and `Week 23` only that 23. A number is skipped
-    only in a context references/helpers.md lists; every other number is read.
+    only in a context references/helpers.md lists; every other number is read. `claim_lines` are the line
+    numbers of the **Claim strength:** lines the claims check accepts (`_claim_review`): each repeats a
+    state.md Claim cell, so its numbers trace to the record.
     """
     patterns = [re.compile(r"\s+".join(map(re.escape, text.split()))) for text in allowed if text.strip()]
     rows, lines = [], list(_unfenced(path))
     for index, (number, line, opens) in enumerate(lines):
-        if opens:
+        if opens or number in claim_lines:
             continue
         previous = lines[index - 1] if index and lines[index - 1][0] == number - 1 else None
         following = lines[index + 1] if index + 1 < len(lines) and lines[index + 1][0] == number + 1 else None
@@ -1497,6 +1522,8 @@ def compare_trees(local_dir: str | os.PathLike, copy_dir: str | os.PathLike) -> 
 
 # A chart specification is a paragraph, or a list item, that renders opening with "Chart N."; its fields
 # are the list items directly under it, each opening with its field name, until a blank line follows one.
+# An item nested deeper than the fields, a blank line before it or not, or a later paragraph inside a field,
+# is kept on the chart as "inside" and reported by `check_charts`; the fields go on after it.
 _CHART_SPEC = re.compile(r"[ \t]*Chart (\d+)\.(?=\s|$)")
 _CHART_FIELD = re.compile(r"(Data|Highlight|Axis|Interval|Source|Caveat|Alt text):(?=\s|$)\s*(.*)")
 _HEADLINE = re.compile(r"Headline:(?=\s|$)\s*(.*)")
@@ -1523,7 +1550,9 @@ def _blocks(lines):
 
     kind is "paragraph", "item" (a list item, depth 1 at the top level), or "heading" (level 4 to 6). first is
     the opening line's plain text, which the chart check reads as `check_charts` always has; text is the
-    whole block as it shows, whitespace collapsed. gap marks a blank line before the block.
+    whole block as it shows, whitespace collapsed. gap marks a blank line before the block. An item that
+    holds later paragraphs, a block quote's included, lists their first lines in "paragraphs"; a paragraph
+    records in "listed" the list depth it sits in, 0 outside every list.
     """
     blocks, gap = [], False
     for line in lines[1:] if lines and lines[0].kind == "heading" and 1 <= lines[0].level <= 3 else lines:
@@ -1544,8 +1573,10 @@ def _blocks(lines):
                                                      or blocks[-1]["kind"] != "item"
                                                      or blocks[-1]["depth"] != line.listed)):
             blocks.append({"kind": "paragraph", "line": line.number, "depth": 0, "first": line.plain,
-                           "text": text, "gap": gap})
+                           "text": text, "gap": gap, "listed": line.listed})
         elif text:
+            if line.start:
+                blocks[-1].setdefault("paragraphs", []).append(line.number)
             blocks[-1]["text"] = _collapse(f"{blocks[-1]['text']} {text}")
         else:
             gap = True
@@ -1559,7 +1590,7 @@ def _chart(block):
     written, _, comparison = re.sub(r"^Chart \d+\.", "", block["text"]).partition(":")
     written = _collapse(written)
     return {"number": number, "line": block["line"], "form": _FORM_NAMES.get(written.lower()),
-            "written": written, "comparison": comparison.strip(), "fields": {}, "slide": None}
+            "written": written, "comparison": comparison.strip(), "fields": {}, "inside": [], "slide": None}
 
 
 def _slide(heading, first, lines):
@@ -1567,16 +1598,27 @@ def _slide(heading, first, lines):
     blocks = _blocks(lines)
     slide = {"line": first, "heading": heading, "opening": blocks[0]["line"] if blocks else None, "headlines": [],
              "bullets": [], "notes": [], "after_notes": None, "charts": [], "extra": []}
-    chart = None
+    chart = depth = None  # depth: the open chart's field depth, set by its first field
     for block in blocks:
         if slide["notes"] and slide["after_notes"] is None:
             slide["after_notes"] = block["line"]
         text = block["text"]
-        if chart is not None and block["kind"] == "item" and not (block["gap"] and chart["fields"]) \
-                and (field := _CHART_FIELD.match(text)) and field[1] not in chart["fields"]:
-            chart["fields"][field[1]] = field[2].strip()
+        # An item deeper than the fields renders inside the last one, a blank line before it or not, and so does
+        # a paragraph at the fields' list depth or deeper that a nested item kept from joining its field.
+        if chart is not None and depth is not None and (
+                block["kind"] == "item" and block["depth"] > depth
+                or block["kind"] == "paragraph" and block["listed"] >= depth and not _CHART_SPEC.match(block["first"])):
+            chart["inside"].append({"line": block["line"], "field": list(chart["fields"])[-1], "kind": block["kind"]})
             continue
-        chart = None
+        if chart is not None and block["kind"] == "item" and not (block["gap"] and chart["fields"]):
+            if (depth is None or block["depth"] == depth) and (field := _CHART_FIELD.match(text)) \
+                    and field[1] not in chart["fields"]:
+                chart["fields"][field[1]] = field[2].strip()
+                chart["inside"] += [{"line": line, "field": field[1], "kind": "paragraph"}
+                                    for line in block.get("paragraphs", [])]
+                depth = block["depth"]
+                continue
+        chart = depth = None
         if block["kind"] != "heading" and _CHART_SPEC.match(block["first"]):
             chart = _chart(block)
             slide["charts"].append(chart)
@@ -1603,8 +1645,9 @@ def parse_outline(text: str) -> dict:
     "bullets", "notes", "chart", ...}, where headline is the `###` heading or the first **Headline:** text,
     bullets are {"line", "text", "sub"} with nested items in sub, notes is the first **Notes:** text, and
     chart is the slide's first chart number. charts lists every chart specification in file order:
-    {"number", "line", "form", "written", "comparison", "fields", "slide"}, form being the canonical
-    CHART_FORMS name or None, fields each field's text by name, and slide the index of its slide in
+    {"number", "line", "form", "written", "comparison", "fields", "inside", "slide"}, form being the
+    canonical CHART_FORMS name or None, fields each field's text by name, inside each nested "item" or
+    later "paragraph" in a field as {"line", "field", "kind"}, and slide the index of its slide in
     slides, or None on the title slide or outside any slide. stray lists text outside every slide, and
     any second `#` heading, as {"where", "line", "text"}. The remaining slide keys keep what the checks report:
     every **Headline:** and **Notes:** paragraph, the first block after the notes, every chart, and text
@@ -1750,7 +1793,8 @@ def chart_data(chart: dict) -> tuple[list, list[str]]:
     roles = Counter(role for role, _ in pairs)
     for role in roles:
         if role not in allowed:
-            problems.append(f"**Data:** role {role} is not one a {form} takes ({', '.join(allowed)})")
+            problems.append(f"**Data:** role {role} is not one a {form} takes ({', '.join(allowed)})"
+                            + (_intervals_note(form) if role in ("lower", "upper") else ""))
         elif roles[role] > 1 and role not in repeated:
             problems.append(f"**Data:** names more than one {role} column")
     for role in needed:
@@ -1863,8 +1907,32 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
             for header in headers[chart["number"]] if pairs else []:
                 if header not in named:
                     rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv column {header!r} is "
-                                 "named by no **Data:** role; name it, or export the chart without it"})
+                                 f"named by no **Data:** role; name it{_by_role(chart['form'])}, or export the "
+                                 "chart without it" + _intervals_note(chart["form"], column=True)})
+        # Text nested in a field renders inside it, where a builder reads it as the field's or drops it.
+        for inside in chart["inside"]:
+            what = (f"an item at line {inside['line']} is nested under" if inside["kind"] == "item"
+                    else f"a paragraph at line {inside['line']} continues")
+            rows.append({"chart": label, "problem": f"{what} the **{inside['field']}:** field; a field is one "
+                                                    "paragraph, so join it to the field or move it below the "
+                                                    "specification as a slide bullet, after a blank line"})
     return rows
+
+
+def _by_role(form):
+    if form is None:
+        return ""
+    needed, optional, _ = CHART_FORMS[form]
+    return f" by a role a {form} takes ({', '.join(needed + optional)})"
+
+
+def _intervals_note(form, column=False):
+    """The fix for interval columns on a form that plots values without them; an unnamed column may hold none."""
+    needed = CHART_FORMS[form][0] if form else ()
+    if "value" not in needed or "lower" in needed:
+        return ""
+    return (f"; if it holds interval bounds, a {form} draws none, so use a Bar with intervals" if column
+            else f"; a {form} draws no intervals, so interval columns need a Bar with intervals")
 
 
 # ---------------------------------------------------------------- check-draft
@@ -2072,7 +2140,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         claims = None
         report["errors"].append(f"claims: {error}")
 
-    record = None
+    record, claim_lines = None, set()
     try:
         path = draft / MANIFEST
         if not path.is_file():
@@ -2089,7 +2157,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             raise ValueError(f"{MANIFEST} records no results list; rerun export")
         if claims is not None:
             try:
-                report["claims"] = claim_problems(draft, [r["result_id"] for r in represented], claims)
+                report["claims"], claim_lines = _claim_review(draft, [r["result_id"] for r in represented], claims)
             except (OSError, UnicodeError) as error:
                 report["errors"].append(f"claims check: {error}")
         if provenance is not None:
@@ -2113,14 +2181,16 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     except (OSError, ValueError) as error:
         report["errors"].append(f"manifest: {error}")
 
-    # Every number in either narrative traces to a represented result or is allowed with a reason.
+    # Every number in either narrative traces to a represented result or is allowed with a reason; a Claim
+    # strength line the claims check accepts repeats state.md and is skipped.
     if record is not None:
         allowed, problems = allowed_numbers(record)
         values, more = recorded_values(root, investigation, record.get("results"))
         report["numbers_problems"], report["numbers"] = problems + more, []
         for name in NARRATIVES:
             try:
-                report["numbers"] += check_numbers(draft / name, values, allowed=allowed)
+                report["numbers"] += check_numbers(draft / name, values, allowed=allowed,
+                                                   claim_lines=claim_lines if name == "methodology.md" else ())
             except (OSError, UnicodeError) as error:
                 report["errors"].append(f"numbers check: {error}")
 
@@ -2155,7 +2225,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "open_questions_count is the required count, including parked questions and answers awaiting recheck.\n"
                "charts lists, as chart and problem, a specification numbered out of order, without "
                "a file, or without a form from deck-rules.md; a **Data:** line missing, malformed, or not naming "
-               "its form's roles; a column it names that the file lacks; and a chart file without a "
+               "its form's roles; a column it names that the file lacks, and a column of the file that it names by "
+               "no role; an item nested under a field or a second paragraph in one; and a chart file without a "
                "specification or data rows, or a foreign file.\nclaims lists each causal phrase (line, section, phrase, claim, results) "
                "in a findings.md slide, heading included, above its claim strength: a ### finding slide is held to the weakest "
                "Claim in state.md among the results its methodology.md section cites (all represented results "
@@ -2168,19 +2239,22 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "lists each form outside the Markdown subset the checks read, which could hide text or move "
                "it between slides: a heading, fence, comment, or **Claim strength:** line inside a list or quote; "
                "an indented fence or comment; a setext heading; indented code; an HTML block or inline tag; a link "
-               "reference definition; an unclosed fence or comment. Every check but numbers and questions reads "
-               "both files as they render."
+               "reference definition; an unclosed fence or comment. Every check but numbers reads both files as "
+               "they render."
                "\nnumbers lists, as file, line, and text, each number in findings.md or "
                "methodology.md that no represented result's table, profile, check details, or settings round to "
-               "and the manifest's allowed_numbers does not cover by its text or a phrase around it; "
-               "numbers_problems names a missing table, an unreadable table, profile, or evidence file, or a "
-               "malformed results or allowed_numbers.\n"
+               "and the manifest's allowed_numbers does not cover by its text or a phrase around it, reading source "
+               "lines without comments or fenced code, and skipping a methodology.md **Claim strength:** line the "
+               "claims check accepts, whose numbers repeat state.md's Claim cell; numbers_problems names a missing "
+               "table, an unreadable table, profile, or evidence file, or a malformed results or allowed_numbers.\n"
                "unmatched_flags lists each finding state.md flags whose exact finding and reason the manifest's "
                "revalidation_flags does not record.\nflag_entries lists a "
                "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
                "that is neither none nor a list of places, and an unknown disposition.\nquestions lists each "
                "manifest results entry without a question, or whose question methodology.md does not repeat "
-               "verbatim.\nExit 0 only when names_problems, findings, outline, charts, headings, markdown, claims, "
+               "verbatim within one paragraph or heading as it renders, the question read as written or rendered the "
+               "same way: a code span counts, and a question in a comment or fenced code does not count.\nExit 0 only when names_problems, findings, outline, charts, "
+               "headings, markdown, claims, "
                "questions, storyline, open_questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
                "are all empty.")
     _package_arguments(parser)
