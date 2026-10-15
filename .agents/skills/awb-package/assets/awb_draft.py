@@ -1172,9 +1172,12 @@ _EXTENSIONS = "md|py|csv|tsv|parquet|jsonl?|sql|png|svg|jpe?g|pdf|html?|duckdb|d
 _FILE = re.compile(rf"(?<![\w.,/\\-])[\w-]*\w\.(?:{_EXTENSIONS})(?![\w/\\])")
 _HYPHENATED = re.compile(r"(?<![\w.-])([A-Za-z_]\w*)(?:-\w+)+")
 # A DOI: 10., a registrant code of four to nine digits with any dot-separated parts, a slash, and its suffix,
-# after doi: or DOI, or bare when its suffix holds a digit; a bare 10.2500/litre is a quantity, so it is read.
-_DOI = re.compile(r"(?i:\bdoi)(?::\s*|\s+)10\.[0-9]{4,9}(?:\.[0-9]+)*/\S+"
-                  r"|(?<![\w.])10\.[0-9]{4,9}(?:\.[0-9]+)*/\S*[0-9]\S*")
+# which runs to the next whitespace or to a , or ; before a digit, after doi: or DOI, or bare when its
+# suffix holds both a letter and a digit; a bare 10.2500/litre or 10.2500/1000 is a quantity, so it is read.
+_DOI_SUFFIX = r"(?:[^\s,;]|[,;](?![0-9]))"
+_DOI = re.compile(rf"(?i:\bdoi)(?::\s*|\s+)10\.[0-9]{{4,9}}(?:\.[0-9]+)*/{_DOI_SUFFIX}+"
+                  rf"|(?<![\w.])10\.[0-9]{{4,9}}(?:\.[0-9]+)*/(?={_DOI_SUFFIX}*?[A-Za-z])(?={_DOI_SUFFIX}*?[0-9])"
+                  rf"{_DOI_SUFFIX}+")
 
 
 def _path(token):
@@ -2057,7 +2060,7 @@ def _intervals_note(form, column=False):
 
 # ---------------------------------------------------------------- check-draft
 
-def storyline_problems(root, investigation, draft, represented, provenance, order=None):
+def storyline_problems(root, investigation, draft, represented, provenance, order="none"):
     """Accepted input: the outline reader's Markdown subset (references/helpers.md), with ### finding headlines matched
     exactly to ### methodology headings. The matching section names represented results using
     the existing _cited grammar (bounded result IDs or evidence/<ID>.json links, outside
@@ -2079,7 +2082,8 @@ def storyline_problems(root, investigation, draft, represented, provenance, orde
     `order` is the manifest's presentation_order. When it is a list it decides the order instead: each
     entry is a finding slide's heading, read as inline Markdown as the heading is, and the list holds
     every finding slide, main and appendix, exactly once, in deck order. A list entry that is not
-    non-blank text makes the whole field malformed; absent and "none" leave the ledger order in force.
+    non-blank text makes the whole field malformed, as does any other value, JSON null included; absent
+    and "none" leave the ledger order in force.
     """
     tree = provenance.question_tree(root, investigation)
     ranks = {q["id"]: (("must", "should", "could").index(q["priority"]), position)
@@ -2101,7 +2105,7 @@ def storyline_problems(root, investigation, draft, represented, provenance, orde
         if question is None:
             unlinked.append(slide["heading"])
         ranked.append((ranks[question] if question else (3, 0), slide, question))
-    if order is not None and order != "none":
+    if order != "none":
         return _order_problems(order, [slide for _, slide, _ in ranked]), unlinked
     main = [entry for entry in ranked if not entry[1]["appendix"]]
     behind = [entry for entry in ranked if entry[1]["appendix"]]
@@ -2343,7 +2347,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             try:
                 report["storyline"], report["unlinked_findings"] = storyline_problems(
                     root, investigation, draft, [r["result_id"] for r in represented], provenance,
-                    record.get("presentation_order"))
+                    record.get("presentation_order", "none"))
             except (OSError, ValueError, AttributeError) as error:
                 report["errors"].append(f"storyline check: {error}")
         if not verify_only:
