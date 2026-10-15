@@ -47,6 +47,7 @@
 # test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section and its wording is not read; an appendix finding slide is held to its claim strength.
 # test_presentation_order_decides_finding_order_when_set: absent or none leaves the ledger order; a non-ledger order the slides follow passes, inline markup read as the heading is; an order missing a finding, listing one twice, naming a heading no slide has, out of the slides' order, not a list, or holding a blank entry fails storyline in both modes.
 # test_export_keeps_presentation_order: export keeps the hand-recorded presentation_order.
+# test_presentation_order_is_no_provenance_gap: a presentation_order heading that starts with Unknown is no release provenance gap, as allowed_numbers is not.
 # test_storyline_orders_main_and_appendix_findings_each_by_the_ledger: main and appendix finding slides are ranked separately, the appendix numbering on.
 # test_open_questions_follows_how_we_know_when_limitations_is_in_the_appendix: with Limitations under ## Appendix, Open questions passes after How we know and fails before it.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
@@ -2034,6 +2035,12 @@ def test_export_keeps_presentation_order(project, capsys):
     ordered_deck(project, ORDER, ORDER)
     code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
     assert code == 0 and report["written"] and manifest(project)["presentation_order"] == ORDER
+
+
+def test_presentation_order_is_no_provenance_gap():
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_order_gaps")
+    record = {"presentation_order": ["Unknown regions hold few late orders"], "producing_commit": "unknown"}
+    assert draft.provenance_gaps(record) == [{"field": "producing_commit", "reason": "unknown"}]
 
 
 def test_storyline_orders_main_and_appendix_findings_each_by_the_ledger(project, capsys):

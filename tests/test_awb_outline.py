@@ -6,7 +6,7 @@
 # test_outline_passes_without_implications: a deck without Implications passes, and one with it passes too.
 # test_outline_requires_its_slides_in_order: a deck without How we know, Limitations, or Answer, with Answer not first, without a finding slide in the main sequence, with How we know before a finding or Limitations before How we know, or with a required slide repeated gives one row for each, a missing slide's line null.
 # test_appendix_slides_parse_in_order_and_count_separately: ## Appendix ### slides parse in order, a template slide's name making that slide rather than a finding, are marked appendix and counted apart from the main sequence, and a required slide there still counts.
-# test_appendix_rows: text before the appendix's first slide, a ## slide after it, a main-sequence slide placed in it, an empty appendix, an appendix slide without its headline, and every finding moved into it give their rows.
+# test_appendix_rows: text before the appendix's first slide, a ## slide after it, a main-sequence slide placed in it, an empty appendix, an appendix slide without its headline, every finding moved into it, a ### finding slide under a ## Findings reopened after it, a second ## Appendix, and Limitations before How we know in it give their rows.
 # test_chart_data_reads_roles: role: header pairs in order, case-insensitive roles, headers kept whole, colons in a header kept.
 # test_check_charts_every_form_passes: a specification in each of the seven forms, its Data line naming that form's roles, and a file with those columns passes.
 # test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, a column the file lacks, and a file column no role names give one row each.
@@ -279,6 +279,7 @@ APPENDIX = """
 # DECK with How we know moved under ## Appendix, after one more finding slide.
 MOVED = DECK.replace(HOW, "") + APPENDIX
 NEXT_STEPS = "\n## Next steps\n\n**Headline:** Staff the west queue first\n\n**Notes:** The queue is the decision.\n"
+SOUTH = "\n### Late claims fell in the south\n\n- South closed 3% of claims late.\n\n**Notes:** The south is small.\n"
 
 
 def line_of(text, marker, occurrence=1):
@@ -366,8 +367,19 @@ def test_appendix_slides_parse_in_order_and_count_separately(tmp_path):
      [("How we know", "### How we know", "no **Headline:** line; open the slide with one")]),
     (DECK.replace("## Findings\n\n" + FINDING_SLIDES, "") + "\n## Appendix\n\n" + FINDING_SLIDES,
      [("Findings", None, "no ### finding slide in the main sequence; keep at least one under ## Findings")]),
+    (MOVED + "\n## Findings\n" + SOUTH,
+     [("Late claims fell in the south", "### Late claims fell in the south",
+       "a ### finding slide after ## Appendix; the appendix ends the deck, so move it under ## Findings before "
+       "## Appendix, or under ## Appendix")]),
+    (MOVED + "\n## Appendix\n" + SOUTH,
+     [("Appendix", "## Appendix\n\n### Late claims fell in the south",
+       "a second ## Appendix; the deck has one appendix, so merge them")]),
+    (DECK.replace(HOW, "").replace("\n" + LIMITS, "") + "\n## Appendix\n\n"
+     + LIMITS.replace("## Limitations", "### Limitations") + "\n" + HOW.replace("## How we know", "### How we know"),
+     [("Limitations and open caveats", "### Limitations",
+       "Limitations and open caveats comes after How we know under ## Appendix; move it below How we know")]),
 ], ids=["text before first slide", "slide after appendix", "main-only section", "empty", "section without headline",
-        "every finding moved"])
+        "every finding moved", "finding after appendix", "second appendix", "limitations before how we know"])
 def test_appendix_rows(tmp_path, text, expected):
     rows = draft.outline_problems(package(tmp_path, text))
     assert [(r["slide"], r["line"], r["problem"]) for r in rows] == [

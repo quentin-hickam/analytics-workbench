@@ -1538,11 +1538,12 @@ _CHART_FIELD = re.compile(r"(Data|Highlight|Axis|Interval|Source|Caveat|Alt text
 _HEADLINE = re.compile(r"Headline:(?=\s|$)\s*(.*)")
 _NOTES = re.compile(r"Notes:(?=\s|$)\s*(.*)")
 _FINDINGS_SECTION = "Findings"
-# ## Appendix, like ## Findings, holds ### slides; it follows the main sequence and ends the deck.
+# ## Appendix, like ## Findings, holds ### slides; a deck has one, which follows the main sequence and ends it.
 _APPENDIX_SECTION = "Appendix"
 # The template's other ## slides. Under ## Appendix a ### slide with one of these headings is that slide,
 # not a finding; only _MOVABLE ones may stand there. _REQUIRED must each appear once, in this order,
-# with at least one finding slide in the main sequence after Answer.
+# with at least one finding slide in the main sequence after Answer; How we know or Limitations and open
+# caveats may move to the appendix, keeping this order when both do.
 _SECTIONS = ("Answer", "Implications", "How we know", "Limitations and open caveats", "Open questions",
              "What changed since the last version", "Supporting datasets")
 _MOVABLE = ("How we know", "Limitations and open caveats", "Supporting datasets")
@@ -1727,8 +1728,9 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
     ends it, and holds nothing else. The title slide is the `#` heading with its subtitle line; a `###`
     finding slide sits under ## Findings or ## Appendix. The deck holds each _REQUIRED slide once: Answer
     first after the title, then at least one finding slide, with How we know and then Limitations and open
-    caveats after the finding slides or under ## Appendix, which ends the deck and holds only _MOVABLE
-    template slides besides findings.
+    caveats after the finding slides or under ## Appendix, How we know first when both stand in the same
+    part. The deck holds one ## Appendix, which ends it and holds only _MOVABLE template slides besides
+    findings.
     """
     outline = read_outline(findings_path)
     rows = []
@@ -1758,7 +1760,10 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
         name, line = slide["heading"], slide["line"]
         if slide["finding"] and slide["section"] not in (_FINDINGS_SECTION, _APPENDIX_SECTION):
             row(name, line, "a ### finding slide outside the ## Findings section; move it under ## Findings")
-        if not slide["finding"] and not slide["appendix"] and opens is not None and line > opens:
+        elif slide["finding"] and not slide["appendix"] and opens is not None and line > opens:
+            row(name, line, "a ### finding slide after ## Appendix; the appendix ends the deck, so move it under "
+                            "## Findings before ## Appendix, or under ## Appendix")
+        elif not slide["appendix"] and opens is not None and line > opens:
             row(name, line, "a ## slide after ## Appendix; the appendix ends the deck, so move this slide before it")
         if slide["appendix"] and not slide["finding"] and name not in _MOVABLE:
             row(name, line, f"{name} stays in the main sequence; make it a ## slide before ## Appendix")
@@ -1793,9 +1798,13 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
             row(name, slide["after_notes"], "text after the **Notes:** paragraph; the notes end the slide")
 
     # The required slides: Answer opens the main sequence, which holds at least one finding slide; How we
-    # know and then Limitations follow the finding slides there, or stand under ## Appendix.
-    main = [slide for slide in outline["slides"] if not slide["appendix"]]
-    findings = [index for index, slide in enumerate(main) if slide["finding"]]
+    # know and then Limitations follow the finding slides there, or stand under ## Appendix, How we know
+    # first when both stand in the same part. Positions are in deck order; a finding slide after ## Appendix
+    # has its own row above, so it moves no required slide.
+    slides = outline["slides"]
+    main = [slide for slide in slides if not slide["appendix"]]
+    findings = [index for index, slide in enumerate(slides) if slide["finding"] and not slide["appendix"]
+                and (opens is None or slide["line"] < opens)]
     placed = {}
     for name in _REQUIRED:
         given = [slide for slide in outline["slides"] if not slide["finding"] and slide["heading"] == name
@@ -1814,15 +1823,20 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
         if not given:
             row(name, None, f"no {name} slide; add it after the finding slides, or under ## Appendix")
             continue
-        if given[0]["appendix"]:
-            continue
-        placed[name] = position = next(i for i, slide in enumerate(main) if slide is given[0])
-        if name == "How we know" and findings and position < findings[-1]:
-            row(name, given[0]["line"], "How we know comes after the finding slides; move it below them")
-        elif name != "How we know" and (findings and position < findings[-1]
-                                        or position < placed.get("How we know", -1)):
+        placed[name] = position = next(i for i, slide in enumerate(slides) if slide is given[0])
+        appendix = given[0]["appendix"]
+        known = placed.get("How we know")
+        if name == "How we know":
+            if not appendix and findings and position < findings[-1]:
+                row(name, given[0]["line"], "How we know comes after the finding slides; move it below them")
+        elif not appendix and (findings and position < findings[-1]
+                               or known is not None and not slides[known]["appendix"] and position < known):
             row(name, given[0]["line"], f"{name} comes after the finding slides and How we know; move it below them")
-    for entry in outline["appendix"]:
+        elif appendix and known is not None and slides[known]["appendix"] and position < known:
+            row(name, given[0]["line"], f"{name} comes after How we know under ## Appendix; move it below How we know")
+    for index, entry in enumerate(outline["appendix"]):
+        if index:
+            row(_APPENDIX_SECTION, entry["line"], "a second ## Appendix; the deck has one appendix, so merge them")
         if not entry["slides"]:
             row(_APPENDIX_SECTION, entry["line"], "## Appendix holds no slide; add ### slides under it or remove it")
     return rows
@@ -2313,15 +2327,17 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "a missing, repeated, empty, or over-15-word headline, more than five bullets except on Open questions, more than one chart, "
                "text that is no headline, bullet, chart, or notes, and a missing, repeated, or non-final **Notes:** "
                "paragraph; a missing, repeated, or misplaced required slide (Answer first after the title, a finding "
-               "slide in the main sequence, then How we know and Limitations and open caveats, which may stand "
-               "under ## Appendix instead), its line null when missing; and a ## slide after ## Appendix, an "
-               "appendix slide that stays in the main sequence, or an empty ## Appendix. slides counts the main "
-               "sequence's slides, title included, and the appendix's.\nstoryline lists the finding slides to "
-               "move, those outside the longest run already in priority/tree order, the main sequence and the "
-               "appendix each ranked alone, each with its expected position; when the manifest's "
+               "slide in the main sequence, then How we know and Limitations and open caveats, either of which may "
+               "stand under ## Appendix instead, How we know first when both stand in the main sequence or both "
+               "under ## Appendix), its line null when missing; and a slide after ## Appendix outside it, a second "
+               "## Appendix, an appendix slide that stays in the main sequence, or an empty ## Appendix. slides "
+               "counts the main sequence's slides, title included, and the appendix's.\nstoryline lists the "
+               "finding slides to move, those outside the longest run already in priority/tree order, the main "
+               "sequence and the appendix each ranked alone, each with its expected position; when the manifest's "
                "presentation_order is a list it ranks every finding slide instead, and storyline also lists a "
                "malformed order, a heading it repeats or that no finding slide has, and a finding slide it misses. "
-               "unlinked_findings names slides with no declared ledger answer, which go last and are informational.\n"
+               "unlinked_findings names slides with no declared ledger answer, which go last without a "
+               "presentation_order; it is informational.\n"
                "open_questions lists presence, placement, and exact-question-bullet problems on Open questions; "
                "open_questions_count is the required count, including parked questions and answers awaiting recheck.\n"
                "charts lists, as chart and problem, a specification numbered out of order, without "
@@ -3090,7 +3106,7 @@ def provenance_gaps(record: dict) -> list[dict]:
                 walk(item, f"{path}[{index}]")
 
     for key, value in record.items():
-        if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers"}:
+        if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers", "presentation_order"}:
             walk(value, key)
     return gaps
 

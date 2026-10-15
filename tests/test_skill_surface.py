@@ -208,11 +208,15 @@ def test_headline_checkpoint_names_both_modes_and_never_waits_unconditionally():
     package = (ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8')
     contract = (ROOT / '.agents/skills/awb-package/references/package-contract.md').read_text(encoding='utf-8')
     brief = (ROOT / '.agents/skills/awb-init/assets/workbench/investigation/brief.md').read_text(encoding='utf-8')
+    # The current request comes before a mode the brief recorded for an earlier package.
+    precedence = ("the mode the request states; **draft-then-review** when the request supplies the storyline or "
+                  "asks for the full draft; the mode the brief's **Audience** section records; **preview-and-wait**")
     for text in (package, contract):
         assert '**preview-and-wait**' in text and '**draft-then-review**' in text
+        assert precedence in ' '.join(text.split())
     assert 'preview-and-wait' in brief and 'draft-then-review' in brief
-    retired = 'wait for their answer before expanding the slides'
-    offenders = [str(path.relative_to(ROOT)) for path in sorted((ROOT / '.agents/skills').rglob('*'))
+    retired = ('wait for their answer before expanding the slides', "and wait for the user's approval or reorder")
+    offenders = [(str(path.relative_to(ROOT)), phrase) for path in sorted((ROOT / '.agents/skills').rglob('*'))
                  if path.is_file() and path.suffix in ('.md', '.py')
-                 and retired in ' '.join(path.read_text(encoding='utf-8').split())]
+                 for phrase in retired if phrase in ' '.join(path.read_text(encoding='utf-8').split())]
     assert offenders == []

@@ -42,10 +42,10 @@ When a brief section names a ledger question ID, resolve it with that list. An `
 
 ### The headline checkpoint
 
-For each required question whose text is not in the audience's words, set audience wording with `python3 src/awb.py questions edit Q-NNN --audience "<wording>"`, leaving its text unchanged. A new draft, or a changed storyline, passes the checkpoint in the mode the **Audience** section records, otherwise **draft-then-review** when the request supplies the storyline or asks for the full draft, and **preview-and-wait** when it does not:
+For each required question whose text is not in the audience's words, set audience wording with `python3 src/awb.py questions edit Q-NNN --audience "<wording>"`, leaving its text unchanged. A new draft, or a changed storyline, passes the checkpoint in the first of these modes that applies: the mode the request states; **draft-then-review** when the request supplies the storyline or asks for the full draft; the mode the brief's **Audience** section records; **preview-and-wait**.
 
 - **preview-and-wait**: write the title slide and every slide headline in storyline order, the conditional **Open questions** slide included, show them, and write the full slides once the user approves or reorders them.
-- **draft-then-review**: write the full draft, then show its headlines, marked provisional, for the user to approve or reorder.
+- **draft-then-review**: write the full draft and finish the steps below; the step 7 report shows its headlines, marked provisional, for the user to approve or reorder.
 
 In either mode a consequential open choice, such as audience wording the user has not approved or an unsettled usefulness criterion, stops the draft before its full slides and is asked in the same message as the headlines.
 
@@ -57,7 +57,7 @@ Create the draft at the contract's paths, or revise the same files. A draft in a
 
 - Before writing, give each column a chart or dataset will export a display name from the glossary in `foundation/display.toml`, e.g. `[columns]` then `return_rate = "Return rate"`; **Data:** lines and dataset headers use these names.
 - `findings.md` is the deck outline under the slide rules and translation rule in `package-format/findings-template.md`; its **Answer** slide is the executive summary.
-- Order finding slides by `presentation_order` when the manifest records one, otherwise under the contract's **Ledger storyline** rules, which also govern **Open questions**; slides the user agreed to move go under `## Appendix`. Report every finding with no linked ledger question, even though its placement last passes the check.
+- Order finding slides by `presentation_order` when the manifest records one, otherwise under the contract's **Ledger storyline** rules, which also govern **Open questions**; slides the user agreed to move go under `## Appendix`. Report every finding with no linked ledger question, even though, without a `presentation_order`, its placement last passes the check.
 - `methodology.md` follows `package-format/methodology-template.md` in the workbench's own vocabulary.
 - When the audience needs one, `methodology-note.md` follows `package-format/methodology-note-template.md`.
 - Copy `package-format/deck-rules.md` and `package-format/assembly/m365.md` into the draft unchanged, at the same paths under it.
@@ -88,7 +88,7 @@ A `numbers` row is a number no represented result records. Repair it by the firs
 
 ## 7. Report
 
-Report the review's outcome and any accepted `warning` violations, the draft path, the audience `findings.md` is written for, the main and appendix slide counts from `check-draft`'s `slides` against any recorded length, the included datasets, each chart with the result it serializes, provenance gaps, unresolved caveats, and the check's `unlinked_findings`. When `open_questions_count` exceeds five, report the count so the audience can review the longer slide. Call `methodology.md` the internal methodology reference, and offer a `methodology-note.md` when the draft has none. Say it is a working copy the next revision overwrites; marking it delivered freezes it as a numbered release. When a represented flagged finding lacks an applicable disposition, say `awb-release` will ask for one before releasing.
+Report the review's outcome and any accepted `warning` violations, the draft path, the audience `findings.md` is written for, the main and appendix slide counts from `check-draft`'s `slides` against any recorded length, the included datasets, each chart with the result it serializes, provenance gaps, unresolved caveats, and the check's `unlinked_findings`. When `open_questions_count` exceeds five, report the count so the audience can review the longer slide. In draft-then-review, list the slide headlines, marked provisional, with what the headline checkpoint shows beside them, and ask the user to approve or reorder them. Call `methodology.md` the internal methodology reference, and offer a `methodology-note.md` when the draft has none. Say it is a working copy the next revision overwrites; marking it delivered freezes it as a numbered release. When a represented flagged finding lacks an applicable disposition, say `awb-release` will ask for one before releasing.
 
 Tell the user how to build the deck: in a Microsoft 365 Copilot app chat, add the PowerPoint agent, attach `findings.md`, every file in `charts/`, `methodology.md`, `deck-rules.md`, and `assembly/m365.md`, and ask for a deck built under those instructions. Datasets, and `methodology-note.md` when there is one, travel beside the deck and are not attached.
 
