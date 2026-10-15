@@ -6,7 +6,7 @@
 # test_records_round_trip: records adds a question, edits next steps, adds a review rule, flags through stdin, and runs clean-record, each writing its record.
 # test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit; read returns both changes while keeping its answer, and attempts to change answered question content or replace its answer are refused.
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
-# test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, read shows sql, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
+# test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, records words it and returns state finding's warning on a number the result does not record, read shows sql, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
 # test_read_sql_refuses_writes: read sql and profile refuse COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, CREATE, a SELECT calling enable_profiling with save_location or enable_logging with file storage, and a query() whose SQL differs between the plan check and the run, and write no file; read refuses arguments outside its command and help topics outside the helpers.
 # test_write_tools_refuse_bad_arguments: unknown commands, non-string args, unknown keys, and a run of an absent investigation are error results naming the problem, and nothing runs.
 # test_project_root_resolution: the project argument wins over roots; one root is used; several roots without an argument name each; without roots the working directory is used; each candidate needs src/awb.py; a relative project is refused.
@@ -327,6 +327,8 @@ def test_data_run_package_release_round_trip(workbench, connect):
     text, error = client.call("run", investigation="churn", results=["by-region"])
     assert not error and '"result_id": "by-region"' in text
     assert (workbench / INV / "evidence/by-region.json").is_file()
+    text, error = client.call("records", command="state", args=["finding", "by-region", "--text", "West takes 7 orders"])
+    assert not error and text.startswith("warning: by-region: 7 is not a value its table") and "exit status 0" in text
     text, error = client.call("package", command="check-draft", args=["churn", "pkg"])
     assert error and '"passed": false' in text
     text, error = client.call("release", command="release", args=["churn", "pkg"])

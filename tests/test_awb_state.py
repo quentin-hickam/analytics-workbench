@@ -20,6 +20,9 @@
 # test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helpers write.
 # test_claim_strength_is_recorded_and_guarded: a new row is association; --claim causal needs an experiment or natural-experiment basis and a reason; a claim change writes history; a rerun keeps the claim; a flagged finding's claim can only be lowered.
 # test_absent_claim_strength_is_refused: a findings.json entry without a valid claim strength makes every writer and the drift check refuse, writing nothing.
+# test_finding_text_warns_on_numbers_its_result_does_not_record: with src/packaging/draft.py, --text or --status supported warns on each number the result's table, profile, checks, and settings do not record, still writing; a recorded number at another precision traces; without draft.py nothing is read; a draft.py that does not load is named.
+# test_finding_text_warns_on_reconciliation_no_check_records: "sums to", "reconciles", or "checked every" wording warns unless a passing check's name or detail uses such wording; a failing check does not back it; the row is still written.
+# test_caveat_splits_notes_outside_brackets: --caveat splits at each ; outside parentheses and square brackets, a closer with no opener is text, an unclosed or mismatched bracket is refused writing nothing, and --help says so.
 
 from datetime import date
 import importlib.util
@@ -670,3 +673,77 @@ def test_absent_claim_strength_is_refused(project, change):
         with pytest.raises(provenance.StateError, match="no valid claim strength"):
             writer()
     assert snapshot(project) == before
+
+
+DRAFT = ROOT / ".agents/skills/awb-package/assets/awb_draft.py"
+
+
+def test_finding_text_warns_on_numbers_its_result_does_not_record(project, capsys):
+    (project / "src/packaging").mkdir()
+    shutil.copyfile(DRAFT, project / "src/packaging/draft.py")
+    produce(project, "r1", table="rate,accounts\n0.12483,1204\n")
+    produce(project, "r2", table="rate,accounts\n0.5,10\n")
+    code, out, _ = run(project, capsys, "finding", "r1", "--text", "Churn reached 12.5% of 1,204 accounts, not 478")
+    assert code == 0
+    # 12.5% traces to 0.12483 at its written precision, and 1,204 to the table; 478 is recorded nowhere.
+    assert out.splitlines()[0] == ("warning: r1: 478 is not a value its table, profile, checks, or settings "
+                                   "record; check the number or reword")
+    assert len(out.splitlines()) == 2 and "| Churn reached 12.5% of 1,204 accounts, not 478 |" in out
+    assert json.loads(text(project, f"{INV}/findings.json"))["findings"][0]["text"].endswith("not 478")
+    # Promotion reads the row's text too, warns, and still promotes.
+    set_row(project, "r2", "Churn reached 40% in the west")
+    code, out, _ = run(project, capsys, "finding", "r2", "--status", "supported", "--reason", "Checked.")
+    assert code == 0 and out.startswith("warning: r2: 40% is not a value") and "| supported |" in out
+    # Without the package reader the numbers go unread, and provenance still writes.
+    (project / "src/packaging/draft.py").unlink()
+    code, out, _ = run(project, capsys, "finding", "r1", "--text", "Churn reached 99% of 7 accounts")
+    assert code == 0 and not out.startswith("warning")
+    (project / "src/packaging/draft.py").write_text("raise ImportError('broken copy')\n")
+    code, out, _ = run(project, capsys, "finding", "r1", "--text", "Churn reached 98% of 7 accounts")
+    assert code == 0 and out.startswith("warning: numbers not checked: src/packaging/draft.py did not load "
+                                        "(ImportError: broken copy)")
+
+
+SUMS = [{"name": "values", "outcome": "pass", "detail": "Country rows plus aggregates sum to World within 0.1%."}]
+
+
+def test_finding_text_warns_on_reconciliation_no_check_records(project, capsys):
+    produce(project, "r1")
+    produce(project, "r2", checks=OK + SUMS)
+    produce(project, "r3", checks=[{**SUMS[0], "outcome": "fail"}])
+    wording = "Countries plus regions sums to World"
+    for result_id, warned in (("r1", True), ("r2", False), ("r3", True)):
+        code, out, _ = run(project, capsys, "finding", result_id, "--text", wording)
+        assert code == 0 and f"| {wording} | [{result_id}]" in out, result_id
+        warning = (f'warning: {result_id}: "sums to" asserts a reconciliation or a completed check that no passing '
+                   "check in its evidence records; record the check in its validation and rerun, or reword")
+        assert (out.splitlines()[0] == warning) is warned, (result_id, out)
+    for phrase, found in (("The totals reconciled with finance", "reconciled"),
+                          ("We checked every region", "checked every"), ("Parts ADD UP TO the total", "ADD UP TO")):
+        code, out, _ = run(project, capsys, "finding", "r1", "--text", phrase)
+        assert out.startswith(f'warning: r1: "{found}" asserts'), phrase
+    for phrase in ("Summary of totals", "A check-in rate of half", "Sums of orders rose"):
+        code, out, _ = run(project, capsys, "finding", "r1", "--text", phrase)
+        assert not out.startswith("warning"), phrase
+
+
+@pytest.mark.parametrize("caveat, notes", [
+    ("a (b; c); d", ["a (b; c)", "d"]),
+    ("x [y; (z; w)]; v", ["x [y; (z; w)]", "v"]),
+    ("1) agency staff excluded; 2) March partial", ["1) agency staff excluded", "2) March partial"]),
+    ("one note", ["one note"]),
+    ("a (b; c", None),
+    ("a (b]; c", None),
+    ("a [b); c]", None),
+])
+def test_caveat_splits_notes_outside_brackets(project, capsys, caveat, notes):
+    produce(project, "r1")
+    before = snapshot(project)
+    code, _, err = run(project, capsys, "finding", "r1", "--caveat", caveat)
+    if notes is None:
+        assert code == 2 and "--caveat" in err and "bracket" in err and snapshot(project) == before
+    else:
+        assert code == 0
+        assert json.loads(text(project, f"{INV}/findings.json"))["findings"][0]["notes"] == notes
+    code, out, _ = run(project, capsys, "finding", "--help")
+    assert code == 0 and "';' outside parentheses and square brackets separates notes" in " ".join(out.split())

@@ -6,7 +6,7 @@
 # test_compare_evidence_clean_committed_state_passes_five_comparisons: clean state passes all five ordered comparisons in the contract shape.
 # test_compare_evidence_detects_view_changed_after_recording: view mutation fails the views comparison.
 # test_compare_evidence_names_changed_setting: settings mutation fails the settings comparison.
-# test_scoped_settings_ignore_other_results_and_tables: only [parameters] and the result's own table count; the file leaves the code comparisons.
+# test_scoped_settings_ignore_other_results_and_tables: only the [parameters] the result reads and its own table count; the file leaves the code comparisons.
 # test_compare_evidence_detects_missing_input_and_missing_metadata: missing input file or unavailable metadata fails inputs.
 # test_compare_evidence_checks_dirty_code_against_recorded_bytes: uncommitted code mutation fails uncommitted-code.
 # test_record_evidence_rejects_destination_symlink_outside_root: regression: evidence destination cannot escape through a symlink.
@@ -34,11 +34,18 @@
 # test_runtime_records_missing_version_metadata_as_unknown: an installed distribution whose metadata has no Version is unknown, not null (not installed).
 # test_cli_stale_reports_runtime_mismatch_as_a_warning: a changed recorded duckdb or Python version, an unread requirements line, or no runtime block, is listed under runtime_mismatches with its findings rows, never under results, and compare_evidence still passes.
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
-# test_producing_paths_follow_the_result: run.py, the result's queries, other investigation code, src/ minus awb.py, provenance.py and packaging/, plus code_paths; other results' queries and the excluded helpers never stale it.
+# test_producing_paths_are_an_allow_list: producing paths are run.py, the result's queries, its producer module (written or not), its declared code, code_paths, and src/ minus awb.py, provenance.py and packaging/; another result's producer and query, notes, prose, an undeclared file, and the excluded helpers leave it current, committed or not, while each producing path stales it, a producer written later included.
+# test_run_py_edit_stales_every_result: an edit to run.py fails committed-code for every result (it passed before the allow list too; kept as its guard).
+# test_record_evidence_refuses_declared_code_that_does_not_exist: a code path the table declares must exist; nothing is written otherwise.
+# test_evidence_records_only_the_parameters_a_result_reads: with the parameters run.py passes, evidence records the [parameters] its queries name as $name and its table lists; an added parameter leaves both results current, changing one stales only the result that reads it, and a parameter a result starts to read stales it once [parameters] or its table changes.
+# test_result_parameters_are_the_names_queries_read_and_the_table_lists: $name in comments counts, $1 names nothing absent from [parameters]; reading another name, with [] or get(), raises KeyError naming the fix.
+# test_evidence_with_every_parameter_compares_on_each_until_rerun: evidence recorded without the parameters its producer received (before scoping, or by an older run.py) records every entry and compares on each; a rerun with them records only those the result reads and keeps its row.
+# test_result_ids_name_their_producer_module: an ID maps to producers/<id>.py exactly; an ID outside the grammar is refused by producer_path and result_problems.
 # test_settings_fall_back_to_tomli: without tomllib, settings parse through tomli, and without either the content is unknown.
 # test_record_evidence_copies_question_and_inputs_verbatim: the settings question and inputs land in the evidence unchanged, and editing the question stales only the settings comparison.
-# test_record_evidence_refuses_a_result_without_its_question: a missing, blank, or multi-line question, or inputs that are not a list of names, raise and write no evidence.
+# test_record_evidence_refuses_a_result_without_its_question: a missing, blank, or multi-line question, inputs that are not a list of names, code that is not a list of paths, or parameters that are not a list of names, raise and write no evidence.
 # test_run_template_refuses_results_without_a_question: run.py exits 2 naming every wanted result that lacks a question, before opening a session or writing anything; without duckdb.
+# test_run_template_loads_each_producer_by_result_id: run.py loads producers/<id>.py by result ID with run() and only the parameters the result reads; an undeclared read, even through get(), fails that result alone; declaring it fixes the run; a module without produce() is named; an ID that cannot name its module exits 2 before anything runs.
 # test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: prior_result checks the state before unlink; the run.py template records a result and writes its state.md row, keeps it on an identical rerun, and refuses before touching evidence when state.md is missing or drifts; a run failing after the table is rewritten leaves no evidence.
 
 import hashlib
@@ -134,7 +141,7 @@ def test_record_evidence_records_clean_producing_state(project):
     ]
     assert raw.endswith("\n") and raw.startswith('{\n  "schema": "awb-evidence/3",')
     assert evidence["producing_commit"] == git(project, "rev-parse", "HEAD")
-    assert evidence["producing_paths"] == ["foundation/views/orders.sql",
+    assert evidence["producing_paths"] == ["foundation/views/orders.sql", "investigations/inv/producers/r1.py",
         "investigations/inv/queries/r1.sql", "investigations/inv/run.py", "src/ops.py"]
     assert evidence["producing_uncommitted_changes"] == []
     assert evidence["views"][0]["publications"] == ["data/parquet/orders/p1"]
@@ -184,8 +191,8 @@ def test_compare_evidence_clean_committed_state_passes_five_comparisons(project)
     assert [c["name"] for c in comparisons] == NAMES
     assert [c["outcome"] for c in comparisons] == ["pass"] * 5
     assert all(set(c) == {"name", "paths", "outcome", "detail"} for c in comparisons)
-    assert comparisons[0]["paths"] == ["foundation/views/orders.sql", "investigations/inv/queries/r1.sql",
-                                        "investigations/inv/run.py", "src/ops.py"]
+    assert comparisons[0]["paths"] == ["foundation/views/orders.sql", "investigations/inv/producers/r1.py",
+                                        "investigations/inv/queries/r1.sql", "investigations/inv/run.py", "src/ops.py"]
     assert comparisons[1]["paths"] == [] and "nothing to compare" in comparisons[1]["detail"]
 
 
@@ -324,6 +331,7 @@ def test_record_evidence_before_first_commit_checksums_every_producing_file(proj
     assert evidence["producing_uncommitted_changes"] == [
         {"path": "foundation/views/orders.sql", "status": "uncommitted", "bytes": 64,
          "sha256": hashlib.sha256(b"select * from read_parquet('data/parquet/orders/p1/*.parquet');\n").hexdigest()},
+        {"path": "investigations/inv/producers/r1.py", "status": "uncommitted", "bytes": None, "sha256": None},
         {"path": "investigations/inv/queries/r1.sql", "status": "uncommitted", "bytes": 21,
          "sha256": hashlib.sha256(b"select * from orders\n").hexdigest()},
         {"path": "investigations/inv/run.py", "status": "uncommitted", "bytes": 11,
@@ -546,6 +554,10 @@ def test_record_evidence_copies_question_and_inputs_verbatim(project):
     (b'question = """How many\norders?"""\n', "[results.r1] question spans several lines"),
     (b'question = "How many?"\ninputs = "orders"\n', "[results.r1] inputs must be a list of dataset or view names"),
     (b'question = "How many?"\ninputs = ["orders", ""]\n', "[results.r1] inputs must be a list"),
+    (b'question = "How many?"\ncode = "helpers.py"\n', "[results.r1] code must be a list of paths"),
+    (b'question = "How many?"\ncode = [""]\n', "[results.r1] code must be a list of paths"),
+    (b'question = "How many?"\nparameters = "threshold"\n', "[results.r1] parameters must be a list of [parameters] names"),
+    (b'question = "How many?"\nparameters = ["a b"]\n', "[results.r1] parameters must be a list of [parameters] names"),
 ])
 def test_record_evidence_refuses_a_result_without_its_question(project, table, problem):
     write(project, "investigations/inv/settings.toml", b"[parameters]\nthreshold = 5\n\n[results.r1]\n" + table)
@@ -555,25 +567,187 @@ def test_record_evidence_refuses_a_result_without_its_question(project, table, p
     assert not (project / "investigations/inv/evidence/r1.json").exists()
 
 
-def test_producing_paths_follow_the_result(project):
-    write(project, "investigations/inv/lib.py", b"y = 1\n")
+def commit_all(root, message="work"):
+    git(root, "add", "-A")
+    git(root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c",
+        "commit.gpgsign=false", "commit", "-qm", message)
+
+
+def outcomes(root, result_id="r1"):
+    return [c["outcome"] for c in provenance.compare_evidence(root, f"investigations/inv/evidence/{result_id}.json")]
+
+
+def record_r2(root):
+    return provenance.record_evidence(root, "inv", "r2", views=[], checks=CHECKS,
+                                      settings_path="investigations/inv/settings.toml")
+
+
+def test_producing_paths_are_an_allow_list(project):
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS.replace(b"[results.r1]\n", b'[results.r1]\ncode = ["helpers.py"]\n'))
+    write(project, "investigations/inv/helpers.py", b"y = 1\n")
+    write(project, "investigations/inv/lib.py", b"z = 1\n")
+    write(project, "investigations/inv/methodology.md", b"# Method\n")
     for path in ("src/awb.py", "src/provenance.py", "src/packaging/draft.py"):
         write(project, path, b"# helper\n")
     write(project, "shared/extra.sql", b"select 3\n")
-    git(project, "add", ".")
-    git(project, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c",
-        "commit.gpgsign=false", "commit", "-qm", "more code")
+    commit_all(project, "more code")
     path = record(project, code_paths=["shared"])
     assert json.loads(path.read_text())["producing_paths"] == [
-        "foundation/views/orders.sql", "investigations/inv/lib.py", "investigations/inv/queries/r1.sql",
-        "investigations/inv/run.py", "shared/extra.sql", "src/ops.py"]
-    for changed in ("investigations/inv/queries/r2.sql", "src/awb.py", "src/provenance.py",
-                    "src/packaging/draft.py"):
-        write(project, changed, b"-- changed\n")
-    assert [c["outcome"] for c in provenance.compare_evidence(project, path)] == ["pass"] * 5
-    for changed in ("investigations/inv/queries/r1.sql", "investigations/inv/lib.py", "shared/extra.sql"):
-        write(project, changed, b"-- changed\n")
-        assert changed in provenance.compare_evidence(project, path)[0]["detail"]
+        "foundation/views/orders.sql", "investigations/inv/helpers.py", "investigations/inv/producers/r1.py",
+        "investigations/inv/queries/r1.sql", "investigations/inv/run.py", "shared/extra.sql", "src/ops.py"]
+    # What cannot change r1's numbers leaves it current, committed or not: another result's producer
+    # and query, prose and notes, an undeclared file, and the helpers that only dispatch, record, or package.
+    for changed, content in (("investigations/inv/producers/r2.py", b"def produce(connection, sql, parameters):\n"),
+                             ("investigations/inv/notes.md", b"# Notes\n"),
+                             ("investigations/inv/methodology.md", b"# Method, revised\n"),
+                             ("investigations/inv/lib.py", b"z = 2\n"),
+                             ("investigations/inv/queries/r2.sql", b"select 4\n"),
+                             ("src/awb.py", b"# changed\n"), ("src/provenance.py", b"# changed\n"),
+                             ("src/packaging/draft.py", b"# changed\n")):
+        write(project, changed, content)
+    assert outcomes(project) == ["pass"] * 5
+    commit_all(project, "unrelated edits")
+    assert outcomes(project) == ["pass"] * 5
+    # Each producing path stales it: run.py, its query, its own producer, its declared code, code_paths, src/.
+    for changed in ("investigations/inv/run.py", "investigations/inv/queries/r1.sql",
+                    "investigations/inv/producers/r1.py", "investigations/inv/helpers.py", "shared/extra.sql",
+                    "src/ops.py"):
+        before = (project / changed).read_bytes() if (project / changed).exists() else None
+        write(project, changed, b"# changed\n")
+        committed = provenance.compare_evidence(project, path)[0]
+        assert committed["outcome"] == "fail" and changed in committed["detail"], changed
+        if before is None:
+            (project / changed).unlink()
+        else:
+            write(project, changed, before)
+        assert outcomes(project) == ["pass"] * 5, changed
+    # A producer module written after recording stales its result, untracked or committed.
+    write(project, "investigations/inv/producers/r1.py", b"def produce(connection, sql, parameters):\n")
+    detail = provenance.compare_evidence(project, path)[0]["detail"]
+    assert "investigations/inv/producers/r1.py: created after the producing commit" in detail
+    commit_all(project, "r1 producer")
+    assert "investigations/inv/producers/r1.py" in provenance.compare_evidence(project, path)[0]["detail"]
+
+
+def test_run_py_edit_stales_every_result(project):
+    record(project)
+    record_r2(project)
+    assert outcomes(project, "r1") == outcomes(project, "r2") == ["pass"] * 5
+    write(project, "investigations/inv/run.py", b"import ops  # harness changed\n")
+    for result_id in ("r1", "r2"):
+        committed = provenance.compare_evidence(project, f"investigations/inv/evidence/{result_id}.json")[0]
+        assert committed["outcome"] == "fail"
+        assert committed["detail"] == "investigations/inv/run.py: differs from producing commit."
+
+
+def test_record_evidence_refuses_declared_code_that_does_not_exist(project):
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS.replace(b"[results.r1]\n", b'[results.r1]\ncode = ["helpers.py"]\n'))
+    with pytest.raises(ValueError, match=r"\[results.r1\] code names helpers.py, which does not exist"):
+        record(project)
+    assert not (project / "investigations/inv/evidence/r1.json").exists()
+
+
+PARAMETERS = (b'[parameters]\nthreshold = 5\nregion = "west"\n\n'
+              b'[results.r1]\nquestion = "How many orders cleared the threshold?"\n\n'
+              b'[results.r2]\nquestion = "Which regions grew?"\nparameters = ["region"]\n')
+
+
+def reads(root, result_id):
+    """The parameters run.py passes a result's producer, and so record_evidence: result_parameters()."""
+    import tomllib
+    settings = tomllib.loads((root / "investigations/inv/settings.toml").read_text())
+    table = settings["results"][result_id]
+    texts = [(root / "investigations/inv" / query).read_text()
+             for query in table.get("queries", [f"queries/{result_id}.sql"])]
+    return provenance.result_parameters(texts, table, settings["parameters"])
+
+
+def parameters_fixture(project):
+    write(project, "investigations/inv/settings.toml", PARAMETERS)
+    write(project, "investigations/inv/queries/r1.sql", b"select * from orders where amount > $threshold\n")
+    commit_all(project, "parameters")
+
+
+def test_evidence_records_only_the_parameters_a_result_reads(project):
+    parameters_fixture(project)
+    content = {r: json.loads(p.read_text())["settings"]["content"] for r, p in (
+        ("r1", record(project, parameters=reads(project, "r1"))),
+        ("r2", provenance.record_evidence(project, "inv", "r2", views=[], checks=CHECKS,
+                                          settings_path="investigations/inv/settings.toml",
+                                          parameters=reads(project, "r2"))))}
+    # r1's query names $threshold; r2 lists region in its table's parameters.
+    assert content["r1"]["parameters"] == {"threshold": 5} and content["r2"]["parameters"] == {"region": "west"}
+    settings = project / "investigations/inv/settings.toml"
+    settings.write_bytes(PARAMETERS.replace(b'region = "west"\n', b'region = "west"\nstart = 2026-01-01\n'))
+    assert outcomes(project, "r1") == outcomes(project, "r2") == ["pass"] * 5
+    for old, new, stale in ((b'region = "west"', b'region = "east"', "r2"), (b"threshold = 5", b"threshold = 6", "r1")):
+        settings.write_bytes(PARAMETERS.replace(old, new))
+        for result_id in ("r1", "r2"):
+            compared = provenance.compare_evidence(project, f"investigations/inv/evidence/{result_id}.json")[4]
+            assert compared["outcome"] == ("fail" if result_id == stale else "pass"), (new, result_id)
+            assert result_id != stale or compared["detail"].endswith("settings differ for keys parameters.")
+    # A parameter the result starts to read counts before [parameters] holds it.
+    settings.write_bytes(PARAMETERS.replace(b'parameters = ["region"]', b'parameters = ["region", "cutoff"]'))
+    assert outcomes(project, "r2")[4] == "fail"
+    settings.write_bytes(PARAMETERS)
+    write(project, "investigations/inv/queries/r1.sql",
+          b"select * from orders where amount > $threshold and $cutoff\n")
+    settings.write_bytes(PARAMETERS.replace(b"threshold = 5\n", b"threshold = 5\ncutoff = 1\n"))
+    assert outcomes(project, "r1")[4] == "fail"
+
+
+def test_result_parameters_are_the_names_queries_read_and_the_table_lists():
+    parameters = {"threshold": 5, "region": "west", "start": "2026-01-01", "unused": 1}
+    scoped = provenance.result_parameters(
+        ["select * from t where n > $threshold -- since $start\n", "select $1"], {"parameters": ["region"]},
+        parameters)
+    assert scoped == {"threshold": 5, "region": "west", "start": "2026-01-01"}
+    with pytest.raises(KeyError, match="'unused' is not among the parameters this result reads"):
+        scoped["unused"]
+    with pytest.raises(KeyError, match="parameters = \\[...\\]"):
+        scoped.get("unused", 0)
+    assert scoped.get("threshold") == 5 and "unused" not in scoped
+    assert provenance.result_parameters(["select 1"], {}, parameters) == {}
+
+
+def test_evidence_with_every_parameter_compares_on_each_until_rerun(project):
+    # Evidence written before parameters were scoped, or by an older run.py whose producers receive every
+    # [parameters] entry, records each one, and each counts until the result is rerun.
+    parameters_fixture(project)
+    write(project, "investigations/inv/state.md", (ASSET.parent / "workbench/investigation/state.md").read_bytes())
+    write(project, "investigations/inv/results/r1.csv", b"n\n1\n")
+    path = record(project)
+    assert json.loads(path.read_text())["settings"]["content"]["parameters"] == {"threshold": 5, "region": "west"}
+    provenance.record_finding(project, "inv", "r1", CHECKS)
+    settings = project / "investigations/inv/settings.toml"
+    settings.write_bytes(PARAMETERS.replace(b'region = "west"\n', b'region = "west"\nstart = 2026-01-01\n'))
+    assert outcomes(project) == ["pass"] * 5
+    settings.write_bytes(PARAMETERS.replace(b'region = "west"', b'region = "east"'))
+    assert outcomes(project) == ["pass"] * 4 + ["fail"]
+    # A rerun through run.py records only what r1 reads, and its unchanged table, checks, and settings keep the row.
+    prior = provenance.prior_result(project, "inv", "r1")
+    record(project, parameters=reads(project, "r1"))
+    assert provenance.record_finding(project, "inv", "r1", CHECKS, prior=prior)["action"] == "kept"
+    assert outcomes(project) == ["pass"] * 5
+    settings.write_bytes(PARAMETERS.replace(b"threshold = 5", b"threshold = 6"))
+    assert outcomes(project) == ["pass"] * 4 + ["fail"]
+
+
+@pytest.mark.parametrize("result_id, module", [
+    ("r1", "producers/r1.py"), ("orders-by-month", "producers/orders-by-month.py"),
+    ("r_1.v2", "producers/r_1.v2.py"), ("2026Q1", "producers/2026Q1.py"),
+    ("../escape", None), (".hidden", None), ("a/b", None), ("a b", None), ("-r1", None), ("", None),
+])
+def test_result_ids_name_their_producer_module(result_id, module):
+    problems = provenance.result_problems(result_id, {"question": "How many?"})
+    if module is None:
+        with pytest.raises(ValueError, match="result ID"):
+            provenance.producer_path(result_id)
+        assert problems and "ID must start with a letter or digit" in problems[0]
+    else:
+        assert provenance.producer_path(result_id) == module and problems == []
 
 
 def test_settings_fall_back_to_tomli(project, monkeypatch):
@@ -651,6 +825,62 @@ def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(p
     assert failed.returncode == 1 and "outside the project root" in failed.stdout
     assert (project / "investigations/inv/results/r1.csv").exists()
     assert not (project / "investigations/inv/evidence/r1.json").exists()
+
+
+def install_run_template(project):
+    assets = ASSET.parent
+    for asset, installed in (("awb_provenance.py", "provenance.py"), ("awb_landing.py", "preparation/landing.py"),
+                             ("awb_validate.py", "exploration/validate.py")):
+        write(project, f"src/{installed}", (assets / asset).read_bytes())
+    write(project, "investigations/inv/run.py", (assets / "workbench/investigation/run.py").read_bytes())
+    write(project, "investigations/inv/state.md", (assets / "workbench/investigation/state.md").read_bytes())
+    write(project, "foundation/views/orders.sql", b"create view orders as select range as n from range(3);\n")
+
+
+def test_run_template_loads_each_producer_by_result_id(project):
+    pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    install_run_template(project)
+    write(project, "investigations/inv/settings.toml", b'[parameters]\nthreshold = 1\nunused = 9\n\n'
+          b'[results.r1]\nquestion = "Which orders cleared the threshold?"\n\n'
+          b'[results.r2]\nquestion = "How many orders?"\n')
+    write(project, "investigations/inv/queries/r1.sql", b"select n from orders where n >= $threshold order by n\n")
+    write(project, "investigations/inv/queries/r2.sql", b"select count(*) as n from orders\n")
+    # A producer module is found by its result's ID; run.py gives it run() and the parameters the result reads.
+    write(project, "investigations/inv/producers/r1.py", b"def produce(connection, sql, parameters):\n"
+          b"    frame = run(connection, sql[0], parameters)\n"
+          b"    return frame.assign(read=','.join(sorted(parameters))), {}\n")
+    write(project, "investigations/inv/producers/r2.py", b"def produce(connection, sql, parameters):\n"
+          b"    return run(connection, sql[0], parameters).assign(cut=parameters.get('unused', 0)), {}\n")
+    run = [sys.executable, str(project / "investigations/inv/run.py")]
+    done = subprocess.run(run + ["r1", "r2"], capture_output=True, text=True)
+    first, second = map(json.loads, done.stdout.splitlines())
+    assert done.returncode == 1 and first["state"] == "added", done.stderr
+    assert (project / "investigations/inv/results/r1.csv").read_text() == "n,read\n1,threshold\n2,threshold\n"
+    evidence = json.loads((project / "investigations/inv/evidence/r1.json").read_text())
+    assert "investigations/inv/producers/r1.py" in evidence["producing_paths"]
+    assert evidence["settings"]["content"]["parameters"] == {"threshold": 1}
+    # Reading a parameter the result does not declare fails loudly, even through get().
+    assert second["result_id"] == "r2" and second["error"].startswith("KeyError: \"'unused' is not among")
+    assert not (project / "investigations/inv/evidence/r2.json").exists()
+    settings = project / "investigations/inv/settings.toml"
+    settings.write_text(settings.read_text() + 'parameters = ["unused"]\n')
+    done = subprocess.run(run + ["r2"], capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (project / "investigations/inv/results/r2.csv").read_text() == "n,cut\n3,9\n"
+    assert json.loads((project / "investigations/inv/evidence/r2.json").read_text())[
+        "settings"]["content"]["parameters"] == {"unused": 9}
+    # A module that defines no produce() is an error naming the file.
+    write(project, "investigations/inv/producers/r2.py", b"value = 1\n")
+    done = subprocess.run(run + ["r2"], capture_output=True, text=True)
+    assert done.returncode == 1 and "producers/r2.py defines no produce(connection, sql, parameters)" in done.stdout
+    # A result ID that cannot name its producer module is refused before anything runs.
+    settings.write_text(settings.read_text() + '\n[results."../escape"]\nquestion = "Which?"\n')
+    before = (project / "investigations/inv/results/r1.csv").read_bytes()
+    done = subprocess.run(run, capture_output=True, text=True)
+    assert (done.returncode, done.stdout) == (2, "")
+    assert "settings.toml: [results.../escape] ID must start with a letter or digit" in done.stderr
+    assert (project / "investigations/inv/results/r1.csv").read_bytes() == before
 
 
 def installed(name):

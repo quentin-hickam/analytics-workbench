@@ -13,10 +13,11 @@ the row's status and claim strength.
 Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml,
 with the question it answers, and its query in queries/<id>.sql. A result whose table declares
 answers = ["Q-NNN"] marks those question ledger rows answered, and its output line lists them.
-Add a producer below only when a result needs more than its query, and put reusable operations in
-src/. Requires duckdb and pandas.
+A result that needs more than its query gets a producer module, producers/<id>.py, described below,
+so adding a result never edits this file; put reusable operations in src/. Requires duckdb and pandas.
 """
 
+import importlib.util
 import json
 import re
 import sys
@@ -37,7 +38,8 @@ sys.path.insert(0, str(ROOT))
 from src.exploration.validate import profile, validate  # noqa: E402
 from src.preparation.landing import session  # noqa: E402
 from src.provenance import (  # noqa: E402
-    ledger_answerers, prior_result, record_evidence, record_finding, result_problems, views_read)
+    ledger_answerers, prior_result, producer_path, record_evidence, record_finding, result_parameters,
+    result_problems, views_read)
 
 
 def run(connection, sql, parameters):
@@ -51,20 +53,34 @@ def produce(connection, sql, parameters):
     return run(connection, sql[0], parameters), {}
 
 
-# Producers for results that need more than one query's output, by result ID. A producer
-# receives the session, the texts of the result's queries (settings `queries`, in order), and
-# the [parameters] table; it returns (frame, measured), where measured holds validation spec
-# entries only known at run time, such as row_counts or joins.left_rows. Read further data
-# through saved queries listed in settings so their views are recorded. Example:
+# A result that needs more than its first query's output has a producer module,
+# producers/<result-id>.py, named by the result ID exactly. It defines
+# produce(connection, sql, parameters), which receives the session, the texts of the result's
+# queries (settings `queries`, in order), and only the [parameters] entries the result reads: those
+# its queries name as $name and those its table lists in parameters = [...]. Reading any other
+# raises KeyError. It returns (frame, measured), where measured holds validation spec entries only
+# known at run time, such as row_counts or joins.left_rows. run.py gives the module run() above
+# before loading it. Read further data through saved queries listed in settings so their views are
+# recorded, and list any other file it imports or reads in its table's code = [...], since evidence
+# records only declared files as the result's code. Example, producers/orders-by-month.py:
 #
-# def orders_by_month(connection, sql, parameters):
+# def produce(connection, sql, parameters):
 #     before = int(run(connection, sql[1], parameters)["orders"].iloc[0])  # unfiltered count
 #     frame = run(connection, sql[0], parameters)
 #     return frame, {"row_counts": [{"step": "period filter", "before": before,
 #                                    "after": int(frame["orders"].sum()), "min_ratio": 0.01}]}
-PRODUCERS = {
-    # "orders-by-month": orders_by_month,
-}
+def producer(result_id):
+    """The result's produce() from its producer module, or the default producer when it has none."""
+    path = HERE / producer_path(result_id)
+    if not path.is_file():
+        return produce
+    spec = importlib.util.spec_from_file_location("producer_" + re.sub(r"\W", "_", result_id), path)
+    module = importlib.util.module_from_spec(spec)
+    module.run = run
+    spec.loader.exec_module(module)
+    if not callable(getattr(module, "produce", None)):
+        raise ValueError(f"{path.relative_to(ROOT).as_posix()} defines no produce(connection, sql, parameters)")
+    return module.produce
 
 
 def _spec(validation, measured):
@@ -78,7 +94,9 @@ def _spec(validation, measured):
 def produce_result(connection, result_id, config, parameters):
     queries = config.get("queries", [f"queries/{result_id}.sql"])
     sql = [(HERE / query).read_text() for query in queries]
-    frame, measured = PRODUCERS.get(result_id, produce)(connection, sql, parameters)
+    # The producer gets only the parameters the result reads, and evidence records those.
+    scoped = result_parameters(sql, config, parameters)
+    frame, measured = producer(result_id)(connection, sql, scoped)
     checks = validate(frame, _spec(config.get("validation", {}), measured))
     # What the rerun replaces: the evidence citation, and the table, checks and settings it compares.
     prior = prior_result(ROOT, NAME, result_id)
@@ -92,7 +110,8 @@ def produce_result(connection, result_id, config, parameters):
     profile_path.write_text(json.dumps(profile(frame), indent=2) + "\n")
     # Settings `views` overrides detection when a result reads views its queries do not name.
     views = config.get("views") or views_read(ROOT, [HERE / query for query in queries])
-    evidence = record_evidence(ROOT, NAME, result_id, views=views, settings_path=SETTINGS, checks=checks)
+    evidence = record_evidence(ROOT, NAME, result_id, views=views, settings_path=SETTINGS, checks=checks,
+                               parameters=scoped)
     # Writes findings and renders the row; failure before findings are saved removes this evidence.
     state = record_finding(ROOT, NAME, result_id, checks, prior=prior)
     return {

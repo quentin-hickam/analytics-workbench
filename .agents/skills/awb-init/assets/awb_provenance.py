@@ -5,7 +5,8 @@ Copy this file to `src/provenance.py` and import the project copy.
 Schema awb-evidence/3, in order: schema, investigation, result_id, question (the result's
 settings question, verbatim), inputs (its settings inputs, or []), recorded_at
 (local ISO time), producing_commit (SHA/uncommitted/unknown), producing_paths
-(sorted), producing_uncommitted_changes (path/status/bytes/sha256), views
+(sorted; the result's producer module is listed whether or not it exists, so writing one stales the
+result), producing_uncommitted_changes (path/status/bytes/sha256), views
 (path/bytes/sha256/publications), publications (path/publication_file/inputs/
 conversion_commit/files), acquisitions (path/provenance_file/status/files),
 settings (path/bytes/sha256/[result]/content), runtime (python/platform/packages/
@@ -16,15 +17,22 @@ when not installed; unknown when its metadata records no version), and each requ
 include it could not read. read_requirements() reads requirements.txt and the files it includes
 with -r and returns what it cannot read; requirement_name() states which lines name a package.
 Settings are scoped: the settings file must hold a [results.<id>] table for the result, with a
-one-line question and optionally inputs, a list of dataset or view names, and answers, a list of
-question ledger IDs, which links questions and is left out of every settings comparison; settings
-carries "result", content holds only [parameters] and that table, and the settings file is left
-out of producing_paths, so other results' tables and other top-level tables never make this
-result stale. Producing paths are the investigation's code (run.py and other files outside its
-records, queries/ and settings), the result's own queries, and src/ except the helpers that only
-dispatch, record, or package (awb.py, provenance.py, packaging/), so a repair replacing those
-stales nothing. compare_evidence reads only awb-evidence/3 files whose settings name their result;
-any other file fails every comparison, so its result must be rerun.
+one-line question and optionally inputs, a list of dataset or view names; answers, a list of
+question ledger IDs, which links questions and is left out of every settings comparison; code, a
+list of further producing files relative to the investigation; and parameters, a list of
+[parameters] names a producer reads that no query names. settings carries "result", content holds
+that table and the [parameters] entries the producer received, those the result reads
+(result_parameters()) when run.py passes them and every entry otherwise, and the settings file is
+left out of producing_paths, so other parameters, other results' tables, and other top-level tables
+never make this result stale. Producing paths are an allow list: the
+investigation's run.py, the result's own queries, its producer module producers/<result-id>.py
+(producer_path()), the code its table declares, and src/ except the helpers that only dispatch,
+record, or package (awb.py, provenance.py, packaging/), so a repair replacing those stales nothing.
+Prose, notes, and every other file in the investigation never count, nor do other results' queries
+and producers. compare_evidence reads only awb-evidence/3 files whose settings name their result;
+any other file fails every comparison, so its result must be rerun. It compares the parameters the
+evidence recorded and those the result reads now, so evidence that recorded every [parameters]
+entry still compares on each until its result is rerun.
 Paths are project-relative POSIX, except that a files[].path copied from publication.json or
 provenance.json is relative to the directory holding that file, and a publication's
 inputs[].files[].path to its acquisition directory.
@@ -58,6 +66,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import urllib.parse
 from collections.abc import Iterable
@@ -195,12 +204,98 @@ def _input_record(root, path, filename, keys):
     return {"path": path, filename.removesuffix(".json") + "_file": entry, **copied}
 
 
-def _scoped(content, result_id):
-    """The part of parsed settings one result reads: [parameters] and its own [results.<id>]."""
+def _scoped(content, result_id, names=None):
+    """The part of parsed settings one result reads: its own [results.<id>] and [parameters], only the
+    entries in `names` when given, the names the result reads."""
     results = content.get("results")
     table = results.get(result_id) if isinstance(results, dict) else None
-    return {**({"parameters": content["parameters"]} if "parameters" in content else {}),
-            "results": {result_id: table}}
+    if names is None:
+        return {**({"parameters": content["parameters"]} if "parameters" in content else {}),
+                "results": {result_id: table}}
+    parameters = content.get("parameters", {})
+    if isinstance(parameters, dict):
+        parameters = {name: value for name, value in parameters.items() if name in names}
+    return {"parameters": parameters, "results": {result_id: table}}
+
+
+# A parameter reference, as run.py's run() reads one: $ then letters, digits, or _. It is found anywhere
+# in a query's text, comments and string literals included, so detection errs toward recording.
+_PARAMETER = re.compile(r"\$(\w+)")
+# A [parameters] name a table's parameters list may hold.
+_NAME = re.compile(r"\w+")
+
+
+class ResultParameters(dict):
+    """The [parameters] entries one result reads; reading any other, with [] or get(), raises KeyError."""
+
+    def __missing__(self, name):
+        raise KeyError(f"{name!r} is not among the parameters this result reads; name it as ${name} in one of "
+                       "its queries or list it in its settings table's parameters = [...]")
+
+    def get(self, name, default=None):
+        return self[name]
+
+
+def _names(texts, table):
+    """The [parameters] names a result reads: each its query texts reference, and each its table lists."""
+    declared = table.get("parameters", []) if isinstance(table, dict) else []
+    return ({name for text in texts for name in _PARAMETER.findall(text)}
+            | ({name for name in declared if isinstance(name, str)} if isinstance(declared, list) else set()))
+
+
+def result_parameters(texts: Iterable[str], table, parameters) -> dict:
+    """The [parameters] entries a result reads, as a ResultParameters mapping.
+
+    `texts` are the result's query texts, `table` its [results.<id>] table, and `parameters` the
+    [parameters] table. A result reads each name its queries reference as $name (see _PARAMETER) and
+    each name its table lists in `parameters`. run.py passes a producer only these, so an undeclared
+    read fails, and evidence records only these, so another parameter never makes the result stale.
+    """
+    names = _names(list(texts), table)
+    return ResultParameters({name: value for name, value in parameters.items() if name in names}
+                            if isinstance(parameters, dict) else {})
+
+
+def _queries(result_id, table):
+    """A result's query paths, relative to its investigation."""
+    queries = table.get("queries", [f"queries/{result_id}.sql"]) if isinstance(table, dict) else None
+    return queries if isinstance(queries, list) else [f"queries/{result_id}.sql"]
+
+
+def _parameter_names(root, investigation, result_id, table):
+    """The [parameters] names a result reads now, from its query files as they are and its table."""
+    texts = []
+    for query in _queries(result_id, table):
+        try:
+            texts.append((root / _relative(root, f"investigations/{investigation}/{query}")).read_text())
+        except (OSError, ValueError, TypeError, UnicodeError):
+            continue  # A missing or unreadable query fails the code comparisons instead.
+    return _names(texts, table)
+
+
+def _compared(root, investigation, result_id, current, *recorded):
+    """The [parameters] names a settings comparison reads: those each recorded content holds, which is
+    every entry when it predates scoping or an older run.py recorded it, and those the result reads now
+    by the `current` content's table and the query files, so a parameter it starts reading counts even
+    before [parameters] holds it."""
+    results = current.get("results") if isinstance(current, dict) else None
+    table = results.get(result_id) if isinstance(results, dict) else None
+    names = _parameter_names(root, investigation, result_id, table)
+    for content in recorded:
+        held = content.get("parameters") if isinstance(content, dict) else None
+        names |= set(held) if isinstance(held, dict) else set()
+    return names
+
+
+def producer_path(result_id: str) -> str:
+    """A result's producer module, relative to its investigation: producers/<result-id>.py.
+
+    The file is named by the result ID exactly, so every ID result_problems() accepts maps to one file
+    name; any other ID raises ValueError.
+    """
+    if not isinstance(result_id, str) or not _ID.fullmatch(result_id):
+        raise ValueError(f"result ID {result_id!r} cannot name a producer module")
+    return f"producers/{result_id}.py"
 
 
 def _settings(root, path, result_id=None):
@@ -526,17 +621,22 @@ def _runtime_mismatches(recorded) -> list[str]:
 
 
 def result_problems(result_id: str, table, questions: dict[str, str] | None = None) -> list[str]:
-    """What a [results.<id>] table lacks: a one-line question, inputs, when given, as a list of names, and
-    answers, when given, as a list of ledger question IDs. With `questions`, ledger_answerers()'s
+    """What a result's ID and [results.<id>] table lack: an ID that names its files, one letter or digit
+    then letters, digits, '.', '_', or '-'; a one-line question; inputs, when given, as a list of names;
+    answers, when given, as a list of ledger question IDs; code, when given, as a list of paths; and
+    parameters, when given, as a list of [parameters] names. With `questions`, ledger_answerers()'s
     mapping, each answers ID must be in the ledger with answerer data: a person answers the others.
 
     record_evidence refuses a table with problems, checking answers against the ledger; run.py checks
     every wanted result, answers against the ledger included, before running any.
     """
     where = f"[results.{result_id}]"
-    if not isinstance(table, dict):
-        return [f"{where} is not a table"]
     problems = []
+    if not isinstance(result_id, str) or not _ID.fullmatch(result_id):
+        problems.append(f"{where} ID must start with a letter or digit and hold only letters, digits, '.', '_', "
+                        "or '-', since it names the result's query, producer module, table, and evidence files")
+    if not isinstance(table, dict):
+        return problems + [f"{where} is not a table"]
     question = table.get("question")
     if not isinstance(question, str) or not question.strip():
         problems.append(f'{where} has no question; add question = "<the question this result answers, '
@@ -546,6 +646,12 @@ def result_problems(result_id: str, table, questions: dict[str, str] | None = No
     inputs = table.get("inputs", [])
     if not isinstance(inputs, list) or not all(isinstance(name, str) and name.strip() for name in inputs):
         problems.append(f"{where} inputs must be a list of dataset or view names")
+    code = table.get("code", [])
+    if not isinstance(code, list) or not all(isinstance(path, str) and path.strip() for path in code):
+        problems.append(f'{where} code must be a list of paths relative to the investigation, as code = ["helpers.py"]')
+    parameters = table.get("parameters", [])
+    if not isinstance(parameters, list) or not all(isinstance(n, str) and _NAME.fullmatch(n) for n in parameters):
+        problems.append(f'{where} parameters must be a list of [parameters] names, as parameters = ["start"]')
     answers = table.get("answers", [])
     if not isinstance(answers, list) or not all(isinstance(q, str) and _QID.fullmatch(q) for q in answers):
         problems.append(f'{where} answers must be a list of question IDs, as answers = ["Q-001"]')
@@ -560,9 +666,6 @@ def result_problems(result_id: str, table, questions: dict[str, str] | None = No
     return problems
 
 
-# Investigation entries that are records or outputs, or that other results own, not producing code.
-_NOT_CODE = {"brief.md", "state.md", "findings.json", "history.md", "questions.json", "questions.md", "evidence",
-             "exploration", "results", "queries"}
 # Helpers that dispatch, record evidence, or package; replacing them changes no result.
 _NOT_PRODUCING = ("src/awb.py", "src/provenance.py", "src/packaging/")
 
@@ -570,14 +673,19 @@ _NOT_PRODUCING = ("src/awb.py", "src/provenance.py", "src/packaging/")
 def record_evidence(project_root, investigation: str, result_id: str, *, views: list[str],
                     publications: list[str] | None = None, acquisitions: list[str] | None = None,
                     settings_path: str, checks: list[dict], notes: str | None = None,
-                    code_paths: list[str] | None = None) -> Path:
+                    code_paths: list[str] | None = None, parameters: dict | None = None) -> Path:
     """Write one result's complete producing state atomically, replacing the same id.
 
     The settings file must hold the result's [results.<id>] table, whose question and inputs the
-    evidence copies; its `queries` (default queries/<id>.sql, relative to the investigation) are
-    producing code. code_paths adds further producing files or directories. Omitted publications
-    are those the views read; omitted acquisitions are the inputs recorded in those publications'
-    publication.json.
+    evidence copies. Producing code is an allow list: the investigation's run.py, the table's
+    `queries` (default queries/<id>.sql), the result's producer module (producer_path()), and the
+    table's `code`, each relative to the investigation, plus src/ except the helpers that only
+    dispatch, record, or package. A declared code path must exist. code_paths adds further producing
+    files or directories, relative to the project. `parameters` is the mapping the producer received,
+    result_parameters() in run.py, and settings record only those [parameters] entries; without it,
+    as an older run.py calls this, every entry is recorded, since its producer may read any. Omitted
+    publications are those the views read; omitted acquisitions are the inputs recorded in those
+    publications' publication.json.
     """
     root = Path(project_root).resolve()
     if not all(isinstance(v, str) and _ID.fullmatch(v) for v in (investigation, result_id)):
@@ -596,12 +704,19 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
                                ledger_answerers(root, investigation) if table.get("answers") else None)
     if problems:
         raise ValueError(f"{settings_path}: " + "; ".join(problems))
-    queries = table.get("queries", [f"queries/{result_id}.sql"])
     prefix = f"investigations/{investigation}/"
-    code = [p for p in _expand(root, [p for p in ("src", prefix) if (root / p).is_dir()])
-            if not p.startswith(_NOT_PRODUCING)
-            and not (p.startswith(prefix) and p[len(prefix):].split("/")[0] in _NOT_CODE)]
-    code += _expand(root, [prefix + query for query in queries] + list(code_paths or []))
+    declared = table.get("code", [])
+    missing = [path for path in declared if not (root / _relative(root, prefix + path)).exists()]
+    if missing:
+        raise ValueError(f"{settings_path}: [results.{result_id}] code names {', '.join(missing)}, which does not "
+                         f"exist under {prefix}")
+    # An allow list: a file the result does not read, such as prose, notes, or another result's query or
+    # producer, never makes it stale. The producer module is listed even before it is written.
+    own = ["run.py", *_queries(result_id, table), producer_path(result_id), *declared]
+    code = [p for p in _expand(root, ["src"] if (root / "src").is_dir() else []) if not p.startswith(_NOT_PRODUCING)]
+    code += _expand(root, [prefix + path for path in own] + list(code_paths or []))
+    if parameters is not None:  # Only the parameters the producer received can change the result.
+        settings["content"] = _scoped(settings["content"], result_id, set(parameters))
     view_entries = [{**e, "publications": _view_publications(root, e["path"])}
                     for e in file_checksums(views, root=root)]
     if publications is None:
@@ -725,6 +840,10 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
                     else:
                         changed = _git(root, "diff", "--name-only", "-z", "--relative", sha, "--", *paths)
                         mismatches = [f"{p}: differs from producing commit" for p in changed.split("\0") if p]
+                        # A path absent when recorded, such as a producer module not yet written, is
+                        # untracked once created, which the diff leaves out.
+                        created = _git(root, "ls-files", "--others", "-z", "--", *paths)
+                        mismatches += [f"{p}: created after the producing commit" for p in created.split("\0") if p]
             elif name == "uncommitted-code":
                 paths = [e["path"] for e in _known(evidence["producing_uncommitted_changes"], deep=False)]
                 for entry in evidence["producing_uncommitted_changes"]:
@@ -778,7 +897,8 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
                 current = _settings(root, entry["path"])
                 old, new = entry["content"], current["content"]
                 if not _is_unknown(old) and not _is_unknown(new):
-                    old, new = _settings_keys(old, scope), _settings_keys(_scoped(new, scope), scope)
+                    names = _compared(root, _known(evidence["investigation"]), scope, new, old)
+                    old, new = (_settings_keys(_scoped(content, scope, names), scope) for content in (old, new))
                     keys = sorted(k for k in old.keys() | new.keys()
                                   if k not in old or k not in new or old[k] != new[k])
                     if keys:
@@ -1360,8 +1480,15 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
         else:
             evidence = json.loads(evidence_path.read_text())
             table = _checksum(root, f"investigations/{investigation}/results/{result_id}.csv")["sha256"]
-            exact = prior["baseline"] is not None and \
-                prior["baseline"] == _baseline(table, checks, evidence["settings"].get("content"))
+            baseline, content = prior["baseline"], evidence["settings"].get("content")
+            if baseline is not None and all(isinstance(c, dict) and not _is_unknown(c)
+                                            for c in (baseline["settings"], content)):
+                # Compare the parameters this run recorded, those its producer received; prior evidence
+                # may have recorded every one.
+                names = _compared(root, investigation, result_id, content, content)
+                baseline = {**baseline, "settings": _scoped(baseline["settings"], result_id, names)}
+                content = _scoped(content, result_id, names)
+            exact = baseline is not None and baseline == _baseline(table, checks, content)
             flagged = entry["status"] == _FLAGGED
             if not flagged and exact:
                 return {"action": "kept", "status": entry["status"], "claim": entry["claim"], "history": False}
@@ -1400,6 +1527,93 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
     return result
 
 
+# Brackets inside which a --caveat ";" stays part of its note.
+_BRACKETS = {"(": ")", "[": "]"}
+
+
+def _notes(caveat):
+    """Split --caveat text into notes at each ";" outside parentheses and square brackets.
+
+    Brackets nest, and a closer with no bracket open, as in "1) first; 2) second", is text. An
+    unclosed bracket, or a closer that does not match the innermost open one, raises ValueError.
+    Each note's whitespace is collapsed; empty notes are dropped.
+    """
+    notes, current, open_ = [], [], []
+    for character in caveat:
+        if character in _BRACKETS:
+            open_.append(character)
+        elif character in _BRACKETS.values() and open_:
+            if _BRACKETS[open_[-1]] != character:
+                raise ValueError(f"--caveat closes {open_[-1]!r} with {character!r}; match each bracket, or "
+                                 "drop the stray one")
+            open_.pop()
+        elif character == ";" and not open_:
+            notes.append("".join(current))
+            current = []
+            continue
+        current.append(character)
+    if open_:
+        raise ValueError(f"--caveat leaves the bracket {open_[-1]!r} unclosed; close it, or drop it")
+    return [_cell(note) for note in [*notes, "".join(current)] if note.strip()]
+
+
+# Wording that asserts a reconciliation or a completed check, matched case-insensitively as whole words:
+# sum(s|med|ming) to, add(s|ed|ing) up to, reconcile(s|d)/reconciling/reconciliation, and checked or
+# verified every, each, or all. A passing check whose name or detail uses such wording records it.
+_ASSERTS_CHECK = re.compile(
+    r"(?<![\w-])(?:(?:sums?|summed|summing)\s+to|(?:adds?|added|adding)\s+up\s+to"
+    r"|reconcil(?:e|es|ed|ing|iation)|(?:checked|verified)\s+(?:every|each|all))(?![\w-])", re.IGNORECASE)
+
+
+def _package_reader(root):
+    """The project's src/packaging/draft.py, loaded only when a finding's numbers are read, so provenance
+    works without it; None when it is absent."""
+    path = root / "src/packaging/draft.py"
+    if not path.is_file():
+        return None
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("awb_project_draft_numbers", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _finding_warnings(root, investigation, result_id, text, checks):
+    """Warnings for a finding's text: each number its result does not record, read by the package helper's
+    number reader when src/packaging/draft.py is present, and wording that asserts a reconciliation or a
+    completed check that no passing check records. They never refuse the write."""
+    warnings = []
+    # A customized or broken copy of the package helper only costs the numbers check.
+    try:
+        draft = _package_reader(root)
+    except Exception as error:
+        draft = None
+        warnings.append(f"warning: numbers not checked: src/packaging/draft.py did not load "
+                        f"({type(error).__name__}: {error})")
+    if draft is not None:
+        try:
+            values, problems = draft.recorded_values(root, investigation, [{"result_id": result_id}])
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "finding.md"
+                path.write_text(text, encoding="utf-8")
+                rows = draft.check_numbers(path, values)
+        except Exception as error:
+            warnings.append(f"warning: numbers not checked: src/packaging/draft.py could not read them "
+                            f"({type(error).__name__}: {error})")
+        else:
+            warnings += [f"warning: {result_id}: {problem}" for problem in problems]
+            warnings += [f"warning: {result_id}: {row['text']} is not a value its table, profile, checks, or "
+                         "settings record; check the number or reword" for row in rows]
+    backed = any(c.get("outcome") == "pass" and _ASSERTS_CHECK.search(f"{c.get('name', '')} {c.get('detail', '')}")
+                 for c in checks if isinstance(c, dict))
+    asserted = _ASSERTS_CHECK.search(text)
+    if asserted and not backed:
+        warnings.append(f'warning: {result_id}: "{asserted.group(0)}" asserts a reconciliation or a completed '
+                        "check that no passing check in its evidence records; record the check in its "
+                        "validation and rerun, or reword")
+    return warnings
+
+
 def update_findings(project_root, investigation: str, result_ids: list[str], *, status: str | None = None,
                     text: str | None = None, caveat: str | None = None, claim: str | None = None,
                     basis: str | None = None, reason: str | None = None, today: str | None = None) -> dict:
@@ -1409,7 +1623,9 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
     change needs `reason`, for history.md.
     ValueError for unusable arguments, including a missing reason when history needs one;
     StateError when a guard refuses. Returns {rows (the changed rows), unchanged, warnings,
-    history (the entry's heading, or None)}.
+    history (the entry's heading, or None)}. Warnings never refuse: a flagged finding reworded, and,
+    for a row given --text or promoted to supported, each number its result does not record and any
+    reconciliation or completed-check wording no passing check records (_finding_warnings).
     """
     root = Path(project_root).resolve()
     today = today or _today()
@@ -1429,7 +1645,7 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
     if claim == "causal" and not _BASIS.fullmatch(basis):
         raise ValueError("--claim causal needs --basis naming its design: 'experiment: <design>' or "
                          "'natural experiment: <design>'")
-    notes = [_cell(part) for part in (caveat or "").split(";") if part.strip()]
+    notes = _notes(caveat or "")
     if any(note.startswith(_CHECK_LABELS) for note in notes):
         raise ValueError("--caveat cannot use the reserved prefixes 'failed checks:' or 'not assessed:'")
 
@@ -1478,6 +1694,10 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
                               "those that still hold" if entry["notes"] and caveat is None else "")
                     raise StateError(f"{result_id} has failed or not-assessed checks ({gaps}); "
                                      f"explain them with --caveat before promoting it{detail}")
+            if text is not None or (cells[2] == "supported" and old[2] != "supported"):
+                checks = json.loads(evidence_path.read_text()).get("checks")
+                warnings.extend(_finding_warnings(root, investigation, result_id, entry["text"] if text is None
+                                                  else text, checks if isinstance(checks, list) else []))
             logged = (old[2] == "supported" or flagged) or cells[2] in ("supported", "superseded") \
                 or cells[3] != old[3]
             changes.append((result_id, index, old, cells, logged))
@@ -2280,7 +2500,12 @@ def cli_state(root: Path, argv: list[str]) -> int:
                    "flag); --claim causal without a --basis naming an experiment or natural experiment. A new "
                    "result's claim is association; --claim descriptive narrows it. --reason is required "
                    "when the prior status is supported or flagged, the new one supported or superseded, or "
-                   "the claim changes; that change appends one history.md entry. Sets Last updated.\n",
+                   "the claim changes; that change appends one history.md entry. Sets Last updated.\n"
+                   "Warns, never refuses, with --text or a promotion to supported: on each number in the finding "
+                   "that its result's table, profile, checks, and settings do not record, read as check-draft "
+                   "reads numbers when src/packaging/draft.py is present; and on wording that asserts a "
+                   "reconciliation or a completed check (sums to, adds up to, reconciles, checked every, each, "
+                   "or all) that no passing check's name or detail records. Warnings print first.\n",
         "render": "Prints discarded disk rows; without findings.json the table renders empty.\n",
         "flag": "Validates every flag before writing. --check writes nothing. Only a rerun clears a flag.\n",
         "issues": "--drop takes the item's number in the list or text only one item contains (case-sensitive), "
@@ -2306,7 +2531,9 @@ def cli_state(root: Path, argv: list[str]) -> int:
         parser.add_argument("--status", choices=_STATUSES, help="new status")
         parser.add_argument("--text", help="new finding wording (one ID)")
         parser.add_argument("--caveat", help="replace the caveat's notes, keeping the checks segments run.py "
-                                             "writes; '' clears them (one ID)")
+                                             "writes; ';' outside parentheses and square brackets separates notes, "
+                                             "and an unclosed or mismatched bracket is refused; '' clears them "
+                                             "(one ID)")
         parser.add_argument("--claim", choices=_CLAIMS,
                             help="the strongest wording the finding supports; check-draft refuses causal wording "
                                  "above it (one ID)")
