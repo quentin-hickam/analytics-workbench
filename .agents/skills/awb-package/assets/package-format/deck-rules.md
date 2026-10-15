@@ -80,7 +80,7 @@ Deliver each dataset file beside the deck as supplied; the **Supporting datasets
 
 ## Theme and accessibility
 
-Apply the organization's approved template, typography, and page furniture when available. Keep every headline in its slide's title placeholder so the reading order and slide titles stay correct, keep body text at 18 pt or larger, and check the deck's accessibility with the tools the builder has.
+Apply the organization's approved template, typography, and page furniture when available. Keep every headline in its slide's title so the reading order and slide titles stay correct, keep body text at 18 pt or larger, and check the deck's accessibility with the tools the builder has.
 
 ## Revision boundary
 

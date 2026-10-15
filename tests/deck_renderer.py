@@ -168,7 +168,8 @@ def _place_chart(slide, chart, draft_dir):
     frame = slide.shapes.add_chart(CHART_TYPES[form], *_CHART_BOX, data)
     if form in ("Horizontal bar", "Bar with intervals", "Stacked bar"):
         frame.chart.category_axis.reverse_order = True  # the file's first row on top
-    if form != "Line":
+    # Values start at zero; a line chart leaves it to the axis only when **Axis:** asks for a non-zero baseline.
+    if form != "Line" or not re.search(r"non-?zero", chart["fields"].get("Axis", ""), re.IGNORECASE):
         frame.chart.value_axis.minimum_scale = 0
     if form == "Bar with intervals":
         _error_bars(frame.chart, pairs, headers, rows, where)

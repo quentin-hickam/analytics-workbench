@@ -1,6 +1,7 @@
 # Kept cases:
 # test_renderer_builds_every_slide_verbatim: the reference renderer builds the title slide and one slide per outline slide in order, with headlines, bullets and nested bullets, and notes verbatim, and leaves the draft untouched.
-# test_renderer_draws_every_form_from_its_file: each of the seven forms is drawn from its chart file at the file's values and order: bar, column, line, and stacked types with a series pivoted, intervals as custom error bars, scatter points and fit, a table's cells; alt text and the source line (with the **Interval:** text) and caveat line come from the specification.
+# test_renderer_draws_every_form_from_its_file: each of the seven forms is drawn from its chart file at the file's values and order: bar, column, line, and stacked types with a series pivoted, intervals as custom error bars, each bar, column, and line value axis from zero, scatter points and fit, a table's cells; alt text and the source line (with the **Interval:** text) and caveat line come from the specification.
+# test_renderer_line_axis_follows_axis_field: a line chart's value axis starts at zero unless **Axis:** asks for a non-zero baseline.
 # test_renderer_is_deterministic: two renders of one draft are byte-identical.
 # test_renderer_refuses_a_draft_breaking_the_contract: an outline or chart row stops the render, naming the rows, and writes nothing.
 # test_renderer_refuses_data_it_cannot_draw: a repeated category and series pair, or a blank interval cell, stops the render with a ContractError instead of dropping a row or crashing.
@@ -138,6 +139,7 @@ def test_renderer_draws_every_form_from_its_file(package, tmp_path):
         [4.0, 1.5], [3.0, 1.0]]
     assert list(line.chart.plots[0].categories) == ["Jan", "Feb", "Mar"]
     assert series(line) == [("West", [12.0, 15.0, 18.0]), ("East", [9.0, 8.0, None])]
+    assert line.chart.value_axis.minimum_scale == 0
     assert series(column) == [("Cases", [1204.0, 1310.0]), ("Late", [96.0, 101.0])]
     assert series(stacked) == [("Late", [21.0, 5.0]), ("On time", [79.0, 95.0])]
     assert series(scatter) == [("Late (%)", [4.0, 9.0, 12.0]), ("Fitted (%)", [4.5, 8.5, 12.5])]
@@ -153,6 +155,16 @@ def test_renderer_draws_every_form_from_its_file(package, tmp_path):
                   if shape.has_text_frame and shape.text_frame.text.startswith("source")]
         expected = f"source {n}; bars show 95% intervals" if n == 2 else f"source {n}"
         assert source == [expected if n % 2 else f"{expected}\n* value {n} is partial"]
+
+
+def test_renderer_line_axis_follows_axis_field(package, tmp_path):
+    findings_path = package / "findings.md"
+    text = findings_path.read_text(encoding="utf-8")
+    line = text.index("**Chart 3.**")
+    findings_path.write_text(text[:line] + text[line:].replace("zero baseline", "non-zero baseline", 1),
+                             encoding="utf-8")
+    frame = frames(list(deck(package, tmp_path).slides)[4])[0]
+    assert frame.chart.chart_type == XL_CHART_TYPE.LINE_MARKERS and frame.chart.value_axis.minimum_scale is None
 
 
 def test_renderer_is_deterministic(package, tmp_path):
