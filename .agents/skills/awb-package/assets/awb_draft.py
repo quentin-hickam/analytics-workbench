@@ -2851,8 +2851,9 @@ def parse_chart(text: str) -> tuple:
     The grammar is closed: RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]]. The first '@'
     opens the row selection, so a column name holding '@' or ',' cannot be named in COLUMNS, though the
     @where column may hold either. Before it, RESULT is a simple name, and the first ':' opens COLUMNS,
-    comma-separated names, each stripped of surrounding spaces and none empty. After it, first=<n>, n a whole number from 1 to 999999999 written without leading
-    zeros, takes the table's first n rows; where=<column>=<value>[,<value>] takes, in table order, the rows
+    comma-separated names, each stripped of surrounding spaces and none empty. After it, first=<n>, n a
+    whole number from 1 to 999999999 written without leading zeros, takes the table's first n rows;
+    where=<column>=<value>[,<value>] takes, in table order, the rows
     whose column holds one of the values exactly as the saved table writes it, the column ending at the first
     '=' and stripped, so no value can hold ',' and none may be empty. selection is "all", {"first": n}, or
     {"where": {"column", "values"}}. Anything else raises ValueError naming the part that does not fit.
