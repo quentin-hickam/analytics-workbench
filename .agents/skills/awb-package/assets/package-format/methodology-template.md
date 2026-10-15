@@ -1,6 +1,6 @@
 # Methodology
 
-This file is the internal reference for the analysis this package represents. It lets the M365 agent and analysts look up the logic behind a specific decision, so it uses the workbench's own vocabulary: view and table names, settings keys, result IDs, evidence paths, and release numbers are expected here. It stays internal to the package. It stands on its own, without earlier releases or the investigation records.
+This file is the internal reference for the analysis this package represents. It lets the deck builder and analysts look up the logic behind a specific decision, so it uses the workbench's own vocabulary: view and table names, settings keys, result IDs, evidence paths, and release numbers are expected here. It stays internal to the package. It stands on its own, without earlier releases or the investigation records.
 
 ## Package context
 

@@ -1,10 +1,10 @@
-# M365 assembly instructions
+# Deck rules
 
-`findings.md` is the slide-by-slide outline of the deck and the authoritative source of every word and number on it; the files in `charts/` hold every plotted value. Both are already written for the deck's audience, in their terms. In the Microsoft 365 Copilot app, use the PowerPoint agent to build the deck from them and improve its presentation, while preserving every slide, claim, value, qualification, and caveat.
+`findings.md` is the slide-by-slide outline of the deck and the authoritative source of every word and number on it; the files in `charts/` hold every plotted value. Both are already written for the deck's audience, in their terms. Whoever builds the deck from them, a person, an agent, or a script, follows these rules and preserves every slide, claim, value, qualification, and caveat. A builder's own steps, such as how to attach the files or which chart objects to use, are in its file under `assembly/`; where that file and these rules differ on content, these rules govern.
 
 ## Before you start
 
-You have `findings.md`, every `charts/` file, `methodology.md`, and these instructions; datasets travel beside the deck and are not attached.
+You have `findings.md`, every `charts/` file, `methodology.md`, these rules, and your builder's assembly file; datasets travel beside the deck and are not attached.
 
 ## Using methodology.md
 
@@ -12,7 +12,7 @@ Use `methodology.md` to understand reasoning, or to answer the requester's quest
 
 ## Ask before building
 
-Before building the deck, check for the conditions below. When one holds, ask the requester before building. Put every question in one message, keep each to a sentence or two, and propose a default the requester can accept with a yes.
+Before building the deck, check for the conditions below. When one holds, ask the requester before building. Put every question in one message, keep each to a sentence or two, and propose a default the requester can accept with a yes. A builder that cannot ask, such as a script, reports each condition it finds instead.
 
 - **Audience or decision differs.** The requester names readers or a decision that differ from the deck's subtitle line and **Answer** slide. Example: "The deck is written for regional operations managers deciding on staffing. Is it for them, or for the finance committee? Default: regional operations managers."
 - **A slide will not fit.** A slide's bullets and chart cannot fit at the minimum text sizes below. Example: "The third finding slide has five bullets and a chart and will not fit at 18 pt. Should I split it into two slides with the same headline continued? Default: yes, split it."
@@ -24,8 +24,8 @@ When none holds, build without asking.
 
 ## Build the deck
 
-- **One slide per outline slide.** The `#` heading and subtitle line make the title slide. Each `##` section is one slide, except **Findings**, which becomes a PowerPoint section holding one slide per `###` finding. Keep the outline's order; add no slide, and drop none.
-- **Headlines verbatim.** The `###` heading, or the text after **Headline:**, goes in the slide's title placeholder as written.
+- **One slide per outline slide.** The `#` heading and subtitle line make the title slide. Each `##` section is one slide, except **Findings**, which becomes a section of the deck holding one slide per `###` finding. Keep the outline's order; add no slide, and drop none.
+- **Headlines verbatim.** The `###` heading, or the text after **Headline:**, goes in the slide's title as written.
 - **Bullets verbatim.** Every bullet, number, rounding, unit, and qualifier as written; tighten wording only where no claim, number, or qualifier changes.
 - **Caveats stay on their slide.** A **Caveat:** or **Awaiting revalidation:** bullet stays on the slide of the claim it qualifies, visible on the slide, not only in the notes.
 - **Notes.** The **Notes:** paragraph goes into the slide's speaker notes, unchanged in substance.
@@ -33,23 +33,23 @@ When none holds, build without asking.
 
 ## Charts
 
-Build each chart as a native, editable PowerPoint chart whose data is its file in `charts/`, not as a picture. Chart data verbatim: plot every row of its file, in the file's order, at the file's values. When a chart cannot be built as a native chart from its file, or its data does not match the file, say so to the requester and name the slide, so they can insert the chart in PowerPoint and paste the file's values into its data; never substitute an image or estimated values.
+Draw each chart as an editable chart whose data is its file in `charts/`, not as a picture. Chart data verbatim: plot every row of its file, in the file's order, at the file's values. When a chart cannot be drawn from its file, or its data does not match the file, say so to the requester and name the slide; never substitute an image or estimated values.
 
 ### Chart forms
 
-The specification names one of these forms.
+The specification names one of these forms. Its **Data:** line names every column of the file by role, each as `role: column header` with the header exactly as the file writes it, separated by semicolons, such as `category: Region; value: Closed late (%)`.
 
-| Form | Use for | Build |
-| --- | --- | --- |
-| Horizontal bar | Ranking or comparing categories | Clustered bar, categories in the file's order, value axis from zero |
-| Bar with intervals | Estimates with intervals across groups | Clustered bar with custom error bars from the file's lower and upper columns |
-| Line | Change over time, a few series | Line chart, time on the horizontal axis; label line ends instead of a legend when there are four series or fewer |
-| Column | A few categories with short labels, or counts by period | Clustered column, value axis from zero |
-| Stacked bar | Part-to-whole across categories | 100% stacked bar; use instead of a pie whenever there are more than three parts |
-| Scatter | Relationship between two measures | Scatter chart; a fitted line only when the file carries its values |
-| Table | About six numbers or fewer, or a two-way grid of values | PowerPoint table, numbers right-aligned, units in the header row, optional color fill in one hue by value |
+| Form | Use for | Data roles | Build |
+| --- | --- | --- | --- |
+| Horizontal bar | Ranking or comparing categories | `category`, one or more `value`, or one `value` with a `series` | Clustered bar, categories in the file's order, value axis from zero |
+| Bar with intervals | Estimates with intervals across groups | `category`, `value`, `lower`, `upper` | Clustered bar with custom error bars from the file's lower and upper columns |
+| Line | Change over time, a few series | `category` (the period), one or more `value`, or one `value` with a `series` | Line chart, time on the horizontal axis; label line ends instead of a legend when there are four series or fewer |
+| Column | A few categories with short labels, or counts by period | `category`, one or more `value`, or one `value` with a `series` | Clustered column, value axis from zero |
+| Stacked bar | Part-to-whole across categories | `category`, one or more `value`, or one `value` with a `series` | 100% stacked bar; use instead of a pie whenever there are more than three parts |
+| Scatter | Relationship between two measures | `x`, `y`, and optionally `label` and `fit` | Scatter chart; a fitted line only when the file carries its values |
+| Table | About six numbers or fewer, or a two-way grid of values | one `column` per table column, in order | Table, numbers right-aligned, units in the header row, optional color fill in one hue by value |
 
-Never use 3D, a second value axis, or decorative effects. Put a second measure in its own chart rather than on a second axis.
+A `series` column splits one `value` column into a series per distinct entry, in the order each first appears in the file. Never use 3D, a second value axis, or decorative effects. Put a second measure in its own chart rather than on a second axis.
 
 ### Style
 
@@ -80,12 +80,12 @@ Deliver each dataset file beside the deck as supplied; the **Supporting datasets
 
 ## Theme and accessibility
 
-Apply the organization's approved template, typography, and page furniture when available. Keep every headline in its slide's title placeholder so the reading order and slide titles stay correct, keep body text at 18 pt or larger, and run PowerPoint's accessibility checker.
+Apply the organization's approved template, typography, and page furniture when available. Keep every headline in its slide's title so the reading order and slide titles stay correct, keep body text at 18 pt or larger, and check the deck's accessibility with the tools the builder has.
 
 ## Revision boundary
 
-When a requested change affects the storyline, wording, findings, numbers, charts, scope, or dataset contents, do not make it in the deck: tell the requester that it needs a revised package from the workbench, and build the deck again from the refreshed package. Layout, theme, and visual polish within the rules above are made here; they are not carried back to the workbench.
+When a requested change affects the storyline, wording, findings, numbers, charts, scope, or dataset contents, do not make it in the deck: tell the requester that it needs a revised package from the workbench, and build the deck again from the refreshed package. Layout, theme, and visual polish within the rules above are made in the deck; they are not carried back to the workbench.
 
 ## Before handing back
 
-Confirm: one slide per outline slide, in order; every chart native from its file; every **Caveat:** and **Awaiting revalidation:** bullet visible on its slide; the accessibility checker clean.
+Confirm: one slide per outline slide, in order; every chart drawn from its file; every **Caveat:** and **Awaiting revalidation:** bullet visible on its slide; and what your builder's assembly file adds.
