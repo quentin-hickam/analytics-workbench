@@ -19,6 +19,8 @@
 # test_check_numbers_reads_formats: thousands separators, percents of fractions, scales, multipliers, scientific notation, ranges, and rounding trace; dates, years where their period ends, times with am or pm or seconds, codes, glued names, chart number lists, list markers, footnotes, code, comments, and link targets are skipped; a count beside a month name, a bare or parenthesized year-like count, a fraction, a time without am or pm, and a hash in scientific form are read; allowed texts pass.
 # test_check_numbers_reviewed_probes: every narrative probed in review rounds 1 to 4 is reported or skipped as intended, reading fail-safe: a context skips a number only where it marks no quantity, so a count after a punctuation mark, a chart reference, a date, or a year, or a year a word follows, is read; paths and identifiers are skipped whole; joined digits that are not thousands grouping or one decimal are read and never trace; a unit or context split by whitespace or a line wrap still counts; a number wrapping a list item's text is read, and a row's text allowed exactly covers it across a wrap; a leading- or trailing-point scientific mantissa is one number; and non-quantities such as a comparison year or a week number are reported.
 # test_recorded_text_reviewed_probes: every recorded text probed in review records the magnitudes intended, and an extreme or non-finite cell records nothing or itself without crashing.
+# test_check_numbers_skips_a_doi: a DOI, 10. with a four- to nine-digit registrant code, a slash, and a suffix, is skipped whole after doi: or DOI, in a doi.org link, or bare when its suffix holds a letter and a digit, ending at whitespace or a , or ; before a digit; a shorter registrant code, no slash, a bare suffix without a letter or a digit, as in 10.2500/litre, 10.2500/1000, or 10.12345/67.8, and a number glued after a DOI by , or ; are read.
+# test_provenance_gaps_are_unknown_objects_and_unread_requirements: an {"unknown": reason} object and an unread requirements line are gaps; a settings value or column name such as unknown_pickup, or a string starting with unknown, is not.
 # test_check_numbers_allowed_phrases_and_precision: an allowed phrase covers only the number it is written around, a bare allowed text every occurrence; a row's text copied exactly covers its number after a line wrap or extra spaces; a number traces at every written digit beyond 28 significant digits and not one unit of a further place outside its rounding.
 # test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's or a path's digits add nothing; evidence text and parsed settings content add scaled and scientific values a narrative can write in full, without dates, booleans, or the settings file's size.
 # test_recorded_values_keep_every_json_digit: profile and evidence fractions keep every written digit, so the exact narrative value traces and a value one digit off does not.
@@ -696,6 +698,37 @@ def test_recorded_text_reviewed_probes():
         found = set()
         draft._magnitudes(text, found)
         assert sorted(found) == sorted(Decimal(value) for value in expected), text
+
+
+def test_check_numbers_skips_a_doi(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_doi")
+    path = tmp_path / "methodology.md"
+    path.write_text("Data: UCI repository (DOI 10.24432/C5CG6D), doi:10.1000.10/182-x and "
+                    "https://doi.org/10.24432/C5CG6D; 10.24432/C5CG6D.\n"
+                    "Not a DOI: 10.123/abc, 10.24432 alone, and 1.24432/C5.\n"
+                    "Fuel cost 10.2500/litre in March; doi: 10.1000/xyz is a paper.\n"
+                    "Cost was 10.2500/1000 litres; ratio 10.12345/67.8 held.\n"
+                    "See DOI 10.24432/C5CG6D,478 rows, and 10.24432/C5CG6D;12 more; cell 10.1016/j.cell.2009.01.002.\n")
+    assert [(row["line"], row["text"]) for row in draft.check_numbers(path, [])] == [
+        (2, "10.123"), (2, "10.24432"), (2, "1.24432"), (3, "10.2500"), (4, "10.2500/1000"), (4, "10.12345/67.8"),
+        (5, "478"), (5, "12")]
+
+
+def test_provenance_gaps_are_unknown_objects_and_unread_requirements():
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_gaps")
+    record = {
+        "analytical_settings": {"path": "investigations/inv/settings.toml", "content": {
+            "parameters": {"pickup": "unknown_pickup", "label": "Unknown region"},
+            "results": {"r-001": {"question": "Unknown pickups?",
+                                  "validation": {"required_columns": ["unknown_pickup"]}}}}},
+        "producing_commit": {"unknown": "not a git repository"},
+        "results": [{"result_id": "r-001", "runtime": {"packages": {"duckdb": "unknown"},
+                                                       "unread_requirements": ["requirements.txt:2: -e ."]}}],
+        "inventory": [{"unknown": "skipped field"}]}
+    assert draft.provenance_gaps(record) == [
+        {"field": "producing_commit", "reason": "not a git repository"},
+        {"field": "results[0].runtime.unread_requirements[0]",
+         "reason": "requirements not read, packages unrecorded: requirements.txt:2: -e ."}]
 
 
 def test_check_numbers_allowed_phrases_and_precision(tmp_path):

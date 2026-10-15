@@ -1129,6 +1129,13 @@ _PATH_CANDIDATE = re.compile(
 _EXTENSIONS = "md|py|csv|tsv|parquet|jsonl?|sql|png|svg|jpe?g|pdf|html?|duckdb|db|xlsx?|docx|pptx|ya?ml|toml|txt|log|ipynb"
 _FILE = re.compile(rf"(?<![\w.,/\\-])[\w-]*\w\.(?:{_EXTENSIONS})(?![\w/\\])")
 _HYPHENATED = re.compile(r"(?<![\w.-])([A-Za-z_]\w*)(?:-\w+)+")
+# A DOI: 10., a registrant code of four to nine digits with any dot-separated parts, a slash, and its suffix,
+# which runs to the next whitespace or to a , or ; before a digit, after doi: or DOI, or bare when its
+# suffix holds both a letter and a digit; a bare 10.2500/litre or 10.2500/1000 is a quantity, so it is read.
+_DOI_SUFFIX = r"(?:[^\s,;]|[,;](?![0-9]))"
+_DOI = re.compile(rf"(?i:\bdoi)(?::\s*|\s+)10\.[0-9]{{4,9}}(?:\.[0-9]+)*/{_DOI_SUFFIX}+"
+                  rf"|(?<![\w.])10\.[0-9]{{4,9}}(?:\.[0-9]+)*/(?={_DOI_SUFFIX}*?[A-Za-z])(?={_DOI_SUFFIX}*?[0-9])"
+                  rf"{_DOI_SUFFIX}+")
 
 
 def _path(token):
@@ -1148,6 +1155,7 @@ def _blank_names(text):
     blanks = [match.span() for match in _PATH_CANDIDATE.finditer(text) if _path(match.group(0))]
     blanks += [match.span() for match in _FILE.finditer(text)]
     blanks += [match.span() for match in _HYPHENATED.finditer(text) if _identifier(match.group(1))]
+    blanks += [match.span() for match in _DOI.finditer(text)]
     for start, end in blanks:
         text = _blank(text, start, end)
     return text
@@ -2965,15 +2973,15 @@ def _runtime(evidence):
 
 
 def provenance_gaps(record: dict) -> list[dict]:
-    """Each manifest value recorded as unknown, by its dotted field path, with the reason, and each
-    requirements line a result's runtime could not read, whose packages' versions went unrecorded."""
+    """Each manifest value recorded as unknown, an {"unknown": reason} object, by its dotted field path,
+    with the reason, and each requirements line a result's runtime could not read, whose packages'
+    versions went unrecorded. A string is never a gap, so a settings value or a column name such as
+    unknown_pickup is not one."""
     gaps = []
 
     def walk(value, path):
         if _is_unknown(value):
             gaps.append({"field": path, "reason": value["unknown"]})
-        elif isinstance(value, str) and value.lower().startswith("unknown"):
-            gaps.append({"field": path, "reason": value})
         elif isinstance(value, dict):
             for key, item in value.items():
                 if key == "unread_requirements" and isinstance(item, list):
