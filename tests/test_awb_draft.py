@@ -7,6 +7,10 @@
 # test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
 # test_check_draft_reports_outline_and_chart_spec_rows: a headline over 15 words, a chart form outside the seven, a Data column the chart file lacks, and a file column no Data role names fail check-draft with outline and charts rows in both modes, and release refuses on them.
 # test_check_draft_requires_each_question_in_methodology: export's questions pass once methodology repeats them; a question methodology lacks or rewords, a results entry without a question, and a manifest without results fail check-draft's questions, and release refuses on the check.
+# test_questions_check_reads_methodology_as_it_renders: a question wrapped, emphasized, linked, escaped, in a code span, heading, or list item, or after a comment block on its line matches; one only in a comment, inline or a block, in fenced code, split over two paragraphs, or reworded does not.
+# test_questions_check_matches_a_code_span_as_written: a question holding brackets, a tilde, an edge underscore, an asterisk, a character reference, or a backslash matches when a code span shows it exactly as written.
+# test_questions_check_refuses_a_commented_question: the issue's probe, a question only inside an HTML comment, fails check-draft's questions; a manifest question with inline markup matches as it renders.
+# test_check_draft_help_and_references_agree_on_the_rendered_reading: the check-draft help text, helpers.md, and the comment above _view name numbers as the only check that does not read the rendered view, and the help states how questions are read.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
 # test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
@@ -42,6 +46,8 @@
 # test_names_and_charts_read_the_same_rendered_text: the names scan and the chart check skip comments as CommonMark scopes them, and read escaped, character-reference, zero-width, and emphasized names and chart numbers as they render.
 # test_claim_check_reads_headlines_and_cited_designs: a causal ### headline fails check-draft with a row to reword both files; cited causal results of different designs are refused; a whitespace design is unrecognized.
 # test_claim_strength_follows_cited_results_and_records: a slide citing several results takes the weakest claim; one citing none takes the weakest represented; with no causal finding the Answer slide fails too; a missing Claim, a missing results list, and a missing or differing methodology Claim strength line each fail.
+# test_numbers_skip_a_claim_strength_line_the_claims_check_accepts: numbers on a causal Claim strength line that repeats its result's Claim cell give no numbers row, while a line continuing its paragraph is read; a line the claims check refuses, another design or no experiment named, keeps its numbers; check_numbers skips only the claim_lines it is given.
+# test_numbers_count_lines_as_the_claims_check_does_after_a_comment: a comment holding a line break that str.splitlines() sees (U+2028, form feed, NEL) keeps the numbers check's line numbers on the claims check's, so the accepted-claim skip cannot land on the next line.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
 
 import hashlib
@@ -296,6 +302,10 @@ def set_results(project, results):
     path.write_text(json.dumps(record))
 
 
+NOT_REPEATED = ("methodology.md does not repeat this question verbatim in text that renders, within one paragraph "
+                "or heading")
+
+
 def test_check_draft_requires_each_question_in_methodology(project, capsys):
     draft = project / "deliveries/inv/pkg/draft"
     write(draft, "methodology.md", METHODOLOGY.split("Question (r-002)")[0])
@@ -306,7 +316,7 @@ def test_check_draft_requires_each_question_in_methodology(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"] and report["questions"] == [
         {"result_id": "r-002", "question": QUESTIONS["r-002"],
-         "problem": "methodology.md does not repeat this question verbatim"}]
+         "problem": NOT_REPEATED}]
     write(draft, "methodology.md", METHODOLOGY.replace("Which regions close", "Which regions closed"))
     assert run(project, capsys, "check-draft", "inv", "pkg")[1]["questions"][0]["result_id"] == "r-002"
     write(draft, "methodology.md", METHODOLOGY)
@@ -324,6 +334,91 @@ def test_check_draft_requires_each_question_in_methodology(project, capsys):
         assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
         assert report["check"]["questions"] == problems
     assert not (project / "deliveries/inv/pkg/released").exists()
+
+
+# Where methodology.md writes r-002's question, and whether the questions check finds it there.
+QUESTION_PLACES = {
+    "only in a comment block": ("<!-- Which regions close claims late? -->", False),
+    "in a comment within a paragraph": ("Question (r-002): <!-- Which regions close claims late? --> to come.", False),
+    "in fenced code": ("```\nWhich regions close claims late?\n```", False),
+    "split over two paragraphs": ("Which regions close\n\nclaims late?", False),
+    "reworded": ("Which regions closed claims late?", False),
+    "wrapped": ("Question (r-002): Which regions\nclose claims\nlate?", True),
+    "emphasized": ("Question (r-002): **Which regions** close _claims_ late?", True),
+    "linked": ("Question (r-002): [Which regions](https://example.com/r-002) close claims late?", True),
+    "escaped and referenced": ("Question (r-002): Which regions close claims late\\? See&#32;notes.", True),
+    "in a code span": ("Question (r-002): `Which regions close claims late?`", True),
+    "in a heading": ("#### Which regions close claims late?", True),
+    "in a list item": ("- r-002: Which regions close\n  claims late?", True),
+    "after a comment block on its line": ("<!-- r-002 --> Which regions close claims late?", True),
+}
+
+
+@pytest.mark.parametrize("place", QUESTION_PLACES)
+def test_questions_check_reads_methodology_as_it_renders(project, place):
+    draft = load(project / "src/packaging/draft.py", "draft_questions")
+    directory = project / "deliveries/inv/pkg/draft"
+    body, found = QUESTION_PLACES[place]
+    write(directory, "methodology.md", METHODOLOGY.split("Question (r-002)")[0] + "\n" + body + "\n")
+    record = json.loads((directory / "manifest.json").read_text())
+    assert draft.question_problems(directory, record) == ([] if found else [
+        {"result_id": "r-002", "question": QUESTIONS["r-002"],
+         "problem": NOT_REPEATED}])
+
+
+# A question holding a markup character, written exactly inside a code span, which shows it as written.
+MARKUP_QUESTIONS = (
+    "Which regions [excluding test] close late?",
+    "Did ~5% of orders close late?",
+    "Which _id values repeat?",
+    "Is churn above 5*baseline?",
+    "Which AT&amp;T orders close late?",
+    "Which regions close late\\?",
+)
+
+
+@pytest.mark.parametrize("question", MARKUP_QUESTIONS)
+def test_questions_check_matches_a_code_span_as_written(project, question):
+    draft = load(project / "src/packaging/draft.py", "draft_markup_questions")
+    directory = project / "deliveries/inv/pkg/draft"
+    before = METHODOLOGY.split("Question (r-002)")[0]
+    write(directory, "methodology.md", before + f"\nQuestion (r-002): `{question}`\n")
+    record = json.loads((directory / "manifest.json").read_text())
+    for entry in record["results"]:
+        if entry["result_id"] == "r-002":
+            entry["question"] = question
+    assert draft.question_problems(directory, record) == []
+    # Without the code span r-002 fails, so the pass above is the code span's.
+    write(directory, "methodology.md", before + "\nQuestion (r-002): to come.\n")
+    assert [row["result_id"] for row in draft.question_problems(directory, record)] == ["r-002"]
+
+
+def test_questions_check_refuses_a_commented_question(project, capsys):
+    # The issue's probe: a question only inside an HTML comment never renders, so check-draft fails.
+    draft = project / "deliveries/inv/pkg/draft"
+    write(draft, "methodology.md", METHODOLOGY.replace("Question (r-002): Which regions close\nclaims late?",
+                                                      "<!-- Which regions close claims late? -->"))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and [row["result_id"] for row in report["questions"]] == ["r-002"]
+    # A question the manifest records with inline markup is compared as it renders, as methodology.md is.
+    record = json.loads((draft / "manifest.json").read_text())
+    record["results"][1]["question"] = "Which **regions** close claims late?"
+    (draft / "manifest.json").write_text(json.dumps(record))
+    write(draft, "methodology.md", METHODOLOGY)
+    assert run(project, capsys, "check-draft", "inv", "pkg")[1]["questions"] == []
+
+
+def test_check_draft_help_and_references_agree_on_the_rendered_reading(project, capsys):
+    cli = load(project / "src/awb.py", "awb_cli_help")
+    with pytest.raises(SystemExit):
+        cli.main(["check-draft", "--help"])
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "Every check but numbers reads both files as they render." in help_text
+    assert "a question in a comment or fenced code does not count" in help_text
+    helpers = (SKILLS / "awb-package/references/helpers.md").read_text()
+    assert "Every draft check but `numbers` reads" in helpers and "`questions` rows" in helpers
+    source = ASSETS["src/packaging/draft.py"].read_text()
+    assert "# Every draft check but numbers reads findings.md and methodology.md through `_view`" in source
 
 
 def set_flags(project, flags):
@@ -1683,6 +1778,54 @@ def test_claim_strength_follows_cited_results_and_records(project, capsys):
     (directory / "manifest.json").write_text(json.dumps(record))
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and "manifest: manifest.json records no results list; rerun export" in report["errors"]
+
+
+HOLDOUT = "causal (experiment: randomized holdout of 2024 Q3, 50/50 split)"
+
+
+def test_numbers_skip_a_claim_strength_line_the_claims_check_accepts(project, capsys):
+    # A causal **Claim strength:** line repeats state.md's Claim cell, design basis included, so once the claims
+    # check accepts it its numbers trace to the record and the numbers check skips that line.
+    write(project, "investigations/inv/state.md", STATE.format(status="supported", reason="").replace(
+        "causal (experiment: randomized discount test)", HOLDOUT))
+    claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace(DISCOUNT_CLAIM, f"**Claim strength:** {HOLDOUT}"))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["claims"] == [] and report["numbers"] == [] and code == 0 and report["passed"]
+    # Only that source line is skipped: a number on the line continuing its paragraph is read.
+    claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace(
+        DISCOUNT_CLAIM, f"**Claim strength:** {HOLDOUT}\nacross 77 stores"))
+    report = run(project, capsys, "check-draft", "inv", "pkg")[1]
+    assert report["claims"] == [] and report["numbers"] == [{"file": "methodology.md", "line": 14, "text": "77"}]
+    # A line the claims check refuses keeps its numbers: another design, or the issue's line, which names no
+    # experiment or natural experiment.
+    for declared in (HOLDOUT.replace("Q3", "Q4"), "causal (randomized holdout of 2024 Q3, 50/50 split)"):
+        claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace(DISCOUNT_CLAIM, f"**Claim strength:** {declared}"))
+        code, report = run(project, capsys, "check-draft", "inv", "pkg")
+        assert code == 1 and [row["section"] for row in report["claims"]] == [DISCOUNT]
+        assert report["numbers"] == [{"file": "methodology.md", "line": 13, "text": text} for text in ("2024", "50/50")]
+    # Without the claims check's accepted lines, check_numbers reads every line.
+    draft = load(project / "src/packaging/draft.py", "draft_claim_numbers")
+    path = project / "deliveries/inv/pkg/draft/methodology.md"
+    assert [row["text"] for row in draft.check_numbers(path, [Decimal(4)])] == ["2024", "50/50"]
+    assert draft.check_numbers(path, [Decimal(4)], claim_lines={13}) == []
+
+
+@pytest.mark.parametrize("brk", ["\u2028", "\x0c", "\x85"])
+def test_numbers_count_lines_as_the_claims_check_does_after_a_comment(project, capsys, brk):
+    # A comment holding a line break that str.splitlines() sees but "\n" does not must not shift the numbers
+    # check's line numbers off the claims check's, or the skip lands on the line after the accepted claim.
+    comment = f"## Findings\n<!-- note{brk}more -->"
+    claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace("## Findings", comment)
+                .replace(DISCOUNT_CLAIM, f"{DISCOUNT_CLAIM}\nacross 77 stores"))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["claims"] == []
+    assert report["numbers"] == [{"file": "methodology.md", "line": 16, "text": "77"}]
+    write(project, "investigations/inv/state.md", STATE.format(status="supported", reason="").replace(
+        "causal (experiment: randomized discount test)", HOLDOUT))
+    claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace("## Findings", comment)
+                .replace(DISCOUNT_CLAIM, f"**Claim strength:** {HOLDOUT}\nacross 77 stores"))
+    report = run(project, capsys, "check-draft", "inv", "pkg")[1]
+    assert report["claims"] == [] and report["numbers"] == [{"file": "methodology.md", "line": 16, "text": "77"}]
 
 
 def storyline_fixture(project):
