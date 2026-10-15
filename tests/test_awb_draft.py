@@ -2244,8 +2244,9 @@ def test_export_keeps_presentation_order(project, capsys):
 
 def test_presentation_order_is_no_provenance_gap():
     draft = load(ASSETS["src/packaging/draft.py"], "draft_order_gaps")
-    record = {"presentation_order": ["Unknown regions hold few late orders"], "producing_commit": "unknown"}
-    assert draft.provenance_gaps(record) == [{"field": "producing_commit", "reason": "unknown"}]
+    record = {"presentation_order": ["Unknown regions hold few late orders"],
+              "producing_commit": {"unknown": "no Git history"}}
+    assert draft.provenance_gaps(record) == [{"field": "producing_commit", "reason": "no Git history"}]
 
 
 def test_storyline_orders_main_and_appendix_findings_each_by_the_ledger(project, capsys):
