@@ -47,4 +47,4 @@ From the project root, with `--origin brainstorm`:
 
 ## 4. Report
 
-Report the questions added in plain words with optional IDs, the counts parked and declined, and what comes next: data questions through `awb-explore` or analysis, questions for the user or a stakeholder through `awb-scope`, and each scope change through `awb-scope`.
+Report the questions added, the counts parked and declined, and what comes next: data questions through `awb-explore` or analysis, questions for the user or a stakeholder through `awb-scope`, and each scope change through `awb-scope`.

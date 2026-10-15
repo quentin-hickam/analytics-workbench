@@ -21,7 +21,7 @@ When `workbench` is false, stop and suggest `awb-init`. Treat `null`, `unknown`,
 
 ## Report
 
-Keep the report to one screen, in this order. Summarize outcomes in plain words, preserving the collector's values and the investigation's meaning; omit empty items and keep helper keys in tool results.
+Keep the report to one screen, in this order. Report the collector's values without its keys, in the investigation's wording shortened, and omit empty items.
 
 - **Question and state.** `active.question` and `active.last_updated`, then `git.state_status`; for `out of date`, add `days_after_state` and `latest_change`. Add `git.commit_comparison` when present. Modification dates use the host timezone: convert `latest_change.date` only when the user's timezone differs and the conversion moves the date. When `active.question` is a ledger ID, report the ID with its `questions.open` or `questions.awaiting_recheck` entry, falling back to its line from `python3 <project-root>/src/awb.py questions list --all`. A missing ID or failed lookup leaves the question unsettled; report the uncertainty.
 - **Findings.** `active.counts`, then every flagged finding in `active.findings` with its `reason`. Read a `foundation/quality.md` correction row only when a reason cites one that needs explaining.

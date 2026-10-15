@@ -1,6 +1,7 @@
 """Public skill metadata and repository content contracts."""
 
 import json
+import os
 from pathlib import Path
 import re
 
@@ -60,6 +61,7 @@ def test_every_skill_has_loadable_metadata(path):
     assert 1 <= len(description) <= 1024
 
 
+# Split so this file does not itself contain the retired name.
 RETIRED_SKILL = b'awb-' + b'eda'
 
 
@@ -85,9 +87,10 @@ def test_retired_skill_exact_byte_matches(data, expected):
 
 def test_repository_has_no_retired_skill_outside_changelog():
     # Scope: tracked and nonignored untracked working-tree files, including
-    # dotfiles and binary content. Deleted files, Git history/metadata and ignored
-    # build/cache files are outside the repository text contract. Only the root
-    # CHANGELOG.md is exempt. File paths are checked along with contents.
+    # dotfiles, binary content and symlink targets. Deleted files, Git
+    # history/metadata and ignored build/cache files are outside the repository
+    # text contract. Only the root CHANGELOG.md is exempt. File paths are
+    # checked along with contents.
     import subprocess
 
     result = subprocess.run(['git', 'ls-files', '--cached', '--others',
@@ -98,7 +101,13 @@ def test_repository_has_no_retired_skill_outside_changelog():
         if not entry or entry == b'CHANGELOG.md':
             continue
         path = ROOT / entry.decode('utf-8')
-        if path.is_file() and (mentions_retired_skill(entry)
-                               or mentions_retired_skill(path.read_bytes())):
+        # Git stores a symlink's target as its content, and the target may dangle.
+        if path.is_symlink():
+            data = os.fsencode(os.readlink(path))
+        elif path.is_file():
+            data = path.read_bytes()
+        else:
+            continue
+        if mentions_retired_skill(entry) or mentions_retired_skill(data):
             offenders.append(str(path.relative_to(ROOT)))
     assert offenders == [], offenders

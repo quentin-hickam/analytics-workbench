@@ -47,7 +47,7 @@ With the foundation in place, invoke the sibling [`awb-scope` skill](../awb-scop
 
 ## 5. Report
 
-Summarize setup or repair outcomes in plain words, linking to files for detail:
+Report:
 
 - the target root;
 - files created, replaced, and existing files preserved or augmented;

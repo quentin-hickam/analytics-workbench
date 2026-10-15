@@ -24,7 +24,7 @@ Run `python3 src/awb.py release <investigation> <package>`. Its gate is `check-d
 - `check-draft --verify-only does not pass`: report the `check` rows verbatim and stop; repairs are package revisions through awb-package. A `claims` row also follows a claim strength or causal design basis changed in `state.md` since packaging: the released methodology must state each finding's current Claim.
 - `flagged findings without a release disposition`: settle them under **4. Resolve flags**, then run `release` again.
 
-The step is done when it exits with `released: true`; summarize verification of the local copy in plain words, quoting a failure verbatim.
+The step is done when it exits with `released: true`; report whether the local copy verified.
 
 ## 4. Resolve flags
 
@@ -40,7 +40,7 @@ Read `foundation/quality.md` only when a flag's reason cites a correction you mu
 
 ## 5. Copy to storage
 
-Summarize where the release was copied and whether the copy was verified. When its status is `unrecorded`, ask where released packages are kept, record the storage line as below, run `python3 src/awb.py copy-releases <investigation> <package>`, and report its rows the same way; when `none chosen`, warn that this checkout holds the only copy.
+Report the `storage` row: where the release was copied and whether the copy verified. When its status is `unrecorded`, ask where released packages are kept, record the storage line as below, run `python3 src/awb.py copy-releases <investigation> <package>`, and report its rows the same way; when `none chosen`, warn that this checkout holds the only copy.
 
 To record the storage line, `Released packages are kept at: <location>` in the project README, write the user's answer on that line, adding the line when absent after the README's `Active investigation` line and any `Landed data is kept at` line, and preserving every other line. When the user declines, record `none chosen` and warn that releases will exist only in this checkout. Record a location whenever the user names one.
 
@@ -50,4 +50,4 @@ When the user asks only to record or change where released packages are kept, re
 
 ## Report
 
-Summarize the review outcome and any accepted warnings in plain words, then give the release path and number, included datasets or none, the decision on each finding awaiting recheck (new decisions and those carried forward), gaps in the evidence of what produced the results, each acquisition held only in this checkout, and whether the release was copied and verified at its storage location.
+Report the review's outcome and any accepted `warning` violations, then from the `release` output: `release` and `release_number`; `datasets`, or none; `dispositions`, separating those marked `new` (absent from the prior release's manifest) from those carried forward; `provenance_gaps`; each `checkout_only_acquisitions` entry as an acquisition held only in this checkout; and the storage result.

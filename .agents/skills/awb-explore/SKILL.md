@@ -51,4 +51,4 @@ Write each follow-up as `investigations/<name>/exploration/<topic>.sql` and run 
 
 ## 6. Report
 
-Summarize the dataset and scope, the observations and values that bear on the question, the decision on each anomaly, the saved query paths, the open questions added in plain words with optional IDs, the records changed, and the scan path. Label observations exploratory; link to the complete scan for detail.
+Report the dataset and scope, the observations and values that bear on the question, each anomaly's disposition, the saved query paths, the ledger questions added, the records changed, and the scan path.

@@ -23,19 +23,9 @@ Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists them a
 
 ## Conversation
 
-Answer in plain words; records keep their precise terms. In chat use:
+Records keep their precise terms; chat uses plain words: ledger rows are open (or answered) questions, findings are what we found, flagged findings are awaiting recheck, limitations are caveats, and a disposition is the decision on <finding>. An ID such as `Q-007` may sit beside the plain text, never replace it. Helper output stays in files and tool results: summarize its outcome, quoting it only for a failure or on request.
 
-| Record term | Chat wording |
-| --- | --- |
-| Ledger rows | Open questions (or answered questions, as applicable) |
-| Findings | What we found |
-| Flagged findings | Awaiting recheck |
-| Limitations | Caveat or watch-out |
-| Disposition | The decision on <finding in plain words> |
-
-IDs such as `Q-007` are optional handles beside plain text, never a replacement for it. Helper output stays in files and tool results; summarize outcomes in chat, quoting output verbatim only for a failure or when the user asks.
-
-End a turn that changed workbench records with one plain line naming what changed and what comes next, for example: Questions: answered 1 · opened 2 (1 needs you) · next: explore the March extract. A turn that changed nothing has no footer.
+A turn that changed workbench records ends with one plain line on what changed and what comes next; other turns have none. For example: Questions: answered 1 · opened 2 (1 needs you) · next: explore the March extract.
 
 ## Analytical invariants
 

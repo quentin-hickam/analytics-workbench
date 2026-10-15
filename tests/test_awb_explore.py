@@ -28,7 +28,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / ".agents/skills/awb-explore/scripts/eda_scan.py"
 LANDING = ROOT / ".agents/skills/awb-init/assets/awb_landing.py"
-spec = importlib.util.spec_from_file_location("awb_eda_scan", SCRIPT)
+spec = importlib.util.spec_from_file_location("awb_explore_scan", SCRIPT)
 eda = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(eda)
 
