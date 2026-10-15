@@ -2975,12 +2975,14 @@ def parse_review_rules(lines: list) -> tuple:
 
 def _sections(lines):
     """The first line number of each section a #, ##, or ### heading opens, read as the text renders, with
-    its heading text: [(first line, heading or None)], text before the first heading under None.
+    its heading text: [(first line, heading or None)], text before the first heading under None. Unless a
+    heading opens line 1, the list starts with (1, None), blank lines alone included, so every line has one.
 
     The view splits on every line break str.splitlines() knows, so each other break becomes a space first
     and every section keeps the line numbers grep -n gives (_read_lines)."""
     view = _view("\n".join(_OTHER_BREAK.sub(" ", line) for line in lines))[0]
-    return [(first, heading) for level, heading, first, rows in _regions(view) if level or rows]
+    sections = [(first, heading) for level, heading, first, rows in _regions(view) if level or rows]
+    return sections if sections and sections[0][0] == 1 else [(1, None), *sections]
 
 
 def _scoped_matches(scope, texts, pattern):

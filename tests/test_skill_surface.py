@@ -224,8 +224,9 @@ def test_headline_checkpoint_names_both_modes_and_never_waits_unconditionally():
 
 def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     # The review holds a checked or reconciliation sentence to a recorded result or check, pairing with the
-    # warning state finding gives; a re-review after repairs may be scoped, but never the last one before
-    # the request's final check-draft, and release always runs the full review.
+    # warning state finding gives, and the package contract tells the writer so; a re-review after repairs may
+    # be scoped, judging rules added or changed since in full, but never the last one before the request's
+    # final check-draft or the one that completes it, and release always runs the full review.
     def read(path):
         return ' '.join((ROOT / '.agents/skills' / path).read_text(encoding='utf-8').split())
 
@@ -248,7 +249,16 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     assert ('a full review is still required before the request\'s final `check-draft`, and `awb-release` always '
             'runs the full review') in review
     assert '`review (scoped):`' in review
+    assert ('judge each rule added or changed since, as the diff of `foundation/review-rules.md` shows, against '
+            'every narrative in full') in review
+    assert ('Only a full review, whose last line opens `review:`, can complete a request or a release; a scoped '
+            're-review, whose last line opens `review (scoped):`, never does') in review
+    assert 'for a scoped re-review, the prior report and the diff' in review
     assert '`slide` rule' in review and '`document` rule' in review
     assert 'scoped re-review' in package and 'the last review before the final `check-draft` is a full one' in package
+    assert 'the last review is a full review, passed and not stale' in package
+    contract = read('awb-package/references/package-contract.md')
+    assert ('A sentence asserting that something was checked or verified, reconciles, sums or adds up to, or matches '
+            'cites the check that establishes it') in contract
     assert 'Run the full read-only review' in release and 'never a scoped re-review' in release
-    assert 'one pass' in reviewer and 'scoped' in reviewer
+    assert 'one pass' in reviewer and 'scoped' in reviewer and 'the evidence a narrative cites' in reviewer

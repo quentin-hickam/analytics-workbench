@@ -20,7 +20,7 @@
 # test_add_rejects_unusable_arguments: a bad area (one ending in a number included), a text split by any line break the parser recognizes, blank, or holding bytes that are not UTF-8, an unknown severity or scope, or a pattern that does not compile (an overflowing repeat included) exits 2 and writes nothing.
 # test_pattern_round_trips_through_backticks: a pattern holding backticks, or the word none, is written in backticks and read back as the same expression.
 # test_slide_scope_lists_one_entry_per_slide: a Scope: slide rule with three matching bullets on one slide lists one entry with its heading, heading line, and three lines; methodology.md and the note give one entry per #, ##, or ### section.
-# test_slide_scope_reads_sections_as_they_render: a # line in fenced code opens no section, text before the first heading is an entry with no heading, and a line holding another break keeps grep -n's numbering.
+# test_slide_scope_reads_sections_as_they_render: a # line in fenced code opens no section, text before the first heading is an entry with no heading, blank lines or a lone blank line included, and a line holding another break keeps grep -n's numbering.
 # test_document_scope_lists_one_entry_per_file: add --scope document writes the Scope field after Pattern; check lists one entry per file, at most 20 lines with more_lines beyond; --scope line is written, an absent scope is not, and both list lines as before with no scope key.
 # test_scope_field_accepted_and_refused_forms: Scope line, slide, or document is accepted; any other value, a blank one included, is a problem, the rule is unchecked, and add refuses until it is repaired.
 # test_repeated_scope_line_is_reported: a second Scope line in a rule is a problem at its line.
@@ -456,6 +456,16 @@ def test_slide_scope_reads_sections_as_they_render(project, capsys):
     assert [(m["file"], m["heading"], m["line"], [line["line"] for line in m["lines"]]) for m in matches] == [
         ("findings.md", None, 1, [1]), ("findings.md", "Orders", 3, [6]), ("findings.md", "Answer", 11, [13]),
         ("methodology.md", "Sales rose 4% in the partial month of October", 3, [3])]
+    # Blank lines before the first heading, or a file that is one blank line, are still that first entry.
+    (draft / "methodology.md").unlink()
+    add(project, capsys, pattern=r"^\s*$", scope="slide")
+    for text, expected in [("\n", [("findings.md", None, 1, [1])]), ("\r\n", [("findings.md", None, 1, [1])]),
+                           ("\ufeff\n", [("findings.md", None, 1, [1])]),
+                           ("\n\n# Orders\n", [("findings.md", None, 1, [1, 2])])]:
+        (draft / "findings.md").write_text(text, newline="")
+        matches = run(project, capsys, "review-rules", "check", "inv", "pkg")[1]["rules"][1]["matches"]
+        assert [(m["file"], m["heading"], m["line"], [line["line"] for line in m["lines"]])
+                for m in matches] == expected
 
 
 def test_document_scope_lists_one_entry_per_file(project, capsys):
@@ -552,7 +562,7 @@ def test_package_and_release_invoke_the_read_only_review():
     assert "`review: <v> violations (<e> error), <n> narrative problems, <c> command problems`" in brief
     assert "no `error` violation, no narrative problem, and no command problem" in brief
     assert "An `error` violation, a narrative problem, or a command problem stops the release" in release
-    assert "is passed and not stale" in package and "goes stale" in release
+    assert "the last review is a full review, passed and not stale" in package and "goes stale" in release
     assert "whether its disposition is `omit`" in brief
     assert "later drafts could repeat" in brief and "later drafts could repeat" in agents
 
