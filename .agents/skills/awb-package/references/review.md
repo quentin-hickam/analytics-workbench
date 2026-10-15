@@ -4,17 +4,18 @@
 
 ## Launch
 
-Start a fresh subagent, so the agent that wrote the draft does not review it. Give it the investigation, the package, the project root, and the path of this file, and tell it to follow **Brief**. Limit it to read tools where the host can: `Read`, `Grep`, `Glob`, and `Bash` for the one command below.
+Start a fresh subagent, so the agent that wrote the draft does not review it. Give it the investigation, the package, the absolute project root, and the absolute path of this file, and tell it to follow **Brief**. Scope its tools by host:
 
-- In Claude Code, use a subagent type without edit tools, such as the built-in `Plan`, or a custom one whose `tools` are `Read, Grep, Glob, Bash`; a skill's `allowed-tools` only pre-approves tools and restricts nothing.
+- In VS Code Copilot, use `runSubagent` under the installed user-level `awb-package-reviewer` custom agent, whose definition ships at `../assets/awb-package-reviewer.agent.md`. It has only file read/search and `awb/read`; run the check with `command: "review-rules"`, `project`, `investigation`, and `package`. If the agent or its MCP tool is unavailable, report that failure and stop the review; never substitute an unrestricted subagent or `awb/*`. The install guide targets the Local session target.
+- In Claude Code, use a subagent type without edit tools, such as the built-in `Plan`, or a custom one whose `tools` are `Read`, `Grep`, `Glob`, and `Bash`; a skill's `allowed-tools` only pre-approves tools and restricts nothing.
 - In Codex, whose subagents inherit the session's sandbox and tools, start a fresh subagent all the same; the limit to read tools is then the brief's instruction alone.
 - Only in a host with no subagents, follow **Brief** yourself, changing no file and running no command that writes until the report is complete, then act on it as **After the review** says. In `awb-package` that is a self-review by the agent that wrote the draft.
 
-Bash can still write, so the limit is a convention plus tool scoping where the host has it, not isolation.
+Bash in the Claude Code branch can still write, and Codex inherits tools, so those limits are conventions plus tool scoping where available. The Copilot custom agent has no shell or write tool.
 
 ## Brief
 
-You review the package draft at `deliveries/<investigation>/<package>/draft/`. Report findings; never fix them, and change no file. Run no command that writes: the only `awb.py` command you run is `python3 src/awb.py review-rules check <investigation> <package>`, which writes nothing, and where the host reads files only through a shell, read-only commands such as `cat`, `sed -n`, and `rg` are reads.
+You review the package draft at `deliveries/<investigation>/<package>/draft/`. Report findings; never fix them, and change no file. Run no command that writes: the only `awb.py` command you run is `python3 src/awb.py review-rules check <investigation> <package>`, which writes nothing (in Copilot, use the MCP call in **Launch**), and where the host reads files only through a shell, read-only commands such as `cat`, `sed -n`, and `rg` are reads.
 
 1. Run that command. Read `foundation/review-rules.md` when its `rules_file` is not `none recorded`, then the draft's `findings.md`, `methodology.md`, and the `revalidation_flags` in `manifest.json`.
 2. Judge every rule the command lists that is not `retired`, against both narratives. A `matched` line is a candidate to judge, not a verdict; `no match`, `no pattern`, and `unchecked` rules are judged by reading.

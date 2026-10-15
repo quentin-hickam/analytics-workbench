@@ -18,6 +18,11 @@
 # test_upgrade_replaces_only_earlier_copies: --upgrade rewrites earlier helpers, package formats and guides, records them in the receipt, and leaves customized ones byte for byte.
 # test_upgrade_replace_and_remove_retired: named customized copies are replaced; unmodified retired files are removed with their emptied directory and receipt entry; customized retired files stay.
 # test_cli_arguments: --replace repeats one path per flag, needs --upgrade, and rejects an uncopied path with exit 2.
+# test_print_json_server_entry_without_writing: copilot and claude print the same JSON stdio entry with their own destination (COPILOT_HOME moves only copilot's); both option spellings print without writing.
+# test_print_codex_server_entry_with_quoted_unicode_paths: native TOML with absolute paths and safe quoting; default/overridden destination, without writing.
+# test_server_entry_refusals_write_nothing: exact host choices and print-only mode refuse unknown/missing values, unknown/abbreviated options, and install arguments with exit 2 and no stdout or writes.
+# test_awb_init_installs_agents_mapping_and_resolving_guides: adapting the root template then running the installer preserves one MCP/CLI rule and both resolving guide links.
+# test_instruction_and_reviewer_tools_exist_in_server_tools_list: names in AGENTS.md and the read-only reviewer agree with the running server's public tools/list.
 
 import ast
 import hashlib
@@ -389,3 +394,126 @@ def test_cli_arguments(upgradable):
                  "package-format/deck-rules.md")
     assert result.returncode == 0
     assert json.loads(result.stdout)["files"]["src/provenance.py"] == "customized"
+
+
+@pytest.mark.parametrize("arguments, copilot_home, destination", [
+    (["--mcp-config", "copilot"], None, "home/.copilot/mcp-config.json"),
+    (["--mcp-config=copilot"], None, "home/.copilot/mcp-config.json"),
+    (["--mcp-config", "copilot"], "copilot config", "copilot config/mcp-config.json"),
+    (["--mcp-config", "claude"], None, "home/.claude.json"),
+    (["--mcp-config", "claude"], "copilot config", "home/.claude.json"),
+])
+def test_print_json_server_entry_without_writing(tmp_path, arguments, copilot_home, destination):
+    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
+    env.pop("COPILOT_HOME", None)
+    if copilot_home is not None:
+        env["COPILOT_HOME"] = str(tmp_path / copilot_home)
+    before = snapshot(tmp_path)
+    result = subprocess.run([sys.executable, str(SCRIPT), *arguments],
+                            cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {"mcpServers": {"awb": {
+        "type": "stdio", "command": sys.executable,
+        "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")], "env": {}}}}
+    assert str(tmp_path / destination) in result.stderr
+    assert snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("codex_home, destination", [
+    (None, "home/.codex/config.toml"),
+    ("codex config", "codex config/config.toml"),
+])
+def test_print_codex_server_entry_with_quoted_unicode_paths(tmp_path, codex_home, destination):
+    tomllib = pytest.importorskip("tomllib")
+    # A worked install path exercises TOML escaping without shell quoting.
+    skills = tmp_path / 'skills "shared" 🐍'
+    script = skills / "awb-init/scripts/install_helpers.py"
+    server = skills / "awb-init/assets/awb_mcp.py"
+    script.parent.mkdir(parents=True)
+    server.parent.mkdir(parents=True)
+    shutil.copyfile(SCRIPT, script)
+    shutil.copyfile(SKILLS / "awb-init/assets/awb_mcp.py", server)
+    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
+    env.pop("CODEX_HOME", None)
+    if codex_home is not None:
+        env["CODEX_HOME"] = str(tmp_path / codex_home)
+    before = snapshot(tmp_path)
+    result = subprocess.run([sys.executable, str(script), "--mcp-config", "codex"],
+                            cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert tomllib.loads(result.stdout) == {"mcp_servers": {"awb": {
+        "command": sys.executable, "args": [str(server)], "env": {}}}}
+    assert str(tmp_path / destination) in result.stderr
+    assert snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("arguments, diagnostic", [
+    (["--mcp-config", "other"], "invalid choice"),
+    (["--mcp-config", "Copilot"], "invalid choice"),
+    (["--mcp-config", ""], "invalid choice"),
+    (["--mcp-config"], "expected one argument"),
+    (["--mcp-con", "copilot"], "unrecognized arguments"),
+    (["--mcp-config", "copilot", "--unknown"], "unrecognized arguments"),
+    (["--mcp-config", "copilot", "--check"], "cannot be combined"),
+    (["--mcp-config", "claude", "--upgrade"], "cannot be combined"),
+    (["--mcp-config", "codex", "--package-formats"], "cannot be combined"),
+    (["--mcp-config", "copilot", "--replace", "src/awb.py"], "cannot be combined"),
+    (["--mcp-config", "claude", "--remove-retired"], "cannot be combined"),
+    (["--mcp-config", "codex", "."], "cannot be combined"),
+])
+def test_server_entry_refusals_write_nothing(tmp_path, arguments, diagnostic):
+    (tmp_path / "AGENTS.md").write_text("# Existing project\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".claude.json").write_text('{"keep": true}\n')
+    before = snapshot(tmp_path)
+    result = subprocess.run([sys.executable, str(SCRIPT), *arguments], cwd=tmp_path,
+                            env={**os.environ, "HOME": str(home), "PYTHONDONTWRITEBYTECODE": "1"},
+                            capture_output=True, text=True)
+    assert result.returncode == 2
+    assert not result.stdout and diagnostic in result.stderr
+    assert snapshot(tmp_path) == before
+
+
+def test_awb_init_installs_agents_mapping_and_resolving_guides(tmp_path):
+    # awb-init adapts the root template first, then invokes the helper installer (section 3).
+    shutil.copyfile(SKILLS / "awb-init/assets/workbench/AGENTS.md", tmp_path / "AGENTS.md")
+    subprocess.run([sys.executable, str(SCRIPT), str(tmp_path)], check=True, capture_output=True, text=True)
+    agents = (tmp_path / "AGENTS.md").read_text()
+    rules = [line for line in agents.splitlines() if line.startswith("When the host offers the `awb` MCP server")]
+    assert len(rules) == 1
+    rule = rules[0]
+    for phrase in ("and the CLI otherwise", "Each tool's description lists its commands",
+                   "Pass the absolute project root as `project`"):
+        assert phrase in rule
+    for guide in ("workbench-guides/data.md", "workbench-guides/analysis.md"):
+        assert f"]({guide})" in agents and (tmp_path / guide).is_file()
+
+
+def test_instruction_and_reviewer_tools_exist_in_server_tools_list(tmp_path):
+    server = SKILLS / "awb-init/assets/awb_mcp.py"
+    requests = [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-11-25", "capabilities": {},
+            "clientInfo": {"name": "install-contract", "version": "1"}}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+    ]
+    result = subprocess.run([sys.executable, str(server)], cwd=tmp_path, capture_output=True, text=True,
+                            input="".join(json.dumps(request) + "\n" for request in requests), check=True)
+    response = [json.loads(line) for line in result.stdout.splitlines()]
+    tools = {tool["name"]: tool for tool in response[1]["result"]["tools"]}
+    agents = (SKILLS / "awb-init/assets/workbench/AGENTS.md").read_text()
+    rule = next(line for line in agents.splitlines() if line.startswith("When the host offers the `awb` MCP server"))
+    # Every code span in the rule other than the server and argument names is a tool name, named as tools/list does.
+    named = set(re.findall(r"`([^`]+)`", rule)) - {"awb", "project"}
+    assert named == tools.keys()
+
+    reviewer = (SKILLS / "awb-package/assets/awb-package-reviewer.agent.md").read_text()
+    frontmatter = reviewer.split("---", 2)[1]
+    tool_line = next(line for line in frontmatter.splitlines() if line.startswith("tools:"))
+    reviewer_tools = json.loads(tool_line.removeprefix("tools:").strip())
+    assert reviewer_tools == ["read/readFile", "search/fileSearch", "search/listDirectory", "search/textSearch", "awb/read"]
+    for tool in reviewer_tools:
+        if tool.startswith("awb/"):
+            name = tool.removeprefix("awb/")
+            assert name in tools and tools[name]["annotations"]["readOnlyHint"] is True
