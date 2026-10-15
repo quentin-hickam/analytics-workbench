@@ -11,6 +11,7 @@
 # test_switch_keeps_the_pointer_form: switch rewrites only the pointer in its link, path, backticked or slug form, which collect_status accepts, and prints the view; a missing state.md exits 1 and a customized pointer is refused.
 # test_malformed_records_write_nothing: a missing or repeated Last updated or section, a wrong header, a short row, two rows for one result, or a missing history file exit 1 and leave every file byte for byte.
 # test_writers_refuse_drift: every findings writer lists each differing row and the render/finding/flag remedies, the flag one conditional; prior_result protects existing evidence and results.
+# test_drift_hint_drops_a_note_holding_a_bracketed_semicolon: the hand-added flag's suggested reason leaves out the row's notes, one holding "; " inside brackets included.
 # test_render_restores_rows: render discards hand edits and preserves the rest of state; without findings.json a hand-written row is drift and render empties the table.
 # test_kept_notes_explain_only_the_checks_they_were_written_for: after a flagged rerun, kept notes satisfy the promotion guard only if the checks are unchanged; changed checks need --caveat; an entry without notes_checks is refused before a rerun changes anything.
 # test_compound_flag_reasons_are_idempotent: a reason containing '; ' is recognized as present and writes nothing.
@@ -20,6 +21,10 @@
 # test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helpers write.
 # test_claim_strength_is_recorded_and_guarded: a new row is association; --claim causal needs an experiment or natural-experiment basis and a reason; a claim change writes history; a rerun keeps the claim; a flagged finding's claim can only be lowered.
 # test_absent_claim_strength_is_refused: a findings.json entry without a valid claim strength makes every writer and the drift check refuse, writing nothing.
+# test_finding_text_warns_on_numbers_its_result_does_not_record: with src/packaging/draft.py, --text or --status supported warns on each number the result's table, profile, checks, and settings do not record, still writing; a recorded number at another precision traces; without draft.py nothing is read; a draft.py that does not load is named.
+# test_finding_text_warns_on_reconciliation_no_check_records: "sums to", "reconciles", "checked every", or "verified each" wording warns, naming a values or metrics judgment as the place to record the check, unless a passing check's name or detail uses such wording; a failing check does not back it; the row is still written.
+# test_finding_text_with_unreadable_evidence_warns_and_writes: --text on a row whose evidence is not JSON, or not a JSON object, warns that nothing was checked and still writes.
+# test_caveat_splits_notes_outside_brackets: --caveat splits at each ; outside parentheses and square brackets, either closer closes the innermost open bracket, a closer with no opener and an unclosed bracket with no ; after it are text, a ; after an unclosed bracket is refused writing nothing, and --help says so.
 
 from datetime import date
 import importlib.util
@@ -486,6 +491,18 @@ def test_writers_refuse_drift(project, writer):
     assert snapshot(project) == before
 
 
+def test_drift_hint_drops_a_note_holding_a_bracketed_semicolon(project):
+    produce(project, "r1")
+    provenance.update_findings(project, "churn", ["r1"], caveat="a (b; c)")
+    state = project / STATE
+    state.write_text(state.read_text().replace(
+        "| provisional | association | a (b; c) |",
+        "| revalidation-needed (was provisional) | association | a (b; c); orders view corrected |"))
+    with pytest.raises(provenance.StateError, match="findings drift") as failure:
+        provenance.update_findings(project, "churn", ["r1"], text="x")
+    assert 'stdin: [{"result": "r1", "reason": "orders view corrected"}]' in str(failure.value)
+
+
 def test_render_restores_rows(project, capsys):
     template = text(project, STATE)
     hand = "| Written by hand | [r9](evidence/r9.json) | supported | association | |"
@@ -670,3 +687,93 @@ def test_absent_claim_strength_is_refused(project, change):
         with pytest.raises(provenance.StateError, match="no valid claim strength"):
             writer()
     assert snapshot(project) == before
+
+
+DRAFT = ROOT / ".agents/skills/awb-package/assets/awb_draft.py"
+
+
+def test_finding_text_warns_on_numbers_its_result_does_not_record(project, capsys):
+    (project / "src/packaging").mkdir()
+    shutil.copyfile(DRAFT, project / "src/packaging/draft.py")
+    produce(project, "r1", table="rate,accounts\n0.12483,1204\n")
+    produce(project, "r2", table="rate,accounts\n0.5,10\n")
+    code, out, _ = run(project, capsys, "finding", "r1", "--text", "Churn reached 12.5% of 1,204 accounts, not 478")
+    assert code == 0
+    # 12.5% traces to 0.12483 at its written precision, and 1,204 to the table; 478 is recorded nowhere.
+    assert out.splitlines()[0] == ("warning: r1: 478 is not a value its table, profile, checks, or settings "
+                                   "record; check the number or reword")
+    assert len(out.splitlines()) == 2 and "| Churn reached 12.5% of 1,204 accounts, not 478 |" in out
+    assert json.loads(text(project, f"{INV}/findings.json"))["findings"][0]["text"].endswith("not 478")
+    # Promotion reads the row's text too, warns, and still promotes.
+    set_row(project, "r2", "Churn reached 40% in the west")
+    code, out, _ = run(project, capsys, "finding", "r2", "--status", "supported", "--reason", "Checked.")
+    assert code == 0 and out.startswith("warning: r2: 40% is not a value") and "| supported |" in out
+    # Without the package reader the numbers go unread, and provenance still writes.
+    (project / "src/packaging/draft.py").unlink()
+    code, out, _ = run(project, capsys, "finding", "r1", "--text", "Churn reached 99% of 7 accounts")
+    assert code == 0 and not out.startswith("warning")
+    (project / "src/packaging/draft.py").write_text("raise ImportError('broken copy')\n")
+    code, out, _ = run(project, capsys, "finding", "r1", "--text", "Churn reached 98% of 7 accounts")
+    assert code == 0 and out.startswith("warning: numbers not checked: src/packaging/draft.py did not load "
+                                        "(ImportError: broken copy)")
+
+
+SUMS = [{"name": "values", "outcome": "pass", "detail": "Country rows plus aggregates sum to World within 0.1%."}]
+
+
+def test_finding_text_warns_on_reconciliation_no_check_records(project, capsys):
+    produce(project, "r1")
+    produce(project, "r2", checks=OK + SUMS)
+    produce(project, "r3", checks=[{**SUMS[0], "outcome": "fail"}])
+    wording = "Countries plus regions sums to World"
+    for result_id, warned in (("r1", True), ("r2", False), ("r3", True)):
+        code, out, _ = run(project, capsys, "finding", result_id, "--text", wording)
+        assert code == 0 and f"| {wording} | [{result_id}]" in out, result_id
+        warning = (f'warning: {result_id}: "sums to" asserts a reconciliation or a completed check that no passing '
+                   "check in its evidence records; state the check, with its tolerance, in the detail of a passing "
+                   f"values or metrics judgment in [results.{result_id}.validation] and rerun, or reword")
+        assert (out.splitlines()[0] == warning) is warned, (result_id, out)
+    for phrase, found in (("The totals reconciled with finance", "reconciled"),
+                          ("We checked every region", "checked every"), ("Parts ADD UP TO the total", "ADD UP TO"),
+                          ("We verified each order", "verified each")):
+        code, out, _ = run(project, capsys, "finding", "r1", "--text", phrase)
+        assert out.startswith(f'warning: r1: "{found}" asserts'), phrase
+    for phrase in ("Summary of totals", "A check-in rate of half", "Sums of orders rose"):
+        code, out, _ = run(project, capsys, "finding", "r1", "--text", phrase)
+        assert not out.startswith("warning"), phrase
+
+
+@pytest.mark.parametrize("content", ["{broken", "[]"])
+def test_finding_text_with_unreadable_evidence_warns_and_writes(project, capsys, content):
+    produce(project, "r1")
+    (project / INV / "evidence/r1.json").write_text(content)
+    code, out, _ = run(project, capsys, "finding", "r1", "--text", "West took 2 orders")
+    assert code == 0
+    assert out.startswith("warning: r1: numbers and wording not checked: evidence/r1.json is unreadable (")
+    assert "| West took 2 orders | [r1]" in out
+    assert json.loads(text(project, f"{INV}/findings.json"))["findings"][0]["text"] == "West took 2 orders"
+
+
+@pytest.mark.parametrize("caveat, notes", [
+    ("a (b; c); d", ["a (b; c)", "d"]),
+    ("x [y; (z; w)]; v", ["x [y; (z; w)]", "v"]),
+    ("1) agency staff excluded; 2) March partial", ["1) agency staff excluded", "2) March partial"]),
+    ("one note", ["one note"]),
+    ("Scale [0, 1); two years", ["Scale [0, 1)", "two years"]),
+    ("a (b]; c", ["a (b]", "c"]),
+    ("Excludes March (partial month", ["Excludes March (partial month"]),
+    ("(a; b) (c", ["(a; b) (c"]),
+    ("a (b; c", None),
+    ("a (b) [c; d", None),
+])
+def test_caveat_splits_notes_outside_brackets(project, capsys, caveat, notes):
+    produce(project, "r1")
+    before = snapshot(project)
+    code, _, err = run(project, capsys, "finding", "r1", "--caveat", caveat)
+    if notes is None:
+        assert code == 2 and "--caveat" in err and "bracket" in err and snapshot(project) == before
+    else:
+        assert code == 0
+        assert json.loads(text(project, f"{INV}/findings.json"))["findings"][0]["notes"] == notes
+    code, out, _ = run(project, capsys, "finding", "--help")
+    assert code == 0 and "';' outside parentheses and square brackets separates notes" in " ".join(out.split())
