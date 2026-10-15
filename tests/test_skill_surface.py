@@ -434,6 +434,21 @@ def test_only_the_users_questions_are_roots():
     assert 'Report `questions.counts`, the totals with every sub-question, only on request' in status
 
 
+def test_analysis_records_its_questions_under_the_one_they_serve():
+    # `questions add` defaults --parent to empty, so a question raised mid-analysis, such as whether a
+    # dip is seasonal, became a root and was counted as one the user asked. The analysis guide gives
+    # the analysis path the parent rule scoping, brainstorming, and exploration follow.
+    add = ' '.join(section((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/analysis.md')
+                           .read_text(encoding='utf-8'), '## Add a result').split())
+    assert ("Record a question the analysis raises, such as whether a dip is seasonal, with "
+            "`awb.py questions add --origin analysis` and the question it serves as `--parent`.") in add
+    assert 'so only a question the user asks is a root' in add
+    # A ledger written before roots meant the user's questions is re-parented when scoping next runs.
+    sharpen = ' '.join((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8').split())
+    assert ("A root the user did not ask, which an older ledger may hold, takes as parent the user's "
+            "question it serves.") in sharpen
+
+
 def test_guide_commit_points_follow_the_commits_line():
     # The README promises at most one commit reminder a session under `on request`, and commits
     # as the work goes under `as I go`; the rerun and publish points keep to both.
