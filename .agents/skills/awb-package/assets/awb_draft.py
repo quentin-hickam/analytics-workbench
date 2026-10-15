@@ -1492,6 +1492,8 @@ def compare_trees(local_dir: str | os.PathLike, copy_dir: str | os.PathLike) -> 
 
 # A chart specification is a paragraph, or a list item, that renders opening with "Chart N."; its fields
 # are the list items directly under it, each opening with its field name, until a blank line follows one.
+# An item nested deeper than the fields, or a later paragraph inside a field, is kept on the chart as
+# "inside" and reported by `check_charts`; the fields go on after it.
 _CHART_SPEC = re.compile(r"[ \t]*Chart (\d+)\.(?=\s|$)")
 _CHART_FIELD = re.compile(r"(Data|Highlight|Axis|Interval|Source|Caveat|Alt text):(?=\s|$)\s*(.*)")
 _HEADLINE = re.compile(r"Headline:(?=\s|$)\s*(.*)")
@@ -1518,7 +1520,8 @@ def _blocks(lines):
 
     kind is "paragraph", "item" (a list item, depth 1 at the top level), or "heading" (level 4 to 6). first is
     the opening line's plain text, which the chart check reads as `check_charts` always has; text is the
-    whole block as it shows, whitespace collapsed. gap marks a blank line before the block.
+    whole block as it shows, whitespace collapsed. gap marks a blank line before the block. An item that
+    holds later paragraphs, a block quote's included, lists their first lines in "paragraphs".
     """
     blocks, gap = [], False
     for line in lines[1:] if lines and lines[0].kind == "heading" and 1 <= lines[0].level <= 3 else lines:
@@ -1541,6 +1544,8 @@ def _blocks(lines):
             blocks.append({"kind": "paragraph", "line": line.number, "depth": 0, "first": line.plain,
                            "text": text, "gap": gap})
         elif text:
+            if line.start:
+                blocks[-1].setdefault("paragraphs", []).append(line.number)
             blocks[-1]["text"] = _collapse(f"{blocks[-1]['text']} {text}")
         else:
             gap = True
@@ -1554,7 +1559,7 @@ def _chart(block):
     written, _, comparison = re.sub(r"^Chart \d+\.", "", block["text"]).partition(":")
     written = _collapse(written)
     return {"number": number, "line": block["line"], "form": _FORM_NAMES.get(written.lower()),
-            "written": written, "comparison": comparison.strip(), "fields": {}, "slide": None}
+            "written": written, "comparison": comparison.strip(), "fields": {}, "inside": [], "slide": None}
 
 
 def _slide(heading, first, lines):
@@ -1562,16 +1567,23 @@ def _slide(heading, first, lines):
     blocks = _blocks(lines)
     slide = {"line": first, "heading": heading, "opening": blocks[0]["line"] if blocks else None, "headlines": [],
              "bullets": [], "notes": [], "after_notes": None, "charts": [], "extra": []}
-    chart = None
+    chart = depth = None  # depth: the open chart's field depth, set by its first field
     for block in blocks:
         if slide["notes"] and slide["after_notes"] is None:
             slide["after_notes"] = block["line"]
         text = block["text"]
-        if chart is not None and block["kind"] == "item" and not (block["gap"] and chart["fields"]) \
-                and (field := _CHART_FIELD.match(text)) and field[1] not in chart["fields"]:
-            chart["fields"][field[1]] = field[2].strip()
-            continue
-        chart = None
+        if chart is not None and block["kind"] == "item" and not (block["gap"] and chart["fields"]):
+            if depth is not None and block["depth"] > depth:
+                chart["inside"].append({"line": block["line"], "field": list(chart["fields"])[-1], "kind": "item"})
+                continue
+            if (depth is None or block["depth"] == depth) and (field := _CHART_FIELD.match(text)) \
+                    and field[1] not in chart["fields"]:
+                chart["fields"][field[1]] = field[2].strip()
+                chart["inside"] += [{"line": line, "field": field[1], "kind": "paragraph"}
+                                    for line in block.get("paragraphs", [])]
+                depth = block["depth"]
+                continue
+        chart = depth = None
         if block["kind"] != "heading" and _CHART_SPEC.match(block["first"]):
             chart = _chart(block)
             slide["charts"].append(chart)
@@ -1598,8 +1610,9 @@ def parse_outline(text: str) -> dict:
     "bullets", "notes", "chart", ...}, where headline is the `###` heading or the first **Headline:** text,
     bullets are {"line", "text", "sub"} with nested items in sub, notes is the first **Notes:** text, and
     chart is the slide's first chart number. charts lists every chart specification in file order:
-    {"number", "line", "form", "written", "comparison", "fields", "slide"}, form being the canonical
-    CHART_FORMS name or None, fields each field's text by name, and slide the index of its slide in
+    {"number", "line", "form", "written", "comparison", "fields", "inside", "slide"}, form being the
+    canonical CHART_FORMS name or None, fields each field's text by name, inside each nested "item" or
+    later "paragraph" in a field as {"line", "field", "kind"}, and slide the index of its slide in
     slides, or None on the title slide or outside any slide. stray lists text outside every slide, and
     any second `#` heading, as {"where", "line", "text"}. The remaining slide keys keep what the checks report:
     every **Headline:** and **Notes:** paragraph, the first block after the notes, every chart, and text
@@ -1745,7 +1758,8 @@ def chart_data(chart: dict) -> tuple[list, list[str]]:
     roles = Counter(role for role, _ in pairs)
     for role in roles:
         if role not in allowed:
-            problems.append(f"**Data:** role {role} is not one a {form} takes ({', '.join(allowed)})")
+            problems.append(f"**Data:** role {role} is not one a {form} takes ({', '.join(allowed)})"
+                            + (_intervals_note(form) if role in ("lower", "upper") else ""))
         elif roles[role] > 1 and role not in repeated:
             problems.append(f"**Data:** names more than one {role} column")
     for role in needed:
@@ -1858,8 +1872,30 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
             for header in headers[chart["number"]] if pairs else []:
                 if header not in named:
                     rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv column {header!r} is "
-                                 "named by no **Data:** role; name it, or export the chart without it"})
+                                 f"named by no **Data:** role; name it{_by_role(chart['form'])}, or export the "
+                                 "chart without it" + _intervals_note(chart["form"])})
+        # Text nested in a field renders inside it, where a builder reads it as the field's or drops it.
+        for inside in chart["inside"]:
+            what = (f"an item at line {inside['line']} is nested under" if inside["kind"] == "item"
+                    else f"a paragraph at line {inside['line']} continues")
+            rows.append({"chart": label, "problem": f"{what} the **{inside['field']}:** field; a field is one "
+                                                    "paragraph, so join it to the field or make it a slide bullet "
+                                                    "after a blank line"})
     return rows
+
+
+def _by_role(form):
+    if form is None:
+        return ""
+    needed, optional, _ = CHART_FORMS[form]
+    return f" by a role a {form} takes ({', '.join(needed + optional)})"
+
+
+def _intervals_note(form):
+    """The fix for interval columns on a form that plots values without them."""
+    needed = CHART_FORMS[form][0] if form else ()
+    return (f"; a {form} draws no intervals, so interval columns need a Bar with intervals"
+            if "value" in needed and "lower" not in needed else "")
 
 
 # ---------------------------------------------------------------- check-draft
@@ -2150,7 +2186,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "open_questions_count is the required count, including parked questions and answers awaiting recheck.\n"
                "charts lists, as chart and problem, a specification numbered out of order, without "
                "a file, or without a form from deck-rules.md; a **Data:** line missing, malformed, or not naming "
-               "its form's roles; a column it names that the file lacks; and a chart file without a "
+               "its form's roles; a column it names that the file lacks, and a column of the file that it names by "
+               "no role; an item nested under a field or a second paragraph in one; and a chart file without a "
                "specification or data rows, or a foreign file.\nclaims lists each causal phrase (line, section, phrase, claim, results) "
                "in a findings.md slide, heading included, above its claim strength: a ### finding slide is held to the weakest "
                "Claim in state.md among the results its methodology.md section cites (all represented results "
