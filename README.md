@@ -47,17 +47,21 @@ After installing the skills, run this with a stable Python 3.10+ interpreter out
 python3 ~/.agents/skills/awb-init/scripts/install_helpers.py --mcp-config <host>
 ```
 
-The option prints the exact `awb` entry on stdout and its merge destination on stderr. It warns on stderr if the interpreter is older than Python 3.10 or runs inside a virtual environment, and still prints the entry. It writes no configuration or project files. Merge the entry into the existing file, preserving other servers and settings; do not replace the whole file with the snippet. Use these user-level registrations:
+The option prints the exact `awb` entry on stdout. On stderr it prints the host's own registration command, ready to paste into a POSIX shell such as bash or zsh, and then the entry's merge destination as the fallback. It warns on stderr if the interpreter is older than Python 3.10 or runs inside a virtual environment, and still prints both. It runs no command and writes no configuration or project files.
 
-| Host | File | Printed format |
-| --- | --- | --- |
-| VS Code Copilot | `$COPILOT_HOME/mcp-config.json`, falling back to `~/.copilot/mcp-config.json` | JSON, top-level `mcpServers.awb`, `type: "stdio"` |
-| Claude Code | `~/.claude.json` | JSON, top-level `mcpServers.awb` (user scope, outside `projects`) |
-| Codex | `$CODEX_HOME/config.toml`, falling back to `~/.codex/config.toml` | TOML, `[mcp_servers.awb]` |
+Prefer the host's command: it adds the `awb` entry to the host's user-level configuration and keeps the rest. This matters most for Claude Code, which rewrites `~/.claude.json` with its own state while it runs, so a hand edit can be lost. The command quotes both paths and the JSON for POSIX shells. In PowerShell or cmd, where quoting differs, or when the host's command is not installed, merge the printed entry into the existing file instead, preserving other servers and settings; do not replace the whole file with the snippet. Use these user-level registrations:
+
+| Host | Registration command | File | Printed format |
+| --- | --- | --- | --- |
+| VS Code Copilot | `copilot mcp add awb -- <python> <server>` (Copilot CLI) | `$COPILOT_HOME/mcp-config.json`, falling back to `~/.copilot/mcp-config.json` | JSON, top-level `mcpServers.awb`, `type: "stdio"` |
+| Claude Code | `claude mcp add-json --scope user awb '<entry>'` | `~/.claude.json` | JSON, top-level `mcpServers.awb` (user scope, outside `projects`) |
+| Codex | `codex mcp add awb -- <python> <server>` | `$CODEX_HOME/config.toml`, falling back to `~/.codex/config.toml` | TOML, `[mcp_servers.awb]` |
+
+VS Code Local reads the same `mcp-config.json` as Copilot CLI, so `copilot mcp add` registers `awb` for both Copilot harnesses. Without Copilot CLI, merge the printed entry. Do not use `code --add-mcp`: it writes the VS Code profile `mcp.json`, a location VS Code lists as deprecated and Copilot CLI does not list among its server sources. The commands were checked on 2026-10-15 against `claude mcp add-json --help` in Claude Code 2.1.300, the Codex CLI source ([`mcp_cmd.rs`](https://github.com/openai/codex/blob/0003732489a514748e61a0f76a652ac992a5f4f5/codex-rs/cli/src/mcp_cmd.rs), which writes `$CODEX_HOME/config.toml`), [adding MCP servers to Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers#using-the-copilot-mcp-add-subcommand), and [VS Code's command-line install](https://code.visualstudio.com/docs/agent-customization/mcp-servers); [GitHub Copilot compatibility](docs/copilot-compat.md#3-server-configuration) has the details.
 
 The command and server argument are absolute paths to the chosen interpreter and the installed server. Keep that command line stable when a managed allowlist matches command and arguments; policies may also match server names or URLs. The server stays in the shared skills installation. It uses each project's `.venv` or `venv` interpreter for helpers, falling back to its own, unless `AWB_PYTHON` is set. Put needed variables directly in the entry's `env` object/table: Copilot user configuration does not support `envFile`, and Copilot CLI passes only `PATH` through by default. The printed `env` is empty; the command does not copy credentials from the environment. See [VS Code MCP configuration](https://code.visualstudio.com/docs/agents/reference/mcp-configuration), [Claude Code MCP scopes](https://code.claude.com/docs/en/mcp#mcp-installation-scopes), and [Codex MCP](https://developers.openai.com/codex/mcp).
 
-Restart or reconnect the host's `awb` server after registration. When it is available, the project's instruction rule uses MCP tools; the skills retain their CLI commands for hosts without it. Each MCP call passes the absolute project root as `project`, so registration is reusable across projects. `awb-init` offers the printed registration entry and its destination together in one line when the host has no `awb` server registered. Copilot CLI requires version 1.0.88 or later for the legacy MCP handshake fallback.
+Restart or reconnect the host's `awb` server after registration. When it is available, the project's instruction rule uses MCP tools; the skills retain their CLI commands for hosts without it. Each MCP call passes the absolute project root as `project`, so registration is reusable across projects. `awb-init` offers the printed registration command in one line when the host has no `awb` server registered, with the entry and its destination as the fallback. Copilot CLI requires version 1.0.88 or later for the legacy MCP handshake fallback.
 
 ### VS Code Local and package reviewer
 

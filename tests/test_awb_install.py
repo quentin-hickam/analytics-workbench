@@ -19,8 +19,9 @@
 # test_upgrade_replace_and_remove_retired: named customized copies are replaced; unmodified retired files are removed with their emptied directory and receipt entry; customized retired files stay.
 # test_cli_arguments: --replace repeats one path per flag, needs --upgrade, and rejects an uncopied path with exit 2.
 # test_print_json_server_entry_without_writing: copilot and claude print the same JSON stdio entry with their own destination (COPILOT_HOME moves only copilot's); both option spellings print without writing.
-# test_print_server_entry_interpreter_warnings: old Python or a virtual environment warns only on stderr, with unchanged host entry and no writes; a stable Python 3.10+ emits no warning.
+# test_print_server_entry_interpreter_warnings: old Python or a virtual environment warns only on stderr after the registration lines, with unchanged host entry and no writes; a stable Python 3.10+ emits no warning.
 # test_print_codex_server_entry_with_quoted_unicode_paths: native TOML with absolute paths and safe quoting; default/overridden destination, without writing.
+# test_print_host_registration_command: each host's own registration command prints on stderr, POSIX-quoted with absolute interpreter and server paths that hold spaces, quotes and Unicode, before the fallback merge line; the entry still prints on stdout; nothing is written or run.
 # test_server_entry_refusals_write_nothing: exact host choices and print-only mode refuse unknown/missing values, unknown/abbreviated options, and install arguments with exit 2 and no stdout or writes.
 # test_awb_init_installs_agents_mapping_and_resolving_guides: adapting the root template then running the installer preserves one MCP/CLI rule and both resolving guide links.
 # test_instruction_and_reviewer_tools_exist_in_server_tools_list: the single rule names every server tool, valid script command enums, run.py, and the same project advice; reviewer tools remain read-only.
@@ -33,6 +34,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -445,8 +447,13 @@ def test_print_server_entry_interpreter_warnings(tmp_path, monkeypatch, capsys, 
     before = snapshot(tmp_path)
     installer.print_server_entry(host)
     stable = capsys.readouterr()
-    destination_line = f"Merge the awb entry into {tmp_path / destination}; preserve other configuration.\n"
-    assert stable.err == destination_line
+    lines = stable.err.splitlines(keepends=True)
+    assert len(lines) == 3
+    assert lines[0] == "Register awb with the host's own command, in a POSIX shell such as bash or zsh:\n"
+    assert lines[1].startswith(("claude mcp add-json --scope user awb ", f"{host} mcp add awb -- "))
+    assert lines[2] == ("Fallback, for other shells or when that command is unavailable: merge the printed awb "
+                        f"entry into {tmp_path / destination}; preserve other configuration.\n")
+    destination_line = stable.err
 
     monkeypatch.setattr(sys, "version_info", version)
     if virtual:
@@ -487,6 +494,60 @@ def test_print_codex_server_entry_with_quoted_unicode_paths(tmp_path, codex_home
     assert tomllib.loads(result.stdout) == {"mcp_servers": {"awb": {
         "command": sys.executable, "args": [str(server)], "env": {}}}}
     assert str(tmp_path / destination) in result.stderr
+    assert snapshot(tmp_path) == before
+
+
+# Host -> the registration command tokens expected for an interpreter, a server path and the entry's JSON.
+REGISTRATION_COMMANDS = {
+    "claude": lambda python, server, entry: ["claude", "mcp", "add-json", "--scope", "user", "awb", entry],
+    "codex": lambda python, server, entry: ["codex", "mcp", "add", "awb", "--", python, server],
+    "copilot": lambda python, server, entry: ["copilot", "mcp", "add", "awb", "--", python, server],
+}
+
+
+@pytest.mark.parametrize("host, destination", [
+    ("claude", "home/.claude.json"),
+    ("codex", "home/.codex/config.toml"),
+    ("copilot", "home/.copilot/mcp-config.json"),
+])
+def test_print_host_registration_command(tmp_path, host, destination):
+    # Spaces, both quote characters and Unicode in both paths exercise POSIX shell quoting.
+    skills = tmp_path / "skills \"shared\" it's 🐍"
+    script = skills / "awb-init/scripts/install_helpers.py"
+    server = skills / "awb-init/assets/awb_mcp.py"
+    script.parent.mkdir(parents=True)
+    server.parent.mkdir(parents=True)
+    shutil.copyfile(SCRIPT, script)
+    shutil.copyfile(SKILLS / "awb-init/assets/awb_mcp.py", server)
+    python = tmp_path / "stable python" / "python3"
+    python.parent.mkdir()
+    python.symlink_to(Path(sys.executable).resolve())
+    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
+    env.pop("COPILOT_HOME", None)
+    env.pop("CODEX_HOME", None)
+    before = snapshot(tmp_path)
+    result = subprocess.run([str(python), str(script), "--mcp-config", host],
+                            cwd=tmp_path, env=env, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    entry = {"type": "stdio", "command": str(python), "args": [str(server)], "env": {}}
+    if host == "codex":
+        tomllib = pytest.importorskip("tomllib")
+        assert tomllib.loads(result.stdout) == {"mcp_servers": {"awb": {
+            key: entry[key] for key in ("command", "args", "env")}}}
+    else:
+        assert json.loads(result.stdout) == {"mcpServers": {"awb": entry}}
+    label, command, fallback = result.stderr.splitlines()
+    assert label == "Register awb with the host's own command, in a POSIX shell such as bash or zsh:"
+    tokens = shlex.split(command)
+    if host == "claude":
+        assert json.loads(tokens[-1]) == entry
+        assert command.endswith(" " + shlex.quote(tokens[-1]))
+        tokens[-1] = "entry"
+    else:
+        assert command.endswith(f" -- {shlex.quote(str(python))} {shlex.quote(str(server))}")
+    assert tokens == REGISTRATION_COMMANDS[host](str(python), str(server), "entry")
+    assert fallback == ("Fallback, for other shells or when that command is unavailable: merge the printed awb "
+                        f"entry into {tmp_path / destination}; preserve other configuration.")
     assert snapshot(tmp_path) == before
 
 

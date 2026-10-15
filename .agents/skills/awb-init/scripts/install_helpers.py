@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Install the workbench helpers, guides, and references README; declare their packages; upgrade shipped copies;
-print a host's user-level awb MCP server entry.
+print a host's registration command and user-level awb MCP server entry.
 
 Run with the interpreter that will run the project's analysis:
     install_helpers.py [PROJECT_ROOT]                    install missing helpers, workbench guides, and the
@@ -11,15 +11,20 @@ Run with the interpreter that will run the project's analysis:
                                                          package formats, workbench guides, and that README
     install_helpers.py [PROJECT_ROOT] --upgrade --replace PATH [--replace PATH]... [--remove-retired]
     install_helpers.py [PROJECT_ROOT] --check ...        report the same without writing
-    install_helpers.py --mcp-config HOST                 print a user-level MCP entry; never write it
+    install_helpers.py --mcp-config HOST                 print the host's registration command and a
+                                                         user-level MCP entry; never run or write them
 
 Accepted input (--mcp-config): argparse accepts the exact, case-sensitive host tokens copilot,
 claude, codex, supplied as --mcp-config HOST or --mcp-config=HOST. No project root or install flags
 may accompany this mode. Unknown hosts/options, abbreviated options, missing values and mixed modes
-are refused on stderr with exit 2 and no configuration on stdout. Known limits: this prints a merge
-entry, not a complete replacement config; it neither reads existing registrations nor detects the
-host, checks host policies, or imports credentials. Variables belong in env, never envFile. Config
-destinations use COPILOT_HOME or CODEX_HOME when nonempty, otherwise the host's default home path.
+are refused on stderr with exit 2 and no configuration on stdout. Output: the entry in the host's
+format on stdout; on stderr, the host's own user-level registration command, quoted for a POSIX shell
+(claude mcp add-json --scope user, codex mcp add, copilot mcp add), then the file to merge the entry
+into as the fallback for other shells or a host without that command, then any interpreter warning.
+Known limits: this prints a merge entry, not a complete replacement config; it neither reads existing
+registrations nor detects the host, checks host policies, or imports credentials. Variables belong in
+env, never envFile. Config destinations use COPILOT_HOME or CODEX_HOME when nonempty, otherwise the
+host's default home path.
 
 Install/check modes print one line of JSON:
   project, workbench  the project root and whether workbench markers exist; when absent, missing lists
@@ -50,6 +55,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import sys
 from pathlib import Path
@@ -283,21 +289,40 @@ def _codex_entry(entry):
     return "[mcp_servers.awb]\n" + "\n".join(f"{key} = {_toml(entry[key])}" for key in ("command", "args", "env"))
 
 
-# Host -> (its user-level configuration file, the entry rendered in that file's format).
+def _claude_command(entry):
+    return ["claude", "mcp", "add-json", "--scope", "user", "awb", json.dumps(entry)]
+
+
+def _add_command(host):
+    """codex mcp add and copilot mcp add share one stdio form: the name, --env KEY=VALUE per variable, then --
+    and the command line."""
+    def command(entry):
+        env = [part for key, value in entry["env"].items() for part in ("--env", f"{key}={value}")]
+        return [host, "mcp", "add", "awb", *env, "--", entry["command"], *entry["args"]]
+    return command
+
+
+# Host -> (its user-level configuration file, the entry rendered in that file's format, the host's own
+# command that writes the same entry there). The README cites the source checked for each command.
 SERVER_HOSTS = {
-    "copilot": (lambda: _home("COPILOT_HOME", ".copilot") / "mcp-config.json", _json_entry),
-    "claude": (lambda: Path.home() / ".claude.json", _json_entry),
-    "codex": (lambda: _home("CODEX_HOME", ".codex") / "config.toml", _codex_entry),
+    "copilot": (lambda: _home("COPILOT_HOME", ".copilot") / "mcp-config.json", _json_entry, _add_command("copilot")),
+    "claude": (lambda: Path.home() / ".claude.json", _json_entry, _claude_command),
+    "codex": (lambda: _home("CODEX_HOME", ".codex") / "config.toml", _codex_entry, _add_command("codex")),
 }
 
 
 def print_server_entry(host):
-    """Print the awb server entry for host's user-level configuration, naming that file on stderr; write nothing."""
-    destination, render = SERVER_HOSTS[host]
+    """Print the awb server entry for host's user-level configuration; on stderr, the host's own registration
+    command for a POSIX shell, then that file as the fallback merge destination. Run and write nothing."""
+    destination, render, command = SERVER_HOSTS[host]
     entry = {"type": "stdio", "command": str(Path(sys.executable).absolute()),
              "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")], "env": {}}
     print(render(entry))
-    print(f"Merge the awb entry into {destination()}; preserve other configuration.", file=sys.stderr)
+    sys.stdout.flush()  # Keep the entry above the guidance when both streams share a terminal.
+    print("Register awb with the host's own command, in a POSIX shell such as bash or zsh:", file=sys.stderr)
+    print(shlex.join(command(entry)), file=sys.stderr)
+    print("Fallback, for other shells or when that command is unavailable: merge the printed awb entry into "
+          f"{destination()}; preserve other configuration.", file=sys.stderr)
     old_python = sys.version_info < (3, 10)
     virtual = sys.prefix != sys.base_prefix
     if old_python:
@@ -322,7 +347,8 @@ def main():
     parser.add_argument("--remove-retired", action="store_true",
                         help="with --upgrade, delete retired files the project left unmodified")
     parser.add_argument("--mcp-config", choices=tuple(SERVER_HOSTS), metavar="HOST",
-                        help="print HOST's user-level server entry only: " + ", ".join(SERVER_HOSTS))
+                        help="print HOST's registration command and user-level server entry only: "
+                             + ", ".join(SERVER_HOSTS))
     args = parser.parse_args()
     if args.mcp_config:
         if (args.project_root is not None or args.check or args.upgrade or args.package_formats
