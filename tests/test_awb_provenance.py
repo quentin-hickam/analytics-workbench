@@ -37,15 +37,18 @@
 # test_producing_paths_are_an_allow_list: producing paths are run.py, the result's queries, its producer module (written or not), its declared code, code_paths, and src/ minus awb.py, provenance.py and packaging/; another result's producer and query, notes, prose, an undeclared file, and the excluded helpers leave it current, committed or not, while each producing path stales it, a producer written later included.
 # test_run_py_edit_stales_every_result: an edit to run.py fails committed-code for every result (it passed before the allow list too; kept as its guard).
 # test_record_evidence_refuses_declared_code_that_does_not_exist: a code path the table declares must exist; nothing is written otherwise.
+# test_declared_code_under_an_ignored_directory_is_recorded_by_checksum: a declared file under an ignored directory is recorded as uncommitted, so it passes while unchanged, committed or not, and an edit to it fails uncommitted-code.
 # test_evidence_records_only_the_parameters_a_result_reads: with the parameters run.py passes, evidence records the [parameters] its queries name as $name and its table lists; an added parameter leaves both results current, changing one stales only the result that reads it, and a parameter a result starts to read stales it once [parameters] or its table changes.
-# test_result_parameters_are_the_names_queries_read_and_the_table_lists: $name in comments counts, $1 names nothing absent from [parameters]; reading another name, with [] or get(), raises KeyError naming the fix.
+# test_result_parameters_are_the_names_queries_read_and_the_table_lists: $name in comments counts, $1 names nothing absent from [parameters]; reading another name, with [] or get(), raises KeyError naming the fix, $name only for a name a query can hold; a listed name [parameters] does not set raises with [] and gives get()'s default; a listed name may hold '-'.
 # test_evidence_with_every_parameter_compares_on_each_until_rerun: evidence recorded without the parameters its producer received (before scoping, or by an older run.py) records every entry and compares on each; a rerun with them records only those the result reads and keeps its row.
 # test_result_ids_name_their_producer_module: an ID maps to producers/<id>.py exactly; an ID outside the grammar is refused by producer_path and result_problems.
 # test_settings_fall_back_to_tomli: without tomllib, settings parse through tomli, and without either the content is unknown.
 # test_record_evidence_copies_question_and_inputs_verbatim: the settings question and inputs land in the evidence unchanged, and editing the question stales only the settings comparison.
-# test_record_evidence_refuses_a_result_without_its_question: a missing, blank, or multi-line question, inputs that are not a list of names, code that is not a list of paths, or parameters that are not a list of names, raise and write no evidence.
+# test_record_evidence_refuses_a_result_without_its_question: a missing, blank, or multi-line question, inputs that are not a list of names, code that is not a list of paths or names a directory or a path outside the project, or parameters that are not a list of names, raise and write no evidence.
 # test_run_template_refuses_results_without_a_question: run.py exits 2 naming every wanted result that lacks a question, before opening a session or writing anything; without duckdb.
 # test_run_template_loads_each_producer_by_result_id: run.py loads producers/<id>.py by result ID with run() and only the parameters the result reads; an undeclared read, even through get(), fails that result alone; declaring it fixes the run; a module without produce() is named; an ID that cannot name its module exits 2 before anything runs.
+# test_run_template_registers_each_producer_module: a producer module defining a dataclass under postponed annotations loads and runs, since run.py registers it by name.
+# test_run_template_checks_declared_code_before_running: a missing declared code path exits 2 naming it before anything runs, leaving the prior evidence and table unchanged.
 # test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: prior_result checks the state before unlink; the run.py template records a result and writes its state.md row, keeps it on an identical rerun, and refuses before touching evidence when state.md is missing or drifts; a run failing after the table is rewritten leaves no evidence.
 
 import hashlib
@@ -558,6 +561,10 @@ def test_record_evidence_copies_question_and_inputs_verbatim(project):
     (b'question = "How many?"\ncode = [""]\n', "[results.r1] code must be a list of paths"),
     (b'question = "How many?"\nparameters = "threshold"\n', "[results.r1] parameters must be a list of [parameters] names"),
     (b'question = "How many?"\nparameters = ["a b"]\n', "[results.r1] parameters must be a list of [parameters] names"),
+    (b'question = "How many?"\nparameters = ["$threshold"]\n', "[results.r1] parameters must be a list of"),
+    (b'question = "How many?"\ncode = ["queries"]\n', "[results.r1] code names queries, a directory; list the files"),
+    (b'question = "How many?"\ncode = ["../../../outside.py"]\n',
+     "[results.r1] code names ../../../outside.py, which is outside the project"),
 ])
 def test_record_evidence_refuses_a_result_without_its_question(project, table, problem):
     write(project, "investigations/inv/settings.toml", b"[parameters]\nthreshold = 5\n\n[results.r1]\n" + table)
@@ -649,6 +656,24 @@ def test_record_evidence_refuses_declared_code_that_does_not_exist(project):
     assert not (project / "investigations/inv/evidence/r1.json").exists()
 
 
+def test_declared_code_under_an_ignored_directory_is_recorded_by_checksum(project):
+    write(project, ".gitignore", b"/data/cache/\n")
+    write(project, "data/cache/lookup.csv", b"code,label\na,1\n")
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS.replace(b"[results.r1]\n", b'[results.r1]\ncode = ["../../data/cache/lookup.csv"]\n'))
+    commit_all(project, "lookup")
+    path = record(project)
+    evidence = json.loads(path.read_text())
+    assert "data/cache/lookup.csv" in evidence["producing_paths"]
+    assert [e["path"] for e in evidence["producing_uncommitted_changes"]] == ["data/cache/lookup.csv"]
+    assert outcomes(project) == ["pass"] * 5
+    commit_all(project, "evidence")
+    assert outcomes(project) == ["pass"] * 5
+    write(project, "data/cache/lookup.csv", b"code,label\na,2\n")
+    assert outcomes(project) == ["pass", "fail", "pass", "pass", "pass"]
+    assert "data/cache/lookup.csv" in provenance.compare_evidence(project, path)[1]["detail"]
+
+
 PARAMETERS = (b'[parameters]\nthreshold = 5\nregion = "west"\n\n'
               b'[results.r1]\nquestion = "How many orders cleared the threshold?"\n\n'
               b'[results.r2]\nquestion = "Which regions grew?"\nparameters = ["region"]\n')
@@ -710,6 +735,21 @@ def test_result_parameters_are_the_names_queries_read_and_the_table_lists():
         scoped.get("unused", 0)
     assert scoped.get("threshold") == 5 and "unused" not in scoped
     assert provenance.result_parameters(["select 1"], {}, parameters) == {}
+    # A listed name [parameters] does not set: get() gives its default, and [] says it is not set.
+    listed = provenance.result_parameters(["select 1"], {"parameters": ["cutoff"]}, {"threshold": 1})
+    assert listed == {} and listed.get("cutoff", 10) == 10 and listed.get("cutoff") is None
+    with pytest.raises(KeyError, match=r"'cutoff' is not set in \[parameters\]"):
+        listed["cutoff"]
+    with pytest.raises(KeyError, match="'threshold' is not among"):
+        listed.get("threshold", 0)
+    # A TOML bare key may hold '-', which no query can name, so only the table's list reads it.
+    hyphen = {"question": "How many?", "parameters": ["min-orders"]}
+    assert provenance.result_problems("r1", hyphen) == []
+    dashed = provenance.result_parameters(["select * from t where n > $min"], hyphen, {"min-orders": 3, "max-orders": 9})
+    assert dashed == {"min-orders": 3} and dashed["min-orders"] == 3
+    with pytest.raises(KeyError) as error:
+        dashed["max-orders"]
+    assert "$" not in str(error.value) and "list it in its settings table's parameters" in str(error.value)
 
 
 def test_evidence_with_every_parameter_compares_on_each_until_rerun(project):
@@ -881,6 +921,39 @@ def test_run_template_loads_each_producer_by_result_id(project):
     assert (done.returncode, done.stdout) == (2, "")
     assert "settings.toml: [results.../escape] ID must start with a letter or digit" in done.stderr
     assert (project / "investigations/inv/results/r1.csv").read_bytes() == before
+
+
+def test_run_template_registers_each_producer_module(project):
+    pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    install_run_template(project)
+    # dataclasses resolves a postponed annotation through sys.modules, as pickle finds a class.
+    write(project, "investigations/inv/producers/r1.py", b"from __future__ import annotations\n\n"
+          b"from dataclasses import dataclass\n\n\n@dataclass\nclass Cut:\n    low: int\n    high: int = 5\n\n\n"
+          b"def produce(connection, sql, parameters):\n"
+          b"    return run(connection, sql[0], parameters).assign(high=Cut(1).high), {}\n")
+    done = subprocess.run([sys.executable, str(project / "investigations/inv/run.py"), "r1"],
+                          capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert json.loads(done.stdout)["state"] == "added"
+
+
+def test_run_template_checks_declared_code_before_running(project):
+    pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    install_run_template(project)
+    write(project, "investigations/inv/helpers.py", b"y = 1\n")
+    run = [sys.executable, str(project / "investigations/inv/run.py"), "r1"]
+    assert subprocess.run(run, capture_output=True, text=True).returncode == 0
+    kept = {path: (project / path).read_bytes() for path in
+            ("investigations/inv/evidence/r1.json", "investigations/inv/results/r1.csv")}
+    settings = project / "investigations/inv/settings.toml"
+    settings.write_bytes(SETTINGS.replace(b"[results.r1]\n", b'[results.r1]\ncode = ["helpres.py"]\n'))
+    done = subprocess.run(run, capture_output=True, text=True)
+    assert (done.returncode, done.stdout) == (2, "")
+    assert "settings.toml: [results.r1] code names helpres.py, which does not exist under investigations/inv/" \
+        in done.stderr
+    assert {path: (project / path).read_bytes() for path in kept} == kept
 
 
 def installed(name):

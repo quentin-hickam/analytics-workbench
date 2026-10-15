@@ -2,11 +2,12 @@
 """Run script for this investigation: produce, validate, and record each result.
 
 Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With no IDs it
-produces every result in settings.toml. It refuses to run, exiting 2, while a wanted result's
-table lacks its question or declares answers the question ledger does not hold as data questions,
-and exits 1 when the ledger cannot be read. For each result it runs the result's saved queries in
-a fresh session of canonical views, validates the result, saves the table and its profile under
-results/, records evidence under evidence/, writes its state.md findings row, and prints one
+produces every result in settings.toml. It refuses to run, exiting 2, while a wanted result's ID
+cannot name its files, or its table lacks its question, lists code that is not files in the project
+or parameters that are not names, or declares answers the question ledger does not hold as data
+questions, and exits 1 when the ledger cannot be read. For each result it runs the result's saved
+queries in a fresh session of canonical views, validates the result, saves the table and its profile
+under results/, records evidence under evidence/, writes its state.md findings row, and prints one
 compact JSON line with the paths, failed and unassessed checks, and what it did to the row, with
 the row's status and claim strength.
 
@@ -58,7 +59,8 @@ def produce(connection, sql, parameters):
 # produce(connection, sql, parameters), which receives the session, the texts of the result's
 # queries (settings `queries`, in order), and only the [parameters] entries the result reads: those
 # its queries name as $name and those its table lists in parameters = [...]. Reading any other
-# raises KeyError. It returns (frame, measured), where measured holds validation spec entries only
+# raises KeyError; a listed name [parameters] does not set raises it with [], and get() gives the
+# default. It returns (frame, measured), where measured holds validation spec entries only
 # known at run time, such as row_counts or joins.left_rows. run.py gives the module run() above
 # before loading it. Read further data through saved queries listed in settings so their views are
 # recorded, and list any other file it imports or reads in its table's code = [...], since evidence
@@ -77,7 +79,13 @@ def producer(result_id):
     spec = importlib.util.spec_from_file_location("producer_" + re.sub(r"\W", "_", result_id), path)
     module = importlib.util.module_from_spec(spec)
     module.run = run
-    spec.loader.exec_module(module)
+    # Registered as an import is, so dataclasses and pickle can look the module up by name.
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(spec.name, None)
+        raise
     if not callable(getattr(module, "produce", None)):
         raise ValueError(f"{path.relative_to(ROOT).as_posix()} defines no produce(connection, sql, parameters)")
     return module.produce
@@ -135,7 +143,8 @@ def main(argv):
         print(f"settings.toml defines no result {', '.join(unknown)}" if unknown else
               "settings.toml defines no [results.<id>] tables", file=sys.stderr)
         return 2
-    # Check answers against the ledger now: a rerun replaces the prior evidence before recording.
+    # Check answers against the ledger, and code against the files, now: a rerun replaces the prior
+    # evidence before recording.
     declares = any(isinstance(results[result_id], dict) and results[result_id].get("answers") for result_id in wanted)
     try:
         questions = ledger_answerers(ROOT, NAME) if declares else None
@@ -143,7 +152,7 @@ def main(argv):
         print(error, file=sys.stderr)
         return 1
     problems = [problem for result_id in wanted
-                for problem in result_problems(result_id, results[result_id], questions)]
+                for problem in result_problems(result_id, results[result_id], questions, folder=HERE)]
     if problems:
         print("\n".join(f"settings.toml: {problem}" for problem in problems), file=sys.stderr)
         return 2

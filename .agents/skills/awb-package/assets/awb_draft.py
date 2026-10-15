@@ -1106,8 +1106,10 @@ _PATH_CANDIDATE = re.compile(
 _EXTENSIONS = "md|py|csv|tsv|parquet|jsonl?|sql|png|svg|jpe?g|pdf|html?|duckdb|db|xlsx?|docx|pptx|ya?ml|toml|txt|log|ipynb"
 _FILE = re.compile(rf"(?<![\w.,/\\-])[\w-]*\w\.(?:{_EXTENSIONS})(?![\w/\\])")
 _HYPHENATED = re.compile(r"(?<![\w.-])([A-Za-z_]\w*)(?:-\w+)+")
-# A DOI: 10., a registrant code of four to nine digits with any dot-separated parts, a slash, and its suffix.
-_DOI = re.compile(r"(?<![\w.])10\.[0-9]{4,9}(?:\.[0-9]+)*/\S+")
+# A DOI: 10., a registrant code of four to nine digits with any dot-separated parts, a slash, and its suffix,
+# after doi: or DOI, or bare when its suffix holds a digit; a bare 10.2500/litre is a quantity, so it is read.
+_DOI = re.compile(r"(?i:\bdoi)(?::\s*|\s+)10\.[0-9]{4,9}(?:\.[0-9]+)*/\S+"
+                  r"|(?<![\w.])10\.[0-9]{4,9}(?:\.[0-9]+)*/\S*[0-9]\S*")
 
 
 def _path(token):

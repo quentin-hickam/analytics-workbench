@@ -4,7 +4,8 @@
 # [parameters] entries, [eda], other results' tables, and a table's answers don't.
 
 [parameters]
-# Named query parameters: a result query reads `start` as $start. Use TOML dates for dates.
+# Named query parameters: a result query reads `start` as $start. Use TOML dates for dates. A query
+# names letters, digits, and _ only, so a name with '-' reaches only a producer whose table lists it.
 # start = 2026-01-01
 # end = 2026-06-30
 
@@ -19,7 +20,8 @@
 #                      # Linking computes nothing, so adding or changing answers never makes the result stale.
 # queries = ["queries/orders-by-month.sql"]  # default: ["queries/<id>.sql"]; a producer may use more
 # code = ["helpers.py"]  # optional: files its producer, producers/<id>.py, imports or reads, relative to
-#                        # this folder. Evidence counts only these, its queries, its producer, run.py, and src/.
+#                        # this folder; each must exist, and a folder is refused, so list its files.
+#                        # Evidence counts only these, its queries, its producer, run.py, and src/.
 # parameters = ["minimum_orders"]  # optional: [parameters] its producer reads that no query names as $name
 #
 # Validation spec for validate(): static checks here, run-time counts from the result's producer.
