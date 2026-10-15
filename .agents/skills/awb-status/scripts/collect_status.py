@@ -29,6 +29,14 @@ DISPOSITIONS = {"none", "revalidate", "omit", "release_with_caveat"}
 CLAIM = re.compile(r"(descriptive|association)|causal \((?:experiment|natural experiment): \S.*\)")
 BLOCKING = {"none", "revalidate"}
 
+# Accepted input (rendered finding status): these four exact tokens, plus
+# revalidation-needed (was <prior>), where prior is provisional, supported, or superseded.
+# Everything else is an uncertainty and cannot assert awaiting recheck. Known limit:
+# this reads the recorded status only; it does not itself revalidate the finding's evidence.
+FINDING_STATUSES = {s: s for s in ("provisional", "supported", "superseded", "revalidation-needed")}
+FINDING_STATUSES.update({f"revalidation-needed (was {s})": "revalidation-needed"
+                         for s in ("provisional", "supported", "superseded")})
+
 
 PROBE_TIMEOUT = 10
 # land()'s own module from the awb-init skill beside this one: an upstream field it refuses to
@@ -86,7 +94,7 @@ def collect(root, *, probe_upstream=False):
         return re.split(r"^##? ", rest, maxsplit=1, flags=re.M)[0].strip()
 
     def ledger(investigation, findings):
-        """The question ledger's counts, open questions, and answers resting only on unsettled findings.
+        """The question ledger's counts, open questions, and derived awaiting-recheck answers.
 
         None when the investigation has no questions.json. Findings statuses come from state.md's table.
         """
@@ -111,14 +119,18 @@ def collect(root, *, probe_upstream=False):
         for row in findings or []:
             for result_id in re.findall(r"evidence/([A-Za-z0-9][A-Za-z0-9._-]*)\.json", row["Evidence"]):
                 statuses[result_id] = row["Status"]
-        unsettled = [f"{q['id']} answered by " + ", ".join(f"{r} ({statuses.get(r, 'no findings row')})" for r in q["results"])
-                     for q in questions if q["status"] == "answered" and q["results"] and not q["answer"]
-                     and all(not statuses.get(r, "").startswith(("provisional", "supported")) for r in q["results"])]
+        # Any answering finding suffices, including when another remains supported.
+        recheck = [q for q in questions if q["status"] == "answered" and q["answerer"] == "data"
+                   and any(FINDING_STATUSES.get(statuses.get(r)) in ("revalidation-needed", "superseded")
+                           for r in q["results"])]
+        displayed = {q["id"]: "answered (awaiting recheck)" if q in recheck else q["status"] for q in questions}
         open_questions = [q for q in questions if q["status"] == "open"]
-        return {"counts": dict(Counter(q["status"] for q in questions)),
+        return {"counts": dict(Counter(displayed[q["id"]] for q in questions)),
                 "open_by_answerer": dict(Counter(q["answerer"] for q in open_questions)),
                 "open": [f"{q['id']} [{q['answerer']}, {q['kind']}] {q['text']}" for q in open_questions],
-                "answered_by_unsettled": unsettled}
+                "awaiting_recheck": [f"{q['id']} answered (awaiting recheck) [{q['answerer']}, {q['kind']}] {q['text']} -> "
+                                    + "; ".join(f"{r} ({statuses.get(r, 'no findings row')})" for r in q["results"])
+                                    for q in recheck]}
 
     def table(text, columns, path):
         if text is None:
@@ -193,10 +205,10 @@ def collect(root, *, probe_upstream=False):
         visible_findings = []
         if findings is not None:
             for row in findings:
-                status = row["Status"]
-                status = "revalidation-needed" if status.startswith("revalidation-needed") else status
-                if status not in {"supported", "provisional", "superseded", "revalidation-needed"}:
+                status = FINDING_STATUSES.get(row["Status"])
+                if status is None:
                     uncertain(state_path, "Unrecognized finding status; interpret manually")
+                    status = row["Status"]
                 counts[status] += 1
                 if not CLAIM.fullmatch(row["Claim"]):
                     uncertain(state_path, "Missing or unrecognized finding claim strength; interpret manually")

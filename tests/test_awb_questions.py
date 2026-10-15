@@ -10,8 +10,8 @@
 # test_linking_reads_the_recorded_settings_file: a result recorded from another settings file is linked from that file, by run and by hand; unreadable evidence refuses a hand link.
 # test_results_answer_only_data_questions: answers naming a user or stakeholder question is refused before evidence, by run.py, and by a hand link; link_answers skips one; the person's answer is still taken; a ledger linking results to a person's question is malformed.
 # test_status_transitions: answered can only be superseded, keeping its answer; open reopens parked or declined and is a no-op on open; reasons are required; only open or parked questions are edited, and a data question keeps answerer data; a superseded answer stays visible in questions.md and list.
-# test_status_collector_reads_the_ledger: collect_status reports counts, open questions by answerer, and answers resting only on flagged findings; null without a ledger; a malformed one, or questions.md without questions.json, is an uncertainty.
-# test_resume_and_list_show_finding_status: state shows open questions and those answered only by flagged findings; list shows each linked finding's current status.
+# test_status_collector_reads_the_ledger: collect_status reports counts, open questions by answerer, and derived answers awaiting recheck; null without a ledger; a malformed one, or questions.md without questions.json, is an uncertainty.
+# test_resume_and_list_show_finding_status: state shows open questions and answers awaiting recheck; list shows each linked finding's current status.
 
 from datetime import date
 import importlib.util
@@ -322,7 +322,7 @@ def test_status_transitions(project):
     assert ledger(project)["Q-001"]["answer"] == "Logo churn"
     assert "| superseded | scope widened; was answered: Logo churn (user) |" in (project / INV / "questions.md").read_text()
     assert provenance.question_lines(project, "churn", ("superseded",)) == [
-        "Q-001 superseded [user, context] Which churn definition does finance use? -- scope widened; "
+        "Q-001 superseded [user, context, should; parent: root] Which churn definition does finance use? -- scope widened; "
         "was answered: Logo churn (user)"]
     with pytest.raises(provenance.StateError):
         provenance.set_question(project, "churn", ["Q-001"], "open")
@@ -347,13 +347,13 @@ def test_resume_and_list_show_finding_status(project, capsys):
     produce(project, "r1")
     code, out, _ = cli(project, capsys, "list", "--all")
     assert code == 0 and out.splitlines() == [
-        "Q-001 answered [data, analytical] Does churn differ by region? -> r1 (provisional)",
-        "Q-002 open [stakeholder, context] Which churn definition does finance use?"]
+        "Q-001 answered [data, analytical, should; parent: root] Does churn differ by region? -> r1 (provisional)",
+        "Q-002 open [stakeholder, context, should; parent: root] Which churn definition does finance use?"]
     view = provenance.state_view(project, "churn")
     assert view.endswith("==> open ledger questions <==\n"
-                         "Q-002 open [stakeholder, context] Which churn definition does finance use?\n")
+                         "Q-002 open [stakeholder, context, should; parent: root] Which churn definition does finance use?\n")
     provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "region view corrected"}])
-    assert "Q-001 answered by r1 (revalidation-needed (was provisional))" in provenance.state_view(project, "churn")
+    assert "Q-001 answered (awaiting recheck)" in provenance.state_view(project, "churn")
     assert cli(project, capsys, "list", "--investigation", "absent")[0] == 2
 
 
@@ -366,9 +366,9 @@ def test_status_collector_reads_the_ledger(project):
     produce(project, "r1")
     provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "region view corrected"}])
     questions = status.collect(project)["active"]["questions"]
-    assert questions == {"counts": {"answered": 1, "open": 1, "declined": 1}, "open_by_answerer": {"stakeholder": 1},
+    assert questions == {"counts": {"answered (awaiting recheck)": 1, "open": 1, "declined": 1}, "open_by_answerer": {"stakeholder": 1},
                          "open": ["Q-002 [stakeholder, context] Which churn definition does finance use?"],
-                         "answered_by_unsettled": ["Q-001 answered by r1 (revalidation-needed (was provisional))"]}
+                         "awaiting_recheck": ["Q-001 answered (awaiting recheck) [data, analytical] Does churn differ by region? -> r1 (revalidation-needed (was provisional))"]}
     (project / INV / "questions.json").write_text('{"schema": "awb-questions/1", "questions": [1]}')
     result = status.collect(project)
     assert result["active"]["questions"] is None
@@ -377,3 +377,99 @@ def test_status_collector_reads_the_ledger(project):
     result = status.collect(project)
     assert result["active"]["questions"] is None
     assert any("without questions.json" in item["reason"] for item in result["uncertainties"])
+
+
+def test_cli_tree_priority_and_render(project, capsys):
+    def question(text, *options):
+        return cli(project, capsys, "add", text, "--kind", "analytical", "--answerer", "data",
+                   "--origin", "scope", *options)
+
+    assert question("Root should?")[0] == 0
+    assert question("Root must?", "--priority", "must")[0] == 0
+    assert question("Child could?", "--parent", "Q-002", "--priority", "could")[0] == 0
+    assert question("Child must?", "--parent", "Q-002", "--priority", "must")[0] == 0
+    assert question("Grandchild should?", "--parent", "Q-004")[0] == 0
+    assert question("Other root should?")[0] == 0
+    code, out, err = cli(project, capsys, "list", "--all")
+    assert (code, err) == (0, "")
+    assert out.splitlines() == [
+        "Q-002 open [data, analytical, must; parent: root] Root must?",
+        "  Q-004 open [data, analytical, must; parent: Q-002] Child must?",
+        "    Q-005 open [data, analytical, should; parent: Q-004] Grandchild should?",
+        "  Q-003 open [data, analytical, could; parent: Q-002] Child could?",
+        "Q-001 open [data, analytical, should; parent: root] Root should?",
+        "Q-006 open [data, analytical, should; parent: root] Other root should?",
+    ]
+    assert cli(project, capsys, "edit", "Q-003", "--parent", "Q-001", "--priority", "must")[0] == 0
+    md = project / INV / "questions.md"
+    rendered = md.read_text()
+    assert "| Parent | Priority |" in rendered
+    assert "| Q-003 | &nbsp;&nbsp;Child could? | analytical | data | | open | | Q-001 | must |" in rendered
+    assert rendered.index("| Q-002 |") < rendered.index("| Q-004 |") < rendered.index("| Q-005 |") < rendered.index("| Q-001 |") < rendered.index("| Q-003 |") < rendered.index("| Q-006 |")
+    md.write_text("hand edit\n")
+    assert cli(project, capsys, "render")[0] == 0
+    assert md.read_text() == rendered
+    assert cli(project, capsys, "edit", "Q-003", "--parent", "")[0] == 0
+    assert "Q-003 open [data, analytical, must; parent: root]" in cli(project, capsys, "list")[1]
+
+
+@pytest.mark.parametrize("action, options, message", [
+    ("add", ["--parent", "Q-999"], "no question Q-999"),
+    ("edit", ["--parent", "Q-999"], "no question Q-999"),
+    ("edit", ["--parent", "Q-001"], "cycle"),
+    ("edit", ["--parent", "Q-003"], "cycle"),
+    ("add", ["--parent", "first"], "parent must be"),
+    ("edit", ["--parent", " Q-002 "], "parent must be"),
+    ("add", ["--priority", "high"], "invalid choice"),
+    ("edit", ["--priority", "MUST"], "invalid choice"),
+])
+def test_cli_refuses_invalid_tree_without_writes(project, capsys, action, options, message):
+    for text, parent in (("Root?", ""), ("Child?", "Q-001"), ("Grandchild?", "Q-002")):
+        assert cli(project, capsys, "add", text, "--kind", "analytical", "--answerer", "data",
+                   "--origin", "scope", "--parent", parent)[0] == 0
+    before = snapshot(project)
+    args = ["Q-001"] if action == "edit" else ["Another?", "--kind", "context", "--answerer", "user", "--origin", "scope"]
+    code, _, err = cli(project, capsys, action, *args, *options)
+    assert code in (1, 2) and message in err
+    assert snapshot(project) == before
+
+
+@pytest.mark.parametrize("finding_status", ["flagged", "superseded"])
+def test_cli_derives_awaiting_recheck_and_refreshes_render(project, capsys, finding_status):
+    assert cli(project, capsys, "add", "Does churn differ?", "--kind", "analytical", "--answerer", "data",
+               "--origin", "scope")[0] == 0
+    settings(project, {"r1": ["Q-001"], "r2": ["Q-001"]})
+    produce(project, "r1")
+    produce(project, "r2")
+    saved = (project / INV / "questions.json").read_bytes()
+    if finding_status == "flagged":
+        provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "region view corrected"}])
+    else:
+        provenance.update_findings(project, "churn", ["r1"], status="superseded", reason="new scope")
+    out = cli(project, capsys, "list", "--all")
+    assert out[0] == 0 and "Q-001 answered (awaiting recheck)" in out[1]
+    assert "| answered (awaiting recheck) |" in (project / INV / "questions.md").read_text()
+    assert (project / INV / "questions.json").read_bytes() == saved
+    assert cli(project, capsys, "render")[1] == "questions.md matches questions.json\n"
+    # Finding changes keep the generated view current, so an ordinary ledger write is safe.
+    assert cli(project, capsys, "add", "Another?", "--kind", "context", "--answerer", "user", "--origin", "scope")[0] == 0
+    produce(project, "r1", table="n\n2\n")
+    if finding_status == "superseded":
+        provenance.update_findings(project, "churn", ["r1"], status="supported", reason="rechecked")
+    assert "Q-001 answered [" in cli(project, capsys, "list", "--all")[1]
+    assert "awaiting recheck" not in (project / INV / "questions.md").read_text()
+
+
+@pytest.mark.parametrize("unrecognized", ["flagged", "revalidation-needed (review pending)", "superseded (was supported)", "revalidation-needed (was unknown)"])
+def test_cli_reports_unsupported_answering_finding_status(project, capsys, unrecognized):
+    add(project, "Does churn differ?")
+    settings(project, {"r1": ["Q-001"]})
+    produce(project, "r1")
+    path = project / INV / "findings.json"
+    findings = json.loads(path.read_text())
+    findings["findings"][0]["status"] = unrecognized
+    path.write_text(json.dumps(findings))
+    before = snapshot(project)
+    code, _, err = cli(project, capsys, "list", "--all")
+    assert code == 1 and "unrecognized finding status" in err
+    assert snapshot(project) == before

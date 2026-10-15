@@ -926,7 +926,7 @@ _CAUSAL = re.compile(r"(?<![\w-])(?:" + "|".join([
     r"impact(?:s|ed|ing)?", r"effects?\s+(?:of|on)", r"attributable\s+to", r"contribut(?:e|es|ed|ing)\s+to",
 ]) + r")(?![\w-])", re.IGNORECASE)
 # Slides that describe method, data, and caveats rather than state findings.
-_UNCHECKED = {"How we know", "Limitations and open caveats", "What changed since the last version",
+_UNCHECKED = {"How we know", "Limitations and open caveats", "Open questions", "What changed since the last version",
               "Supporting datasets"}
 
 
@@ -1660,7 +1660,7 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
     """List each break of the slide rules in findings.md: {"slide", "line", "problem"}.
 
     Every slide after the title has a headline of at most HEADLINE_WORDS words (its `###` heading, or one
-    **Headline:** line), at most SLIDE_BULLETS bullets, at most one chart, and one **Notes:** paragraph that
+    **Headline:** line), at most SLIDE_BULLETS bullets (Open questions is exempt), at most one chart, and one **Notes:** paragraph that
     ends it, and holds nothing else. The title slide is the `#` heading with its subtitle line; a `###`
     finding slide sits under ## Findings.
     """
@@ -1704,7 +1704,7 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
                 row(name, line, "the headline is empty; state the slide's point with its key number")
             elif words > HEADLINE_WORDS:
                 row(name, line, f"the headline has {words} words; keep it to {HEADLINE_WORDS}")
-        if len(slide["bullets"]) > SLIDE_BULLETS:
+        if len(slide["bullets"]) > SLIDE_BULLETS and (slide["finding"] or name != "Open questions"):
             row(name, slide["bullets"][SLIDE_BULLETS]["line"],
                 f"{len(slide['bullets'])} bullets; keep it to {SLIDE_BULLETS} and move the rest to another slide "
                 "or into the notes")
@@ -1864,10 +1864,111 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
 
 # ---------------------------------------------------------------- check-draft
 
+def storyline_problems(root, investigation, draft, represented, provenance):
+    """Accepted input: PR #52's outline Markdown subset, with ### finding headlines matched
+    exactly to ### methodology headings. The matching section names represented results using
+    the existing _cited grammar (bounded result IDs or evidence/<ID>.json links, outside
+    comments). Only those results' recorded settings `answers` supply ledger question IDs.
+
+    Missing citations or empty answers are reported in unlinked_findings and sort last; no
+    fallback infers answers from prose or from other represented results. A result without
+    evidence has no declared linkage and is reported as unlinked, preserving the package's
+    existing handling of provenance gaps. Malformed settings
+    or ledgers raise an error. Known limits: a literal result ID mentioned in methodology counts
+    as a citation; the reader cannot judge whether that evidence supports the audience's claim.
+    Ties keep the author's slide order. Existing markdown/headings checks refuse unsupported
+    Markdown and missing/repeated methodology headings.
+    """
+    tree = provenance.question_tree(root, investigation)
+    ranks = {q["id"]: (("must", "should", "could").index(q["priority"]), position)
+             for position, q in enumerate(tree)}
+    sections = {}
+    for level, heading, _, lines in _regions(_read_view(draft / "methodology.md")[0]):
+        if level == 3:
+            sections.setdefault(heading, []).extend(" ".join([line.plain, *line.links]) for line in lines)
+    slides = [s for s in read_outline(draft / "findings.md")["slides"] if s["finding"]]
+    ranked, unlinked, answers = [], [], {}
+    for slide in slides:
+        cited = _cited("\n".join(sections.get(slide["heading"], [])), represented)
+        questions = set()
+        for result in cited:
+            if result not in answers:
+                answers[result] = provenance.result_answers(root, investigation, result)
+            questions.update(answers[result])
+        question = min(questions, key=ranks.__getitem__) if questions else None
+        if question is None:
+            unlinked.append(slide["heading"])
+        ranked.append((ranks[question] if question else (3, 0), slide, question))
+    ordered = sorted(range(len(ranked)), key=lambda i: ranked[i][0])
+    positions = {index: position for position, index in enumerate(ordered, 1)}
+    rows = [{"slide": slide["heading"], "line": slide["line"], "position": index + 1,
+             "expected_position": positions[index], "question": question,
+             "problem": f"finding slide is out of place; move it to finding position {positions[index]}"}
+            for index, (_, slide, question) in enumerate(ranked) if positions[index] != index + 1]
+    return rows, unlinked
+
+
+def open_question_problems(root, investigation, draft, provenance):
+    """Accepted input: exactly one ## Open questions slide iff required questions exist,
+    immediately after ## Limitations and open caveats and before ## What changed since the
+    last version when present. Its body is top-level Markdown list items (bullet or numbered,
+    inline markup and wrapped continuations as the existing outline reader accepts), exactly
+    the required ledger texts rendered by _inline/_shown with whitespace collapsed, once each.
+
+    Required means priority must and status open, parked, or answered (awaiting recheck).
+    Declined and superseded questions are set aside. Nested bullets, charts, missing/repeated
+    questions and any other bullet text are reported; outline/markdown checks report other
+    structural forms. Known limits: this compares rendered text, not paraphrases or audience
+    suitability. Question IDs and added owner commentary do not match; ledger wording must be
+    audience-ready single-line inline text. Block markup/comments in that wording are not an
+    alternate matching form. Notes remain presenter context and do not satisfy a question.
+    """
+    questions = [q for q in provenance.question_tree(root, investigation) if q["priority"] == "must"
+                 and q["display_status"] in ("open", "parked", "answered (awaiting recheck)")]
+    expected = Counter(_collapse(_shown(_inline(q["text"])[0])) for q in questions)
+    slides = read_outline(draft / "findings.md")["slides"]
+    opened = [(i, slide) for i, slide in enumerate(slides) if not slide["finding"] and slide["heading"] == "Open questions"]
+    rows = []
+
+    def row(problem, line=None, **details):
+        rows.append({"slide": "Open questions", "line": line, "problem": problem, **details})
+
+    if not expected:
+        if opened:
+            row("no unanswered must questions; omit the Open questions slide", opened[0][1]["line"])
+        return rows, len(questions)
+    if not opened:
+        row("missing Open questions slide; list every unanswered must question")
+        return rows, len(questions)
+    if len(opened) != 1:
+        row("keep exactly one Open questions slide", opened[1][1]["line"])
+    for position, slide in opened:
+        if position == 0 or slides[position - 1]["heading"] != "Limitations and open caveats":
+            row("place Open questions immediately after Limitations and open caveats", slide["line"])
+        if any(s["heading"] == "What changed since the last version" for s in slides[:position]):
+            row("place Open questions before What changed since the last version", slide["line"])
+        actual = Counter(b["text"] for b in slide["bullets"])
+        for text, count in expected.items():
+            if actual[text] < count:
+                row("missing question", slide["line"], question=text)
+        for text, count in actual.items():
+            if not expected[text]:
+                row("unexpected question or commentary; use the exact rendered ledger text", slide["line"], question=text)
+            elif count > expected[text]:
+                row("repeated question; list each required question once", slide["line"], question=text)
+        for bullet in slide["bullets"]:
+            if bullet["sub"]:
+                row("nested bullets are not accepted; list questions as top-level bullets", bullet["line"])
+        if slide["charts"]:
+            row("Open questions takes no chart; list questions as top-level bullets", slide["charts"][0]["line"])
+    return rows, len(questions)
+
+
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
             and report["outline"] == [] and report["charts"] == [] and report["headings"] == [] and report["markdown"] == []
             and report["claims"] == [] and report["questions"] == []
+            and report["storyline"] == [] and report["open_questions"] == []
             and report["verify"] == [] and report["flag_entries"] == [] and report["numbers"] == []
             and not report["numbers_problems"])
 
@@ -1878,6 +1979,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
               "outline": None, "charts": None, "headings": None, "markdown": None, "claims": None, "questions": None,
+              "storyline": None, "unlinked_findings": None, "open_questions": None, "open_questions_count": None,
               "numbers": None, "numbers_problems": [], "inventory": None, "verify": None,
               "flag_entries": None, "unmatched_flags": None, "errors": [], "passed": False}
     if not draft.is_dir():
@@ -1921,6 +2023,11 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     except (OSError, ValueError) as error:
         report["errors"].append(f"findings drift: {error}")
     try:
+        report["open_questions"], report["open_questions_count"] = open_question_problems(
+            root, investigation, draft, _load_provenance(root))
+    except (OSError, ValueError, AttributeError) as error:
+        report["errors"].append(f"open questions check: {error}")
+    try:
         flags = state_flags(root, investigation)
     except ValueError as error:
         flags = None
@@ -1951,6 +2058,12 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
                 report["claims"] = claim_problems(draft, [r["result_id"] for r in represented], claims)
             except (OSError, UnicodeError) as error:
                 report["errors"].append(f"claims check: {error}")
+        try:
+            provenance = _load_provenance(root)
+            report["storyline"], report["unlinked_findings"] = storyline_problems(
+                root, investigation, draft, [r["result_id"] for r in represented], provenance)
+        except (OSError, ValueError, AttributeError) as error:
+            report["errors"].append(f"storyline check: {error}")
         if not verify_only:
             rows = inventory(draft)
             if rows != record.get("inventory"):
@@ -1990,7 +2103,7 @@ def _package_arguments(parser, *, package=True):
 def cli_check_draft(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py check-draft", formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Run every mechanical draft check (internal names in findings.md, the slide rules, chart "
+        description="Run every mechanical draft check (internal names in findings.md, the slide rules, ledger storyline and Open questions, chart "
                     "specifications and files, "
                     "matching finding headings, the Markdown subset, causal wording against claim strength, "
                     "each represented result's question in methodology.md, numbers in both narratives, the "
@@ -1999,16 +2112,20 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                     "nothing.",
         epilog="Prints one JSON line.\noutline lists, as slide, line, and problem, each break of the slide "
                "rules: a missing # title or subtitle, text outside every slide, a ### finding outside ## Findings, "
-               "a missing, repeated, empty, or over-15-word headline, more than five bullets, more than one chart, "
+               "a missing, repeated, empty, or over-15-word headline, more than five bullets except on Open questions, more than one chart, "
                "text that is no headline, bullet, chart, or notes, and a missing, repeated, or non-final **Notes:** "
-               "paragraph.\ncharts lists, as chart and problem, a specification numbered out of order, without "
+               "paragraph.\nstoryline lists each finding slide out of priority/tree order; unlinked_findings "
+               "names slides with no declared ledger answer, which go last and are informational.\n"
+               "open_questions lists presence, placement, and exact-question-bullet problems on Open questions; "
+               "open_questions_count is the required count, including parked questions and answers awaiting recheck.\n"
+               "charts lists, as chart and problem, a specification numbered out of order, without "
                "a file, or without a form from deck-rules.md; a **Data:** line missing, malformed, or not naming "
                "its form's roles; a column it names that the file lacks; and a chart file without a "
                "specification or data rows, or a foreign file.\nclaims lists each causal phrase (line, section, phrase, claim, results) "
                "in a findings.md slide, heading included, above its claim strength: a ### finding slide is held to the weakest "
                "Claim in state.md among the results its methodology.md section cites (all represented results "
                "when it cites none), and the title and other slides that state conclusions to the strongest; "
-               "How we know, Limitations and open caveats, What changed since the last version, and Supporting "
+               "How we know, Limitations and open caveats, Open questions, What changed since the last version, and Supporting "
                "datasets are not read. It also lists a represented result without a recognized Claim, and a "
                "finding whose methodology.md section is missing or whose **Claim strength:** line is missing, "
                "repeated, unrecognized, or differs from state.md, a causal design included.\nheadings lists a ### "
@@ -2029,7 +2146,7 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "that is neither none nor a list of places, and an unknown disposition.\nquestions lists each "
                "manifest results entry without a question, or whose question methodology.md does not repeat "
                "verbatim.\nExit 0 only when names_problems, findings, outline, charts, headings, markdown, claims, "
-               "questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
+               "questions, storyline, open_questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
                "are all empty.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
