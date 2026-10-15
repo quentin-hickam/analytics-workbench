@@ -1169,7 +1169,8 @@ def session(project_root: str | Path, *,
     load. View files may then hold only CREATE and SELECT statements, checked in every file
     before any runs, so a view file's ATTACH, COPY, or other statement is refused rather
     than run; each statement's calls and plan are then checked as read_only_sql() checks
-    one, just before it runs. Run queries in the session through read_only_sql().
+    one, just before it runs, and a macro it creates is refused if its body in the catalog
+    calls dynamic SQL. Run queries in the session through read_only_sql().
     """
     try:
         import duckdb
@@ -1206,7 +1207,9 @@ def session(project_root: str | Path, *,
                 if read_only:  # what runs is the parsed statement whose kind, calls and plan were checked
                     for statement in statements:
                         _refuse_writing_plan(connection, statement)
+                        before = _dynamic_names(connection)
                         connection.execute(statement.query)
+                        _refuse_new_dynamic_macros(connection, before)
                 else:
                     connection.execute(text)
             except Exception as error:
@@ -1238,9 +1241,11 @@ def session(project_root: str | Path, *,
 # is called as a table function, and DuckDB's histogram() aggregate, which shares a table macro's name,
 # still runs; a scalar macro calling one is refused wherever it is called. A CREATE statement's body is
 # read the same way when it parses alone (_create_body); one that does not is checked by token, so there
-# the histogram() aggregate is refused too. Without these dynamic functions, every table function a
-# statement binds is named in its text or in a view or macro body fixed before the check; what still
-# varies between check and run is values, such as which files a glob reads.
+# the histogram() aggregate is refused too. Once a view file's CREATE runs, a macro it made is checked
+# again from DuckDB's own parse of its body in the catalog (_refuse_new_dynamic_macros), so a misread
+# split of the CREATE's text cannot leave the session holding one. Without these dynamic functions,
+# every table function a statement binds is named in its text or in a view or macro body fixed before
+# the check; what still varies between check and run is values, such as which files a glob reads.
 DYNAMIC_SQL_FUNCTIONS = frozenset({"query", "query_table", "json_execute_serialized_sql"})
 READ_TABLE_FUNCTIONS = frozenset("""
     seq_scan range generate_series unnest repeat repeat_row glob summary sniff_csv read_text read_blob
@@ -1330,10 +1335,23 @@ def _refuse_dynamic_sql(connection, statement):
         raise ValueError(f"read-only: refused a statement whose calls cannot be read ({error}); "
                          "run it without --read-only") from error
     if found := sorted(found):
-        where = (" (this CREATE's body does not parse alone, so its calls are checked by token, and a "
-                 "histogram() aggregate is refused too)") if by_token else ""
+        # a name refused here only because by-token reading counts a table macro's call in any position
+        where = (" (this CREATE's calls were checked by token, in any position, which also refuses the "
+                 "histogram() aggregate)") if by_token and set(found) <= tables - scalars - DYNAMIC_SQL_FUNCTIONS \
+            else ""
         raise ValueError(f"read-only: refused {found[0]}(){where}, which builds SQL from a string each time it "
                          "is bound, so the plan checked need not be the plan that runs; run it without --read-only")
+
+
+def _refuse_new_dynamic_macros(connection, before):
+    """Raise when the catalog now has a macro calling dynamic SQL that was not in before, the result of
+    _dynamic_names() just before a statement ran: a check of DuckDB's own parse of a created macro's body,
+    behind the split of the CREATE statement's text (_create_body) that _refuse_dynamic_sql reads."""
+    after = _dynamic_names(connection)
+    if new := sorted((after[0] - before[0]) | (after[1] - before[1])):
+        raise ValueError(f"read-only: refused {new[0]}(), a macro just created that calls dynamic SQL, which "
+                         "builds SQL from a string each time it is bound, so the plan checked need not be the "
+                         "plan that runs; run it without --read-only")
 
 
 def _dynamic_names(connection):
@@ -1403,22 +1421,25 @@ def _create_calls(connection, text, dynamic):
 def _create_body(text):
     """Split a CREATE statement into the text before its body, the body, and how the body parses alone.
 
-    Closed grammar, on DuckDB's tokens: CREATE, then tokens up to the first AS keyword outside
-    parentheses, then the body. Before that AS, the first of the keywords VIEW, TABLE, MACRO, and FUNCTION
+    Closed grammar, on DuckDB's tokens, each read as the word at its start, so a comment glued to a
+    token, as in AS/**/ or (/*)*/, is not part of it: CREATE, then tokens up to the first AS keyword
+    outside parentheses, then the body. Before that AS, the first of the keywords VIEW, TABLE, MACRO, and FUNCTION
     names the kind. The body of a VIEW or TABLE is a query ("select"); a MACRO's or FUNCTION's is TABLE
     and a query ("select"), or an expression ("expression"), parsed as SELECT <body>. Anything else, such
     as CREATE TYPE or a CREATE TABLE without AS, returns None."""
     import duckdb
     data = text.encode("utf-8")  # token positions are byte offsets
     tokens = duckdb.tokenize(text)
-    spans = [(data[start:end].decode("utf-8").split()[0] if data[start:end].strip() else "", kind.name, start)
+    # a token's word is matched at its start, as _called_names reads it: DuckDB emits no comment tokens, so
+    # a comment glued to a token, as in AS/**/ or (/*)*/, is part of its span but not of its word
+    spans = [(_token_word(data[start:end].decode("utf-8")), kind.name, start)
              for (start, kind), end in zip(tokens, [after for after, _ in tokens[1:]] + [len(data)])]
     if not spans or spans[0][0].upper() != "CREATE":
         return None
     depth, object_kind = 0, None
     for index, (word, kind, start) in enumerate(spans):
         if kind == "operator":
-            depth += word.count("(") - word.count(")")
+            depth += (word == "(") - (word == ")")
         elif kind == "keyword" and depth == 0:
             if object_kind is None and word.upper() in ("VIEW", "TABLE", "MACRO", "FUNCTION"):
                 object_kind = word.upper()
@@ -1436,6 +1457,12 @@ def _create_body(text):
                     return None
                 return data[:start].decode("utf-8"), data[rest[0][2]:].decode("utf-8"), body_kind
     return None
+
+
+def _token_word(span):
+    """Return the word at the start of a token's span (a quoted name, a name, or one character), or ""."""
+    word = re.match(r'"(?:[^"]|"")*"|[\w$]+|\S', span)
+    return word.group() if word else ""
 
 
 def _called_names(text):

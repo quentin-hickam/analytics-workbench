@@ -25,10 +25,11 @@
 # test_read_only_session_checks_view_files_before_any_runs_and_locks_configuration: a read-only session refuses a view file holding anything but CREATE and SELECT (a writable or READ_ONLY ATTACH, ATTACH then DETACH, COPY) before any statement runs, and a CREATE or SELECT whose plan calls a writing table function or cannot be checked (a PIVOT without IN), or that calls query, query_table, or a macro calling one (the histogram table macro included, and a scalar macro calling query), or calls a dynamic name before its body, or whose body does not parse alone and so is checked by token (a macro with two bodies, CREATE TABLE ... WITH NO DATA, refusing the histogram() aggregate there with a message saying so), each dynamic row refused for the name it calls, creating and changing no file, while the default session still loads them; a PIVOT view with IN loads; the loaded session's configuration is locked and spills go to a private directory outside the project.
 # test_read_only_session_runs_the_histogram_aggregate_from_view_files: a view, temp view with a column list, table, table macro, scalar macro, or scalar macro holding a subquery whose body uses the histogram() aggregate loads in a read-only session and its query runs, as does one naming histogram(orders, id) only in a comment or a string, writing nothing.
 # test_create_body_splits_only_the_create_statements_its_grammar_accepts: _create_body's closed grammar splits a CREATE VIEW, TABLE, MACRO, or FUNCTION at its first AS outside parentheses into the text before it, the body, and whether the body is a query or an expression, and returns None for a CREATE TYPE or SEQUENCE, a table without AS, an AS with no body, a SELECT, and empty text.
+# test_read_only_session_refuses_a_macro_whose_catalog_body_calls_dynamic_sql: a view file's CREATE MACRO whose text check reads no call is refused, after it runs and before the session opens, when DuckDB's catalog shows its body calling dynamic SQL (a table macro calling query_table or histogram(), a scalar macro replaced by one calling query()), writing nothing; one calling only the histogram() aggregate loads.
 # test_read_only_sql_matches_a_scalar_macro_calling_dynamic_sql_anywhere: a scalar macro calling query(), directly or through another scalar macro, is refused in any position, a table macro calling query_table as a table function, while a scalar macro over an aggregate and histogram() run.
 # test_read_list_holds_read_xlsx_and_its_plan_passes_without_the_extension: read_xlsx is on the read list as the excel extension's function, so a plan calling it passes the check while another extension's table function is refused; runs without the extension.
 # test_read_only_sql_without_the_excel_extension_says_how_to_install_it: without the excel extension, read_xlsx or FROM 'book.xlsx' in a query, or read_xlsx in a view file, fails on one line saying it is not installed and how to install it once without --read-only, writing nothing; skipped where the extension is installed.
-# test_read_only_sql_reads_a_landed_excel_file_through_a_view: with the excel extension installed, sql and profile --read-only read a landed .xlsx through a view and directly, loading the extension without installing it, refuse COPY to xlsx, and write nothing; skipped where the extension cannot be loaded.
+# test_read_only_sql_reads_a_landed_excel_file_through_a_view: with the excel extension installed, sql and profile --read-only read a landed .xlsx through a view and directly, loading the extension without installing it, also when no view loaded it before the configuration locked, refuse COPY to xlsx, and write nothing; skipped where the extension cannot be loaded.
 # test_cli_land_copies_files_retains_and_writes_ledger_rows: land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
 # test_cli_land_skips_unusable_retention_location: unrecorded, none chosen, unreachable and non-filesystem locations skip retention and record this checkout only.
 # test_cli_land_creates_a_missing_ledger_from_the_template: missing sources.md is written from the template with the row, reported as created.
@@ -616,7 +617,7 @@ def test_read_only_session_checks_view_files_before_any_runs_and_locks_configura
         side.execute("CREATE TABLE extra AS SELECT 7 AS n")
     view = tmp_path / "foundation/views/02_side.sql"
     side, cache = tmp_path / "side.duckdb", tmp_path / "cache.duckdb"
-    token = "(this CREATE's body does not parse alone, so its calls are checked by token"
+    token = "(this CREATE's calls were checked by token, in any position, which also refuses the histogram()"
     dynamic = {  # each refused for the dynamic name it calls
         "CREATE VIEW extra AS FROM histogram(orders, id);": "refused histogram()",
         "CREATE OR REPLACE TEMP VIEW extra (h) AS SELECT histogram(id) FROM orders, histogram(orders, id);":
@@ -628,7 +629,14 @@ def test_read_only_session_checks_view_files_before_any_runs_and_locks_configura
         "CREATE MACRO extra(t := query_table('orders')) AS TABLE SELECT 1 AS n;": "refused query_table()",
         # a body that cannot be parsed alone is checked by token, so the aggregate is refused there
         "CREATE MACRO extra(a) AS histogram(a), (a, b) AS histogram(b);": f"refused histogram() {token}",
-        "CREATE TABLE extra AS SELECT histogram(id) AS h FROM orders WITH NO DATA;": f"refused histogram() {token}"}
+        "CREATE TABLE extra AS SELECT histogram(id) AS h FROM orders WITH NO DATA;": f"refused histogram() {token}",
+        # a comment glued to AS hides neither it nor the table function call after the alias in the body
+        "CREATE MACRO extra() AS/**/TABLE SELECT * FROM orders AS a, query_table('orders');":
+            "refused query_table(), which builds SQL",
+        "CREATE MACRO extra() AS--c\nTABLE SELECT * FROM orders AS a, histogram(orders, id);":
+            "refused histogram(), which builds SQL",
+        "CREATE VIEW extra AS/**/SELECT * FROM orders AS a, query_table('orders');":
+            "refused query_table(), which builds SQL"}
     for text in (f"ATTACH '{side}' AS side; CREATE VIEW extra AS SELECT * FROM side.extra;",
                  f"ATTACH '{side}' AS side (READ_ONLY); CREATE VIEW extra AS SELECT * FROM side.extra;",
                  f"ATTACH '{tmp_path / 'new.duckdb'}' AS new; CREATE VIEW extra AS SELECT 7 AS n;",
@@ -681,7 +689,8 @@ def test_read_only_session_runs_the_histogram_aggregate_from_view_files(tmp_path
             ("CREATE MACRO extra(x) AS (SELECT histogram(id) FROM orders WHERE id < x);",
              "SELECT extra(5) AS h"),
             ("-- histogram(orders, id) in a comment\nCREATE VIEW extra AS SELECT histogram(id) AS h, "
-             "'FROM histogram(orders, id)' AS note FROM orders;", "SELECT h FROM extra")):
+             "'FROM histogram(orders, id)' AS note FROM orders;", "SELECT h FROM extra"),
+            ("CREATE VIEW extra AS/**/SELECT histogram(id) AS h FROM orders;", "SELECT h FROM extra")):
         view.write_text(text)
         before = _files(tmp_path)
         with landing.session(tmp_path, read_only=True) as connection:
@@ -701,11 +710,40 @@ def test_create_body_splits_only_the_create_statements_its_grammar_accepts():
              ("CREATE MACRO m(a := CAST(1 AS INT)) ", "FROM t", "select")),
             ("create function f(x) as table select x", ("create function f(x) ", "select x", "select")),
             ("CREATE MACRO m(x) AS x + 1", ("CREATE MACRO m(x) ", "x + 1", "expression")),
+            # a comment glued to a token is not part of its word, for AS and for parentheses alike
+            ("CREATE MACRO m() AS/**/TABLE SELECT * FROM t AS a, query_table('t')",
+             ("CREATE MACRO m() ", "SELECT * FROM t AS a, query_table('t')", "select")),
+            ("CREATE VIEW v AS--c\nSELECT 1 AS a", ("CREATE VIEW v ", "SELECT 1 AS a", "select")),
+            ("CREATE MACRO m(a := (/*)*/1)) AS a", ("CREATE MACRO m(a := (/*)*/1)) ", "a", "expression")),
+            ("CREATE MACRO m(a := (/*(*/1)) AS a", ("CREATE MACRO m(a := (/*(*/1)) ", "a", "expression")),
             # refused: no kind before the first AS outside parentheses, no AS, or no body
             ("CREATE TYPE t AS ENUM ('a')", None), ("CREATE SEQUENCE s", None),
             ("CREATE TABLE t (x INT GENERATED ALWAYS AS (1))", None), ("CREATE TABLE t AS", None),
             ("CREATE MACRO m(x) AS TABLE", None), ("SELECT 1 AS x", None), ("", None)):
         assert landing._create_body(text) == split, text
+
+
+def test_read_only_session_refuses_a_macro_whose_catalog_body_calls_dynamic_sql(tmp_path, monkeypatch):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    view = tmp_path / "foundation/views/02_extra.sql"
+    # a CREATE whose text check reads no call, as a misread split would, is checked again from the catalog
+    monkeypatch.setattr(landing, "_create_calls", lambda connection, text, dynamic: (set(), set(), False))
+    for text, name in (("CREATE MACRO extra() AS TABLE FROM query_table('orders');", "extra"),
+                       ("CREATE MACRO extra(t) AS TABLE SELECT * FROM histogram(t, id);", "extra"),
+                       ("CREATE MACRO plain(x) AS x + 1; CREATE OR REPLACE MACRO plain() AS "
+                        "(SELECT count(*) FROM query('FROM orders'));", "plain")):
+        view.write_text(text)
+        before = _files(tmp_path)
+        with pytest.raises(RuntimeError, match="02_extra.sql") as refused:
+            landing.session(tmp_path, read_only=True)
+        assert f"read-only: refused {name}(), a macro just created that calls dynamic SQL" in str(
+            refused.value.__cause__), text
+        assert _files(tmp_path) == before, text
+    view.write_text("CREATE MACRO extra(x) AS histogram(x);")  # calls no dynamic SQL, so it loads
+    with landing.session(tmp_path, read_only=True) as connection:
+        assert landing.read_only_sql(connection, "SELECT extra(id) FROM orders").fetchall() == [
+            ({0: 1, 1: 1, 2: 1, 3: 1, 4: 1},)]
 
 
 def test_read_only_sql_matches_a_scalar_macro_calling_dynamic_sql_anywhere():
@@ -808,6 +846,15 @@ def test_read_only_sql_reads_a_landed_excel_file_through_a_view(tmp_path, capsys
     assert "rows: 3" in capsys.readouterr().out
     assert landing.cli_sql(tmp_path, ["--read-only", f"COPY (FROM book) TO '{tmp_path / 'copy.xlsx'}' (FORMAT xlsx)"]) == 1
     assert "read-only: refused" in capsys.readouterr().err
+    assert _files(tmp_path) == before
+    (tmp_path / "foundation/views/02_book.sql").unlink()  # no view loads the extension before the lock
+    before = _files(tmp_path)
+    for query in ("SELECT count(*) FROM read_xlsx('data/raw/books/a1/book.xlsx')",
+                  "SELECT count(*) FROM 'data/raw/books/a1/book.xlsx'"):
+        with landing.session(tmp_path, read_only=True) as connection:
+            assert connection.execute("SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'excel'"
+                                      ).fetchall() == [(False,)], query
+            assert landing.read_only_sql(connection, query).fetchall() == [(3,)], query
     assert _files(tmp_path) == before
 
 
