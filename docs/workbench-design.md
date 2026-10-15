@@ -80,7 +80,7 @@ The approved direction is the workbench to M365. Each package contains a complet
 
 ## Workflow responsibilities
 
-Keep the skills as agent-agnostic folders under `.agents/skills/`. Keep generated project behavior in root AGENTS.md; do not generate vendor-specific instruction bridges or require project-local skill installations. Git is required for code history, but GitHub hosting is not.
+Keep the skills as agent-agnostic folders under `.agents/skills/`. Keep generated project behavior in root AGENTS.md; do not generate vendor-specific instruction bridges or require project-local skill installations. Git is required for code history, but GitHub hosting is not. One deliberate exception ships with the skills: a VS Code `.agent.md` package reviewer installed at user level in the Local harness's profile storage. It scopes the reviewer to file read/search tools and the MCP server's read-only tool, and is never generated into a workbench project.
 
 Keep initialization and packaging as separate skills. Initialization establishes the workspace and conventions. The project's AGENTS.md governs everyday analytical work and automatic recordkeeping. The packaging skill creates or revises packages only when explicitly invoked.
 

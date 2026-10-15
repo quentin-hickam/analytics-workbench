@@ -17,6 +17,8 @@ Read each guide once per session. Existing project conventions win; surface any 
 
 ## Commands
 
+When the host offers the `awb` MCP server, use its tools for the CLI commands below: `awb/read` for state reads, questions list, SQL/profile reads, stale, review-rules check, check-draft --verify-only and help (also status and saved EDA sections); `awb/records` for state/questions/review-rules edits and cleaning records; `awb/data` for land/retain/publish, writing or refused SQL/profile, and EDA/cleaning scans; `awb/package` for export/check-draft; `awb/release` for release/copy-releases; `awb/run` for investigation run.py; `awb/setup` for helper installation. Otherwise use the CLI. Pass the absolute workbench root as `project`; translate CLI arguments to the tool's schema.
+
 Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists them and `<command> --help` their arguments. Compute through saved queries: run every query with `awb.py sql`, and counts, null rates, and distinct values with `awb.py profile`; save a query you run twice as `investigations/<name>/exploration/<topic>.sql` and rerun it by path. Run the project's helpers, customized or not, as black boxes; open one's source only to adapt or debug it. When a helper or package is missing, repair through `awb-init`. Keep complete records in files; in chat, report counts, paths, and helper failures verbatim.
 
 ## Analytical invariants

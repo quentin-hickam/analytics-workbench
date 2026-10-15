@@ -10,8 +10,17 @@ Run with the interpreter that will run the project's analysis:
                                                          package formats, workbench guides, and that README
     install_helpers.py [PROJECT_ROOT] --upgrade --replace PATH [--replace PATH]... [--remove-retired]
     install_helpers.py [PROJECT_ROOT] --check ...        report the same without writing
+    install_helpers.py --mcp-config HOST                print a user-level MCP entry; never write it
 
-Prints one line of JSON:
+Accepted input (--mcp-config): argparse accepts the exact, case-sensitive host tokens copilot,
+claude, codex, supplied as --mcp-config HOST or --mcp-config=HOST. No project root or install flags
+may accompany this mode. Unknown hosts/options, abbreviated options, missing values and mixed modes
+are refused on stderr with exit 2 and no configuration on stdout. Known limits: this prints a merge
+entry, not a complete replacement config; it neither reads existing registrations nor detects the
+host, checks host policies, or imports credentials. Variables belong in env, never envFile. Config
+destinations use COPILOT_HOME or CODEX_HOME when nonempty, otherwise the host's default home path.
+
+Install/check modes print one line of JSON:
   project, workbench  the project root and whether workbench markers exist; when absent, missing lists
                      the markers and hint explains how to initialize the root or choose another
   files              every src/ helper, workbench guide, and the references README, and with --upgrade or
@@ -38,6 +47,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import os
 import re
 import shutil
 import sys
@@ -253,8 +263,9 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("project_root", nargs="?", default=".", help="workbench root (default: the current directory)")
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+                                     allow_abbrev=False)
+    parser.add_argument("project_root", nargs="?", help="workbench root (default: the current directory)")
     parser.add_argument("--check", action="store_true", help="report without installing, replacing, or writing anything")
     parser.add_argument("--package-formats", action="store_true",
                         help="also install missing package formats and report present ones")
@@ -264,11 +275,29 @@ def main():
                         help="with --upgrade, also replace this customized copy, by project path; repeat for each")
     parser.add_argument("--remove-retired", action="store_true",
                         help="with --upgrade, delete retired files the project left unmodified")
+    parser.add_argument("--mcp-config", choices=("copilot", "claude", "codex"),
+                        help="print the user-level server entry only")
     args = parser.parse_args()
+    if args.mcp_config:
+        if (args.project_root is not None or args.check or args.upgrade or args.package_formats
+                or args.replace or args.remove_retired):
+            parser.error("--mcp-config cannot be combined with a project root or install flags")
+        destination = (Path(os.environ.get("COPILOT_HOME") or Path.home() / ".copilot") / "mcp-config.json"
+                       if args.mcp_config == "copilot" else Path.home() / ".claude.json")
+        entry = {"type": "stdio", "command": str(Path(sys.executable).absolute()),
+                 "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")], "env": {}}
+        if args.mcp_config == "codex":
+            destination = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "config.toml"
+            print('[mcp_servers.awb]\ncommand = ' + json.dumps(entry["command"], ensure_ascii=False)
+                  + '\nargs = ' + json.dumps(entry["args"], ensure_ascii=False) + '\nenv = {}')
+        else:
+            print(json.dumps({"mcpServers": {"awb": entry}}, indent=2))
+        print(f"Merge the awb entry into {destination}; preserve other configuration.", file=sys.stderr)
+        return 0
     if (args.replace or args.remove_retired) and not args.upgrade:
         parser.error("--replace and --remove-retired need --upgrade")
     try:
-        result = install(args.project_root, check=args.check, upgrade=args.upgrade,
+        result = install(args.project_root or ".", check=args.check, upgrade=args.upgrade,
                          package_formats=args.package_formats, replace=args.replace,
                          remove_retired=args.remove_retired)
     except ValueError as error:

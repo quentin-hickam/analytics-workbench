@@ -28,15 +28,44 @@ Every skill name carries the `awb-` prefix, so typing `awb-` in a host that list
 
 ## Install
 
-Download `analytics-workbench-skills-vX.Y.Z.zip` from the repository's GitHub releases and unzip it anywhere. It unpacks to one folder, `analytics-workbench-skills/`, holding the eight `awb-*` skill folders beside this README, `LICENSE`, and `CHANGELOG.md`. Copy the eight `awb-*` folders into your agent host's user-level skills directory, replacing any earlier copies, and delete an `awb-update` folder left by an earlier release: its job now belongs to `awb-init`. Do not unzip the archive into the skills directory itself: a host looks for `<skills directory>/<skill name>/SKILL.md`, and the extra folder level hides the skills. In a clone of this repository, the same eight folders are under `.agents/skills/`.
+Download `analytics-workbench-skills-vX.Y.Z.zip` from the repository's GitHub releases and unzip it anywhere. It unpacks to one folder, `analytics-workbench-skills/`, holding the eight `awb-*` skill folders beside this README, `LICENSE`, and `CHANGELOG.md`. Install those folders once in `~/.agents/skills/`, replacing earlier copies. Delete an `awb-update` folder left by an earlier release: its job now belongs to `awb-init`. Do not unzip the archive into the skills directory itself: a host looks for `<skills directory>/<skill name>/SKILL.md`, and the extra folder level hides the skills. In a clone of this repository, the same eight folders are under `.agents/skills/`.
 
 The skills serve every project from the user-level directory; projects need no local copies.
 
-User-level skills directories:
+### Shared skills
 
-- Claude Code: `~/.claude/skills/`. Claude Code does not discover skills in `~/.agents/skills/`. See [Claude Code skills](https://code.claude.com/docs/en/skills).
-- OpenAI Codex: `~/.agents/skills/`. Codex also scans `.agents/skills/` in each directory from the working directory up to the repository root. See [Codex agent skills](https://developers.openai.com/codex/skills).
+- VS Code Copilot and OpenAI Codex read `~/.agents/skills/`. Codex also scans `.agents/skills/` in each directory from the working directory up to the repository root. See [VS Code skills](https://code.visualstudio.com/docs/agent-customization/agent-skills) and [Codex agent skills](https://developers.openai.com/codex/skills).
+- For Claude Code, create one symlink per installed `awb-*` folder in `~/.claude/skills/`, pointing to its absolute path in `~/.agents/skills/`. Claude Code loads these directory symlinks. Preserve unrelated skills, and replace any earlier independent `awb-*` copies with the links after retaining local customizations. See [Claude Code skills](https://code.claude.com/docs/en/skills).
+- Where symlinks are unavailable, copy the eight folders to both locations and update both together on every upgrade. VS Code prefers a successfully loaded copy in `~/.agents/skills/` over one of the same name in `~/.claude/skills/`.
 - Other hosts: each `awb-*` folder follows the agent skills convention of a folder holding a `SKILL.md` with `name` and `description` frontmatter. Check the host's documentation for its user-level skills directory.
+
+### MCP server
+
+After installing the skills, run this with the Python 3.10+ interpreter that should launch the server, replacing `<host>` with `copilot`, `claude`, or `codex`:
+
+```sh
+python3 ~/.agents/skills/awb-init/scripts/install_helpers.py --mcp-config <host>
+```
+
+The option prints the exact `awb` entry on stdout and its merge destination on stderr. It writes no configuration or project files. Merge the entry into the existing file, preserving other servers and settings; do not replace the whole file with the snippet. Use these user-level registrations:
+
+| Host | File | Printed format |
+| --- | --- | --- |
+| VS Code Copilot | `$COPILOT_HOME/mcp-config.json`, falling back to `~/.copilot/mcp-config.json` | JSON, top-level `mcpServers.awb`, `type: "stdio"` |
+| Claude Code | `~/.claude.json` | JSON, top-level `mcpServers.awb` (user scope, outside `projects`) |
+| Codex | `$CODEX_HOME/config.toml`, falling back to `~/.codex/config.toml` | TOML, `[mcp_servers.awb]` |
+
+The command and server argument are absolute paths to the chosen interpreter and the installed server. Keep that command line stable when a managed allowlist matches command and arguments; policies may also match server names or URLs. The server stays in the shared skills installation. It uses each project's `.venv` or `venv` interpreter for helpers, falling back to its own, unless `AWB_PYTHON` is set. Put needed variables directly in the entry's `env` object/table: Copilot user configuration does not support `envFile`, and Copilot CLI passes only `PATH` through by default. The printed `env` is empty; the command does not copy credentials from the environment. See [VS Code MCP configuration](https://code.visualstudio.com/docs/agents/reference/mcp-configuration), [Claude Code MCP scopes](https://code.claude.com/docs/en/mcp#mcp-installation-scopes), and [Codex MCP](https://developers.openai.com/codex/mcp).
+
+Restart or reconnect the host's `awb` server after registration. When it is available, the project's instruction rule uses MCP tools; the skills retain their CLI commands for hosts without it. Each MCP call passes the absolute workbench root as `project`, so registration is reusable across projects. `awb-init` reports the registration entry when the host has no `awb` server registered. Copilot CLI requires version 1.0.88 or later for the legacy MCP handshake fallback.
+
+### VS Code Local and package reviewer
+
+1. In a new Copilot chat, choose **Local** in **Session Target**. A policy can limit available targets, server access, or approval scopes; use the controls the host offers.
+2. Open the workbench folder itself as the workspace root. VS Code reads root `AGENTS.md` by default; nested instructions and discovery in parent repositories require separate opt-ins.
+3. Start the `awb` server and accept its initial trust prompt. For its write tools, choose **Allow in this Workspace** when offered. Read-only tools need no pre-call approval in Local; `awb/read` declares `openWorldHint`, so result review can still appear.
+4. Install the [package reviewer definition](.agents/skills/awb-package/assets/awb-package-reviewer.agent.md) at user level: with **Local** selected, run **Chat: New Custom Agent**, choose the user/profile location, name it `awb-package-reviewer`, and replace the created file's contents with the shipped definition. Local reads user agents from **VS Code profile storage**, whose location the command selects; `~/.copilot/agents/` is the Copilot harness's user directory. Keep this file out of generated workbenches. Update it from the shipped definition on upgrades. See [custom agent locations](https://code.visualstudio.com/docs/agent-customization/custom-agents#custom-agent-file-locations).
+5. Confirm that a reviewer subagent receives its four explicit file read/search tools and `awb/read`, successfully calls its review-rules check, and has no edit, terminal, or write tool. The definition uses individual file tools because the broad `read` tool set includes terminal-output readers; see the [VS Code tools reference](https://code.visualstudio.com/docs/agents/reference/tools-reference). GitHub documents individual `server/tool` names, while VS Code documents `server/*`; unknown names are silently ignored. The definition deliberately uses only `awb/read`: never broaden it to `awb/*`. If the exact tool is unavailable, the review reports failure and completion stays blocked. See [custom agent tools](https://docs.github.com/en/copilot/reference/custom-agents-configuration#tools). Copilot end-to-end behavior remains a field test.
 
 ### Project instructions in AGENTS.md
 
