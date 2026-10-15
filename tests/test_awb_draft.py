@@ -46,6 +46,7 @@
 # test_claim_check_reads_headlines_and_cited_designs: a causal ### headline fails check-draft with a row to reword both files; cited causal results of different designs are refused; a whitespace design is unrecognized.
 # test_claim_strength_follows_cited_results_and_records: a slide citing several results takes the weakest claim; one citing none takes the weakest represented; with no causal finding the Answer slide fails too; a missing Claim, a missing results list, and a missing or differing methodology Claim strength line each fail.
 # test_numbers_skip_a_claim_strength_line_the_claims_check_accepts: numbers on a causal Claim strength line that repeats its result's Claim cell give no numbers row, while a line continuing its paragraph is read; a line the claims check refuses, another design or no experiment named, keeps its numbers; check_numbers skips only the claim_lines it is given.
+# test_numbers_count_lines_as_the_claims_check_does_after_a_comment: a comment holding a line break that str.splitlines() sees (U+2028, form feed, NEL) keeps the numbers check's line numbers on the claims check's, so the accepted-claim skip cannot land on the next line.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
 
 import hashlib
@@ -1777,7 +1778,7 @@ def test_numbers_skip_a_claim_strength_line_the_claims_check_accepts(project, ca
     assert draft.check_numbers(path, [Decimal(4)], claim_lines={13}) == []
 
 
-@pytest.mark.parametrize("brk", [" ", "\x0c", "\x85"])
+@pytest.mark.parametrize("brk", ["\u2028", "\x0c", "\x85"])
 def test_numbers_count_lines_as_the_claims_check_does_after_a_comment(project, capsys, brk):
     # A comment holding a line break that str.splitlines() sees but "\n" does not must not shift the numbers
     # check's line numbers off the claims check's, or the skip lands on the line after the accepted claim.
