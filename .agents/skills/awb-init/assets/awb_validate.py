@@ -199,14 +199,21 @@ def cli_profile(root: Path, argv: list[str]) -> int:
     parser.add_argument("--max-rows", type=int, default=PROFILE_MAX_ROWS,
                         help="profile a repeatable sample of this many rows when the result is "
                              f"larger (default {PROFILE_MAX_ROWS})")
+    parser.add_argument("--read-only", action="store_true",
+                        help="write nothing: profile only a view or SELECT statements, as `sql --read-only` "
+                             "runs them; refuses --out")
     args = parser.parse_args(argv)
     if args.max_rows < 1:
         parser.error("--max-rows must be 1 or more")
+    if args.read_only and args.out:
+        parser.error("--read-only refuses --out")
     out = None
     try:
         landing = _landing(root)
         out = landing._under(root, args.out) if args.out else None
-        with landing.session(root) as connection:
+        # A landing helper older than read_only still profiles without --read-only.
+        session = landing.session(root, read_only=True) if args.read_only else landing.session(root)
+        with session as connection:
             if _IDENTIFIER.fullmatch(args.source) and connection.execute(
                     "SELECT 1 FROM information_schema.tables WHERE lower(table_name) = lower(?)",
                     [args.source]).fetchall():
@@ -215,7 +222,7 @@ def cli_profile(root: Path, argv: list[str]) -> int:
                 text = landing._sql_argument(root, args.source)
                 if text == args.source and _IDENTIFIER.fullmatch(text):
                     raise ValueError(f"no view or query file named {args.source}")
-            relation = connection.sql(text)
+            relation = landing.read_only_sql(connection, text) if args.read_only else connection.sql(text)
             if relation is None:
                 raise ValueError("the SQL returns no rows; end it with a query")
             total = relation.aggregate("count(*)").fetchone()[0]

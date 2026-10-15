@@ -21,6 +21,7 @@ Paths are sorted POSIX paths relative to their acquisition or publication.
 """
 
 import argparse
+import atexit
 import hashlib
 import json
 import math
@@ -29,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 from collections.abc import Callable, Sequence
 from datetime import date, datetime, timezone
@@ -1152,13 +1154,22 @@ def cli_publish(root: Path, argv: list[str]) -> int:
 
 
 def session(project_root: str | Path, *,
-            views_dir: str | Path = "foundation/views") -> "duckdb.DuckDBPyConnection":
+            views_dir: str | Path = "foundation/views",
+            read_only: bool = False) -> "duckdb.DuckDBPyConnection":
     """Open an in-memory DuckDB session and load view files in name order.
 
     Project-relative paths in views, such as data/parquet/..., resolve against
     the project root from any working directory. A view that reads another view
     must sort after it; use numeric prefixes, for example 01_base.sql and
     02_derived.sql.
+
+    read_only=True opens a session that writes nothing: no extension installs, no
+    persistent secrets, spill files in a private temporary directory removed at exit,
+    and configuration locked once the views load. View files may then hold only CREATE
+    and SELECT statements, checked in every file before any runs, so a view file's
+    ATTACH, COPY, or other statement is refused rather than run; each statement's calls
+    and plan are then checked as read_only_sql() checks one, just before it runs. Run queries in
+    the session through read_only_sql().
     """
     try:
         import duckdb
@@ -1169,20 +1180,160 @@ def session(project_root: str | Path, *,
         # file_search_path is a comma-separated list with no escape for a comma.
         raise ValueError(f"session() cannot use a project root containing a comma: {root}")
     directory = _under(root, views_dir)
-    connection = duckdb.connect()
-    try:
-        connection.execute("SET file_search_path = ?", [str(root)])
-        for path in sorted(directory.glob("*.sql")):
-            if not path.is_file():
-                continue
+    views = []
+    for path in sorted(directory.glob("*.sql")):
+        if path.is_file():
             try:
-                connection.execute(path.read_text(encoding="utf-8"))
+                text = path.read_text(encoding="utf-8")
+                views.append((path, text, duckdb.extract_statements(text) if read_only else None))
+                if read_only:  # every file is checked before any statement runs
+                    _refuse_statements(views[-1][2], ("CREATE", "SELECT"), "in a read-only session, which "
+                                       "loads only CREATE and SELECT statements from view files")
             except Exception as error:
                 raise RuntimeError(f"Failed to load view file: {path}") from error
+    if read_only:
+        # An in-memory database spills to .tmp/ under the working directory by default; a fixed
+        # name under the shared temp directory could belong to another user.
+        spill = tempfile.mkdtemp(prefix="awb-duckdb-")
+        atexit.register(shutil.rmtree, spill, True)
+    connection = duckdb.connect(config={
+        "autoinstall_known_extensions": False, "allow_persistent_secrets": False,
+        "temp_directory": str(Path(spill) / "spill")}) if read_only else duckdb.connect()
+    try:
+        connection.execute("SET file_search_path = ?", [str(root)])
+        for path, text, statements in views:
+            try:
+                if read_only:  # what runs is the parsed statement whose kind, calls and plan were checked
+                    for statement in statements:
+                        _refuse_writing_plan(connection, statement)
+                        connection.execute(statement.query)
+                else:
+                    connection.execute(text)
+            except Exception as error:
+                raise RuntimeError(f"Failed to load view file: {path}") from error
+        if read_only:
+            connection.execute("SET lock_configuration = true")
     except BaseException:
         connection.close()
         raise
     return connection
+
+
+# Table functions a read-only session runs. DuckDB records no side effects for table functions, and
+# some write files from a SELECT (enable_profiling's save_location, enable_logging's file storage), so
+# any table function not listed here is refused, as is a statement whose plan EXPLAIN cannot show.
+# Limits: scalar functions are not checked (none of DuckDB's writes a file while logging is off and the
+# configuration locked), and EXPLAIN binds a statement before it is checked, which DuckDB's own table
+# functions do without writing; an extension's table function is refused, but only once bound.
+# The plan checked must be the plan that runs, so a read-only session also refuses, by name and before
+# EXPLAIN, every function that turns a runtime string into SQL or a table reference: its text is bound
+# anew at each bind, and current_query(), random() or now() can pick another table function at the run
+# than at the check. Macros calling one, DuckDB's histogram_values included, are refused with it. Without
+# them every table function a statement binds is named in its text or in a view or macro body fixed
+# before the check; what still varies between check and run is values, such as which files a glob reads.
+DYNAMIC_SQL_FUNCTIONS = frozenset({"query", "query_table", "json_execute_serialized_sql"})
+READ_TABLE_FUNCTIONS = frozenset("""
+    seq_scan range generate_series unnest repeat repeat_row glob summary sniff_csv read_text read_blob
+    read_csv read_csv_auto read_parquet parquet_scan parquet_metadata parquet_schema parquet_file_metadata
+    parquet_kv_metadata read_json read_json_auto read_json_objects read_json_objects_auto read_ndjson
+    read_ndjson_auto read_ndjson_objects json_each json_tree duckdb_columns duckdb_constraints
+    duckdb_databases duckdb_dependencies duckdb_extensions duckdb_functions duckdb_indexes duckdb_keywords
+    duckdb_schemas duckdb_sequences duckdb_settings duckdb_tables duckdb_types duckdb_views
+    pragma_table_info pragma_show pragma_version pragma_database_size pragma_storage_info
+    pragma_platform pragma_collations pg_timezone_names icu_calendar_names""".split())
+
+
+def read_only_sql(connection, text):
+    """Run SQL text in a read-only session(): only SELECT statements, refusing COPY, ATTACH, INSTALL,
+    LOAD, EXPORT, SET, a PRAGMA that sets, CALL, CREATE, and every other kind, and a SELECT whose plan
+    calls a table function outside READ_TABLE_FUNCTIONS or any of DYNAMIC_SQL_FUNCTIONS, before any
+    statement runs. Returns the last statement's relation, as connection.sql() does."""
+    import duckdb
+    statements = duckdb.extract_statements(text)  # parsed once, so what runs is what was checked
+    _refuse_statements(statements, ("SELECT",), "(only SELECT runs here, and a PIVOT is one only with an IN "
+                       "(...) list of its values)")
+    for statement in statements:
+        _refuse_writing_plan(connection, statement)
+    for statement in statements[:-1]:
+        connection.execute(statement.query)
+    return connection.sql(statements[-1].query) if statements else None
+
+
+def _refuse_writing_plan(connection, statement):
+    """Raise unless one parsed statement calls none of DYNAMIC_SQL_FUNCTIONS and the plan DuckDB would
+    run for it calls only READ_TABLE_FUNCTIONS. EXPLAIN binds the statement, expanding views and macros,
+    without running it; the name check runs again after it, since binding can load an extension's macros."""
+    _refuse_dynamic_sql(connection, statement)
+    text = statement.query
+    try:
+        plan = json.loads(connection.execute("EXPLAIN (FORMAT json) " + text).fetchall()[0][1])
+    except Exception as error:  # a PIVOT without IN, or SQL that does not bind
+        raise ValueError(f"read-only: refused a statement whose plan cannot be checked ({error}); "
+                         "run it without --read-only") from error
+    table_functions = {name for (name,) in connection.execute(
+        "SELECT upper(function_name) FROM duckdb_functions() WHERE function_type = 'table'").fetchall()}
+    nodes = list(plan)
+    while nodes:
+        node = nodes.pop()
+        info = node.get("extra_info") if isinstance(node.get("extra_info"), dict) else {}
+        for name in ({node.get("name")} & table_functions) | {info.get("Function")} - {None}:
+            if str(name).lower() not in READ_TABLE_FUNCTIONS:
+                raise ValueError(f"read-only: refused table function {str(name).lower()}, which a read-only "
+                                 "session does not run; run it without --read-only")
+        nodes.extend(node.get("children") or [])
+    _refuse_dynamic_sql(connection, statement)
+
+
+def _refuse_dynamic_sql(connection, statement):
+    """Raise when one parsed statement calls a function of DYNAMIC_SQL_FUNCTIONS, or a macro calling one,
+    found by name in its parse tree (json_serialize_sql), or in its tokens for a CREATE, which the
+    serializer does not take. A statement neither can read is refused."""
+    try:
+        dynamic = set(DYNAMIC_SQL_FUNCTIONS)
+        macros = connection.execute("SELECT DISTINCT lower(function_name), macro_definition "
+                                    "FROM duckdb_functions() WHERE macro_definition IS NOT NULL").fetchall()
+        while more := {name for name, body in macros if name not in dynamic and _called_names(body) & dynamic}:
+            dynamic |= more  # a macro calling a dynamic function, directly or through other macros
+        tree = json.loads(connection.execute("SELECT json_serialize_sql(?)", [statement.query]).fetchone()[0])
+        if not tree.get("error"):
+            called, nodes = set(), [tree]
+            while nodes:
+                node = nodes.pop()
+                if isinstance(node, dict) and isinstance(node.get("function_name"), str):
+                    called.add(node["function_name"].lower())
+                nodes.extend(node.values() if isinstance(node, dict) else node if isinstance(node, list) else ())
+        elif getattr(statement.type, "name", "") == "CREATE":
+            called = _called_names(statement.query)
+        else:
+            raise ValueError(tree.get("error_message"))
+    except Exception as error:
+        raise ValueError(f"read-only: refused a statement whose calls cannot be read ({error}); "
+                         "run it without --read-only") from error
+    if found := sorted(called & dynamic):
+        raise ValueError(f"read-only: refused {found[0]}(), which builds SQL from a string each time it is "
+                         "bound, so the plan checked need not be the plan that runs; run it without --read-only")
+
+
+def _called_names(text):
+    """Return the lowercased names DuckDB's lexer finds just before "(" in SQL text."""
+    import duckdb
+    data = text.encode("utf-8")  # token positions are byte offsets
+    tokens = duckdb.tokenize(text)
+    names = set()
+    for (start, kind), (after, _) in zip(tokens, tokens[1:]):
+        word = re.match(r'"(?:[^"]|"")*"|[\w$]+', data[start:after].decode("utf-8"))  # ':' is a keyword
+        if word and data[after:after + 1] == b"(" and kind.name in ("identifier", "keyword"):
+            word = word.group()
+            names.add(word[1:-1].replace('""', '"').lower() if word.startswith('"') else word.lower())
+    return names
+
+
+def _refuse_statements(statements, allowed, where):
+    """Raise unless every statement from duckdb.extract_statements() is of an allowed kind."""
+    for statement in statements:
+        kind = getattr(statement.type, "name", "") or "unknown"
+        if kind not in allowed:
+            raise ValueError(f"read-only: refused statement kind {kind} {where}; run it without --read-only")
 
 
 def _sql_argument(root, argument):
@@ -1222,16 +1373,23 @@ def cli_sql(root: Path, argv: list[str]) -> int:
     parser.add_argument("query", help="query file (absolute or project-relative) or SQL text")
     parser.add_argument("--limit", type=int, default=20, help="rows to print (default 20)")
     parser.add_argument("--out", help="write the full result to this project-relative .csv or .parquet file")
+    parser.add_argument("--read-only", action="store_true",
+                        help="write nothing: run only SELECT statements whose table functions read files or the "
+                             "catalog, in a session that installs no extension and spills outside the project; "
+                             "refuses --out")
     args = parser.parse_args(argv)
     if args.limit < 0:
         parser.error("--limit must be 0 or more")
+    if args.read_only and args.out:
+        parser.error("--read-only refuses --out")
     out = _under(root, args.out) if args.out else None
     if out is not None and out.suffix.lower() not in {".csv", ".parquet"}:
         parser.error("--out must end in .csv or .parquet")
     try:
-        with session(root) as connection:
+        with session(root, read_only=args.read_only) as connection:
             # sql() runs every statement and returns the last one's result, or None.
-            relation = connection.sql(_sql_argument(root, args.query))
+            text = _sql_argument(root, args.query)
+            relation = read_only_sql(connection, text) if args.read_only else connection.sql(text)
             if relation is None:
                 raise ValueError("the SQL returns no rows; end it with a query")
             if out is not None:
