@@ -154,6 +154,10 @@ def collect(root, *, probe_upstream=False):
             uncertain(path, "Last updated is not an ISO calendar date")
             return None
 
+    def local_path(value):
+        path = Path((value or "").strip().strip("`").strip()).expanduser()
+        return path if path.is_absolute() else root / path
+
     def storage(value):
         cleaned = (value or "").strip().strip("`").strip()
         # A declined location is the user's recorded decision, distinct from a line never recorded.
@@ -164,11 +168,8 @@ def collect(root, *, probe_upstream=False):
         # A URI or prose needs its established connector, never a speculative network call.
         if "://" in cleaned or not (cleaned.startswith(("/", "~", "./", "../"))):
             return {"location": value, "availability": "unknown"}
-        path = Path(cleaned).expanduser()
-        if not path.is_absolute():
-            path = root / path
         try:
-            availability = "reachable" if path.is_dir() else "unreachable"
+            availability = "reachable" if local_path(value).is_dir() else "unreachable"
         except OSError:
             availability = "unknown"
         return {"location": value, "availability": availability}
@@ -397,7 +398,9 @@ def collect(root, *, probe_upstream=False):
     result["sources"] = None if registered is None else {"count": len(registered), "documentation_without_reference": [
         row["Source ID"] for row in registered if documentation_basis(row) and not referenced(row["Notes"])]}
     result["landed_data_storage"] = storage(field(readme, "Landed data is kept at", readme_path, optional=True))
-    result["release_storage"] = storage(field(readme, "Released packages are kept at", readme_path, optional=True))
+    release_line = field(readme, "Released packages are kept at", readme_path, optional=True)
+    result["release_storage"] = storage(release_line)
+    release_base = local_path(release_line) if result["release_storage"]["availability"] == "reachable" else None
     result["upstream"] = upstream(root, probe_upstream, uncertain, entries)
 
     def manifest(directory, *, release=False):
@@ -478,6 +481,14 @@ def collect(root, *, probe_upstream=False):
             entry = {"name": directory.name, "draft_exists": draft.is_dir(), "revised_at": revised.isoformat() if revised else None,
                      "release_inventory_known": release_dirs is not None, "latest_release": latest.name if latest else None, "released_at": released.isoformat() if released else None,
                      "draft_vs_release": ("ahead" if revised > released else "same_or_older") if revised and released else None}
+            # Release storage holds each release at <location>/<investigation>/<package>/<n>/; null when the
+            # storage is not a reachable directory or the package has no release.
+            entry["latest_release_in_storage"] = None
+            if latest is not None and release_base is not None:
+                try:
+                    entry["latest_release_in_storage"] = (release_base / slug / directory.name / latest.name).is_dir()
+                except OSError:
+                    pass
             # A result rerun after the draft's last revision leaves the package showing its earlier run.
             entry["rerun_since_draft"] = rerun_since(obj, revised) if draft.is_dir() else None
             flags = obj.get("revalidation_flags") if obj is not None else None

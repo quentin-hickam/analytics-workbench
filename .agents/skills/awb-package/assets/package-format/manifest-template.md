@@ -35,10 +35,10 @@ The operation that assembled this package, recorded separately from the producin
 
 ## Selection
 
-- `dataset_selection`: the exported dataset paths, or an explicit `none`; and
-- `charts`: each chart file's path with the result ID it serializes, or `none`.
+- `dataset_selection`: each exported dataset as `path`, the `result_id` it serializes, its `columns`, the `percent` columns shown 100 times larger, and the decimal places each rounded column shows (`round`); or an explicit `none`. A manifest from an earlier export may list paths alone; and
+- `charts`: each chart file as `path`, `result_id`, `columns`, the row `selection` (`all`, `{"first": n}`, or `{"where": {"column", "values"}}`), its `headers`, the value labels its rows use (`values`), `percent`, and `round`; or `none`. `check-draft` reapplies each entry to the result's saved table and refuses a chart file that differs.
 
-`export` writes both, and each `revalidation_flags` entry's finding and reason, one per flagged finding; you fill `represented_in` and the user's `disposition`, required when `represented_in` lists places. The package contract's **Revalidation caveats** defines the field.
+`export` writes both, and each `revalidation_flags` entry's finding and reason, one per flagged finding; you fill `represented_in` and the user's `disposition`, required when `represented_in` lists places. The package contract's **Revalidation caveats** defines the field. `methodology.md` states the row selection, percent scaling, and rounding that `charts` and `dataset_selection` record, as `export`'s `methodology_lines` give them.
 
 Say the provenance locates the producing state; never call a package reproducible. Record an undeterminable field as `{"unknown": "<reason>"}`; a string such as `"unknown: evidence lost"` is not read as a provenance gap.
 

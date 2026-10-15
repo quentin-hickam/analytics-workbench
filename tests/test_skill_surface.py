@@ -220,3 +220,28 @@ def test_headline_checkpoint_names_both_modes_and_never_waits_unconditionally():
                  if path.is_file() and path.suffix in ('.md', '.py')
                  for phrase in retired if phrase in ' '.join(path.read_text(encoding='utf-8').split())]
     assert offenders == []
+
+
+def section(path, heading):
+    """A SKILL.md section's text from its heading to the next heading of any level, whitespace collapsed."""
+    text = (ROOT / path).read_text(encoding='utf-8')
+    body = text.split(f'\n{heading}\n', 1)[1]
+    return ' '.join(re.split(r'\n#{1,6} ', body, maxsplit=1)[0].split())
+
+
+def test_a_folded_revision_waits_for_the_users_check_before_release():
+    # A revision requested together with the release is shown to the user, and the release waits for their
+    # yes, so a change they have not seen is never frozen into a numbered release.
+    milestone = section('.agents/skills/awb-package/SKILL.md', '## Delivery milestone')
+    assert 'show the user the changed slides' in milestone
+    assert 'wait for their yes before invoking `awb-release`' in milestone
+    assert 'unless they said to release without seeing it' in milestone
+
+
+def test_release_shows_draft_markers_and_reports_every_open_caveat():
+    release = section('.agents/skills/awb-release/SKILL.md', '## 3. Release')
+    assert '`draft_markers`' in release and 'confirm' in release and 'revise' in release
+    report = section('.agents/skills/awb-release/SKILL.md', '## Report')
+    # An open caveat the deck states, such as one on its limitations slide, is listed too, not only a flag.
+    assert '`open_caveats`' in report and '**Limitations and open caveats**' in report
+    assert 'never call the release clean' in report and 'say nothing is outstanding' in report

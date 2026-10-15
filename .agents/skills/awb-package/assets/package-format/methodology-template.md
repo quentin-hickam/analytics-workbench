@@ -32,7 +32,7 @@ State the validation checks performed on the results presented, with their outco
 
 ### Use the same heading text as the finding in findings.md
 
-Give one `###` section per finding in `findings.md`, its heading identical to that finding's heading. Open it with `**Claim strength:** <claim>`: the weakest Claim in `state.md` among its results; a causal claim copies its results' Claim cell, design basis included. Record the reasoning that supports the finding, its result IDs and evidence paths, the question each result answers exactly as the manifest's `results` records it, the chart file each of its charts reads with the result it serializes and the source column of each header, the settings it depends on, and the results that complicate or contradict it.
+Give one `###` section per finding in `findings.md`, its heading identical to that finding's heading. Open it with `**Claim strength:** <claim>`: the weakest Claim in `state.md` among its results; a causal claim copies its results' Claim cell, design basis included. Record the reasoning that supports the finding, its result IDs and evidence paths, the question each result answers exactly as the manifest's `results` records it, the chart file each of its charts reads with the result it serializes, the source column of each header with any percent scaling and rounding, and the rows it selects, as `export`'s `methodology_lines` state them from the manifest's `charts` entry, the settings it depends on, and the results that complicate or contradict it.
 
 ## Methodological corrections
 

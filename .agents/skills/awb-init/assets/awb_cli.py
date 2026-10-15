@@ -38,15 +38,15 @@ COMMANDS = {
               "list findings whose evidence no longer matches the current code, views, inputs, or settings, "
               "and warn on runtime differences"),
     "export": ("packaging/draft.py", "cli_export",
-               "write the draft's chart and dataset files and the manifest's producing and packaging state; "
-               "--result alone refreshes provenance"),
+               "write the draft's chart and dataset files, a chart's rows selected as its --chart says, and the "
+               "manifest's producing and packaging state; --result alone refreshes provenance"),
     "review-rules": ("packaging/draft.py", "cli_review_rules",
                      "check: list each review rule with the draft lines its pattern matches, writing nothing; "
                      "add: append the next numbered rule from a user's correction"),
     "check-draft": ("packaging/draft.py", "cli_check_draft",
                     "run every mechanical draft check, including narrative numbers against recorded results "
-                    "and state.md's current flags, and rewrite the manifest inventory; --verify-only checks a "
-                    "release candidate"),
+                    "and state.md's current flags, write START-HERE.md, and rewrite the manifest inventory; "
+                    "--verify-only checks a release candidate"),
     "release": ("packaging/draft.py", "cli_release",
                 "copy the verified draft to the next numbered release and to release storage"),
     "copy-releases": ("packaging/draft.py", "cli_copy_releases",
