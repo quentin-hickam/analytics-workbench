@@ -17,6 +17,9 @@ All notable changes to this project are recorded in this file. The format is bas
 - `awb.py state` prints the ledger's open questions and those whose answering findings are all flagged or superseded. `awb-status` reports ledger counts, open questions by answerer, and those unsettled answers, and suggests `awb-scope`, `awb-eda`, or `awb-brainstorm` from them.
 - Print-only `install_helpers.py --mcp-config copilot|claude|codex` entries for user-level MCP registration, with absolute interpreter and server paths, host-native JSON or TOML, and a separate merge destination. Unsupported hosts and mixed install/registration arguments are refused without writes.
 - A user-level VS Code package reviewer with only file read/search and `awb/read` tools, plus a Copilot subagent launch branch that reports unavailable tools as a failed review.
+- Parent and priority fields for ledger questions through the CLI and MCP tools, with missing-parent and cycle checks and priority-ordered tree rendering.
+- Ledger-derived finding slide order, informational reporting of unlinked findings, and draft checks for slide order and the conditional Open questions slide.
+- A headline approval checkpoint before full slides for new drafts or changed storylines.
 
 ### Changed
 
@@ -42,6 +45,8 @@ All notable changes to this project are recorded in this file. The format is bas
 - Generated workbench instructions name the seven `awb` MCP tools as the server lists them, use them for CLI commands when the host offers the server, retain the CLI fallback, and pass the absolute project root explicitly.
 - Installation uses shared skills in `~/.agents/skills`, per-skill Claude Code symlinks with a copy-both fallback, per-host server registration, and VS Code Local workspace and approval steps. `awb-init` reports registration output when the host has no registered `awb` server.
 - Design notes record the user-level reviewer as a deliberate vendor-specific exception that is never generated into projects.
+- Answered data questions derive an `answered (awaiting recheck)` display status whenever any answering finding is flagged or superseded; stored status remains unchanged. Status collection reports `awaiting_recheck` in place of `answered_by_unsettled`.
+- The findings template includes every unanswered must question after Limitations and open caveats. Open questions is exempt from the five-bullet limit to preserve complete coverage.
 
 ### Fixed
 
