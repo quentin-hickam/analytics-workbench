@@ -52,7 +52,29 @@ def test_skill_metadata_accepted_and_refused_forms(header, expected):
         assert skill_metadata(header) == expected
 
 
-@pytest.mark.parametrize('path', sorted(ROOT.rglob('SKILL.md')),
+def shipped_skills(root):
+    """The repository's skills live only in .agents/skills/<name>/SKILL.md.
+    Scope to that folder, not the whole checkout: an rglob would also collect
+    stale copies in ignored nested worktrees such as .claude/worktrees/.
+    """
+    return sorted(root.glob('.agents/skills/*/SKILL.md'))
+
+
+def test_shipped_skills_skip_nested_copies(tmp_path):
+    shipped = tmp_path / '.agents/skills/good/SKILL.md'
+    nested = tmp_path / '.claude/worktrees/old/.agents/skills/bad/SKILL.md'
+    for path in (shipped, nested):
+        path.parent.mkdir(parents=True)
+        path.write_text('not frontmatter\n', encoding='utf-8')
+    assert shipped_skills(tmp_path) == [shipped]
+
+
+def test_repository_ships_skills():
+    # Guards the parametrized test below against silently collecting nothing.
+    assert shipped_skills(ROOT)
+
+
+@pytest.mark.parametrize('path', shipped_skills(ROOT),
                          ids=lambda path: str(path.relative_to(ROOT)))
 def test_every_skill_has_loadable_metadata(path):
     name, description = skill_metadata(path.read_text(encoding='utf-8'))
