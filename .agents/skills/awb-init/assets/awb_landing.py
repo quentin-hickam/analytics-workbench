@@ -1239,8 +1239,8 @@ def session(project_root: str | Path, *,
 # still runs; a scalar macro calling one is refused wherever it is called. A CREATE statement's body is
 # read the same way when it parses alone (_create_body); one that does not is checked by token, so there
 # the histogram() aggregate is refused too. Without these dynamic functions, every table function a
-# statement binds is named in its text or in a view or macro body fixed before the check; what still varies between check and
-# run is values, such as which files a glob reads.
+# statement binds is named in its text or in a view or macro body fixed before the check; what still
+# varies between check and run is values, such as which files a glob reads.
 DYNAMIC_SQL_FUNCTIONS = frozenset({"query", "query_table", "json_execute_serialized_sql"})
 READ_TABLE_FUNCTIONS = frozenset("""
     seq_scan range generate_series unnest repeat repeat_row glob summary sniff_csv read_text read_blob
