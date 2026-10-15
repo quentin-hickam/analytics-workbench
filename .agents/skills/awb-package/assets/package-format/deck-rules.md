@@ -45,7 +45,7 @@ The specification names one of these forms. Its **Data:** line names every colum
 | Bar with intervals | Estimates with intervals across groups | `category`, `value`, `lower`, `upper` | Clustered bar with custom error bars from the file's lower and upper columns |
 | Line | Change over time, a few series | `category` (the period), one or more `value`, or one `value` with a `series` | Line chart, time on the horizontal axis; label line ends instead of a legend when there are four series or fewer |
 | Column | A few categories with short labels, or counts by period | `category`, one or more `value`, or one `value` with a `series` | Clustered column, columns from zero |
-| Stacked bar | Part-to-whole across categories | `category`, one or more `value`, or one `value` with a `series` | 100% stacked bar; use instead of a pie whenever there are more than three parts |
+| Stacked bar | Part-to-whole across categories, each part zero or more | `category`, one or more `value`, or one `value` with a `series` | 100% stacked bar; use instead of a pie whenever there are more than three parts |
 | Scatter | Relationship between two measures | `x`, `y`, and optionally `label` and `fit` | Scatter chart; a fitted line only when the file carries its values |
 | Table | About six numbers or fewer, or a two-way grid of values | one `column` per table column, in order | Table, numbers right-aligned, units in the header row, optional color fill in one hue by value |
 
@@ -69,7 +69,7 @@ A `series` column splits one `value` column into a series per distinct entry, in
 
 ### Honest display
 
-- Bars and columns start at zero. Every value axis spans every value and interval bound in the file, negative values included, and zero too, unless a line chart's **Axis:** says `non-zero baseline` and gives the reason; keep that reason in the source line. Any other wording keeps zero on the axis.
+- Bars and columns start at zero. A Horizontal bar, Bar with intervals, Column, or Line value axis spans zero and every value and interval bound in the file, negative values included, unless a line chart's **Axis:** says `non-zero baseline` and gives the reason; keep that reason in the source line. Any other wording keeps zero on the axis. A Stacked bar's axis runs from 0 to 100%, so each part is zero or more.
 - Draw intervals whenever the file carries them, and state what they mean in the source line from **Interval:**.
 - Keep every category, period, and outlier the file holds, including results that contradict the headline.
 - Charts across the deck that show the same measure use the same scale unless **Axis:** says otherwise.

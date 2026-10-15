@@ -4,8 +4,9 @@ A test fixture, kept out of the distributed archive. It proves the deck contract
 package-format/deck-rules.md is complete enough to build a deck from without Microsoft 365: everything it
 places comes from the outline `awb_draft.parse_outline` derives and from the chart files. It follows the
 content rules (one slide per outline slide, headlines, bullets, and notes verbatim, every chart drawn from
-its file at the file's values, each value axis spanning zero and every value unless a line chart's **Axis:**
-says non-zero baseline, intervals as error bars, the source line with the baseline's reason, what the
+its file at the file's values, each bar, column, and line value axis spanning zero and every value and
+interval bound unless a line chart's **Axis:** says non-zero baseline, a Stacked bar's parts zero or more,
+intervals as error bars, the source line with the baseline's reason, what the
 intervals mean, and the caveat's reason, and alt text from the specification) and leaves styling, sections,
 and theme to the builders users run. It marks no value with the caveat's asterisk: **Caveat:** names that
 value only in words. Like any builder that cannot ask, it

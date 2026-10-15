@@ -5,8 +5,8 @@
 # test_outline_problems_rows: each slide rule broken gives its row with slide, line, and problem, a block quote outside a list being a paragraph of its own, as is a paragraph back at a bullet's depth after a deeper item, and the title slide's notes counted too; a deck without its # heading also has its subtitle on no slide, and one without ## Findings has each finding outside it.
 # test_chart_data_reads_roles: role: header pairs in order, case-insensitive roles, headers kept whole, colons in a header kept.
 # test_check_charts_every_form_passes: a specification in each of the seven forms, its Data line naming that form's roles, and a file with those columns passes.
-# test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, a column the file lacks, and a file column no role names give one row each; an interval role or column on a form without intervals says only a Bar with intervals draws them.
-# test_chart_fields_read_past_a_nested_item: an item nested under a field is kept out of the fields and the bullets and reported, and the fields after it still count; a later paragraph in a field is reported; a field-named item back at a shallower depth is a bullet.
+# test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, a column the file lacks, and a file column no role names give one row each; an interval role on a form without intervals says only a Bar with intervals draws them, and an unnamed column there says so if it holds interval bounds.
+# test_chart_fields_read_past_a_nested_item: an item nested under a field is kept out of the fields and the bullets and reported, and the fields after it still count; a blank line before the nested item changes none of this; a later paragraph in a field is reported; a field-named item back at a shallower depth is a bullet.
 # test_check_draft_help_lists_every_chart_row: the check-draft --help epilog names the unnamed-column and field-list chart rows.
 
 import importlib.util
@@ -297,7 +297,7 @@ def test_check_charts_every_form_passes(tmp_path):
       "interval columns need a Bar with intervals"]),
     ("Line", "category: Month; value: Rate (%)", "Month,Rate (%),Lower (%)\nJan,2,1\n",
      "chart-1.csv column 'Lower (%)' is named by no **Data:** role; name it by a role a Line takes (category, value, "
-     "series), or export the chart without it; a Line draws no intervals, so interval columns need a Bar with "
+     "series), or export the chart without it; if it holds interval bounds, a Line draws none, so use a Bar with "
      "intervals"),
     ("Scatter", "x: Spend; y: Late", "Spend,Late,Store\n1,2,A\n",
      "chart-1.csv column 'Store' is named by no **Data:** role; name it by a role a Scatter takes (x, y, label, "
@@ -313,8 +313,8 @@ def test_check_charts_every_form_passes(tmp_path):
      "chart-1.csv has no column 'Late (%)', which **Data:** names"),
     ("Horizontal bar", "category: Region; value: Closed late (%)", "Region,Closed late (%),Orders (n)\nW,21,90\n",
      "chart-1.csv column 'Orders (n)' is named by no **Data:** role; name it by a role a Horizontal bar takes "
-     "(category, value, series), or export the chart without it; a Horizontal bar draws no intervals, so interval "
-     "columns need a Bar with intervals"),
+     "(category, value, series), or export the chart without it; if it holds interval bounds, a Horizontal bar "
+     "draws none, so use a Bar with intervals"),
 ])
 def test_check_charts_spec_rows(tmp_path, form, data, content, problem):
     text = f"### Slide\n\n**Chart 1.** {form}: a comparison\n" + (f"- **Data:** {data}\n" if data else "")
@@ -341,11 +341,18 @@ def test_chart_fields_read_past_a_nested_item(tmp_path):
     assert [b["text"] for b in slide["bullets"]] == ["West."] and slide["extra"] == []
     assert draft.check_charts(path, tmp_path / "charts") == [
         {"chart": "Chart 1", "problem": "an item at line 7 is nested under the **Data:** field; a field is one "
-                                        "paragraph, so join it to the field or make it a slide bullet after a blank "
-                                        "line"},
+                                        "paragraph, so join it to the field or move it below the specification as a "
+                                        "slide bullet, after a blank line"},
         {"chart": "Chart 1", "problem": "a paragraph at line 11 continues the **Alt text:** field; a field is one "
-                                        "paragraph, so join it to the field or make it a slide bullet after a blank "
-                                        "line"}]
+                                        "paragraph, so join it to the field or move it below the specification as a "
+                                        "slide bullet, after a blank line"}]
+    # After a blank line a nested item still renders inside the field, so it is reported and the fields go on.
+    loose = draft.parse_outline("# T\nSub\n\n## A\n\n**Headline:** H\n\n- West.\n\n**Chart 1.** Line: x\n"
+                                "- **Data:** category: M; value: C\n\n  - Cases are counted at closure.\n"
+                                "- **Source:** s\n- **Alt text:** a\n\n**Notes:** N\n")
+    assert loose["charts"][0]["fields"] == {"Data": "category: M; value: C", "Source": "s", "Alt text": "a"}
+    assert loose["charts"][0]["inside"] == [{"line": 13, "field": "Data", "kind": "item"}]
+    assert loose["slides"][0]["bullets"] == [{"line": 8, "text": "West.", "sub": []}]
     # A field-named item back at a shallower depth renders outside the specification, so it is a bullet.
     nested = draft.parse_outline("# T\nSub\n\n## A\n\n- West.\n  - **Chart 1.** Table: grid\n"
                                  "    - **Data:** column: Region\n      - Regions as filed.\n"

@@ -1492,8 +1492,8 @@ def compare_trees(local_dir: str | os.PathLike, copy_dir: str | os.PathLike) -> 
 
 # A chart specification is a paragraph, or a list item, that renders opening with "Chart N."; its fields
 # are the list items directly under it, each opening with its field name, until a blank line follows one.
-# An item nested deeper than the fields, or a later paragraph inside a field, is kept on the chart as
-# "inside" and reported by `check_charts`; the fields go on after it.
+# An item nested deeper than the fields, a blank line before it or not, or a later paragraph inside a field,
+# is kept on the chart as "inside" and reported by `check_charts`; the fields go on after it.
 _CHART_SPEC = re.compile(r"[ \t]*Chart (\d+)\.(?=\s|$)")
 _CHART_FIELD = re.compile(r"(Data|Highlight|Axis|Interval|Source|Caveat|Alt text):(?=\s|$)\s*(.*)")
 _HEADLINE = re.compile(r"Headline:(?=\s|$)\s*(.*)")
@@ -1572,10 +1572,11 @@ def _slide(heading, first, lines):
         if slide["notes"] and slide["after_notes"] is None:
             slide["after_notes"] = block["line"]
         text = block["text"]
+        # An item deeper than the fields renders inside the last one, a blank line before it or not.
+        if chart is not None and block["kind"] == "item" and depth is not None and block["depth"] > depth:
+            chart["inside"].append({"line": block["line"], "field": list(chart["fields"])[-1], "kind": "item"})
+            continue
         if chart is not None and block["kind"] == "item" and not (block["gap"] and chart["fields"]):
-            if depth is not None and block["depth"] > depth:
-                chart["inside"].append({"line": block["line"], "field": list(chart["fields"])[-1], "kind": "item"})
-                continue
             if (depth is None or block["depth"] == depth) and (field := _CHART_FIELD.match(text)) \
                     and field[1] not in chart["fields"]:
                 chart["fields"][field[1]] = field[2].strip()
@@ -1873,14 +1874,14 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
                 if header not in named:
                     rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv column {header!r} is "
                                  f"named by no **Data:** role; name it{_by_role(chart['form'])}, or export the "
-                                 "chart without it" + _intervals_note(chart["form"])})
+                                 "chart without it" + _intervals_note(chart["form"], column=True)})
         # Text nested in a field renders inside it, where a builder reads it as the field's or drops it.
         for inside in chart["inside"]:
             what = (f"an item at line {inside['line']} is nested under" if inside["kind"] == "item"
                     else f"a paragraph at line {inside['line']} continues")
             rows.append({"chart": label, "problem": f"{what} the **{inside['field']}:** field; a field is one "
-                                                    "paragraph, so join it to the field or make it a slide bullet "
-                                                    "after a blank line"})
+                                                    "paragraph, so join it to the field or move it below the "
+                                                    "specification as a slide bullet, after a blank line"})
     return rows
 
 
@@ -1891,11 +1892,13 @@ def _by_role(form):
     return f" by a role a {form} takes ({', '.join(needed + optional)})"
 
 
-def _intervals_note(form):
-    """The fix for interval columns on a form that plots values without them."""
+def _intervals_note(form, column=False):
+    """The fix for interval columns on a form that plots values without them; an unnamed column may hold none."""
     needed = CHART_FORMS[form][0] if form else ()
-    return (f"; a {form} draws no intervals, so interval columns need a Bar with intervals"
-            if "value" in needed and "lower" not in needed else "")
+    if "value" not in needed or "lower" in needed:
+        return ""
+    return (f"; if it holds interval bounds, a {form} draws none, so use a Bar with intervals" if column
+            else f"; a {form} draws no intervals, so interval columns need a Bar with intervals")
 
 
 # ---------------------------------------------------------------- check-draft
