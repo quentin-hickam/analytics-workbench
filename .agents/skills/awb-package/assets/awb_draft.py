@@ -1130,9 +1130,12 @@ _EXTENSIONS = "md|py|csv|tsv|parquet|jsonl?|sql|png|svg|jpe?g|pdf|html?|duckdb|d
 _FILE = re.compile(rf"(?<![\w.,/\\-])[\w-]*\w\.(?:{_EXTENSIONS})(?![\w/\\])")
 _HYPHENATED = re.compile(r"(?<![\w.-])([A-Za-z_]\w*)(?:-\w+)+")
 # A DOI: 10., a registrant code of four to nine digits with any dot-separated parts, a slash, and its suffix,
-# after doi: or DOI, or bare when its suffix holds a digit; a bare 10.2500/litre is a quantity, so it is read.
-_DOI = re.compile(r"(?i:\bdoi)(?::\s*|\s+)10\.[0-9]{4,9}(?:\.[0-9]+)*/\S+"
-                  r"|(?<![\w.])10\.[0-9]{4,9}(?:\.[0-9]+)*/\S*[0-9]\S*")
+# which runs to the next whitespace or to a , or ; before a digit, after doi: or DOI, or bare when its
+# suffix holds both a letter and a digit; a bare 10.2500/litre or 10.2500/1000 is a quantity, so it is read.
+_DOI_SUFFIX = r"(?:[^\s,;]|[,;](?![0-9]))"
+_DOI = re.compile(rf"(?i:\bdoi)(?::\s*|\s+)10\.[0-9]{{4,9}}(?:\.[0-9]+)*/{_DOI_SUFFIX}+"
+                  rf"|(?<![\w.])10\.[0-9]{{4,9}}(?:\.[0-9]+)*/(?={_DOI_SUFFIX}*?[A-Za-z])(?={_DOI_SUFFIX}*?[0-9])"
+                  rf"{_DOI_SUFFIX}+")
 
 
 def _path(token):

@@ -6,7 +6,7 @@
 # test_compare_evidence_clean_committed_state_passes_five_comparisons: clean state passes all five ordered comparisons in the contract shape.
 # test_compare_evidence_detects_view_changed_after_recording: view mutation fails the views comparison.
 # test_compare_evidence_names_changed_setting: settings mutation fails the settings comparison.
-# test_scoped_settings_ignore_other_results_and_tables: only the [parameters] the result reads and its own table count; the file leaves the code comparisons.
+# test_scoped_settings_ignore_other_results_and_tables: recorded without parameters=, evidence keeps [parameters] whole and the result's own table, so another result's table never counts; the file leaves the code comparisons.
 # test_compare_evidence_detects_missing_input_and_missing_metadata: missing input file or unavailable metadata fails inputs.
 # test_compare_evidence_checks_dirty_code_against_recorded_bytes: uncommitted code mutation fails uncommitted-code.
 # test_record_evidence_rejects_destination_symlink_outside_root: regression: evidence destination cannot escape through a symlink.
@@ -36,6 +36,7 @@
 # test_record_evidence_requires_the_results_table: settings without the result's table, or unparseable, raise and write no evidence.
 # test_producing_paths_are_an_allow_list: producing paths are run.py, the result's queries, its producer module (written or not), its declared code, code_paths, and src/ minus awb.py, provenance.py and packaging/; another result's producer and query, notes, prose, an undeclared file, and the excluded helpers leave it current, committed or not, while each producing path stales it, a producer written later included.
 # test_run_py_edit_stales_every_result: an edit to run.py fails committed-code for every result (it passed before the allow list too; kept as its guard).
+# test_declared_file_a_query_reads_stales_its_result: a lookup CSV a result's query reads directly, declared in code, stales the result when it changes, committed or not, while an unrelated note leaves it current.
 # test_record_evidence_refuses_declared_code_that_does_not_exist: a code path the table declares must exist; nothing is written otherwise.
 # test_declared_code_under_an_ignored_directory_is_recorded_by_checksum: a declared file under an ignored directory is recorded as uncommitted, so it passes while unchanged, committed or not, and an edit to it fails uncommitted-code.
 # test_evidence_records_only_the_parameters_a_result_reads: with the parameters run.py passes, evidence records the [parameters] its queries name as $name and its table lists; an added parameter leaves both results current, changing one stales only the result that reads it, and a parameter a result starts to read stales it once [parameters] or its table changes.
@@ -47,7 +48,8 @@
 # test_record_evidence_refuses_a_result_without_its_question: a missing, blank, or multi-line question, inputs that are not a list of names, code that is not a list of paths or names a directory or a path outside the project, or parameters that are not a list of names, raise and write no evidence.
 # test_run_template_refuses_results_without_a_question: run.py exits 2 naming every wanted result that lacks a question, before opening a session or writing anything; without duckdb.
 # test_run_template_loads_each_producer_by_result_id: run.py loads producers/<id>.py by result ID with run() and only the parameters the result reads; an undeclared read, even through get(), fails that result alone; declaring it fixes the run; a module without produce() is named; an ID that cannot name its module exits 2 before anything runs.
-# test_run_template_registers_each_producer_module: a producer module defining a dataclass under postponed annotations loads and runs, since run.py registers it by name.
+# test_run_template_registers_each_producer_module: a producer module defining a dataclass under postponed annotations loads and runs, since run.py registers it by name, and its output is the saved table.
+# test_run_template_names_each_producer_module_apart: IDs that differ only in '.', '-', or '_' load their producer modules under distinct names, so one never takes another's sys.modules entry.
 # test_run_template_checks_declared_code_before_running: a missing declared code path exits 2 naming it before anything runs, leaving the prior evidence and table unchanged.
 # test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: prior_result checks the state before unlink; the run.py template records a result and writes its state.md row, keeps it on an identical rerun, and refuses before touching evidence when state.md is missing or drifts; a run failing after the table is rewritten leaves no evidence.
 
@@ -648,6 +650,28 @@ def test_run_py_edit_stales_every_result(project):
         assert committed["detail"] == "investigations/inv/run.py: differs from producing commit."
 
 
+def test_declared_file_a_query_reads_stales_its_result(project):
+    # A file a result's query reads directly, with no producer module, counts only when its table declares it.
+    write(project, "investigations/inv/queries/r1.sql",
+          b"select * from read_csv('investigations/inv/region_map.csv')\n")
+    write(project, "investigations/inv/region_map.csv", b"region,label\nw,West\n")
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS.replace(b"[results.r1]\n", b'[results.r1]\ncode = ["region_map.csv"]\n'))
+    commit_all(project, "lookup")
+    path = record(project)
+    assert "investigations/inv/region_map.csv" in json.loads(path.read_text())["producing_paths"]
+    commit_all(project, "evidence")
+    write(project, "investigations/inv/notes.md", b"# Notes\n")
+    commit_all(project, "notes")
+    assert outcomes(project) == ["pass"] * 5
+    write(project, "investigations/inv/region_map.csv", b"region,label\nw,Western\n")
+    committed = provenance.compare_evidence(project, path)[0]
+    assert committed["outcome"] == "fail" and "investigations/inv/region_map.csv" in committed["detail"]
+    commit_all(project, "lookup changed")
+    committed = provenance.compare_evidence(project, path)[0]
+    assert committed["outcome"] == "fail" and "investigations/inv/region_map.csv" in committed["detail"]
+
+
 def test_record_evidence_refuses_declared_code_that_does_not_exist(project):
     write(project, "investigations/inv/settings.toml",
           SETTINGS.replace(b"[results.r1]\n", b'[results.r1]\ncode = ["helpers.py"]\n'))
@@ -936,6 +960,25 @@ def test_run_template_registers_each_producer_module(project):
                           capture_output=True, text=True)
     assert done.returncode == 0, done.stdout + done.stderr
     assert json.loads(done.stdout)["state"] == "added"
+    assert (project / "investigations/inv/results/r1.csv").read_text().splitlines()[0] == "n,high"
+
+
+def test_run_template_names_each_producer_module_apart(project):
+    pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    install_run_template(project)
+    ids = ("a-b", "a_b", "a.b", "a_2d_b")
+    write(project, "investigations/inv/settings.toml", "".join(
+        f'[results."{result_id}"]\nquestion = "How many orders?"\n\n' for result_id in ids).encode())
+    for result_id in ids:
+        write(project, f"investigations/inv/queries/{result_id}.sql", b"select count(*) as n from orders\n")
+        write(project, f"investigations/inv/producers/{result_id}.py", b"def produce(connection, sql, parameters):\n"
+              b"    return run(connection, sql[0], parameters).assign(module=__name__), {}\n")
+    done = subprocess.run([sys.executable, str(project / "investigations/inv/run.py")], capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    names = {(project / f"investigations/inv/results/{result_id}.csv").read_text().splitlines()[1].split(",")[1]
+             for result_id in ids}
+    assert len(names) == len(ids), names
 
 
 def test_run_template_checks_declared_code_before_running(project):

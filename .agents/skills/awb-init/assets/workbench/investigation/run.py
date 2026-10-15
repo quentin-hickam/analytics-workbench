@@ -76,7 +76,9 @@ def producer(result_id):
     path = HERE / producer_path(result_id)
     if not path.is_file():
         return produce
-    spec = importlib.util.spec_from_file_location("producer_" + re.sub(r"\W", "_", result_id), path)
+    # Each character other than a letter or digit becomes _ and its hex code, so no two IDs share a name.
+    name = "producer_" + "".join(c if c.isalnum() else f"_{ord(c):02x}" for c in result_id)
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     module.run = run
     # Registered as an import is, so dataclasses and pickle can look the module up by name.
