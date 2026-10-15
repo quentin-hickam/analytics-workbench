@@ -249,6 +249,13 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     assert ('a full review is still required before the request\'s final `check-draft`, and `awb-release` always '
             'runs the full review') in review
     assert '`review (scoped):`' in review
+    # The draft is outside Git, so the diff is taken against a copy kept when the prior review was launched,
+    # and with no copy the next review is full; a slide or document rule is judged on each slide or file a
+    # changed line falls in.
+    assert '`diff -u <copy> <current file>`' in review and 'Git-ignored `deliveries/` folder' in review
+    assert 'When no copy of what the prior review read was kept, the next review is a full one' in review
+    assert 'for a `slide` or `document` rule, on each slide or file that holds one' in review
+    assert 'the caller settles them all before the next review' in review
     assert ('judge each rule added or changed since, as the diff of `foundation/review-rules.md` shows, against '
             'every narrative in full') in review
     assert ('Only a full review, whose last line opens `review:`, can complete a request or a release; a scoped '
