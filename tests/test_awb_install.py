@@ -18,6 +18,7 @@
 # test_project_interpreter_inside_the_project_is_recorded_relative: a virtual environment's interpreter inside the project is recorded by its project-relative path and reported in_project.
 # test_recorded_interpreter_is_kept_or_replaced: a README naming another existing interpreter, or repeating the line, refuses with exit 1 and writes nothing, with or without --check; a recorded interpreter that no longer exists is replaced and named under was; a link to this interpreter outside any virtual environment is this interpreter.
 # test_project_venv_is_kept_while_readme_records_none: a project with its own .venv or venv interpreter, run under another while README records none, refuses with exit 1 and writes nothing, with or without --check; README naming this interpreter lets it run.
+# test_hardlinked_interpreter_in_another_prefix_is_refused: outside a virtual environment, a hard link to this interpreter's binary in another directory is another interpreter: README naming it refuses, and so does a project .venv that is such a link while README records none; nothing is written.
 # test_awb_python_naming_this_interpreter_leaves_the_readme_line: with AWB_PYTHON naming this interpreter, by path or by name on PATH, the line is reported overridden and neither refused nor written, over another recorded interpreter or a project venv; AWB_PYTHON naming another interpreter changes nothing.
 # test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks; without the provenance asset an existing requirements.txt is reported unchecked, not a crash.
 # test_refuses_non_workbench_old_python_and_unreadable_receipt: none of these writes anything.
@@ -441,6 +442,30 @@ def test_project_venv_is_kept_while_readme_records_none(project, imports_ok, fol
     # Naming this interpreter on the line is the choice to use it over the project's own.
     template_readme(project, f"# P\n\nProject interpreter: {running}\n")
     assert installer.install(project)["interpreter"]["status"] == "current"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_hardlinked_interpreter_in_another_prefix_is_refused(project, tmp_path, imports_ok, monkeypatch):
+    # This interpreter runs from one prefix; a package manager linked the same binary into another.
+    base = executable(tmp_path / "base/bin/python3")
+    monkeypatch.setattr(sys, "executable", str(base))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "base"))
+    monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "base"))
+    monkeypatch.delenv("AWB_PYTHON", raising=False)
+    env = tmp_path / "env/bin/python3"
+    env.parent.mkdir(parents=True)
+    os.link(base, env)
+    template_readme(project, f"# P\n\nProject interpreter: {env}\n")
+    before = snapshot(project)
+    result = installer.install(project)
+    assert "rerun with it" in result["error"] and str(env) in result["error"] and snapshot(project) == before
+    # The project's own environment linked the same way is kept while README records none.
+    template_readme(project)
+    (project / ".venv/bin").mkdir(parents=True)
+    os.link(base, project / ".venv/bin/python")
+    before = snapshot(project)
+    result = installer.install(project)
+    assert "the project has its own interpreter, .venv/bin/python" in result["error"] and snapshot(project) == before
 
 
 def test_awb_python_naming_this_interpreter_leaves_the_readme_line(project, tmp_path, imports_ok, monkeypatch):

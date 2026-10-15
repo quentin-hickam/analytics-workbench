@@ -33,12 +33,14 @@
 # test_failed_phase_a_leaves_no_partial_files: a failed replace in phase A removes every prepared temporary file.
 # test_adapted_quality_template_still_parses: the shipped quality.md names the two headings and tables record_cleaning.py reads and the DQ-NNN format, keeps its guidance above each table, and with that guidance removed, as awb-init may adapt it, still takes a new row under its Active table.
 # test_rows_outside_the_table_are_located: rows appended after prose that follows a table, or above its header, refuse every call with their line numbers and IDs instead of "issues not in the scan", and write nothing.
+# test_issue_row_after_the_correction_record_is_refused: an issue row appended at the end of quality.md, directly under the Correction record table of the shipped template or after prose below it in an older layout, refuses every call, with or without a correction, by its line and the table it belongs in, and writes nothing.
+# test_new_ids_skip_ids_in_any_table: a new row's ID skips one already in the first cell of a table row elsewhere in quality.md.
 # test_fresh_record_allocates_dq_ids: a project without quality rows gets DQ-001 onward.
 # test_existing_q_prefix_continues: a quality record already numbered Q-NNN keeps Q- for new rows.
 # test_analyst_authored_issue_gets_the_next_id_and_no_link: a `new` entry writes a row with the next ID, its object, observation and evidence, and no scan marker or quality.json link; {N1} resolves elsewhere in the call; a correction on it has no rescan suffix; rerunning the call updates the row instead of adding another.
 # test_new_issues_and_decision_keys_refuse_what_they_do_not_accept: a `new` entry missing a column, with an unknown key, with evidence ending in .sql, in any case or in backticks, that is not the path alone of a saved query in the project (missing, outside it, or inside a sentence), with only one of correction and change, or not a list of objects, and an unknown top-level decision key, each refuse and write nothing.
 # test_new_issue_evidence_accepted_forms: a saved query's path, bare, in backticks, `./`-prefixed, or with an upper-case .SQL, is written as one code span of its project-relative path; other text, backticks included, is written as given.
-# test_catalog_template_keeps_rows_in_its_table: the shipped catalog.md names the section record_cleaning.py reads and keeps its guidance above the table, so a row added under its last row stays in the table and record sets it; a row added after text below the table is refused by line.
+# test_catalog_template_keeps_rows_in_its_table: the shipped catalog.md names the section record_cleaning.py reads and keeps its guidance above the table, so a row added under its last row stays in the table and record sets it; a row added after text below the table is refused by line; a second table in the section is refused as a second table, to go under its own heading.
 
 import hashlib
 import importlib.util
@@ -871,6 +873,41 @@ def test_rows_outside_the_table_are_located(tmp_path):
         recorder.record(tmp_path, "orders", {"issues": {"S2": judgment()}}, today=TODAY)
 
 
+ACTIVE_ROW = "| DQ-001 | view `orders` | March has no rows; evidence scan orders | Understates March | None | open |"
+
+
+def test_issue_row_after_the_correction_record_is_refused(tmp_path):
+    scan_file(tmp_path, delta=False)
+    template = (TEMPLATES / "foundation/quality.md").read_text()
+    old = OLD_LAYOUT.replace("\n| Q-002 | view `orders` | March missing | Understates March | None | open |\n"
+                             "| Q-003 | view `orders` | Test orders | Inflates counts | Open | open |\n", "")
+    for text, message in (
+            (template + ACTIVE_ROW + "\n", "under '## Correction record' is not a correction row: it has 6 cells where "
+             "the table has 5 and no YYYY-MM-DD date in its Date cell; an issue row belongs under the last row of the "
+             "table under '## Active limitations and issues'"),
+            (old + "\nCorrections are recorded by awb-clean.\n\n" + ACTIVE_ROW + "\n",
+             "sits outside the table under '## Correction record', whose rows end at line 14; it does not have this "
+             "table's 5 columns; move it to the table whose columns it has")):
+        path = write(tmp_path, "foundation/quality.md", text)
+        line = path.read_text().splitlines().index(ACTIVE_ROW) + 1
+        before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+        for decision in (judgment(), {**judgment(), "correction": "Null 9999", "change": "view nulls it",
+                                      "findings": "none"}):
+            with pytest.raises(recorder.RecordError) as refused:
+                recorder.record(tmp_path, "orders", {"issues": {"S2": decision}}, today=TODAY)
+            assert f"line {line} (DQ-001)" in str(refused.value) and message in str(refused.value)
+            assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+def test_new_ids_skip_ids_in_any_table(tmp_path):
+    scan_file(tmp_path, delta=False)
+    template = (TEMPLATES / "foundation/quality.md").read_text()
+    write(tmp_path, "foundation/quality.md", template + "\n## Retired issues\n\n| ID | Note |\n| --- | --- |\n"
+                                                        "| DQ-001 | Superseded |\n")
+    result = recorder.record(tmp_path, "orders", {"issues": {"S1": judgment(), "S2": judgment()}}, today=TODAY)
+    assert result["quality_ids"] == {"S1": "DQ-002", "S2": "DQ-003"}
+
+
 def test_fresh_record_allocates_dq_ids(tmp_path):
     scan_file(tmp_path, delta=False)
     result = recorder.record(tmp_path, "orders", {"issues": {"S1": judgment(), "S2": judgment()}}, today=TODAY)
@@ -1003,3 +1040,12 @@ def test_catalog_template_keeps_rows_in_its_table(tmp_path):
                                                    r"outside the table under '## Published datasets and views'"):
         recorder.record(tmp_path, "orders", decisions, today=TODAY)
     assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+    # A second table in the section, such as a view's column list, is refused as one, not as rows to move.
+    path = write(tmp_path, "foundation/catalog.md", template.rstrip("\n") + "\n" + CATALOG_ROW
+                 + "\n\nColumns of `orders`:\n\n| Column | Meaning |\n| --- | --- |\n| dept | Department |\n")
+    line = path.read_text().splitlines().index("| Column | Meaning |") + 1
+    with pytest.raises(recorder.RecordError) as refused:
+        recorder.record(tmp_path, "orders", decisions, today=TODAY)
+    assert (f"foundation/catalog.md: line {line} starts a second table under '## Published datasets and views'"
+            in str(refused.value)) and "under its own heading" in str(refused.value)
+    assert "directly under its last row" not in str(refused.value)

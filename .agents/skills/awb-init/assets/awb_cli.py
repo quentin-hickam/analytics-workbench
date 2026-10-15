@@ -185,8 +185,10 @@ def locate(command):
 def same_interpreter(path):
     """Whether this process runs `path`: the same file once its directories are resolved, or the same
     virtual environment. A venv's python is never resolved, since it links to a base interpreter whose
-    packages it does not see; outside virtual environments, two names for one binary, such as python3
-    and the python3.13 it links to, are the same interpreter."""
+    packages it does not see; outside virtual environments, two symbolic links to one binary, such as
+    python3 and the python3.13 it links to, are the same interpreter. A hard link to the binary in
+    another directory is not: package managers link one environment's interpreter from a shared cache,
+    and each copy sees its own prefix's packages."""
     def place(name):
         name = Path(os.path.abspath(name))
         return os.path.normcase(os.path.join(os.path.realpath(name.parent), name.name))
@@ -197,10 +199,7 @@ def same_interpreter(path):
         return os.path.normcase(os.path.realpath(environment)) == os.path.normcase(os.path.realpath(sys.prefix))
     if sys.prefix != sys.base_prefix:
         return False
-    try:
-        return os.path.samefile(path, sys.executable)
-    except OSError:
-        return False
+    return os.path.normcase(os.path.realpath(path)) == os.path.normcase(os.path.realpath(sys.executable))
 
 
 def _rerun_under_project_python(argv):

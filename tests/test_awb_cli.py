@@ -6,6 +6,7 @@
 # test_awb_reexecutes_under_the_project_interpreter: run by another interpreter, src/awb.py reruns itself under the project's .venv interpreter, noting it on stderr; run by that interpreter it runs once, silently; README's recorded interpreter comes before .venv, a refused line is noted and skipped, and AWB_PYTHON overrides both.
 # test_reexecution_never_loops: an interpreter that execs another one is run once, not again, because the rerun carries a marker it clears for its own subprocesses.
 # test_aliases_of_one_interpreter_are_the_same: outside a virtual environment, two links to one binary are the same interpreter, so neither reruns the other; a virtual environment's link to it, or another file, is not.
+# test_hardlinked_interpreter_in_another_prefix_is_another_interpreter: a hard link to this interpreter's binary in another directory, as package managers link one environment's interpreter from a shared cache, is not this interpreter: awb.py reruns under it with a note.
 # test_recorded_interpreter_that_cannot_run_is_noted: a README interpreter that exists but cannot be executed is noted on stderr and the command runs under the interpreter that started it, without a traceback.
 
 import importlib.util
@@ -182,6 +183,24 @@ def test_aliases_of_one_interpreter_are_the_same(tmp_path):
     (root / "README.md").write_text(f"# P\n\nProject interpreter: {links[1]}\n")
     result = run(links[0], root)
     assert result.returncode == 0 and result.stdout.strip() == str(links[0]) and result.stderr == ""
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the copied interpreter is a POSIX executable")
+def test_hardlinked_interpreter_in_another_prefix_is_another_interpreter(tmp_path):
+    cli = install(tmp_path)
+    # Two prefixes sharing one binary: neither is a virtual environment, and each would see its own packages.
+    base, env = tmp_path / "base/bin/python3", tmp_path / "env/bin/python3"
+    base.parent.mkdir(parents=True)
+    env.parent.mkdir(parents=True)
+    shutil.copy2(os.path.realpath(sys.executable), base)
+    os.link(base, env)
+    assert not cli.same_interpreter(base) or os.path.realpath(sys.executable) == str(base)
+    assert not cli.same_interpreter(env)
+    root = stub_project(tmp_path / "project")
+    (root / "README.md").write_text(f"# P\n\nProject interpreter: {env}\n")
+    result = run(base, root)
+    assert result.returncode == 0 and result.stdout.strip() == str(env)
+    assert f"awb.py: running under {env} (README's Project interpreter)" in result.stderr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")

@@ -53,7 +53,11 @@ issues, ## Correction record, and the catalog's ## Published datasets and views)
 its first line starting with `|` is the header, the next is its `| --- |` separator, and the rows
 are the `|` lines directly under that. A header without a separator, or a `|` line elsewhere in the
 section, such as a row added after prose that follows the table, refuses the call with its line
-number before anything is written.
+number before anything is written; a header and separator there start a second table, which belongs
+under its own heading. Every call also reads the Correction record, when quality.md has one: each of
+its rows has the header's number of cells and a YYYY-MM-DD Date, so an issue row added at the end of
+the file, directly under that table, is refused with its line rather than read as a correction. A
+new row's ID is never one already in the first cell of a table row anywhere in quality.md.
 """
 
 import argparse
@@ -122,11 +126,22 @@ class Table:
         section = next((i for i in range(self.end, len(lines)) if lines[i].startswith("#")), len(lines))
         outside = [i for i in range(self.end, section) if lines[i].strip().startswith("|")]
         if outside:
+            second = next((i for i in outside if i + 1 < len(lines) and _separator(lines[i + 1])), None)
+            if second is not None:
+                raise RecordError(f"{path}: line {second + 1} starts a second table under '{heading}', whose table "
+                                  f"ends at line {self.end}; a section holds one table, so put the second under "
+                                  "its own heading or outside the section, then rerun")
             where = " and ".join(f"line {i + 1} ({_cells(lines[i])[0] or 'no ID'})" for i in outside)
             many = len(outside) > 1
+            width = len(self.columns)
+            if all(len(_cells(lines[i])) == width for i in outside):
+                advice = f"move {'them' if many else 'it'} directly under its last row"
+            else:
+                # A row with another table's columns belongs in that table, not under this one's last row.
+                advice = (f"{'they do not all have' if many else 'it does not have'} this table's {width} columns; "
+                          f"move {'each' if many else 'it'} to the table whose columns it has")
             raise RecordError(f"{path}: {'rows at' if many else 'a row at'} {where} {'sit' if many else 'sits'} outside "
-                              f"the table under '{heading}', whose rows end at line {self.end}; move "
-                              f"{'them' if many else 'it'} directly under its last row, then rerun")
+                              f"the table under '{heading}', whose rows end at line {self.end}; {advice}, then rerun")
 
     def rows(self):
         return [(i, _cells(self.lines[i])) for i in range(self.header + 2, self.end)]
@@ -165,16 +180,38 @@ ID = r"([A-Za-z]+-?)(\d+)"
 
 def _next_ids(table):
     """Yield new IDs continuing the table's prefix and numbering, DQ-001 by default: the ledger's
-    questions are Q-NNN."""
+    questions are Q-NNN. An ID in the first cell of any table row in the file, such as an issue row
+    misplaced under another table, is skipped, so no new row repeats it."""
     at = position(table.columns, "ID", 0)
     found = [re.fullmatch(ID, cells[at]) for _, cells in table.rows()]
     found = [m for m in found if m]
     prefix = Counter(m.group(1) for m in found).most_common(1)[0][0] if found else "DQ-"
     width = max((len(m.group(2)) for m in found), default=3)
     number = max((int(m.group(2)) for m in found), default=0)
-    while True:
-        number += 1
-        yield f"{prefix}{number:0{width}d}"
+    first = (re.fullmatch(ID, _cells(line)[0]) for line in table.lines if line.strip().startswith("|"))
+    used = {(m.group(1), int(m.group(2))) for m in first if m}
+
+    def ids(number):
+        while True:
+            number += 1
+            if (prefix, number) not in used:
+                yield f"{prefix}{number:0{width}d}"
+    return ids(number)
+
+
+def _check_corrections(table):
+    """Refuse a Correction record row that is not one: another cell count or no YYYY-MM-DD Date."""
+    date_at = position(table.columns, "Date", 0)
+    for line_index, cells in table.rows():
+        wrong = []
+        if len(cells) != len(table.columns):
+            wrong.append(f"{len(cells)} cells where the table has {len(table.columns)}")
+        if not (date_at < len(cells) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", cells[date_at])):
+            wrong.append("no YYYY-MM-DD date in its Date cell")
+        if wrong:
+            raise RecordError(f"{table.path}: line {line_index + 1} ({cells[0] or 'no ID'}) under '{CORRECTIONS}' "
+                              f"is not a correction row: it has {' and '.join(wrong)}; an issue row belongs under "
+                              f"the last row of the table under '{ACTIVE}', so move it there, then rerun")
 
 
 def _fill(text, ids, prefixes=("S",)):
@@ -297,6 +334,8 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     files, changed = {}, {}
     quality = files["foundation/quality.md"] = _load(root, "foundation/quality.md", "quality.md")
     active = Table(quality, ACTIVE, "foundation/quality.md")
+    if any(line.strip() == CORRECTIONS for line in quality):
+        _check_corrections(Table(quality, CORRECTIONS, "foundation/quality.md"))
     issues = decisions.get("issues") or {}
     by_qid = {}
     id_at, object_at, observation_at = (position(active.columns, "ID", 0), position(active.columns, OBJECT, 1),

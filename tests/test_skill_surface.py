@@ -583,10 +583,15 @@ def test_no_code_history_means_no_commits_or_suggestions():
     # Both the reference-document and the publication commit points say so where the step is read.
     assert data.count("While README's `Code history:` line says `none`, do neither.") == 2
     clean = ' '.join((ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8').split())
-    assert "Unless README's `Code history:` line says `none`, commit `foundation/quality.json`" in clean
+    assert ("Commit `foundation/quality.json` together with `foundation/quality.md` when you commit as README's "
+            "`Commits:` line allows, never while its `Code history:` line says `none`") in clean
     init = ' '.join(section((ROOT / '.agents/skills/awb-init/SKILL.md').read_text(encoding='utf-8'),
                             '## 1. Resolve the target').split())
     assert '`Code history: none (<reason>)`' in init
+    # A project that later gains a repository goes back to Git, at a rerun or a repair.
+    assert 'set the line back to `Code history: Git`' in init
+    repair = ' '.join((ROOT / '.agents/skills/awb-init/references/repair.md').read_text(encoding='utf-8').split())
+    assert "set it back to `Code history: Git`" in repair
 
 
 def ledger_ids(text):
