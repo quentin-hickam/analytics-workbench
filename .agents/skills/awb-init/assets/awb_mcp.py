@@ -23,7 +23,8 @@ when the client advertises roots (requested with roots/list), else the working d
 must hold src/awb.py, except for setup. Several roots and no argument is an error naming them.
 
 Subprocesses run with cwd at the project root and stdin closed unless a tool passes text to it. The
-interpreter is $AWB_PYTHON, else the project's .venv or venv interpreter, else this one. Read calls
+interpreter is $AWB_PYTHON, else README's Project interpreter line, else the project's .venv or venv
+interpreter, else this one: the order src/awb.py follows, read with its asset beside this file. Read calls
 write no bytecode and take none of Git's optional locks, and stop after $AWB_MCP_READ_TIMEOUT seconds
 (default 300); write calls run one at a time, so concurrent updates to one record never overwrite each
 other. Results are plain text: stdout, then stderr, then the exit status, cut to $AWB_MCP_MAX_CHARS
@@ -38,6 +39,7 @@ initialize. Logs go to stderr.
 
 import contextlib
 import functools
+import importlib.util
 import json
 import os
 import re
@@ -153,7 +155,8 @@ TOOLS = [
         "Write investigation and foundation records through their helpers. command state: change findings, "
         "issues, next steps, or the active investigation (`state flag` reads JSON from stdin); questions: "
         "add, answer, status, edit, render; review-rules: add a rule; clean-record: record a cleaning pass "
-        "for a scan name, decisions JSON on stdin. Read records with the read tool.",
+        "for a scan name, decisions JSON on stdin, with scan issues under `issues` and issues the scan did "
+        "not report under `new`. Read records with the read tool.",
         ("state", "questions", "review-rules", "clean-record"), stdin=True),
     _write_tool(
         "data", "Prepare workbench data",
@@ -186,7 +189,8 @@ TOOLS = [
         ("release", "copy-releases")),
     {"name": "setup", "title": "Install workbench helpers",
      "description": "Install or upgrade the workbench helpers, guides, and package formats in a project "
-                    "with workbench markers (AGENTS.md, foundation/, or investigations/), through awb-init's "
+                    "with workbench markers (AGENTS.md, foundation/, or investigations/), and record the "
+                    "interpreter that runs them on README's Project interpreter line, through awb-init's "
                     "install_helpers.py. check reports without writing.",
      "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
          "project": PROJECT,
@@ -300,15 +304,17 @@ def resolve_project(arguments, client, *, setup=False):
 
 # ---------------------------------------------------------------- commands
 
+@functools.cache
+def _cli():
+    """The awb.py asset beside this file: its project_python() is the rule src/awb.py reruns itself by."""
+    spec = importlib.util.spec_from_file_location("awb_mcp_cli", Path(__file__).resolve().parent / "awb_cli.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def _python(root):
-    configured = os.environ.get("AWB_PYTHON")
-    if configured:
-        return configured
-    for folder in (".venv", "venv"):
-        for candidate in (root / folder / "bin" / "python", root / folder / "Scripts" / "python.exe"):
-            if candidate.is_file():
-                return str(candidate)
-    return sys.executable
+    return _cli().project_python(root)[0] or sys.executable
 
 
 def _script(key):

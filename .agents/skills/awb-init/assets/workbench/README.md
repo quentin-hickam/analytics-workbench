@@ -12,6 +12,10 @@ Released packages are kept at: not yet recorded
 
 Commits: on request
 
+Code history: Git
+
+Project interpreter: not yet recorded
+
 ## Where work belongs
 
 - `foundation/` records sources, canonical datasets and views, shared data quality, common vocabulary, and the review rules every package review checks. `foundation/references/` keeps the third-party documentation those records rely on.
@@ -49,4 +53,6 @@ Name the workbench skill in a plain request:
 - `awb-explore` explores one dataset for the active investigation: "Use awb-explore to explore the shifts view."
 - `awb-init` repairs the workbench and brings it up to date after newer skills are installed: "Use awb-init to bring this workbench up to date."
 
-The `Commits` line at the top says when the agent commits: `on request`, the default, means only when you ask, with a reminder at most once a session while analytical code is uncommitted; `as I go` means it commits analytical code as it works. Say "commit as you go" to switch.
+The `Commits` line at the top says when the agent commits: `on request`, the default, means only when you ask, with a reminder at most once a session while analytical code is uncommitted; `as I go` means it commits analytical code as it works. Say "commit as you go" to switch. The `Code history` line reads `none (<reason>)` when the project has no Git repository; the agent then makes and suggests no commits, and evidence records file checksums instead of a commit.
+
+The `Project interpreter` line names the Python that runs every workbench command, written by the helper installer; `python3` in the commands here means it, and `src/awb.py` switches to it when started by another. To switch interpreters, edit the line.

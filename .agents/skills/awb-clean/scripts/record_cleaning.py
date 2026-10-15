@@ -9,16 +9,27 @@ SCAN_NAME names foundation/scans/<SCAN_NAME>.json written by scan_dataset.py. De
                        "correction", "change",                    both or neither: a correction row
                        "findings", "object",                      optional overrides
                        "check": {"publication", "name"}}},        optional: a publication check to cite
+     "new": [{"object", "observation", "evidence",                an issue the scan did not report
+              "impact", "treatment", "status",                    judgment columns, required
+              "correction", "change", "findings", "check"}],      optional, as for issues
      "findings": "...",                                           correction rows' findings when no flags
      "flags": [{"investigation", "result", "reason"}],            findings to flag
      "catalog": {"name", "cells": {column: text}}}                catalog cells to set
-Text may name an issue as {S1} or {Q-004}; it becomes the issue's quality ID.
-A recorded quality ID, such as Q-004, also works as a key: it revises only judgment cells,
-keeps the observation and link, and its correction carries no rescan suffix.
-A check names a publication directory, data/parquet/<dataset>/<publication-id>/ relative to
-PROJECT_ROOT or absolute inside it, and one of the checks its publication.json records; the
-citation, with the check's outcome and the root-relative path, is appended to the row's Current
+Any other key is refused. Text may name an issue as {S1}, {N1} (the first new entry), or {DQ-004};
+it becomes the issue's quality ID. A recorded quality ID, such as DQ-004, also works as a key: it
+revises only judgment cells, keeps the observation and link, and its correction carries no rescan
+suffix. New rows' IDs continue the prefix and numbering the Active table already uses, DQ-001 in a
+record without IDs. A check names a publication directory, data/parquet/<dataset>/<publication-id>/
+relative to PROJECT_ROOT or absolute inside it, and one of the checks its publication.json records;
+the citation, with the check's outcome and the root-relative path, is appended to the row's Current
 treatment once.
+
+A new entry is an issue the analyst found that the scan did not report. Its evidence is a saved
+query's project-relative path ending in .sql, which must be a file in the project and is written as
+code, or any other one-line text, such as a reference and page, written as given. Its row gets the
+next ID, the observation followed by `; evidence <evidence>`, and no scan marker or quality.json
+link. An Active row with the same object and observation is that entry already recorded, as when a
+call is run again: its judgment cells are set instead.
 
 Quality issue rows get the next ID, the scan's counts and examples, and the marker
 `<scan>#<key>` with its scan date. foundation/quality.json holds hashed scan links and recorded
@@ -31,6 +42,14 @@ flag goes through the project's provenance helper and sets the finding's status 
 `Last updated`. All versions are checked before writing: A replaces links, Active rows, and
 catalog; B writes flags; C appends corrections. Failures report completed phases and replaced
 files. --dry-run prints the rows that would change and writes nothing. Prints compact JSON.
+
+foundation/quality.md and catalog.md are read as Markdown sections: a heading line, then the lines
+up to the next line starting with `#`. Each section the script reads (## Active limitations and
+issues, ## Correction record, and the catalog's ## Published datasets and views) holds one table:
+its first line starting with `|` is the header, the next is its `| --- |` separator, and the rows
+are the `|` lines directly under that. A header without a separator, or a `|` line elsewhere in the
+section, such as a row added after prose that follows the table, refuses the call with its line
+number before anything is written.
 """
 
 import argparse
@@ -68,8 +87,13 @@ def _cell(text):
     return re.sub(r"\s*\n\s*", " ", str(text)).replace("|", r"\|").strip()
 
 
+def _separator(line):
+    return line.strip().startswith("|") and all(re.fullmatch(r":?-+:?", cell) for cell in _cells(line))
+
+
 class Table:
-    """The first Markdown table under a heading, edited in place within the file's lines."""
+    """The one Markdown table in a heading's section, edited in place within the file's lines; the
+    module docstring gives the grammar."""
 
     def __init__(self, lines, heading, path):
         try:
@@ -83,11 +107,22 @@ class Table:
             index += 1
         if index + 1 >= len(lines):
             raise RecordError(f"{path}: no table under '{heading}'")
+        if not _separator(lines[index + 1]):
+            raise RecordError(f"{path}: line {index + 1} under '{heading}' has no | --- | separator line under it; "
+                              "the table's header must come first, with rows directly under the separator")
         self.lines, self.path, self.header = lines, path, index
         self.columns = _cells(lines[index])
         self.end = index + 2
         while self.end < len(lines) and lines[self.end].strip().startswith("|"):
             self.end += 1
+        section = next((i for i in range(self.end, len(lines)) if lines[i].startswith("#")), len(lines))
+        outside = [i for i in range(self.end, section) if lines[i].strip().startswith("|")]
+        if outside:
+            where = " and ".join(f"line {i + 1} ({_cells(lines[i])[0] or 'no ID'})" for i in outside)
+            many = len(outside) > 1
+            raise RecordError(f"{path}: {'rows at' if many else 'a row at'} {where} {'sit' if many else 'sits'} outside "
+                              f"the table under '{heading}', whose rows end at line {self.end}; move "
+                              f"{'them' if many else 'it'} directly under its last row, then rerun")
 
     def rows(self):
         return [(i, _cells(self.lines[i])) for i in range(self.header + 2, self.end)]
@@ -125,11 +160,12 @@ ID = r"([A-Za-z]+-?)(\d+)"
 
 
 def _next_ids(table):
-    """Yield new IDs continuing the table's prefix and numbering, Q-001 by default."""
+    """Yield new IDs continuing the table's prefix and numbering, DQ-001 by default: the ledger's
+    questions are Q-NNN."""
     at = position(table.columns, "ID", 0)
     found = [re.fullmatch(ID, cells[at]) for _, cells in table.rows()]
     found = [m for m in found if m]
-    prefix = Counter(m.group(1) for m in found).most_common(1)[0][0] if found else "Q-"
+    prefix = Counter(m.group(1) for m in found).most_common(1)[0][0] if found else "DQ-"
     width = max((len(m.group(2)) for m in found), default=3)
     number = max((int(m.group(2)) for m in found), default=0)
     while True:
@@ -138,7 +174,7 @@ def _next_ids(table):
 
 
 def _fill(text, ids, prefixes=("S",)):
-    """Replace {S1} or {Q-004} with its quality ID; an unknown name with a known prefix is an error."""
+    """Replace {S1}, {N1}, or {DQ-004} with its quality ID; an unknown name with a known prefix is an error."""
     def replace(match):
         name = match.group(1)
         if name in ids:
@@ -196,9 +232,45 @@ def _citation(root, check):
     return f"check {_code(check['name'])} {found[0].get('outcome')} in `{publication}/publication.json`"
 
 
+DECISION_KEYS = ("date", "issues", "new", "findings", "flags", "catalog")
+NEW_REQUIRED = ("object", "observation", "evidence", "impact", "treatment", "status")
+NEW_OPTIONAL = ("correction", "change", "findings", "check")
+
+
+def _new_entries(root, new):
+    """The decisions' `new` list, checked against the module docstring's rules: [(name, entry, evidence)]."""
+    if not isinstance(new, list) or not all(isinstance(entry, dict) for entry in new):
+        raise RecordError("new must be a list of issue objects, each with " + ", ".join(NEW_REQUIRED))
+    checked = []
+    for number, entry in enumerate(new, 1):
+        name = f"N{number}"
+        unknown = sorted(set(entry) - set(NEW_REQUIRED) - set(NEW_OPTIONAL))
+        if unknown:
+            raise RecordError(f"{name} has unknown keys: {', '.join(unknown)}")
+        missing = [k for k in NEW_REQUIRED if not (isinstance(entry.get(k), str) and entry[k].strip())]
+        if missing:
+            raise RecordError(f"{name} needs {', '.join(missing)} for a new quality row")
+        if bool(entry.get("correction")) != bool(entry.get("change")):
+            raise RecordError(f"{name}: give both correction and change, or neither")
+        evidence = " ".join(entry["evidence"].split())
+        if evidence.endswith(".sql"):
+            path = Path(os.path.normpath(root / evidence))
+            if (Path(evidence).is_absolute() or "`" in evidence or " " in evidence
+                    or not path.is_relative_to(root) or not path.is_file()):
+                raise RecordError(f"{name} evidence names no saved query: {evidence}; give a saved query's "
+                                  "path relative to the project root, or a reference in words")
+            evidence = f"`{path.relative_to(root).as_posix()}`"
+        checked.append((name, entry, evidence))
+    return checked
+
+
 def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     """Validate DECISIONS, then write A (records), B (flags), C (corrections)."""
     root = Path(project_root).resolve()
+    unknown_keys = sorted(set(decisions) - set(DECISION_KEYS))
+    if unknown_keys:
+        raise RecordError(f"decisions have unknown keys: {', '.join(unknown_keys)}; expected {', '.join(DECISION_KEYS)}")
+    new = _new_entries(root, decisions.get("new") or [])
     scan_path = root / "foundation/scans" / f"{scan_name}.json"
     try:
         scan = json.loads(scan_path.read_text(encoding="utf-8"))
@@ -278,8 +350,32 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
             ids[issue["id"]] = recorded[issue["key"]][1]
     for qid in [*by_qid, *ids.values()]:
         ids.setdefault(qid, qid)
-    prefixes = {"S", "Q-"} | {re.fullmatch(ID, qid).group(1) for qid in by_qid}
+    prefixes = {"S", "N", "Q-", "DQ-"} | {re.fullmatch(ID, qid).group(1) for qid in by_qid}
     fill = lambda text: _fill(text, ids, prefixes)
+
+    # A new entry names its own row: an Active row with its object and observation, else a new ID.
+    # IDs are allocated in order, so an entry's text may name an earlier entry.
+    by_text = {}
+    for line_index, cells in active.rows():
+        if max(object_at, observation_at) < len(cells):
+            by_text.setdefault((cells[object_at], cells[observation_at]), []).append(line_index)
+    found = {}
+    for name, entry, evidence in new:
+        obj, observation = fill(entry["object"]), f"{fill(entry['observation'])}; evidence {evidence}"
+        lines = by_text.get((_cell(obj), _cell(observation)), [])
+        if len(lines) > 1:
+            raise RecordError(f"{name} is recorded on {len(lines)} active rows; give them distinct IDs or remove one")
+        if lines:
+            qid = _cells(quality[lines[0]])[id_at]
+            if not re.fullmatch(ID, qid) or len(by_qid.get(qid, [])) != 1:
+                raise RecordError(f"{name} is recorded on a row without a unique ID; give that row one")
+            if lines[0] in named:
+                raise RecordError(f"{named[lines[0]]} and {name} both name {qid}; give one decision per issue")
+            named[lines[0]] = name
+        else:
+            qid = next(new_ids)
+        ids[name] = ids[qid] = qid
+        found[name] = (lines[0] if lines else None, obj, observation)
 
     flags = decisions.get("flags") or []
     by_investigation = {}
@@ -294,14 +390,15 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     judged = {key: active.columns[position(active.columns, name, default)] for key, name, default in (
         ("impact", "Analytical impact", 3), ("treatment", "Current treatment", 4),
         ("status", "Status", len(active.columns) - 1))}
-    for issue_id, decision in issues.items():
+    entries = {name: entry for name, entry, _ in new}
+    for issue_id, decision in [*issues.items(), *entries.items()]:
         issue = by_id.get(issue_id)
         qid = ids[issue_id]
         values = {judged[k]: fill(decision[k]) for k in judged if decision.get(k)}
         if decision.get("check") is not None:
             citation = _citation(root, decision["check"])
             treatment = judged["treatment"]
-            line_index = revised.get(issue_id) if issue is None else (
+            line_index = found[issue_id][0] if issue_id in found else revised.get(issue_id) if issue is None else (
                 recorded[issue["key"]][0] if issue["key"] in recorded else None)
             current = values.get(treatment)
             if current is None and line_index is not None:
@@ -310,7 +407,16 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                 current = cells[at].replace("\\|", "|") if at < len(cells) else ""  # set() escapes again
             if current is not None and citation not in current:
                 values[treatment] = f"{current}; {citation}" if current else citation
-        if issue is None:  # a quality-ID key: judgment cells only; the observation stays
+        if issue_id in found:  # a new entry: its row, else a new one without a scan marker or link
+            line_index, obj, observation = found[issue_id]
+            if line_index is not None:
+                rows.append(active.set(line_index, values))
+                updated.append(qid)
+            else:
+                rows.append(active.append({active.columns[id_at]: qid, active.columns[object_at]: obj,
+                                           active.columns[observation_at]: observation, **values}))
+                added.append(qid)
+        elif issue is None:  # a quality-ID key: judgment cells only; the observation stays
             if values:
                 rows.append(active.set(revised[issue_id], values))
                 updated.append(qid)
@@ -464,7 +570,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                                   + (", ".join(flagged_investigations) or "none"))
             failure.phases, failure.written = phases, written
             raise failure from error
-    result = {"quality_ids": {k: ids[k] for k in issues}, "added": added, "updated": updated,
+    result = {"quality_ids": {k: ids[k] for k in [*issues, *entries]}, "added": added, "updated": updated,
               "corrections": appended, "catalog": catalog_result,
               "flags": flagged, "written": written}
     if repeated:

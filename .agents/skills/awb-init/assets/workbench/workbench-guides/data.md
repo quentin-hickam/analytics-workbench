@@ -2,7 +2,7 @@
 
 Paths below that begin with `references/` or `assets/` are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (VS Code Copilot and Codex).
 
-Existing project layouts remain authoritative. Read `references/landing.md` only to write a `fetch` callable for `land()` or a `convert` callable for `publish()`, or when `sql --read-only` or the `read` tool refuses a function or needs an extension.
+Existing project layouts remain authoritative. Read `references/landing.md` only to write a `fetch` callable for `land()` or a `convert` callable for `publish()`, to land an archive or publish a spreadsheet, or when `sql --read-only` or the `read` tool refuses a function or needs an extension.
 
 ## Assess and acquire
 
@@ -15,6 +15,8 @@ Land user-supplied or already-downloaded files:
 ```
 python3 src/awb.py land <source> <acquisition-id> <file-or-directory>... [--request TEXT] [--records NAME=COUNT] [--notes TEXT]
 ```
+
+Land an archive, such as a `.zip`, as received, with the members a conversion reads extracted beside it in the same `land` call, and record in `--notes` that the archive is the original; a workbook is published through DuckDB's `read_xlsx`, with Excel serial dates converted explicitly. `references/landing.md` (**Archives and spreadsheets**) gives both.
 
 For an API or other fetched source, save the fetch as `src/preparation/fetch_<source>.py`, taking the acquisition ID as its argument and calling `land()` from `src/preparation/landing.py` with a `fetch` callable and the upstream URL, without credentials, and validators it receives; run it by path with a new acquisition ID, then run `python3 src/awb.py retain`. Land a changed upstream again under a new acquisition ID, only on request; rerunning analysis never re-lands.
 

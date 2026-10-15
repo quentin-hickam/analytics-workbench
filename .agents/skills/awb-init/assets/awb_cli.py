@@ -6,9 +6,16 @@ Copy this file to `src/awb.py`; run it from anywhere as `python3 src/awb.py <com
 in COMMANDS as a function `cli_<name>(root: Path, argv: list[str]) -> int`, where `root` is the
 project root (the parent of `src/`) and the return value is the exit status. Commands print
 compact output for the conversation and keep complete records in files.
+
+Run as a script, it first reruns itself under the project's interpreter when another one started it:
+$AWB_PYTHON, else README's `Project interpreter` line, else the project's .venv or venv interpreter,
+the order the awb MCP server follows. A rerun is noted on stderr and happens at most once.
 """
 
 import importlib.util
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -60,6 +67,8 @@ def _usage():
     lines += [f"  {name:<{width}}  {summary}" for name, (_, _, summary) in COMMANDS.items()]
     lines += ["", "Run `python3 src/awb.py <command> --help` for a command's arguments, output, and exit status.",
               "Paths are project-relative unless that help says otherwise.",
+              "Started by another interpreter, it reruns itself under the project's: $AWB_PYTHON, else",
+              "README's Project interpreter line, else the project's .venv or venv, noting it on stderr.",
               "Exit status: 0 done; 1 something attempted failed, named in the output or on stderr;",
               "2 unusable arguments, nothing changed."]
     return "\n".join(lines)
@@ -99,5 +108,101 @@ def main(argv=None):
     return command(ROOT, rest)
 
 
+INTERPRETER_LINE = "Project interpreter:"
+# Set on the rerun only, so a rerun never reruns again; the rerun clears it for its own subprocesses.
+REEXECUTED = "AWB_REEXECUTED"
+
+
+def read_interpreter(root):
+    """README's `Project interpreter` line as (status, value, detail).
+
+    Accepted input: README.md at the project root, holding at most one line that starts at column 0
+    with `Project interpreter:`. Its value is the rest of that line without surrounding spaces and
+    one pair of surrounding backticks: `not yet recorded` in any case, or the path of an existing
+    file, absolute or relative to the project root. Returns ("none", None, None) without README.md
+    or the line, ("unrecorded", value, None) for `not yet recorded`, and ("recorded", value, path)
+    for a file. Refused, as ("refused", value, why): a repeated line, an empty value, and a path
+    naming no file. Known limits: `~` and environment variables are not expanded, and the file is
+    not checked to be an interpreter.
+    """
+    try:
+        text = (Path(root) / "README.md").read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return "none", None, None
+    lines = [line for line in text.splitlines() if line.startswith(INTERPRETER_LINE)]
+    if not lines:
+        return "none", None, None
+    if len(lines) > 1:
+        return "refused", None, "README.md repeats the Project interpreter line"
+    value = lines[0][len(INTERPRETER_LINE):].strip()
+    if len(value) >= 2 and value[0] == value[-1] == "`":
+        value = value[1:-1].strip()
+    if not value:
+        return "refused", value, "README's Project interpreter line is empty"
+    if value.lower() == "not yet recorded":
+        return "unrecorded", value, None
+    path = Path(value)
+    path = path if path.is_absolute() else Path(root) / path
+    if not path.is_file():
+        return "refused", value, f"README's Project interpreter {value} names no file"
+    return "recorded", value, path
+
+
+def project_python(root):
+    """(interpreter, source, note) for the project: $AWB_PYTHON, else README's recorded interpreter,
+    else .venv's or venv's, else (None, None, note). The note names a refused README line."""
+    configured = os.environ.get("AWB_PYTHON")
+    if configured:
+        return configured, "AWB_PYTHON", None
+    status, _, detail = read_interpreter(root)
+    if status == "recorded":
+        return str(detail), "README's Project interpreter", None
+    for folder in (".venv", "venv"):
+        for candidate in (Path(root) / folder / "bin" / "python", Path(root) / folder / "Scripts" / "python.exe"):
+            if candidate.is_file():
+                return str(candidate), f"the project's {folder}", detail if status == "refused" else None
+    return None, None, detail if status == "refused" else None
+
+
+def same_interpreter(path):
+    """Whether this process runs `path`: the same file once its directories are resolved, or the same
+    virtual environment. The file itself is never resolved: a venv's python links to a base interpreter
+    whose packages it does not see."""
+    def place(name):
+        name = Path(os.path.abspath(name))
+        return os.path.normcase(os.path.join(os.path.realpath(name.parent), name.name))
+    if place(sys.executable) == place(path):
+        return True
+    environment = Path(os.path.abspath(path)).parent.parent
+    return ((environment / "pyvenv.cfg").is_file()
+            and os.path.normcase(os.path.realpath(environment)) == os.path.normcase(os.path.realpath(sys.prefix)))
+
+
+def _rerun_under_project_python(argv):
+    """Rerun this script under the project's interpreter when another one runs it; return otherwise."""
+    if os.environ.pop(REEXECUTED, None) or not sys.executable:
+        return
+    target, source, note = project_python(ROOT)
+    if note:
+        print(f"awb.py: {note}; it is skipped", file=sys.stderr)
+    if target is None:
+        return
+    # AWB_PYTHON may name a command on PATH rather than a path.
+    found = (target if os.path.isfile(target) else None) if os.path.dirname(target) else shutil.which(target)
+    if not found:
+        print(f"awb.py: {source} names no interpreter: {target}", file=sys.stderr)
+        return
+    if same_interpreter(found):
+        return
+    print(f"awb.py: running under {found} ({source}) instead of {sys.executable}", file=sys.stderr, flush=True)
+    command = [found, str(Path(__file__).resolve()), *argv]
+    environment = {**os.environ, REEXECUTED: "1"}
+    if os.name == "nt":  # Windows has no exec that keeps the process; wait for the rerun instead.
+        sys.exit(subprocess.call(command, env=environment))
+    sys.stdout.flush()
+    os.execve(found, command, environment)
+
+
 if __name__ == "__main__":
+    _rerun_under_project_python(sys.argv[1:])
     sys.exit(main())

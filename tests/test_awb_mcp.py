@@ -17,6 +17,8 @@
 # test_clip_stays_within_the_limit_and_counts_the_cut: the cut output never exceeds the limit, the note states the number of characters actually cut, and a limit below 1000 is raised to 1000.
 # test_read_writes_no_bytecode_and_reads_no_shared_cache: a read subprocess runs with bytecode writes off and no PYTHONPYCACHEPREFIX, even one the server inherits, so it reads no bytecode from a cache directory; a write subprocess keeps Python's cache settings.
 # test_root_uris_are_unquoted_once: a root URI's percent escapes are decoded once.
+# test_clean_record_passes_new_issues: records clean-record passes a decisions `new` list through stdin, writing an analyst-authored quality row with the next DQ- ID, its evidence, and no scan link; the records description names `new`.
+# test_subprocess_interpreter_follows_the_project: AWB_PYTHON wins, then README's Project interpreter line, then .venv or venv, then the server's own interpreter, as src/awb.py resolves it.
 
 import importlib.util
 import json
@@ -554,3 +556,43 @@ def test_root_uris_are_unquoted_once(monkeypatch):
     server = load_server(monkeypatch)
     path = Path("/tmp/sales 100%25 done")
     assert server._root_paths([{"uri": path.as_uri()}, {"uri": "https://example.invalid/x"}]) == [path]
+
+
+def test_clean_record_passes_new_issues(workbench, connect):
+    scan = {"schema": "awb-scan/1", "name": "orders", "target": {"kind": "view", "label": "view orders", "path": None},
+            "scanned_at": "2026-10-09T10:00:00+00:00", "issues": [], "baseline": None, "delta": None}
+    (workbench / "foundation/scans").mkdir(parents=True)
+    (workbench / "foundation/scans/orders.json").write_text(json.dumps(scan))
+    (workbench / INV / "exploration").mkdir()
+    (workbench / INV / "exploration/march-gap.sql").write_text("SELECT 1\n")
+    decisions = {"new": [{"object": "view `orders`", "observation": "March has no orders from the west region",
+                          "evidence": f"{INV}/exploration/march-gap.sql", "impact": "Understates March",
+                          "treatment": "None in the foundation; investigations decide", "status": "open"}],
+                 "date": "2026-10-09"}
+    client = connect(cwd=workbench)
+    tools = {tool["name"]: tool for tool in client.request("tools/list")["result"]["tools"]}
+    assert "`new`" in tools["records"]["description"]
+    text, error = client.call("records", command="clean-record", args=["orders"], stdin=json.dumps(decisions))
+    assert not error, text
+    assert json.loads(text.split("\n\n")[0])["quality_ids"] == {"N1": "DQ-001"}
+    quality = (workbench / "foundation/quality.md").read_text()
+    assert (f"| DQ-001 | view `orders` | March has no orders from the west region; evidence `{INV}/exploration/march-gap.sql` | "
+            "Understates March | None in the foundation; investigations decide | open |") in quality
+    assert not (workbench / "foundation/quality.json").exists()
+
+
+def test_subprocess_interpreter_follows_the_project(tmp_path, monkeypatch):
+    server = load_server(monkeypatch)
+    monkeypatch.delenv("AWB_PYTHON", raising=False)
+    assert server._python(tmp_path) == sys.executable
+    venv = tmp_path / ".venv/bin/python"
+    venv.parent.mkdir(parents=True)
+    venv.write_text("")
+    assert server._python(tmp_path) == str(venv)
+    recorded = tmp_path / "tools/python"
+    recorded.parent.mkdir()
+    recorded.write_text("")
+    (tmp_path / "README.md").write_text("# P\n\nProject interpreter: tools/python\n")
+    assert server._python(tmp_path) == str(recorded)
+    monkeypatch.setenv("AWB_PYTHON", "/opt/python")
+    assert server._python(tmp_path) == "/opt/python"

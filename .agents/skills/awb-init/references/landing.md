@@ -1,6 +1,6 @@
 # Landing helper
 
-Call the project copy at `src/preparation/landing.py`. The `land`, `retain`, `publish`, and `sql` commands cover supplied files and select-based conversions; `python3 src/awb.py <command> --help` gives each one's arguments and output. This reference covers the two library calls for what the commands cannot do, and what the read-only commands read.
+Call the project copy at `src/preparation/landing.py`. The `land`, `retain`, `publish`, and `sql` commands cover supplied files and select-based conversions; `python3 src/awb.py <command> --help` gives each one's arguments and output. This reference covers the two library calls for what the commands cannot do, landing archives and spreadsheets, and what the read-only commands read.
 
 ## Fetch a source with `land()`
 
@@ -17,6 +17,24 @@ The fetch script reads credentials from environment variables, with local values
 For a conversion a select cannot express, call `publish()` with a `convert` callable.
 
 `publish(root, dataset, publication_id, convert, *, acquisitions, validate=None, notes=None) -> Path` calls `convert(partial_directory)`, runs the dataset's checks declared in `foundation/datasets.toml` over the Parquet files it wrote, then calls `validate(partial_directory)`. A malformed declaration of any dataset, or declared checks without the `duckdb` package, refuses before `convert` runs. A failing declared check raises `ChecksFailed`, whose `checks` lists every declared check. Use `validate` for checks a declaration cannot express: raise on failure or return the Python boolean `False`; every other return value permits publication, and a returned string becomes the detail of its `validate` check. `acquisitions` lists completed acquisition directories, absolute or project-relative. Conversion reads them without modification. `publication.json` is reserved; the helper records inputs, hashes, Git HEAD (or `uncommitted`), and the checks with their outcomes, then renames the output directory. Record the publication in `foundation/catalog.md` as the `publish` command's `catalog_row` would.
+
+## Archives and spreadsheets
+
+Land an archive, such as a `.zip`, as received. DuckDB reads no member inside an archive, so extract the members a conversion needs into a folder outside the project, then land the archive and that folder in one call, so the acquisition's provenance hashes both and retention copies both:
+
+```sh
+python3 src/awb.py land <source> <acquisition-id> <archive>.zip <extracted-folder> --notes "<archive>.zip is the original as received; <extracted-folder>/ holds the members extracted from it"
+```
+
+The archive is the retained original and the extracted members are the form conversions read; the `--notes` text records which is which in the Acquisitions row. A spreadsheet landed on its own is its own original.
+
+Publish a workbook (`.xlsx`) through DuckDB's spreadsheet reader, `read_xlsx`, which comes from the `excel` extension: install it once as the next section says. Name the sheet, and read every cell as text with `all_varchar = true`, so no column's type is guessed from its first rows; cast each column in the SELECT:
+
+```sql
+SELECT ... FROM read_xlsx('data/raw/<source>/<acquisition-id>/<extracted-folder>/<book>.xlsx', sheet = '<sheet>', all_varchar = true)
+```
+
+Under `all_varchar`, a date cell can arrive as its Excel serial day number, such as `45292` for 2024-01-01. Convert it explicitly, `DATE '1899-12-30' + CAST(<column> AS INTEGER)` for a workbook in Excel's default 1900 date system (right from March 1900 on) or `DATE '1904-01-01' + CAST(<column> AS INTEGER)` for one in the 1904 system, and check a few converted dates against the workbook before publishing.
 
 ## Read landed files without writing
 

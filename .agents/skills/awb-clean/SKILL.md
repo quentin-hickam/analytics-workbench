@@ -7,7 +7,7 @@ description: "Find data errors in one analytics workbench dataset and correct th
 
 Work on one dataset at a time: a canonical view, a publication, or a landed acquisition. This skill and its references hold the data and analysis guides' cleaning rules, so a cleaning pass reads neither guide. Corrections go into view definitions or a new publication; landed originals and existing publications are never modified.
 
-Run the bundled scripts as black boxes, by path, with the project's Python environment (the scan needs `duckdb`). A typical pass is six tool calls: scan, read the view definition and the view's catalog row in one call, edit the view, rescan, `stale`, record.
+Run the bundled scripts as black boxes, by path, with README's `Project interpreter` (the scan needs `duckdb`). A typical pass is six tool calls: scan, read the view definition and the view's catalog row in one call, edit the view, rescan, `stale`, record.
 
 ## 1. Scan
 
@@ -30,7 +30,7 @@ The active question bounds the work: decide issues in the columns the active inv
 
 Decide yourself the fixes that change only representation: `whitespace`, `text-typed`, case- or punctuation-only `variants`, a clear `parse` format error, a `date-formats` mix with one reading, and `duplicate-rows` under a recorded grain — except in a code or identifier column, where case, padding, and numeric form can carry meaning. Ask when examples or source context leave meaning ambiguous. Record `all-null` as an open limitation yourself. The user decides every other issue, because each changes meaning: what a placeholder stands for (missing, zero, or real), the canonical label, whether repeated rows or keys are errors and which row wins, whether out-of-range values are wrong, a parsed value that carries meaning such as `<5`, how to treat orphans and null keys, and an ambiguous day-month order. Ask all of these in one message, as a table of issue, observation with count and examples, proposed treatment, and the alternative. Ask in sequence only when one answer changes which later questions arise, such as the grain deciding which repeated keys are issues.
 
-Decide is done when every in-scope `S<n>`, including any beyond the 25 that stdout lists, has a class and every question asked has an answer or is recorded as `open`.
+An in-scope problem the scan missed, such as one a saved query shows, is decided the same way and recorded as a `new` issue. Decide is done when every in-scope `S<n>`, including any beyond the 25 that stdout lists, has a class and every question asked has an answer or is recorded as `open`.
 
 ## 3. Correct
 
@@ -46,7 +46,7 @@ Every scan after the edit uses `--rescan`, which keeps the pre-cleaning baseline
 
 ## 5. Flag affected findings
 
-Run `python3 src/awb.py stale` with the interpreter that runs `run.py`, such as the project's virtual environment. Flag the findings whose `stale` entry names the corrected view or publication, or a view built on it; findings `stale` lists for other reasons keep their status. `runtime_mismatches` flag nothing; report them as a rerun decision for the user. A version mismatch on every result at once usually means a different interpreter, not an upgrade: rerun `stale` with the right one before reporting. A `requirements not read` entry in an entry's `details` ends with a line whose package version went unrecorded, not a change; report it with that line, quoted as given.
+Run `python3 src/awb.py stale`. Flag the findings whose `stale` entry names the corrected view or publication, or a view built on it; findings `stale` lists for other reasons keep their status. `runtime_mismatches` flag nothing; report them as a rerun decision for the user. A version mismatch on every result at once usually means `run.py` recorded them under an interpreter other than README's `Project interpreter`, not an upgrade; say so in the report. A `requirements not read` entry in an entry's `details` ends with a line whose package version went unrecorded, not a change; report it with that line, quoted as given.
 
 ## 6. Record
 
@@ -57,6 +57,8 @@ python3 <skill-directory>/scripts/record_cleaning.py <project-root> <scan-name> 
 {"issues": {"S1": {"impact": "...", "treatment": "...", "status": "corrected",
                    "correction": "rule and rationale", "change": "`foundation/views/02_orders.sql` trims dept"},
             "S4": {"impact": "...", "treatment": "...", "status": "open"}},
+ "new": [{"object": "view `orders`", "observation": "March has no west-region orders", "status": "open",
+          "evidence": "investigations/churn/exploration/march-gap.sql", "impact": "...", "treatment": "..."}],
  "flags": [{"investigation": "churn", "result": "r-003", "reason": "{S1} merges department labels"}],
  "catalog": {"name": "orders", "cells": {"Preparation rules": "...", "Quality constraints": "..."}}}
 EOF
@@ -64,7 +66,7 @@ EOF
 
 Flags go through the project's `src/provenance.py` state flag helper. A helper predating `findings.json` refuses before writes; run `awb-init` repair (`install_helpers.py --upgrade`).
 
-With no affected finding, add `"findings": "none: stale listed no finding reading <view>"`. The script fills new rows' IDs, observations, counts, and markers, keeps scan links and recorded counts and dates in `foundation/quality.json`, fills flagged statuses, and turns `{S1}` into that issue's quality ID. Reopening updates judgment cells and the link; the observation stays as first written. A decision on a recorded issue the scan no longer lists uses its quality ID, such as `"Q-004"`, as the key; it revises judgment cells while keeping the observation and link. `{Q-004}` placeholders also resolve. To cite a declared publication check that establishes a row, such as a `key` check confirming a decided grain, add `"check": {"publication": "data/parquet/<dataset>/<publication-id>/", "name": "key:order_id"}` to its decision; the script confirms that `publication.json` records the check and appends the citation to Current treatment. Record shared vocabulary in the glossary yourself.
+With no affected finding, add `"findings": "none: stale listed no finding reading <view>"`. The script fills new rows' IDs, observations, counts, and markers, keeps scan links and recorded counts and dates in `foundation/quality.json`, fills flagged statuses, and turns `{S1}` into that issue's quality ID and `{N1}` into the first `new` issue's; new IDs are `DQ-NNN` unless the record uses another prefix. A `new` issue's evidence is a saved query's path or a reference in words; it takes `correction` and `change` like a scan issue, and its row has no scan link. Reopening updates judgment cells and the link; the observation stays as first written. A decision on a recorded issue the scan no longer lists uses its quality ID, such as `"DQ-004"`, as the key; it revises judgment cells while keeping the observation and link. `{DQ-004}` placeholders also resolve. To cite a declared publication check that establishes a row, such as a `key` check confirming a decided grain, add `"check": {"publication": "data/parquet/<dataset>/<publication-id>/", "name": "key:order_id"}` to its decision; the script confirms that `publication.json` records the check and appends the citation to Current treatment. Record shared vocabulary in the glossary yourself.
 
 Read the existing catalog row before setting any of its cells; when a publication row shares the dataset's name, `record_cleaning.py` sets the view's row (Kind `canonical view`), so read that one. A cell you set replaces the whole cell: give its complete new text, keeping what still holds and citing quality IDs for rationale.
 

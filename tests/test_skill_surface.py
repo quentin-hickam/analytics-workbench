@@ -407,3 +407,67 @@ def test_setup_report_has_at_most_five_items_and_keeps_the_host_instruction_file
     assert 1 <= len(items) <= 5, items
     assert sum('host instruction file' in item for item in items) == 1
     assert any('impact' in item for item in items)
+
+
+def test_commands_state_the_cli_fallback_scripts_by_path_and_the_interpreter():
+    commands = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Commands').split())
+    # A refused or missing write tool falls back to the command line, said once; working tools stay first.
+    assert ('If a write tool is refused or unavailable, run its CLI command, '
+            'keep using the tools that work, and say so once.') in commands
+    # The scan and record scripts live in their skill folders and are never awb.py subcommands.
+    assert 'Skill scripts run by path, never as `awb.py` commands.' in commands
+    # One interpreter, recorded once: the installer writes the README line the commands mean.
+    assert "In every workbench command, `python3` means README's `Project interpreter`." in commands
+    readme = (ROOT / '.agents/skills/awb-init/assets/workbench/README.md').read_text(encoding='utf-8')
+    assert re.search(r'^Project interpreter: not yet recorded$', readme, re.M)
+    for skill in ('awb-clean', 'awb-explore'):
+        text = ' '.join((ROOT / f'.agents/skills/{skill}/SKILL.md').read_text(encoding='utf-8').split())
+        assert "README's `Project interpreter`" in text, skill
+
+
+def test_no_code_history_means_no_commits_or_suggestions():
+    readme = (ROOT / '.agents/skills/awb-init/assets/workbench/README.md').read_text(encoding='utf-8')
+    assert re.search(r'^Code history: Git$', readme, re.M)
+    agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
+    assert "While README's `Code history:` line says `none`, make and suggest no commits." in agents
+    analysis = ' '.join((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/analysis.md')
+                        .read_text(encoding='utf-8').split())
+    assert "while its `Code history:` line says `none`, do neither" in analysis
+    init = ' '.join(section((ROOT / '.agents/skills/awb-init/SKILL.md').read_text(encoding='utf-8'),
+                            '## 1. Resolve the target').split())
+    assert '`Code history: none (<reason>)`' in init
+
+
+def ledger_ids(text):
+    """Accepted input: any text. Returns each ledger-style ID, `Q-` and one or more digits,
+    in order; a `Q-` preceded by a letter, a digit, or `-` (as in `DQ-004`) is part of another
+    word and refused, as is `Q-` without a digit. Known limits: a plain substring scan, so an
+    ID inside a URL or code is found too."""
+    return re.findall(r'(?<![A-Za-z0-9-])Q-\d+', text)
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('Use {Q-004} or Q-12.', ['Q-004', 'Q-12']),
+    ('`Q-007` beside plain text', ['Q-007']),
+    ('such as DQ-004', []),
+    ('x-Q-004 and AQ-1', []),
+    ('Q- and Q-ID', []),
+])
+def test_ledger_id_scanner_accepted_and_refused_forms(text, expected):
+    assert ledger_ids(text) == expected
+
+
+def test_quality_ids_in_shipped_help_are_dq_never_ledger_ids():
+    # Ledger questions are Q-NNN; quality IDs are DQ-NNN, so no cleaning help names a quality ID like Q-004.
+    import subprocess
+    import sys
+    scripts = ROOT / '.agents/skills/awb-clean/scripts'
+    texts = {name: subprocess.run([sys.executable, str(scripts / name), '--help'], capture_output=True,
+                                  text=True, check=True).stdout
+             for name in ('record_cleaning.py', 'scan_dataset.py')}
+    for path in [ROOT / '.agents/skills/awb-clean/SKILL.md', *sorted((ROOT / '.agents/skills/awb-clean/references').glob('*.md')),
+                 ROOT / '.agents/skills/awb-init/assets/workbench/foundation/quality.md']:
+        texts[str(path.relative_to(ROOT))] = path.read_text(encoding='utf-8')
+    assert {name: ledger_ids(text) for name, text in texts.items() if ledger_ids(text)} == {}
+    assert 'DQ-004' in texts['record_cleaning.py'] and 'DQ-004' in texts['.agents/skills/awb-clean/SKILL.md']
+    assert 'DQ-NNN' in texts['.agents/skills/awb-init/assets/workbench/foundation/quality.md']

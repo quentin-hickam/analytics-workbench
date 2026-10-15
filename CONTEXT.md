@@ -97,5 +97,11 @@ The current understanding of an investigation, including its active question, fi
 **Investigation history**:
 The record of meaningful findings, analytical decisions, and relevant data limitations accumulated during an investigation, including superseded conclusions. It retains methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, and excludes routine debugging, coding mistakes, and abandoned attempts that changed no understanding.
 
+**Project interpreter**:
+The Python interpreter that runs a project's helpers and `run.py`, recorded on the project README's `Project interpreter` line by the helper installer. `python3` in every documented workbench command means it, and `src/awb.py` reruns itself under it when another interpreter starts it.
+
+**Code history**:
+The Git history of a project's analytical code, which evidence and manifests cite by commit. A project without Git records `Code history: none (<reason>)` on its README line; it then has no commits, and evidence records file checksums instead.
+
 **Result evidence**:
 The per-result record of what produced a finding and why: the question it answers in the user's words, the producing commit or `uncommitted` state with checksums, the inputs with the checksums their provenance or publication files record, the view definitions read, the settings it reads, the runtime (Python, platform, and package versions), and the validation checks. It is written to `investigations/<name>/evidence/<result-id>.json` and linked from the finding's row in `state.md`. It records provenance for one result; the investigation history records how understanding changed.
