@@ -1,0 +1,9 @@
+### Changed
+
+- The README opens for the analyst. **What you get** says the package is the files a deck is built from, not a .pptx, and names each one: the deck outline, the chart data, the optional methods note for the audience, the internal methodology reference, the builder instructions, and `START-HERE.md`, which says what to send and what to attach to the builder. It says that Microsoft 365 Copilot's PowerPoint agent is one builder, that a person can build the deck by hand from the same files, and that a Copilot license is needed only for the Copilot route.
+- A **Quick-start for analysts** follows: the Python 3.10 requirement, what to say first, what the agent asks (the scoping round, package installs, both storage locations, audience and length, the headline checkpoint in preview-and-wait or draft-then-review, and the release questions), that a disposition is asked only when a finding the draft shows is flagged, the usual requests in order with when clean, explore, and brainstorm help, the 6 to 11 exchanges six simulated first-time runs took from first message to release, and plain definitions of canonical view, question ledger, receipt, disposition, and review rule.
+- The requirements, install, repair, MCP server, VS Code, and `AGENTS.md`/`CLAUDE.md` material moves unchanged into an **Install and administer** section below the quick-start, and the rest of the old **Use** section into **How it works**.
+
+### Fixed
+
+- `scripts/build-dist.sh` refused to build the archive, because the README's MCP server section linked `docs/copilot-compat.md` outside a `dist:exclude` block. That sentence now sits in its own excluded block, and `tests/test_skill_surface.py` checks the README as the script reads it: the archive copy has balanced markers and no `docs/` link, and every link resolves in the repository and in the archive.

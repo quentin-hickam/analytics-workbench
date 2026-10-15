@@ -551,3 +551,217 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
             'cites the check that establishes it') in contract
     assert 'Run the full read-only review' in release and 'never a scoped re-review' in release
     assert 'one pass' in reviewer and 'scoped' in reviewer and 'the evidence a narrative cites' in reviewer
+
+
+README = ROOT / 'README.md'
+
+
+def markdown_links(text):
+    """Accepted input: LF Markdown whose links are all inline, `[label](target)`: the
+    target is one or more characters other than whitespace, `(`, `)`, `<`, and `>`,
+    closed by `)`. Returns every target in order, anchors included. Refuse with
+    ValueError a `](` whose target does not fit, such as one holding a space, a title,
+    angle brackets, or parentheses, or never closed; a reference definition, a line
+    starting `[label]: `; and an autolink, `<` then `http`. Known limits: code spans
+    and fences are read like prose, so a `](` written in code must fit too, as
+    scripts/build-dist.sh's own check reads it; labels are not checked.
+    """
+    if any(re.match(r'\s*\[[^\]]+\]:\s', line) for line in text.split('\n')):
+        raise ValueError('reference definitions are outside the link grammar')
+    if re.search(r'<https?:', text):
+        raise ValueError('autolinks are outside the link grammar')
+    targets = []
+    for match in re.finditer(r'\]\(', text):
+        target = re.match(r'[^\s()<>]+\)', text[match.end():])
+        if not target:
+            raise ValueError(f'link target outside the grammar: {text[match.start():match.start() + 40]!r}')
+        targets.append(target[0][:-1])
+    return targets
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('See [a](b.md) and [`c`](https://x.y/z#q).\n', ['b.md', 'https://x.y/z#q']),
+    ('[a](docs/x.md#3-y)\n[b](#what-you-get)\n', ['docs/x.md#3-y', '#what-you-get']),
+    ('No links, [brackets] or (parentheses) here.\n', []),
+    ('[a](b c.md)\n', None),
+    ('[a](b.md "Title")\n', None),
+    ('[a](<b.md>)\n', None),
+    ('[a](b(c).md)\n', None),
+    ('[a]()\n', None),
+    ('[a](b.md\n', None),
+    ('[a]: b.md\n', None),
+    ('See <https://x.y>.\n', None),
+])
+def test_markdown_links_accepted_and_refused_forms(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            markdown_links(text)
+    else:
+        assert markdown_links(text) == expected
+
+
+def heading_anchors(text):
+    """Accepted input: LF Markdown. Returns the anchor GitHub gives each ATX heading
+    (one to six `#` at column 0, a space, text) outside ``` fences: the text stripped
+    and lowercased, each character other than an ASCII letter, digit, space, hyphen,
+    or underscore dropped, then each space made a hyphen. Refuse with ValueError a
+    heading holding a character outside printable ASCII, since this is GitHub's rule
+    for ASCII text only. Known limits: a repeated heading's `-1` suffix and Setext
+    headings are not produced.
+    """
+    anchors, fenced = set(), False
+    for line in text.split('\n'):
+        if line.startswith('```'):
+            fenced = not fenced
+            continue
+        match = None if fenced else re.match(r'#{1,6} (.+)$', line)
+        if match:
+            heading = match[1].strip()
+            if not all(' ' <= character <= '~' for character in heading):
+                raise ValueError(f'heading outside printable ASCII: {heading!r}')
+            anchors.add(re.sub(r'[^a-z0-9 _-]', '', heading.lower()).replace(' ', '-'))
+    return anchors
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('# Title\n## What you get\n', {'title', 'what-you-get'}),
+    ('## 3. Server configuration\n', {'3-server-configuration'}),
+    ('### Project instructions in `AGENTS.md`\n', {'project-instructions-in-agentsmd'}),
+    ('## Install and administer\n```sh\n# a comment\n```\n', {'install-and-administer'}),
+    ('#hashtag\n####### seven\n', set()),
+    ('## Café\n', None),
+    ('## A — B\n', None),
+])
+def test_heading_anchors_accepted_and_refused_forms(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            heading_anchors(text)
+    else:
+        assert heading_anchors(text) == expected
+
+
+DIST_OPEN, DIST_CLOSE = '<!-- dist:exclude -->', '<!-- /dist:exclude -->'
+
+
+def archive_readme(text):
+    """Accepted input: LF Markdown in which every `dist:exclude` marker is a whole
+    line, DIST_OPEN or DIST_CLOSE, alternating from DIST_OPEN and ending on
+    DIST_CLOSE. Returns the README scripts/build-dist.sh writes into the archive: each
+    block from DIST_OPEN through DIST_CLOSE dropped, and every `](.agents/skills/`
+    made `](`. Refuse with ValueError a marker inside a line of other text, two
+    DIST_OPEN or two DIST_CLOSE lines in a row, a DIST_CLOSE first, and a DIST_OPEN
+    never closed, which build-dist.sh would drop to the end of the file. Known limits:
+    the script's squeezing of repeated blank lines is left out, since it changes no
+    link.
+    """
+    kept, inside = [], False
+    for line in text.split('\n'):
+        if line in (DIST_OPEN, DIST_CLOSE):
+            if (line == DIST_OPEN) == inside:
+                raise ValueError(f'unbalanced marker: {line!r}')
+            inside = line == DIST_OPEN
+        elif 'dist:exclude' in line:
+            raise ValueError(f'marker inside a line: {line!r}')
+        elif not inside:
+            kept.append(line)
+    if inside:
+        raise ValueError('an exclude block is never closed')
+    return '\n'.join(kept).replace('](.agents/skills/', '](')
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    (f'a\n{DIST_OPEN}\nb\n{DIST_CLOSE}\nc\n', 'a\nc\n'),
+    ('[x](.agents/skills/awb-init/SKILL.md)\n', '[x](awb-init/SKILL.md)\n'),
+    (f'a\n{DIST_CLOSE}\n', None),
+    (f'{DIST_OPEN}\n{DIST_OPEN}\n{DIST_CLOSE}\n', None),
+    (f'{DIST_OPEN}\nb\n{DIST_CLOSE}\n{DIST_CLOSE}\n', None),
+    (f'{DIST_OPEN}\nb\n', None),
+    (f'text {DIST_OPEN}\n', None),
+    (f' {DIST_OPEN}\nb\n{DIST_CLOSE}\n', None),
+])
+def test_archive_readme_accepted_and_refused_forms(text, expected):
+    if expected is None:
+        with pytest.raises(ValueError):
+            archive_readme(text)
+    else:
+        assert archive_readme(text) == expected
+
+
+def unresolved_links(text, source):
+    """Each relative link in text whose file `source` maps to nothing, or whose
+    anchor names no heading there; `source` maps a link path to a file or None."""
+    unresolved = []
+    for target in markdown_links(text):
+        if re.match(r'https?://', target):
+            continue
+        path, _, anchor = target.partition('#')
+        file = source(path)
+        if file is None or not file.is_file():
+            unresolved.append(target)
+        elif anchor and anchor not in heading_anchors(text if not path else file.read_text(encoding='utf-8')):
+            unresolved.append(target)
+    return unresolved
+
+
+def test_readme_links_resolve():
+    # Every relative link in the repository README names a file that exists, and every anchor a heading in it.
+    text = README.read_text(encoding='utf-8')
+    assert unresolved_links(text, lambda path: ROOT / path if path else README) == []
+
+
+# scripts/build-dist.sh's archive holds the skill folders at its top level, beside these files.
+ARCHIVE_FILES = ('CHANGELOG.md', 'LICENSE', 'README.md')
+
+
+def test_archive_readme_links_only_what_the_archive_holds():
+    # build-dist.sh drops the dist:exclude blocks, rewrites skill links, and refuses a docs/ link or a stray
+    # marker in what is left; every link left must name a file the archive holds.
+    archive = archive_readme(README.read_text(encoding='utf-8'))
+    assert '](docs/' not in archive
+
+    def source(path):
+        if not path or path in ARCHIVE_FILES:
+            return ROOT / (path or 'README.md')
+        if (ROOT / '.agents/skills' / path.split('/')[0] / 'SKILL.md').is_file():
+            return ROOT / '.agents/skills' / path
+        return None
+
+    assert unresolved_links(archive, source) == []
+
+
+def test_readme_opens_with_what_you_get_and_the_analyst_quick_start():
+    # The analyst's page comes first; install and host setup sit in one section below it.
+    text = README.read_text(encoding='utf-8')
+    headings = re.findall(r'^## (.+)$', text, re.M)
+    assert headings[:2] == ['What you get', 'Quick-start for analysts']
+    assert headings.index('Install and administer') > headings.index('Quick-start for analysts')
+    admin = section(text, '## Install and administer').split('\n')
+    for heading in ('### Requirements', '### Install', '#### Shared skills', '#### MCP server',
+                    '#### VS Code Local and package reviewer', '#### Project instructions in AGENTS.md'):
+        assert heading in admin
+
+
+def test_readme_says_what_the_analyst_gets_and_is_asked():
+    text = README.read_text(encoding='utf-8')
+    what = ' '.join(section(text, '## What you get').split())
+    for name in ('findings.md', 'charts/', 'methodology-note.md', 'methodology.md', 'deck-rules.md',
+                 'assembly/m365.md', 'START-HERE.md'):
+        assert f'`{name}`' in what, name
+    # Users expected slides: the package is the deck's sources, and Copilot is one builder of several.
+    assert 'not a .pptx' in what
+    assert 'by hand' in what and 'only for the Copilot route' in what
+    quick = ' '.join(section(text, '## Quick-start for analysts').split())
+    assert 'Python 3.10 or later' in quick
+    for term in ('Canonical view', 'Question ledger', 'Receipt', 'Disposition', 'Review rule'):
+        assert f'**{term}**' in quick, term
+    assert 'asked for a disposition only when a finding the draft shows is flagged' in quick
+    for mode in ('preview-and-wait', 'draft-then-review'):
+        assert mode in quick
+    # The requests come in the order an investigation usually takes them.
+    requests = ['Use awb-init', 'Use awb-scope', 'Use awb-clean', 'Use awb-explore', 'Use awb-status',
+                'Use awb-package', 'Use awb-release']
+    positions = [quick.find(request) for request in requests]
+    assert -1 not in positions and positions == sorted(positions), dict(zip(requests, positions))
+    assert 'awb-brainstorm' in quick
+    # The exchange count is a range from the recorded runs, not a promise.
+    assert '6 to 11' in quick
