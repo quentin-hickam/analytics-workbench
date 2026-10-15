@@ -96,7 +96,7 @@ def collect(root, *, probe_upstream=False):
     def ledger(investigation, findings):
         """The question ledger's counts, open questions, and derived awaiting-recheck answers.
 
-        roots counts the questions with no parent, the ones the investigation was asked, and
+        roots counts the questions with no parent, which awb-scope keeps for the user's own, and
         must_subquestions the must questions under them, each by displayed status, apart from the
         totals in counts. None when the investigation has no questions.json. Findings statuses come
         from state.md's table.

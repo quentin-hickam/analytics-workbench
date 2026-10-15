@@ -39,7 +39,7 @@ Present five to eight, numbered and ranked by how much an answer could change th
 
 ## 3. Record the choices
 
-From the project root, with `--origin brainstorm`, the priority the ranking implies (`must` when the decision cannot be made without the answer, `could` when the answer only refines it, `should` otherwise), and the question it serves as parent, empty for a root.
+From the project root, with `--origin brainstorm`, the priority the ranking implies (`must` when the decision cannot be made without the answer, `could` when the answer only refines it, `should` otherwise), and the question it serves as parent. Status counts the roots, the questions with an empty parent, as the user's own, so leave the parent empty only when the user takes the question as one of their own.
 
 - **Kept, in scope**: `python3 src/awb.py questions add "<question>" --kind <kind> --answerer <answerer> --origin brainstorm --priority <priority> --parent "<parent ID or empty>" --unblocks "<what it serves>"`. A re-proposed parked or declined question the user keeps is reopened instead, keeping its ID: `python3 src/awb.py questions status Q-NNN --set open`, then `python3 src/awb.py questions edit Q-NNN --priority <priority> --parent "<parent ID or empty>"`.
 - **Parked or declined**: the same command with `--status parked` or `--status declined` and `--reason "<the user's reason>"`. A re-proposed question keeps its ID: change its status with `python3 src/awb.py questions status Q-NNN --set parked|declined --reason "<the user's reason>"`, or leave it as it is when its status does not change. Record every in-scope proposal the user did not keep as declined with the reason `not chosen`, so later brainstorms do not repeat it, and say so in the report.

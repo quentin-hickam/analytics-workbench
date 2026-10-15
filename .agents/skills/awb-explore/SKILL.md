@@ -51,4 +51,4 @@ Write each follow-up as `investigations/<name>/exploration/<topic>.sql` and run 
 
 ## 6. Report
 
-Report the dataset and scope, the observations and values that bear on the question, each anomaly's disposition, the saved query paths, the ledger questions added, the records changed, and the scan path.
+Report the dataset and scope, the observations and values that bear on the question, each anomaly's disposition, the saved query paths, the ledger questions added, asking in the report each one the user can settle, the records changed, and the scan path.

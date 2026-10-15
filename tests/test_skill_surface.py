@@ -407,3 +407,48 @@ def test_setup_report_has_at_most_five_items_and_keeps_the_host_instruction_file
     assert 1 <= len(items) <= 5, items
     assert sum('host instruction file' in item for item in items) == 1
     assert any('impact' in item for item in items)
+    # A repair reports more than setup does; step 5 says so rather than capping a repair at five items.
+    assert 'A repair report adds what [references/repair.md](references/repair.md) says to report' \
+           in ' '.join(report.split())
+
+
+def test_only_the_users_questions_are_roots():
+    # Status and the turn footer count the ledger's roots as the user's questions. A stakeholder's
+    # threshold or a deferred decision left as a root was counted as one the user asked, so scoping
+    # records each question the user asks as a root and puts every other question under one.
+    interview = ' '.join(section((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8'),
+                                 '## 2. Interview').split())
+    assert 'so a root is only a question the user asked: record each one they ask' in interview
+    assert ("Every other question, such as a stakeholder's threshold, a decision the user deferred, "
+            "or a method choice, takes as parent the user's question it serves") in interview
+    record = ' '.join(section((ROOT / '.agents/skills/awb-brainstorm/SKILL.md').read_text(encoding='utf-8'),
+                              '## 3. Record the choices').split())
+    assert 'empty for a root' not in record
+    assert 'leave the parent empty only when the user takes the question as one of their own' in record
+    # The footer names the user's questions as the roots and counts them only when they changed.
+    agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
+    assert ("ends with one plain line: what changed for the user's questions, the ledger's roots, "
+            "if anything, and the next step") in agents
+    status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
+    assert 'lead with `roots`, the questions the user asked' in status
+    assert 'Report `questions.counts`, the totals with every sub-question, only on request' in status
+
+
+def test_guide_commit_points_follow_the_commits_line():
+    # The README promises at most one commit reminder a session under `on request`, and commits
+    # as the work goes under `as I go`; the rerun and publish points keep to both.
+    guides = ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides'
+    analysis = ' '.join((guides / 'analysis.md').read_text(encoding='utf-8').split())
+    assert ("Before rerunning a supported or flagged finding, commit its evidence when README's `Commits:` "
+            "line says `as I go`; otherwise suggest committing it, unless you already suggested a commit "
+            "this session.") in analysis
+    data = ' '.join((guides / 'data.md').read_text(encoding='utf-8').split())
+    assert ("commit these first when README's `Commits:` line says `as I go`; otherwise suggest committing "
+            "them, unless you already suggested a commit this session.") in data
+    assert 'Suggest committing these first' not in data
+
+
+def test_exploration_asks_the_users_questions_in_its_report():
+    report = ' '.join(section((ROOT / '.agents/skills/awb-explore/SKILL.md').read_text(encoding='utf-8'),
+                              '## 6. Report').split())
+    assert 'the ledger questions added, asking in the report each one the user can settle' in report

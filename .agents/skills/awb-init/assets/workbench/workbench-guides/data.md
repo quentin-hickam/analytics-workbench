@@ -28,7 +28,7 @@ Fetch scripts read credentials from environment variables; local values may sit 
 
 ## Publish and prepare
 
-Save the conversion as `src/preparation/<dataset>.sql`, one SELECT reading landed files by project-relative path. Declare the dataset's checks (columns and types, not-null, key and uniqueness, accepted values, ranges, row count) under `[datasets.<dataset>.checks]` in `foundation/datasets.toml`, starting from `assets/workbench/foundation/datasets.toml`, which documents the keys. Put a check a declaration cannot express in `src/preparation/<dataset>-check.sql`, a query over the view `publication` whose returned rows are failures. Suggest committing these first so the publication's `conversion_commit` holds them. Then publish:
+Save the conversion as `src/preparation/<dataset>.sql`, one SELECT reading landed files by project-relative path. Declare the dataset's checks (columns and types, not-null, key and uniqueness, accepted values, ranges, row count) under `[datasets.<dataset>.checks]` in `foundation/datasets.toml`, starting from `assets/workbench/foundation/datasets.toml`, which documents the keys. Put a check a declaration cannot express in `src/preparation/<dataset>-check.sql`, a query over the view `publication` whose returned rows are failures. So the publication's `conversion_commit` holds them, commit these first when README's `Commits:` line says `as I go`; otherwise suggest committing them, unless you already suggested a commit this session. Then publish:
 
 ```
 python3 src/awb.py publish <dataset> <publication-id> --from <acquisition-dir> --sql <select.sql> [--check <check.sql>]
