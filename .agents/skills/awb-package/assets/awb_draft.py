@@ -144,9 +144,10 @@ def _evidence_files(root, investigation):
 
 # ---------------------------------------------------------------- Markdown as it renders
 #
-# Every draft check reads findings.md and methodology.md through `_view`, one reading of what renders, so
-# a form that hides text from the reader hides it from every check, and a form that shows text shows it
-# to every check. The reading covers the Markdown subset helpers.md lists. A block form outside it that
+# Every draft check but numbers reads findings.md and methodology.md through `_view`, one reading of what
+# renders, so a form that hides text from the reader hides it from every such check, and a form that shows
+# text shows it to every such check. The numbers check reads source lines (`_unfenced`), as the check-draft
+# help text says. The reading covers the Markdown subset helpers.md lists. A block form outside it that
 # could hide or move text is refused (`markdown_problems`) rather than guessed at, so it never passes.
 
 # One source line as it renders. kind is "text", "heading", "fence" (a code fence's opening line),
@@ -862,9 +863,15 @@ def _regions(view):
 def question_problems(draft, record: dict) -> list[dict]:
     """List each manifest `results` entry whose question methodology.md does not repeat verbatim.
 
-    Runs of whitespace compare equal, so a wrapped line still matches.
+    methodology.md is read as it renders (`_view`): each paragraph or heading's text as it shows, code spans
+    unwrapped and whitespace collapsed, so a wrapped or formatted question matches and one in a comment or
+    fenced code does not. The question is rendered the same way, and must fall within one block.
     """
-    methodology = " ".join((Path(draft) / "methodology.md").read_text(encoding="utf-8").split())
+    blocks = {}
+    for line in _read_view(Path(draft) / "methodology.md")[0]:
+        if line.group is not None:
+            blocks.setdefault(line.group, []).append(line.plain)
+    shown = [_collapse(_shown("\n".join(lines))) for lines in blocks.values()]
     entries = record.get("results")
     if not isinstance(entries, list):
         return [{"result_id": None, "problem": "the manifest records no results list; run export"}]
@@ -875,7 +882,7 @@ def question_problems(draft, record: dict) -> list[dict]:
         if not isinstance(question, str) or not question.strip():
             problems.append({"result_id": result_id, "problem": "the manifest records no question for this "
                              "result; run export, or copy its question from settings into a hand-added entry"})
-        elif " ".join(question.split()) not in methodology:
+        elif not (rendered := _collapse(_shown(_inline(question)[0]))) or not any(rendered in b for b in shown):
             problems.append({"result_id": result_id, "question": question,
                              "problem": "methodology.md does not repeat this question verbatim"})
     return problems
@@ -1018,6 +1025,11 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
     states its strength on one `**Claim strength:**` line, a causal one as its results' Claim cell.
     Both files are read as they render (`_view`).
     """
+    return _claim_review(draft, represented, claims)[0]
+
+
+def _claim_review(draft, represented, claims):
+    """claim_problems' rows, and the methodology.md line numbers of the **Claim strength:** lines it accepts."""
     draft = Path(draft)
     levels = {result: _level(cell) for result, cell in claims.items()}
     rows = [{"result": r, "problem": "state.md has no findings row with a claim strength for this result"
@@ -1027,13 +1039,15 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
     sections = {}
     for level, heading, _, lines in _regions(_read_view(draft / "methodology.md")[0]):
         if level == 3:
-            section = sections.setdefault(heading, {"text": [], "declared": []})
+            section = sections.setdefault(heading, {"text": [], "declared": [], "lines": []})
             section["text"] += [" ".join([line.plain, *line.links]) for line in lines]
-            section["declared"] += [_claim_text(m[1]) for line in lines
-                                    if line.declares and (m := _CLAIM_LINE.match(line.plain))]
+            for line in lines:
+                if line.declares and (match := _CLAIM_LINE.match(line.plain)):
+                    section["declared"].append(_claim_text(match[1]))
+                    section["lines"].append(line.number)
     known = [levels[r] for r in represented if levels.get(r)]
     deck = max(known, key=_CLAIMS.index) if known else _CLAIMS[0]
-    declared = set()
+    declared, accepted = set(), set()
     for level, heading, first, lines in _regions(_read_view(draft / "findings.md")[0]):
         if level == 2 and heading in _UNCHECKED:
             continue
@@ -1042,9 +1056,11 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
             cited = _cited("\n".join(section["text"]) if section else "", represented) or list(represented)
             ceiling = _weakest(cited, levels)
             problem = None if heading in declared else _declaration_problem(section, cited, ceiling, claims)
-            declared.add(heading)
             if problem:
                 rows.append({"section": heading, "problem": f"{problem}; its results support {ceiling}"})
+            elif heading not in declared:
+                accepted.update(section["lines"])
+            declared.add(heading)
         else:
             cited, ceiling = list(represented), deck
         if ceiling == "causal":
@@ -1057,7 +1073,7 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
                          "problem": f"causal wording above the {ceiling} claim strength; reword it, since only "
                                     "an experiment or an identified natural experiment supports a causal claim"
                                     + ("; reword the methodology.md heading to match" if in_heading else "")})
-    return rows
+    return rows, accepted
 
 
 # ---------------------------------------------------------------- numbers in the narratives
@@ -1363,18 +1379,20 @@ def _continues(previous, line):
     return int(numbered.group(1)) != 1 and not re.match(starts, previous)
 
 
-def check_numbers(path: str | os.PathLike, values, *, allowed=()) -> list[dict]:
+def check_numbers(path: str | os.PathLike, values, *, allowed=(), claim_lines=()) -> list[dict]:
     """List each number in a narrative file that no recorded value rounds to and `allowed` does not cover.
 
     `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
     text is written around it, matched on the text the number is read from, so any whitespace or a line
     wrap matches a space: a bare `40` covers every 40, and `Week 23` only that 23. A number is skipped
-    only in a context references/helpers.md lists; every other number is read.
+    only in a context references/helpers.md lists; every other number is read. `claim_lines` are the line
+    numbers of the **Claim strength:** lines the claims check accepts (`_claim_review`): each repeats a
+    state.md Claim cell, so its numbers trace to the record.
     """
     patterns = [re.compile(r"\s+".join(map(re.escape, text.split()))) for text in allowed if text.strip()]
     rows, lines = [], list(_unfenced(path))
     for index, (number, line, opens) in enumerate(lines):
-        if opens:
+        if opens or number in claim_lines:
             continue
         previous = lines[index - 1] if index and lines[index - 1][0] == number - 1 else None
         following = lines[index + 1] if index + 1 < len(lines) and lines[index + 1][0] == number + 1 else None
@@ -2067,7 +2085,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         claims = None
         report["errors"].append(f"claims: {error}")
 
-    record = None
+    record, claim_lines = None, set()
     try:
         path = draft / MANIFEST
         if not path.is_file():
@@ -2084,7 +2102,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             raise ValueError(f"{MANIFEST} records no results list; rerun export")
         if claims is not None:
             try:
-                report["claims"] = claim_problems(draft, [r["result_id"] for r in represented], claims)
+                report["claims"], claim_lines = _claim_review(draft, [r["result_id"] for r in represented], claims)
             except (OSError, UnicodeError) as error:
                 report["errors"].append(f"claims check: {error}")
         if provenance is not None:
@@ -2115,7 +2133,8 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         report["numbers_problems"], report["numbers"] = problems + more, []
         for name in NARRATIVES:
             try:
-                report["numbers"] += check_numbers(draft / name, values, allowed=allowed)
+                report["numbers"] += check_numbers(draft / name, values, allowed=allowed,
+                                                   claim_lines=claim_lines if name == "methodology.md" else ())
             except (OSError, UnicodeError) as error:
                 report["errors"].append(f"numbers check: {error}")
 
@@ -2163,19 +2182,22 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "lists each form outside the Markdown subset the checks read, which could hide text or move "
                "it between slides: a heading, fence, comment, or **Claim strength:** line inside a list or quote; "
                "an indented fence or comment; a setext heading; indented code; an HTML block or inline tag; a link "
-               "reference definition; an unclosed fence or comment. Every check but numbers and questions reads "
-               "both files as they render."
+               "reference definition; an unclosed fence or comment. Every check but numbers reads both files as "
+               "they render."
                "\nnumbers lists, as file, line, and text, each number in findings.md or "
                "methodology.md that no represented result's table, profile, check details, or settings round to "
-               "and the manifest's allowed_numbers does not cover by its text or a phrase around it; "
-               "numbers_problems names a missing table, an unreadable table, profile, or evidence file, or a "
-               "malformed results or allowed_numbers.\n"
+               "and the manifest's allowed_numbers does not cover by its text or a phrase around it, reading source "
+               "lines without comments or fenced code, and skipping a methodology.md **Claim strength:** line the "
+               "claims check accepts, whose numbers repeat state.md's Claim cell; numbers_problems names a missing "
+               "table, an unreadable table, profile, or evidence file, or a malformed results or allowed_numbers.\n"
                "unmatched_flags lists each finding state.md flags whose exact finding and reason the manifest's "
                "revalidation_flags does not record.\nflag_entries lists a "
                "missing or malformed revalidation_flags, an entry without text finding and reason, represented_in "
                "that is neither none nor a list of places, and an unknown disposition.\nquestions lists each "
                "manifest results entry without a question, or whose question methodology.md does not repeat "
-               "verbatim.\nExit 0 only when names_problems, findings, outline, charts, headings, markdown, claims, "
+               "verbatim within one paragraph or heading as it renders: a code span counts, and a question in a "
+               "comment or fenced code does not count.\nExit 0 only when names_problems, findings, outline, charts, "
+               "headings, markdown, claims, "
                "questions, storyline, open_questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
                "are all empty.")
     _package_arguments(parser)
