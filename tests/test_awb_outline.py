@@ -5,7 +5,7 @@
 # test_outline_problems_rows: each slide rule broken gives its row with slide, line, and problem, a block quote outside a list being a paragraph of its own; a deck without its # heading also has its subtitle on no slide, and one without ## Findings has each finding outside it.
 # test_chart_data_reads_roles: role: header pairs in order, case-insensitive roles, headers kept whole, colons in a header kept.
 # test_check_charts_every_form_passes: a specification in each of the seven forms, its Data line naming that form's roles, and a file with those columns passes.
-# test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, and a column the file lacks give one row each.
+# test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, a column the file lacks, and a file column no role names give one row each.
 
 import importlib.util
 from pathlib import Path
@@ -276,8 +276,10 @@ def test_check_charts_every_form_passes(tmp_path):
     ("Stacked bar", "category: Region; series: Kind; value: A; value: B", "Region,Kind,A,B\nW,x,1,2\n",
      "**Data:** names a series column and more than one value column; name one value with a series, or drop the "
      "series"),
-    ("Table", "column: Region; column: Late (%)", "Region,Late\nW,1\n",
+    ("Table", "column: Region; column: Late (%)", "Region\nW\n",
      "chart-1.csv has no column 'Late (%)', which **Data:** names"),
+    ("Horizontal bar", "category: Region; value: Closed late (%)", "Region,Closed late (%),Orders (n)\nW,21,90\n",
+     "chart-1.csv column 'Orders (n)' is named by no **Data:** role; name it, or export the chart without it"),
 ])
 def test_check_charts_spec_rows(tmp_path, form, data, content, problem):
     text = f"### Slide\n\n**Chart 1.** {form}: a comparison\n" + (f"- **Data:** {data}\n" if data else "")

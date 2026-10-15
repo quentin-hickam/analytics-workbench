@@ -5,7 +5,7 @@
 # test_check_draft_rewrites_inventory_and_passes: a clean draft passes; the inventory is rewritten, revised_at stamped only when it changes, other manifest fields kept; nothing is written outside the draft.
 # test_evidence_older_than_scoped_3_is_reported_for_rerun: check-draft and export --result refuse awb-evidence/1 and unscoped /3 with a rerun instruction.
 # test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
-# test_check_draft_reports_outline_and_chart_spec_rows: a headline over 15 words, a chart form outside the seven, and a Data column the chart file lacks fail check-draft with outline and charts rows in both modes, and release refuses on them.
+# test_check_draft_reports_outline_and_chart_spec_rows: a headline over 15 words, a chart form outside the seven, a Data column the chart file lacks, and a file column no Data role names fail check-draft with outline and charts rows in both modes, and release refuses on them.
 # test_check_draft_requires_each_question_in_methodology: export's questions pass once methodology repeats them; a question methodology lacks or rewords, a results entry without a question, and a manifest without results fail check-draft's questions, and release refuses on the check.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
@@ -278,10 +278,12 @@ def test_check_draft_reports_outline_and_chart_spec_rows(project, capsys):
             {"chart": "Chart 1", "problem": "names no chart form (Pie); open the specification with one of: "
                                             "Horizontal bar, Bar with intervals, Line, Column, Stacked bar, Scatter, "
                                             "Table"},
-            {"chart": "Chart 1", "problem": "chart-1.csv has no column 'Late share', which **Data:** names"}]
+            {"chart": "Chart 1", "problem": "chart-1.csv has no column 'Late share', which **Data:** names"},
+            {"chart": "Chart 1", "problem": "chart-1.csv column 'Closed late (%)' is named by no **Data:** role; "
+                                            "name it, or export the chart without it"}]
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
-    assert len(report["check"]["outline"]) == 1 and len(report["check"]["charts"]) == 2
+    assert len(report["check"]["outline"]) == 1 and len(report["check"]["charts"]) == 3
 
 
 def set_results(project, results):
@@ -906,7 +908,7 @@ def test_export_names_every_gap_and_blocks_stale_results(project, capsys):
     assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes() == before
     write(project, "investigations/inv/settings.toml", SETTINGS)
     write(project, "deliveries/inv/pkg/draft/datasets/old.csv", "a\n1\n")
-    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,late_rate", "--no-datasets")
     assert code == 0 and manifest(project)["dataset_selection"] == "none"
     assert not (project / "deliveries/inv/pkg/draft/datasets").exists()
     with pytest.raises(SystemExit):

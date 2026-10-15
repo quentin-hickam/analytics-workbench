@@ -1796,8 +1796,8 @@ def write_charts(charts_dir: str | os.PathLike, charts: list) -> list[Path]:
 
 def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike) -> list[dict]:
     """Match the chart specifications in findings.md with the chart files, and each specification with its
-    form and file: one of CHART_FORMS, a **Data:** line naming that form's roles, and each named column in
-    the file's header."""
+    form and file: one of CHART_FORMS, a **Data:** line naming that form's roles, each named column in the
+    file's header, and each column of the header named."""
     view = _read_view(findings_path)[0]
     charts = _outline(view)["charts"]
     numbers = [chart["number"] for chart in charts]
@@ -1840,10 +1840,16 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
         pairs, problems = chart_data(chart)
         rows += [{"chart": label, "problem": problem} for problem in problems]
         if chart["number"] in headers:
-            for header in dict.fromkeys(header for _, header in pairs):
+            named = dict.fromkeys(header for _, header in pairs)
+            for header in named:
                 if header not in headers[chart["number"]]:
                     rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv has no column "
                                                             f"{header!r}, which **Data:** names"})
+            # A column no role names would be drawn by one builder and dropped by another.
+            for header in headers[chart["number"]] if pairs else []:
+                if header not in named:
+                    rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv column {header!r} is "
+                                 "named by no **Data:** role; name it, or export the chart without it"})
     return rows
 
 

@@ -37,7 +37,7 @@ Draw each chart as an editable chart whose data is its file in `charts/`, not as
 
 ### Chart forms
 
-The specification names one of these forms. Its **Data:** line names the file's columns by role, each as `role: column header` with the header exactly as the file writes it, separated by semicolons, such as `category: Region; value: Closed late (%)`.
+The specification names one of these forms. Its **Data:** line names every column of the file by role, each as `role: column header` with the header exactly as the file writes it, separated by semicolons, such as `category: Region; value: Closed late (%)`.
 
 | Form | Use for | Data roles | Build |
 | --- | --- | --- | --- |
