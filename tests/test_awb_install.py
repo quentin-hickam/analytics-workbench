@@ -19,9 +19,9 @@
 # test_upgrade_replace_and_remove_retired: named customized copies are replaced; unmodified retired files are removed with their emptied directory and receipt entry; customized retired files stay.
 # test_cli_arguments: --replace repeats one path per flag, needs --upgrade, and rejects an uncopied path with exit 2.
 # test_print_json_server_entry_without_writing: copilot and claude print the same JSON stdio entry with their own destination (COPILOT_HOME moves only copilot's); both option spellings print without writing.
-# test_print_server_entry_interpreter_warnings: old Python or a virtual environment warns only on stderr after the registration lines, with unchanged host entry and no writes; a stable Python 3.10+ emits no warning.
+# test_print_server_entry_interpreter_warnings: old Python or a virtual environment warns only on stderr before the registration lines, with unchanged host entry and no writes; a stable Python 3.10+ emits no warning.
 # test_print_codex_server_entry_with_quoted_unicode_paths: native TOML with absolute paths and safe quoting; default/overridden destination, without writing.
-# test_print_host_registration_command: each host's own registration command prints on stderr, POSIX-quoted with absolute interpreter and server paths that hold spaces, quotes and Unicode, before the fallback merge line; the entry still prints on stdout; nothing is written or run.
+# test_print_host_registration_command: each host's own registration command prints on stderr, POSIX-quoted with absolute interpreter and server paths that hold spaces, quotes and Unicode, before the fallback merge line, which for claude says to close Claude Code first; the entry still prints on stdout; nothing is written or run.
 # test_server_entry_refusals_write_nothing: exact host choices and print-only mode refuse unknown/missing values, unknown/abbreviated options, and install arguments with exit 2 and no stdout or writes.
 # test_awb_init_installs_agents_mapping_and_resolving_guides: adapting the root template then running the installer preserves one MCP/CLI rule and both resolving guide links.
 # test_instruction_and_reviewer_tools_exist_in_server_tools_list: the single rule names every server tool, valid script command enums, run.py, and the same project advice; reviewer tools remain read-only.
@@ -424,6 +424,14 @@ def test_print_json_server_entry_without_writing(tmp_path, arguments, copilot_ho
     assert snapshot(tmp_path) == before
 
 
+# Host -> what the fallback merge line adds after "preserve other configuration."
+FALLBACK_NOTES = {
+    "claude": " Close every Claude Code session first, since Claude Code rewrites that file while it runs.",
+    "codex": "",
+    "copilot": "",
+}
+
+
 @pytest.mark.parametrize("host, destination", [
     ("copilot", ".copilot/mcp-config.json"),
     ("claude", ".claude.json"),
@@ -452,7 +460,8 @@ def test_print_server_entry_interpreter_warnings(tmp_path, monkeypatch, capsys, 
     assert lines[0] == "Register awb with the host's own command, in a POSIX shell such as bash or zsh:\n"
     assert lines[1].startswith(("claude mcp add-json --scope user awb ", f"{host} mcp add awb -- "))
     assert lines[2] == ("Fallback, for other shells or when that command is unavailable: merge the printed awb "
-                        f"entry into {tmp_path / destination}; preserve other configuration.\n")
+                        f"entry into {tmp_path / destination}; preserve other configuration."
+                        f"{FALLBACK_NOTES[host]}\n")
     destination_line = stable.err
 
     monkeypatch.setattr(sys, "version_info", version)
@@ -461,10 +470,11 @@ def test_print_server_entry_interpreter_warnings(tmp_path, monkeypatch, capsys, 
     installer.print_server_entry(host)
     actual = capsys.readouterr()
     assert actual.out == stable.out
-    expected_stderr = destination_line
+    expected_stderr = ""
     if warnings:
         expected_stderr += "\n".join(warnings) + "\n"
         expected_stderr += "Use a stable Python 3.10+ interpreter outside a project virtual environment.\n"
+    expected_stderr += destination_line
     assert actual.err == expected_stderr
     assert snapshot(tmp_path) == before
 
@@ -547,7 +557,7 @@ def test_print_host_registration_command(tmp_path, host, destination):
         assert command.endswith(f" -- {shlex.quote(str(python))} {shlex.quote(str(server))}")
     assert tokens == REGISTRATION_COMMANDS[host](str(python), str(server), "entry")
     assert fallback == ("Fallback, for other shells or when that command is unavailable: merge the printed awb "
-                        f"entry into {tmp_path / destination}; preserve other configuration.")
+                        f"entry into {tmp_path / destination}; preserve other configuration.{FALLBACK_NOTES[host]}")
     assert snapshot(tmp_path) == before
 
 

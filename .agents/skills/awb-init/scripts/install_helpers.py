@@ -18,13 +18,16 @@ Accepted input (--mcp-config): argparse accepts the exact, case-sensitive host t
 claude, codex, supplied as --mcp-config HOST or --mcp-config=HOST. No project root or install flags
 may accompany this mode. Unknown hosts/options, abbreviated options, missing values and mixed modes
 are refused on stderr with exit 2 and no configuration on stdout. Output: the entry in the host's
-format on stdout; on stderr, the host's own user-level registration command, quoted for a POSIX shell
-(claude mcp add-json --scope user, codex mcp add, copilot mcp add), then the file to merge the entry
-into as the fallback for other shells or a host without that command, then any interpreter warning.
-Known limits: this prints a merge entry, not a complete replacement config; it neither reads existing
-registrations nor detects the host, checks host policies, or imports credentials. Variables belong in
-env, never envFile. Config destinations use COPILOT_HOME or CODEX_HOME when nonempty, otherwise the
-host's default home path.
+format on stdout; on stderr, any interpreter warning, then the host's own user-level registration
+command, quoted for a POSIX shell (claude mcp add-json --scope user, codex mcp add, copilot mcp add),
+then the file to merge the entry into as the fallback for other shells or a host without that command.
+For Claude Code the fallback says to close every Claude Code session first, since Claude Code rewrites
+that file while it runs. Known limits: this prints a merge entry, not a complete replacement config; it
+neither reads existing registrations nor detects the host, checks host policies, or imports
+credentials. With an awb registration already present, claude mcp add-json refuses it (run
+claude mcp remove --scope user awb first) and codex mcp add replaces it; what copilot mcp add does was
+not checked. Variables belong in env, never envFile. Config destinations use COPILOT_HOME or
+CODEX_HOME when nonempty, otherwise the host's default home path.
 
 Install/check modes print one line of JSON:
   project, workbench  the project root and whether workbench markers exist; when absent, missing lists
@@ -303,26 +306,27 @@ def _add_command(host):
 
 
 # Host -> (its user-level configuration file, the entry rendered in that file's format, the host's own
-# command that writes the same entry there). The README cites the source checked for each command.
+# command that writes the same entry to its user-level configuration, a note for the hand-merge fallback).
+# The README cites the source checked for each command.
 SERVER_HOSTS = {
-    "copilot": (lambda: _home("COPILOT_HOME", ".copilot") / "mcp-config.json", _json_entry, _add_command("copilot")),
-    "claude": (lambda: Path.home() / ".claude.json", _json_entry, _claude_command),
-    "codex": (lambda: _home("CODEX_HOME", ".codex") / "config.toml", _codex_entry, _add_command("codex")),
+    "copilot": (lambda: _home("COPILOT_HOME", ".copilot") / "mcp-config.json", _json_entry, _add_command("copilot"),
+                ""),
+    "claude": (lambda: Path.home() / ".claude.json", _json_entry, _claude_command,
+               " Close every Claude Code session first, since Claude Code rewrites that file while it runs."),
+    "codex": (lambda: _home("CODEX_HOME", ".codex") / "config.toml", _codex_entry, _add_command("codex"), ""),
 }
 
 
 def print_server_entry(host):
-    """Print the awb server entry for host's user-level configuration; on stderr, the host's own registration
-    command for a POSIX shell, then that file as the fallback merge destination. Run and write nothing."""
-    destination, render, command = SERVER_HOSTS[host]
+    """Print the awb server entry for host's user-level configuration; on stderr, any interpreter warning, then
+    the host's own registration command for a POSIX shell, then that file as the fallback merge destination.
+    Run and write nothing."""
+    destination, render, command, fallback_note = SERVER_HOSTS[host]
     entry = {"type": "stdio", "command": str(Path(sys.executable).absolute()),
              "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")], "env": {}}
     print(render(entry))
     sys.stdout.flush()  # Keep the entry above the guidance when both streams share a terminal.
-    print("Register awb with the host's own command, in a POSIX shell such as bash or zsh:", file=sys.stderr)
-    print(shlex.join(command(entry)), file=sys.stderr)
-    print("Fallback, for other shells or when that command is unavailable: merge the printed awb entry into "
-          f"{destination()}; preserve other configuration.", file=sys.stderr)
+    # Warnings come first: the command below registers this interpreter as soon as it is pasted.
     old_python = sys.version_info < (3, 10)
     virtual = sys.prefix != sys.base_prefix
     if old_python:
@@ -331,6 +335,10 @@ def print_server_entry(host):
         print("Warning: this interpreter runs in a virtual environment.", file=sys.stderr)
     if old_python or virtual:
         print("Use a stable Python 3.10+ interpreter outside a project virtual environment.", file=sys.stderr)
+    print("Register awb with the host's own command, in a POSIX shell such as bash or zsh:", file=sys.stderr)
+    print(shlex.join(command(entry)), file=sys.stderr)
+    print("Fallback, for other shells or when that command is unavailable: merge the printed awb entry into "
+          f"{destination()}; preserve other configuration.{fallback_note}", file=sys.stderr)
 
 
 def main():
