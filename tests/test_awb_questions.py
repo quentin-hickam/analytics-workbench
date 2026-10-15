@@ -130,13 +130,17 @@ def test_add_numbers_and_renders(project, capsys):
     assert cli(project, capsys)[0] == 2 and cli(project, capsys, "--help")[0] == 0
 
 
-def test_hand_edits_are_drift(project, capsys):
-    add(project, "Does churn differ by region?")
+@pytest.mark.parametrize("before_text, after_text", [("open", "answered"), ("Where does churn differ?", "Who left?")])
+def test_hand_edits_are_drift(project, capsys, before_text, after_text):
+    add(project, "Does churn differ by region?", audience="Where does churn differ?")
+    add(project, "Which definition?", "user", kind="context")
     md = project / INV / "questions.md"
-    md.write_text(md.read_text().replace("open", "answered"))
+    md.write_text(md.read_text().replace(before_text, after_text))
     before = snapshot(project)
     for argv in (["add", "Another?", "--kind", "context", "--answerer", "user", "--origin", "scope"],
-                 ["status", "Q-001", "--set", "parked", "--reason", "later"], ["edit", "Q-001", "--text", "New?"]):
+                 ["status", "Q-001", "--set", "parked", "--reason", "later"], ["edit", "Q-001", "--text", "New?"],
+                 ["edit", "Q-001", "--audience", "New wording?"],
+                 ["answer", "Q-002", "--text", "Revenue", "--by", "user"]):
         code, _, err = cli(project, capsys, *argv)
         assert code == 1 and "questions drift" in err and "questions render" in err
     assert snapshot(project) == before
@@ -149,6 +153,51 @@ def test_hand_edits_are_drift(project, capsys):
         code, _, err = cli(project, capsys, *argv)
         assert code == 1 and "exists without" in err
     assert snapshot(project) == before and "| Q-001 |" in md.read_text()
+
+
+@pytest.mark.parametrize("trouble, diagnostic", [
+    ("drift", "questions drift"),
+    ("malformed", "questions.json"),
+    ("missing", "exists without"),
+])
+@pytest.mark.parametrize("action", ["record", "flag", "update", "render"])
+def test_finding_writes_preserve_evidence_under_ledger_trouble(project, trouble, diagnostic, action):
+    # These results answer nothing: an unrelated ledger cannot invalidate their writes.
+    produce(project, "r1")
+    provenance.update_findings(project, "churn", ["r1"], status="supported", text="One account remained",
+                               reason="checks passed")
+    add(project, "Which segment next?")
+    md, data = project / INV / "questions.md", project / INV / "questions.json"
+    if trouble == "drift":
+        md.write_text(md.read_text() + "Keep this hand edit.\n")
+    elif trouble == "malformed":
+        data.write_text("{")
+    else:
+        data.unlink()
+    saved_md = md.read_bytes()
+    saved_history = (project / INV / "history.md").read_bytes()
+    evidence = project / INV / "evidence/r1.json"
+    saved_evidence = evidence.read_bytes()
+    if action == "record":
+        result = produce(project, "r1", table="n\n2\n")
+        assert result["action"] == "refreshed" and result["history"]
+    elif action == "flag":
+        result = provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "source corrected"}])
+    elif action == "update":
+        result = provenance.update_findings(project, "churn", ["r1"], status="superseded", reason="new scope")
+    else:
+        result = provenance.render_findings(project, "churn")
+    assert diagnostic in result["questions"]["error"]
+    assert "python3 src/awb.py questions render --investigation churn" in result["questions"]["error"]
+    assert md.read_bytes() == saved_md and evidence.is_file()
+    assert json.loads(evidence.read_text())["result_id"] == "r1"
+    if action != "record":
+        assert evidence.read_bytes() == saved_evidence
+    assert provenance.findings_drift(project, "churn") == []
+    if action in ("record", "update"):
+        assert (project / INV / "history.md").read_bytes() != saved_history
+    else:
+        assert (project / INV / "history.md").read_bytes() == saved_history
 
 
 def test_person_answers(project, capsys):
@@ -411,6 +460,44 @@ def test_cli_tree_priority_and_render(project, capsys):
     assert md.read_text() == rendered
     assert cli(project, capsys, "edit", "Q-003", "--parent", "")[0] == 0
     assert "Q-003 open [data, analytical, must; parent: root]" in cli(project, capsys, "list")[1]
+
+
+@pytest.mark.parametrize("status", ["open", "parked", "declined", "answered", "superseded"])
+def test_cli_audience_wording_in_every_status(project, capsys, status):
+    assert cli(project, capsys, "add", "Which internal measure?", "--kind", "context", "--answerer", "user",
+               "--origin", "scope", "--audience", " Which\n measure   matters? ")[0] == 0
+    if status == "answered":
+        assert cli(project, capsys, "answer", "Q-001", "--text", "Revenue", "--by", "user")[0] == 0
+    elif status != "open":
+        assert cli(project, capsys, "status", "Q-001", "--set", status, "--reason", "scope choice")[0] == 0
+    assert ledger(project)["Q-001"]["audience"] == "Which measure matters?"
+    assert "audience: Which measure matters?" in cli(project, capsys, "list", "--all")[1]
+    assert "audience:" not in provenance.state_view(project, "churn")
+    assert "| Audience |" in (project / INV / "questions.md").read_text()
+    assert "| Which measure matters? |" in (project / INV / "questions.md").read_text()
+    assert cli(project, capsys, "edit", "Q-001", "--audience", " What\tmatters\n most? ")[0] == 0
+    assert ledger(project)["Q-001"]["audience"] == "What matters most?"
+    assert "audience: What matters most?" in cli(project, capsys, "list", "--all")[1]
+    assert "| What matters most? |" in (project / INV / "questions.md").read_text()
+    rendered = (project / INV / "questions.md").read_bytes()
+    assert cli(project, capsys, "render")[0] == 0
+    assert (project / INV / "questions.md").read_bytes() == rendered
+    assert cli(project, capsys, "edit", "Q-001", "--audience", "")[0] == 0
+    entry = ledger(project)["Q-001"]
+    assert entry["audience"] == "" and entry["text"] == "Which internal measure?" and entry["status"] == status
+    assert "audience:" not in cli(project, capsys, "list", "--all")[1]
+
+
+def test_audience_defaults_empty_for_existing_questions(project, capsys):
+    add(project, "Which measure?", "user", kind="context")
+    path = project / INV / "questions.json"
+    content = json.loads(path.read_text())
+    content["questions"][0].pop("audience", None)
+    path.write_text(json.dumps(content))
+    assert cli(project, capsys, "render")[0] == 0
+    assert provenance.question_tree(project, "churn")[0]["audience"] == ""
+    assert cli(project, capsys, "edit", "Q-001", "--audience", "Which outcome?")[0] == 0
+    assert ledger(project)["Q-001"]["audience"] == "Which outcome?"
 
 
 def test_cli_tree_sorts_ids_by_number_and_indents_under_listed_parents(project, capsys):

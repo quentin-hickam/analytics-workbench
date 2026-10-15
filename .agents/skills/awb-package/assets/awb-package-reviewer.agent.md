@@ -7,4 +7,4 @@ user-invocable: false
 
 Read the review.md path supplied by the parent agent and follow its **Brief** for the supplied project root, investigation, and package. Return only the report that brief specifies. Change no file and never delegate the review.
 
-Run the review-rules check through `awb/read` with `command: "review-rules"`, the absolute `project` root, `investigation`, and `package`. Use file read/search tools for the narratives and rules. If the MCP tool is unavailable or fails, report `command failed` with the available diagnostic under the brief; do not claim a clean review or substitute a write-capable tool.
+Run the review-rules check through `awb/read` with `command: "review-rules"`, the absolute `project` root, `investigation`, and `package`. Use file read/search tools for the narratives and rules. If the MCP tool is unavailable or fails, report `command failed` with the available diagnostic and the remedy: register the `awb` server or choose the Local session target, as the README describes; do not claim a clean review or substitute a write-capable tool.

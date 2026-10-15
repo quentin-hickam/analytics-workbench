@@ -19,10 +19,13 @@
 # test_upgrade_replace_and_remove_retired: named customized copies are replaced; unmodified retired files are removed with their emptied directory and receipt entry; customized retired files stay.
 # test_cli_arguments: --replace repeats one path per flag, needs --upgrade, and rejects an uncopied path with exit 2.
 # test_print_json_server_entry_without_writing: copilot and claude print the same JSON stdio entry with their own destination (COPILOT_HOME moves only copilot's); both option spellings print without writing.
+# test_print_server_entry_interpreter_warnings: old Python or a virtual environment warns only on stderr, with unchanged host entry and no writes; a stable Python 3.10+ emits no warning.
 # test_print_codex_server_entry_with_quoted_unicode_paths: native TOML with absolute paths and safe quoting; default/overridden destination, without writing.
 # test_server_entry_refusals_write_nothing: exact host choices and print-only mode refuse unknown/missing values, unknown/abbreviated options, and install arguments with exit 2 and no stdout or writes.
 # test_awb_init_installs_agents_mapping_and_resolving_guides: adapting the root template then running the installer preserves one MCP/CLI rule and both resolving guide links.
-# test_instruction_and_reviewer_tools_exist_in_server_tools_list: names in AGENTS.md and the read-only reviewer agree with the running server's public tools/list.
+# test_instruction_and_reviewer_tools_exist_in_server_tools_list: the single rule names every server tool, valid script command enums, run.py, and the same project advice; reviewer tools remain read-only.
+# test_every_shipped_skill_script_has_an_instruction_route: all shipped skill script commands, including the shared installer, have a route in the rule.
+# test_contract_scanners: inline code and Python target scanners accept their documented grammar and refuse other forms.
 
 import ast
 import hashlib
@@ -419,6 +422,46 @@ def test_print_json_server_entry_without_writing(tmp_path, arguments, copilot_ho
     assert snapshot(tmp_path) == before
 
 
+@pytest.mark.parametrize("host, destination", [
+    ("copilot", ".copilot/mcp-config.json"),
+    ("claude", ".claude.json"),
+    ("codex", ".codex/config.toml"),
+])
+@pytest.mark.parametrize("version, virtual, warnings", [
+    ((3, 10), False, []),
+    ((3, 9), False, ["Warning: this interpreter is older than Python 3.10."]),
+    ((3, 14), True, ["Warning: this interpreter runs in a virtual environment."]),
+    ((3, 9), True, ["Warning: this interpreter is older than Python 3.10.",
+                    "Warning: this interpreter runs in a virtual environment."]),
+])
+def test_print_server_entry_interpreter_warnings(tmp_path, monkeypatch, capsys, host, destination,
+                                               version, virtual, warnings):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("COPILOT_HOME", raising=False)
+    monkeypatch.delenv("CODEX_HOME", raising=False)
+    monkeypatch.setattr(sys, "version_info", (3, 10))
+    monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "stable-python"))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "stable-python"))
+    before = snapshot(tmp_path)
+    installer.print_server_entry(host)
+    stable = capsys.readouterr()
+    destination_line = f"Merge the awb entry into {tmp_path / destination}; preserve other configuration.\n"
+    assert stable.err == destination_line
+
+    monkeypatch.setattr(sys, "version_info", version)
+    if virtual:
+        monkeypatch.setattr(sys, "prefix", str(tmp_path / "project/.venv"))
+    installer.print_server_entry(host)
+    actual = capsys.readouterr()
+    assert actual.out == stable.out
+    expected_stderr = destination_line
+    if warnings:
+        expected_stderr += "\n".join(warnings) + "\n"
+        expected_stderr += "Use a stable Python 3.10+ interpreter outside a project virtual environment.\n"
+    assert actual.err == expected_stderr
+    assert snapshot(tmp_path) == before
+
+
 @pytest.mark.parametrize("codex_home, destination", [
     (None, "home/.codex/config.toml"),
     ("codex config", "codex config/config.toml"),
@@ -490,7 +533,90 @@ def test_awb_init_installs_agents_mapping_and_resolving_guides(tmp_path):
         assert f"]({guide})" in agents and (tmp_path / guide).is_file()
 
 
-def test_instruction_and_reviewer_tools_exist_in_server_tools_list(tmp_path):
+def code_spans(line):
+    """Accepted input: one line of prose with zero or more nonempty single-backtick
+    spans; span contents have no backtick or newline. Raise ValueError for multiline,
+    unpaired or empty spans. Limits: no Markdown fences, escapes or nested code;
+    prose and span contents are returned literally, without interpreting Markdown.
+    """
+    if "\n" in line or "\r" in line:
+        raise ValueError("Expected one line of single-backtick code spans")
+    pieces = line.split("`")
+    if len(pieces) % 2 == 0 or any(not value for value in pieces[1::2]):
+        raise ValueError("Expected nonempty paired single-backtick code spans")
+    return pieces[1::2]
+
+
+def skill_script_commands(text):
+    """Accepted input: text whose literal python3 command targets are src/awb.py,
+    <project-root>/src/awb.py, investigations/<name>/run.py, or
+    <skill-directory>/scripts/NAME.py / <awb-init skill directory>/scripts/NAME.py,
+    where NAME is [a-z][a-z0-9_]*. One ASCII space follows python3; target ends
+    at whitespace, a backtick or end of text. Return skill directory/script pairs;
+    explicitly allow the three non-skill targets without returning them. Raise
+    ValueError for every other python3 target or spacing. Limits: scans literal
+    python3 words only, not shell aliases, expansions or wrapped commands; arguments
+    after the target are opaque and are not parsed as shell or Markdown.
+    """
+    scripts = []
+    target = re.compile(r" (?:"
+                        r"(?P<directory><skill-directory>|<awb-init skill directory>)/scripts/"
+                        r"(?P<script>[a-z][a-z0-9_]*\.py)"
+                        r"|src/awb\.py|<project-root>/src/awb\.py|investigations/<name>/run\.py)"
+                        r"(?=\s|`|$)")
+    for command in re.finditer(r"\bpython3\b", text):
+        match = target.match(text, command.end())
+        if not match:
+            raise ValueError(f"Unsupported python3 target: {text[command.start():].splitlines()[0]}")
+        if match["script"]:
+            scripts.append((match["directory"], match["script"]))
+    return scripts
+
+
+@pytest.mark.parametrize("line, expected", [
+    ("plain prose", []),
+    ("Use `read` for `status`.", ["read", "status"]),
+    ("`investigations/<name>/run.py`", ["investigations/<name>/run.py"]),
+])
+def test_code_span_scanner_accepts(line, expected):
+    assert code_spans(line) == expected
+
+
+@pytest.mark.parametrize("line", ["`read", "read`", "``", "``read``", "`read`\n`data`", "a\rb"])
+def test_code_span_scanner_refuses(line):
+    with pytest.raises(ValueError):
+        code_spans(line)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("ordinary prose", []),
+    ("python3 src/awb.py state", []),
+    ("`python3 <project-root>/src/awb.py questions list`", []),
+    ("python3 investigations/<name>/run.py", []),
+    ("python3 <skill-directory>/scripts/collect_status.py <project-root>",
+     [("<skill-directory>", "collect_status.py")]),
+    ("`python3 <awb-init skill directory>/scripts/install_helpers.py . --package-formats`",
+     [("<awb-init skill directory>", "install_helpers.py")]),
+    ("python3 <skill-directory>/scripts/eda_scan.py\n",
+     [("<skill-directory>", "eda_scan.py")]),
+])
+def test_skill_script_scanner_accepts(text, expected):
+    assert skill_script_commands(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "python3 other.py", "python3  src/awb.py", "python3\tsrc/awb.py",
+    "python3 <other-directory>/scripts/scan.py", "python3 <skill-directory>/scripts/scan.py.bak",
+    "python3 <skill-directory>/scripts/nested/scan.py", "python3 <skill-directory>/scripts/Scan.py",
+    "python3 <skill-directory>/scripts/scan-dataset.py", "python3 <skill-directory>/scripts/scan",
+])
+def test_skill_script_scanner_refuses(text):
+    with pytest.raises(ValueError):
+        skill_script_commands(text)
+
+
+@pytest.fixture
+def server_tools(tmp_path):
     server = SKILLS / "awb-init/assets/awb_mcp.py"
     requests = [
         {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
@@ -501,12 +627,49 @@ def test_instruction_and_reviewer_tools_exist_in_server_tools_list(tmp_path):
     result = subprocess.run([sys.executable, str(server)], cwd=tmp_path, capture_output=True, text=True,
                             input="".join(json.dumps(request) + "\n" for request in requests), check=True)
     response = [json.loads(line) for line in result.stdout.splitlines()]
-    tools = {tool["name"]: tool for tool in response[1]["result"]["tools"]}
+    return {tool["name"]: tool for tool in response[1]["result"]["tools"]}
+
+
+@pytest.fixture
+def instruction_rule():
     agents = (SKILLS / "awb-init/assets/workbench/AGENTS.md").read_text()
-    rule = next(line for line in agents.splitlines() if line.startswith("When the host offers the `awb` MCP server"))
-    # Every code span in the rule other than the server and argument names is a tool name, named as tools/list does.
-    named = set(re.findall(r"`([^`]+)`", rule)) - {"awb", "project"}
+    rules = [line for line in agents.splitlines() if line.startswith("When the host offers the `awb` MCP server")]
+    assert len(rules) == 1
+    return rules[0]
+
+
+SCRIPT_ROUTES = {
+    ("awb-status", "collect_status.py"): [("read", "status")],
+    ("awb-explore", "eda_scan.py"): [("data", "eda-scan"), ("read", "eda-show")],
+    ("awb-clean", "scan_dataset.py"): [("data", "clean-scan")],
+    ("awb-clean", "record_cleaning.py"): [("records", "clean-record")],
+    ("awb-init", "install_helpers.py"): [("setup", None)],
+}
+
+
+def test_instruction_and_reviewer_tools_exist_in_server_tools_list(server_tools, instruction_rule):
+    tools = server_tools
+    reserved = {"awb", "project", "awb.py", "investigations/<name>/run.py", "--show"}
+    reserved.update(script for _, script in SCRIPT_ROUTES)
+    reserved.update(command for routes in SCRIPT_ROUTES.values() for _, command in routes if command)
+    named = set(code_spans(instruction_rule)) - reserved
     assert named == tools.keys()
+    assert "`awb.py` commands" in instruction_rule
+    assert "`investigations/<name>/run.py` through `run`" in instruction_rule
+    assert "`--show` through `read` command `eda-show`" in instruction_rule
+    assert "Pass the absolute project root as `project` on every call" in instruction_rule
+    for tool in tools.values():
+        description = tool["inputSchema"]["properties"]["project"]["description"]
+        assert "Pass it on every call" in description
+        assert "otherwise omit" not in description
+    for (_, script), routes in SCRIPT_ROUTES.items():
+        for tool, command in routes:
+            route = f"`{tool}`" + (f" command `{command}`" if command else "")
+            assert f"`{script}` through {route}" in instruction_rule or (
+                script == "eda_scan.py" and command == "eda-show"
+                and f"`--show` through {route}" in instruction_rule)
+            if command:
+                assert command in tools[tool]["inputSchema"]["properties"]["command"]["enum"]
 
     reviewer = (SKILLS / "awb-package/assets/awb-package-reviewer.agent.md").read_text()
     frontmatter = reviewer.split("---", 2)[1]
@@ -517,3 +680,14 @@ def test_instruction_and_reviewer_tools_exist_in_server_tools_list(tmp_path):
         if tool.startswith("awb/"):
             name = tool.removeprefix("awb/")
             assert name in tools and tools[name]["annotations"]["readOnlyHint"] is True
+
+
+def test_every_shipped_skill_script_has_an_instruction_route(instruction_rule):
+    seen = set()
+    for skill in sorted(SKILLS.glob("*/SKILL.md")):
+        for directory, script in skill_script_commands(skill.read_text()):
+            owner = "awb-init" if directory == "<awb-init skill directory>" else skill.parent.name
+            assert (owner, script) in SCRIPT_ROUTES, f"Missing route for {skill}: {script}"
+            assert f"`{script}` through " in instruction_rule
+            seen.add((owner, script))
+    assert seen == SCRIPT_ROUTES.keys()

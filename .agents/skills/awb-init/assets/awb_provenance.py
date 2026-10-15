@@ -1181,11 +1181,17 @@ def _write_findings(root, investigation, mutate, *, check=False, render=False, r
     if not render:
         findings.refuse_drift(investigation)
     result = mutate(findings)
+    question_view = []
+    try:
+        ledger = _Ledger(root, investigation)
+        ledger.refuse_drift()
+        if ledger.entries:
+            question_view = [_Text(ledger.md_path, ledger.md_label, ledger.rendered(_status_map(findings.entries)))]
+    except StateError as error:
+        # Findings and their evidence remain writable even when the question view cannot be refreshed.
+        result["questions"] = {"error": f"{error}; python3 src/awb.py questions render --investigation {investigation}"}
     if check or not findings.changed:
         return result
-    ledger = _Ledger(root, investigation)
-    if ledger.entries:
-        ledger.refuse_drift()
     state = findings.state
     state.locate(strict=False)  # a mutation may have moved lines above the table
     for i in reversed(state.strays):
@@ -1193,8 +1199,6 @@ def _write_findings(root, investigation, mutate, *, check=False, render=False, r
     state.lines[state.rows_start:state.rows_end] = [
         _row(_finding_cells(e)) + state.newline for e in findings.entries]
     findings.lines = [json.dumps({"schema": "awb-findings/1", "findings": findings.entries}, indent=2, ensure_ascii=False) + "\n"]
-    question_view = ([_Text(ledger.md_path, ledger.md_label, ledger.rendered(_status_map(findings.entries)))]
-                     if ledger.entries else [])
     _commit([findings, state] + question_view + ([findings.history] if findings.history else []),
             replaced=replaced, prior_rows=findings.prior_rows)
     return result
@@ -1332,7 +1336,7 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
     returns to superseded if it was superseded, else provisional, with its notes kept, its flag reason
     dropped, and a history entry naming that reason. When findings.json is not replaced, the evidence just recorded is removed before raising.
     Returns {action: added|kept|refreshed|flag cleared, status, claim, history (bool)}, with questions
-    {answered, linked, skipped} from link_answers, or {error}, when the settings table declares answers.
+    {answered, linked, skipped} from link_answers when settings declare answers, or {error} for a ledger problem.
     """
     root = Path(project_root).resolve()
     today = today or _today()
@@ -1381,7 +1385,9 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
         if base / "findings.json" not in replaced:
             evidence_path.unlink(missing_ok=True)
         raise
-    # Questions the result's settings declare: a ledger failure leaves the finding recorded and says so.
+    # A ledger problem never blocks a finding write; report it and leave questions.md untouched.
+    if "questions" in result and "error" in result["questions"]:
+        return result
     try:
         if _declared_answers(root, investigation, result_id)[1]:
             result["questions"] = link_answers(root, investigation, result_id, today=today)
@@ -1583,7 +1589,7 @@ _ORIGINS = ("scope", "brainstorm", "eda", "analysis")
 _PRIORITIES = ("must", "should", "could")
 _QSTATUSES = ("open", "answered", "parked", "declined", "superseded")
 _QUESTION_KEYS = {"id", "text", "kind", "answerer", "unblocks", "origin", "status", "answer", "by", "results",
-                  "reason", "updated", "parent", "priority"}
+                  "reason", "updated", "parent", "priority", "audience"}
 _LEDGER_HEADER = [
     "# Question ledger", "",
     "Every question this investigation has raised, answered or not. Rendered from `questions.json`: change it "
@@ -1591,7 +1597,7 @@ _LEDGER_HEADER = [
     "A data question is answered only by a recorded result: its settings table declares `answers = [\"Q-NNN\"]` "
     "and `run.py` links it here. `python3 src/awb.py questions list` shows each linked finding's current status.",
     ""]
-_LEDGER_COLUMNS = ["ID", "Question", "Kind", "Answerer", "Unblocks", "Status", "Answer or reason", "Parent", "Priority"]
+_LEDGER_COLUMNS = ["ID", "Question", "Kind", "Answerer", "Unblocks", "Status", "Answer or reason", "Parent", "Priority", "Audience"]
 
 
 class _Ledger:
@@ -1615,6 +1621,8 @@ class _Ledger:
                 raise ValueError(f"expected {_LEDGER_SCHEMA} questions list")
             self.entries, seen = content["questions"], set()
             for entry in self.entries:
+                if isinstance(entry, dict):
+                    entry.setdefault("audience", "")  # Earlier ledgers have no audience wording.
                 problem = _question_problem(entry)
                 if problem or entry["id"] in seen:
                     raise ValueError(f"invalid question {entry.get('id') if isinstance(entry, dict) else entry!r}: "
@@ -1736,7 +1744,7 @@ def _question_cells(entry, status=None, depth=0):
             parts.append(f"{entry['answer']} ({entry['by']})")
         answer = entry["reason"] + (f"; was answered: {'; '.join(parts)}" if parts else "")
     return [entry["id"], "&nbsp;&nbsp;" * depth + _cell(entry["text"]), entry["kind"], entry["answerer"],
-            _cell(entry["unblocks"]), status or entry["status"], _cell(answer), entry["parent"], entry["priority"]]
+            _cell(entry["unblocks"]), status or entry["status"], _cell(answer), entry["parent"], entry["priority"], _cell(entry["audience"])]
 
 
 def ledger_answerers(project_root, investigation: str) -> dict[str, str]:
@@ -1836,7 +1844,7 @@ def question_status(entry, findings):
 
 def add_question(project_root, investigation: str, text: str, *, kind: str, answerer: str, origin: str,
                  unblocks: str = "", status: str = "open", reason: str = "", parent: str = "", priority: str = "should",
-                 today: str | None = None) -> dict:
+                 audience: str = "", today: str | None = None) -> dict:
     """Append the next numbered question; a parked or declined one needs a reason. Returns the entry."""
     root = Path(project_root).resolve()
     text = " ".join((text or "").split())
@@ -1858,7 +1866,7 @@ def add_question(project_root, investigation: str, text: str, *, kind: str, answ
     entry = {"id": f"Q-{number:03d}", "text": text, "kind": kind, "answerer": answerer,
              "unblocks": " ".join((unblocks or "").split()), "origin": origin, "status": status, "answer": "",
              "by": "", "results": [], "reason": reason, "updated": today or _today(),
-             "parent": parent, "priority": priority}
+             "parent": parent, "priority": priority, "audience": " ".join(audience.split())}
     ledger.entries.append(entry)
     ledger.check_parent(entry["id"], parent)
     ledger.write()
@@ -1948,8 +1956,9 @@ def set_question(project_root, investigation: str, question_ids: list[str], stat
 
 def edit_question(project_root, investigation: str, question_id: str, *, text: str | None = None,
                   kind: str | None = None, answerer: str | None = None, unblocks: str | None = None,
-                  parent: str | None = None, priority: str | None = None, today: str | None = None) -> bool:
-    """Reword or reclassify an open or parked question; edit parent or priority in any status.
+                  parent: str | None = None, priority: str | None = None, audience: str | None = None,
+                  today: str | None = None) -> bool:
+    """Reword or reclassify an open or parked question; edit parent, priority or audience in any status.
     A data question keeps answerer data. Returns whether it changed."""
     root = Path(project_root).resolve()
     if text is not None and not text.strip():
@@ -1968,7 +1977,7 @@ def edit_question(project_root, investigation: str, question_id: str, *, text: s
         raise StateError(f"{question_id} is a data question, answered only by a recorded result; to have a person "
                          "answer it instead, supersede it and add a new question")
     new = {k: " ".join(v.split()) for k, v in (("text", text), ("kind", kind), ("answerer", answerer),
-                                                ("unblocks", unblocks), ("parent", parent), ("priority", priority)) if v is not None}
+                                                ("unblocks", unblocks), ("parent", parent), ("priority", priority), ("audience", audience)) if v is not None}
     if parent is not None:
         ledger.check_parent(question_id, parent)
     if priority is not None and priority not in _PRIORITIES:
@@ -2009,7 +2018,7 @@ def link_answers(project_root, investigation: str, result_id: str, today: str | 
     return {"answered": answered, "linked": linked, "skipped": skipped}
 
 
-def question_lines(project_root, investigation: str, statuses=("open",)) -> list[str]:
+def question_lines(project_root, investigation: str, statuses=("open",), *, show_audience=True) -> list[str]:
     """One line per question in the given statuses, a data answer with its findings' current status.
 
     Lines follow the tree walk, indented by how many of the question's ancestors are listed too, so a
@@ -2033,6 +2042,8 @@ def question_lines(project_root, investigation: str, statuses=("open",)) -> list
             line += " -> " + answer
         elif entry["reason"]:
             line += f" -- {entry['reason']}" + (f"; was answered: {answer}" if answer else "")
+        if show_audience and entry["audience"]:
+            line += f" [audience: {entry['audience']}]"
         lines.append(line)
     return lines
 
@@ -2049,7 +2060,7 @@ def cli_questions(root: Path, argv: list[str]) -> int:
         "add": "append the next numbered question",
         "answer": "record a person's answer, or link recorded results that declare the question",
         "status": "park, decline, supersede, or reopen questions",
-        "edit": "reword or reclassify an open or parked question; edit parent or priority in any status",
+        "edit": "reword or reclassify an open or parked question; edit parent, priority or audience in any status",
         "render": "restore questions.md from questions.json, discarding hand edits; with neither file, "
                   "write an empty ledger",
     }
@@ -2101,6 +2112,8 @@ def cli_questions(root: Path, argv: list[str]) -> int:
         parser.add_argument("--answerer", choices=_ANSWERERS)
         parser.add_argument("--unblocks")
     if action in ("add", "edit"):
+        parser.add_argument("--audience", default="" if action == "add" else None,
+                            help="audience wording for Open questions; empty clears it; whitespace is collapsed")
         parser.add_argument("--parent", default="" if action == "add" else None,
                             help="existing question ID; empty for a root")
         parser.add_argument("--priority", choices=_PRIORITIES, default="should" if action == "add" else None)
@@ -2124,7 +2137,7 @@ def cli_questions(root: Path, argv: list[str]) -> int:
         elif action == "add":
             entry = add_question(root, name, args.text, kind=args.kind, answerer=args.answerer, origin=args.origin,
                                  unblocks=args.unblocks, status=args.status, reason=args.reason,
-                                 parent=args.parent, priority=args.priority)
+                                 parent=args.parent, priority=args.priority, audience=args.audience)
             print(f"{entry['id']} {entry['status']}: {entry['text']}")
         elif action == "answer":
             entry = answer_question(root, name, args.question_id, text=args.text, by=args.by, results=args.result)
@@ -2134,7 +2147,7 @@ def cli_questions(root: Path, argv: list[str]) -> int:
             print(f"{args.status}: {', '.join(changed) or 'none changed'}")
         elif action == "edit":
             changed = edit_question(root, name, args.question_id, text=args.text, kind=args.kind,
-                                    answerer=args.answerer, unblocks=args.unblocks, parent=args.parent, priority=args.priority)
+                                    answerer=args.answerer, unblocks=args.unblocks, parent=args.parent, priority=args.priority, audience=args.audience)
             print(("edited: " if changed else "unchanged: ") + args.question_id)
         else:
             ledger = _Ledger(root, name)
@@ -2211,7 +2224,8 @@ def state_view(project_root, investigation: str) -> str:
     if questions:
         out.append("==> questions the findings answer, by result <==\n" + "\n".join(questions) + "\n")
     try:
-        ledger = question_lines(root, investigation) + question_lines(root, investigation, (AWAITING_RECHECK,))
+        ledger = question_lines(root, investigation, show_audience=False) + question_lines(
+            root, investigation, (AWAITING_RECHECK,), show_audience=False)
     except StateError as error:
         ledger = [f"warning: {error}"]
     if ledger:

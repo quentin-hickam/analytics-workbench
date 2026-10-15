@@ -41,13 +41,13 @@ The skills serve every project from the user-level directory; projects need no l
 
 ### MCP server
 
-After installing the skills, run this with the Python 3.10+ interpreter that should launch the server, replacing `<host>` with `copilot`, `claude`, or `codex`:
+After installing the skills, run this with a stable Python 3.10+ interpreter outside a project virtual environment to launch the server, replacing `<host>` with `copilot`, `claude`, or `codex`:
 
 ```sh
 python3 ~/.agents/skills/awb-init/scripts/install_helpers.py --mcp-config <host>
 ```
 
-The option prints the exact `awb` entry on stdout and its merge destination on stderr. It writes no configuration or project files. Merge the entry into the existing file, preserving other servers and settings; do not replace the whole file with the snippet. Use these user-level registrations:
+The option prints the exact `awb` entry on stdout and its merge destination on stderr. It warns on stderr if the interpreter is older than Python 3.10 or runs inside a virtual environment, and still prints the entry. It writes no configuration or project files. Merge the entry into the existing file, preserving other servers and settings; do not replace the whole file with the snippet. Use these user-level registrations:
 
 | Host | File | Printed format |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ The option prints the exact `awb` entry on stdout and its merge destination on s
 
 The command and server argument are absolute paths to the chosen interpreter and the installed server. Keep that command line stable when a managed allowlist matches command and arguments; policies may also match server names or URLs. The server stays in the shared skills installation. It uses each project's `.venv` or `venv` interpreter for helpers, falling back to its own, unless `AWB_PYTHON` is set. Put needed variables directly in the entry's `env` object/table: Copilot user configuration does not support `envFile`, and Copilot CLI passes only `PATH` through by default. The printed `env` is empty; the command does not copy credentials from the environment. See [VS Code MCP configuration](https://code.visualstudio.com/docs/agents/reference/mcp-configuration), [Claude Code MCP scopes](https://code.claude.com/docs/en/mcp#mcp-installation-scopes), and [Codex MCP](https://developers.openai.com/codex/mcp).
 
-Restart or reconnect the host's `awb` server after registration. When it is available, the project's instruction rule uses MCP tools; the skills retain their CLI commands for hosts without it. Each MCP call passes the absolute project root as `project`, so registration is reusable across projects. `awb-init` explains how to obtain the registration entry when the host has no `awb` server registered, and shows it on request. Copilot CLI requires version 1.0.88 or later for the legacy MCP handshake fallback.
+Restart or reconnect the host's `awb` server after registration. When it is available, the project's instruction rule uses MCP tools; the skills retain their CLI commands for hosts without it. Each MCP call passes the absolute project root as `project`, so registration is reusable across projects. `awb-init` offers the printed registration entry and its destination together in one line when the host has no `awb` server registered. Copilot CLI requires version 1.0.88 or later for the legacy MCP handshake fallback.
 
 ### VS Code Local and package reviewer
 

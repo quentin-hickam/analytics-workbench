@@ -91,9 +91,8 @@ def log(message):
 # ---------------------------------------------------------------- tool definitions
 
 PROJECT = {"type": "string",
-           "description": "Absolute path of the workbench root (the folder holding src/awb.py). Pass it when "
-                          "the workspace holds several folders or the server reports it cannot find the "
-                          "project; otherwise omit it."}
+           "description": "Absolute path of the workbench root (the folder holding src/awb.py). "
+                          "Pass it on every call."}
 ARGS = {"type": "array", "items": {"type": "string"},
         "description": "The command's arguments, one array item per argument, exactly as on its command line "
                        "and without the project root; `read` with command `help` and this command as topic "

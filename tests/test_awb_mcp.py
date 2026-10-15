@@ -285,12 +285,14 @@ def test_question_tree_metadata_round_trip(workbench, connect):
         "answer", "Q-003", "--text", "The next quarter", "--by", "user"])
     assert not error, text
     text, error = client.call("records", command="questions", args=[
-        "edit", "Q-003", "--parent", "Q-001", "--priority", "could"])
+        "edit", "Q-003", "--parent", "Q-001", "--priority", "could",
+        "--audience", "Which period matters for the decision?"])
     assert not error, text
     text, error = client.call("read", command="questions", all=True)
     assert not error, text
     assert ("  Q-003 answered [user, context, could; parent: Q-001] "
-            "Which period should the plan cover? -> The next quarter (user)") in text
+            "Which period should the plan cover? -> The next quarter (user) "
+            "[audience: Which period matters for the decision?]") in text
     for flag, value in (("--text", "A different question?"), ("--kind", "analytical"),
                         ("--answerer", "stakeholder"), ("--unblocks", "Another decision")):
         refusal, error = client.call("records", command="questions", args=[
