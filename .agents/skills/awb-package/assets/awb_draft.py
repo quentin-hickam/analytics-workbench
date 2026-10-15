@@ -2090,10 +2090,32 @@ def _chart_difference(actual, expected):
     return next((f"row {index}" for index, (have, want) in enumerate(zip(actual, expected)) if have != want), None)
 
 
+def _display_difference(entry, saved, display):
+    """Which of an entry's headers, value labels, or percent columns differ from what display.toml now gives
+    for its result and selected rows, or None. Its places can come from --round, so they are not compared."""
+    names, values, _ = _labels(display, entry["result_id"])
+    own_percent = display["results"].get(entry["result_id"], {}).get("percent")
+    percent = display["percent"] if own_percent is None else own_percent
+    selected = _select(saved, entry["selection"])
+    labels = {}
+    for column in entry["columns"]:
+        codes = values.get(column, {})
+        if used := {row[column]: codes[row[column]] for row in selected if row[column] in codes}:
+            labels[column] = used
+    if entry["headers"] != [names.get(column) for column in entry["columns"]]:
+        return "headers"
+    if entry["values"] != labels:
+        return "value labels"
+    if entry["percent"] != [column for column in entry["columns"] if column in percent]:
+        return "percent columns"
+    return None
+
+
 def chart_file_problems(root, investigation, draft, record) -> list[dict]:
-    """Match each chart file with the manifest's charts entry export recorded for it, and the file with its
-    result's saved table under that entry's selection, value labels, percent columns, and rounding:
-    {"chart", "problem"}. The numbers check is separate: every plotted value is still a recorded value."""
+    """Match each chart file with the manifest's charts entry export recorded for it, the entry's headers,
+    value labels, and percent columns with what foundation/display.toml gives, and the file with its result's
+    saved table under that entry's selection, value labels, percent columns, and rounding: {"chart",
+    "problem"}. The numbers check is separate: every plotted value is still a recorded value."""
     charts = record.get("charts")
     entries = [] if charts is None or charts == "none" else charts
     if not isinstance(entries, list) or not all(isinstance(e, dict) and isinstance(e.get("path"), str)
@@ -2110,6 +2132,7 @@ def chart_file_problems(root, investigation, draft, record) -> list[dict]:
                                                    "every chart file, so rerun export with its --chart"}
             for number, path in files if f"charts/{path.name}" not in recorded]
     present = {f"charts/{path.name}": path for _, path in files}
+    display = None
     for name, entry in recorded.items():
         match = re.fullmatch(r"charts/" + _CHART_FILE.pattern, name)
         label = f"Chart {match[1]}" if match else name
@@ -2133,6 +2156,17 @@ def chart_file_problems(root, investigation, draft, record) -> list[dict]:
             rows.append({"chart": label, "problem": f"{file} cannot be checked against {_rel(root, table)}: {error}"})
             continue
         lacking = [column for column in entry["columns"] if column not in available]
+        if not lacking:
+            if display is None:
+                try:
+                    display = display_names(root)
+                except (ValueError, ImportError) as error:
+                    return rows + [{"chart": None, "problem": f"chart files cannot be checked: {error}"}]
+            if part := _display_difference(entry, saved, display):
+                rows.append({"chart": label, "problem": f"the manifest's charts entry for {file} records {part} "
+                                                        f"other than {_DISPLAY} gives; rerun export, which "
+                                                        "records them"})
+                continue
         detail = (f"its saved table has no column {lacking[0]!r}" if lacking
                   else _chart_difference(actual, [entry["headers"]] + _apply(saved, entry)))
         if detail:
@@ -2527,6 +2561,10 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
                 _write_json(path, record)
         elif not isinstance(record.get("inventory"), list):
             raise ValueError(f"{MANIFEST} records no inventory list; run check-draft without --verify-only")
+        elif not (draft / START_HERE).is_file():
+            # Every release includes it; an inventory recorded before it was written would not miss it.
+            report["errors"].append(f"{START_HERE}: the draft lacks it; run check-draft without --verify-only, "
+                                    "which writes it and records it in the inventory")
         report["inventory"] = {"rows": len(record["inventory"]),
                                "source": "recorded" if verify_only else "rewritten"}
         report["verify"] = verify(draft, record["inventory"])
@@ -2598,7 +2636,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "no role; an item nested under a field or a second paragraph in one; and a chart file without a "
                "specification or data rows, or a foreign file. It also lists each chart file the manifest's "
                "charts does not record, an entry whose file is missing or that records no selection, columns, "
-               "headers, value labels, percent, or rounding, and a file that differs from its result's saved "
+               "headers, value labels, percent, or rounding, an entry whose headers, value labels, or percent "
+               "columns differ from what foundation/display.toml gives, and a file that differs from its result's saved "
                "table under that entry's selection, labels, percent columns, and rounding (export writes every "
                "chart file; rows are selected with --chart, never by editing the file).\nclaims lists each causal phrase (line, section, phrase, claim, results) "
                "in a findings.md slide, heading included, above its claim strength: a ### finding slide is held to the weakest "
@@ -2635,7 +2674,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "Without --verify-only it first writes START-HERE.md, plain text in three parts: what to send the "
                "audience (the deck once built, methodology-note.md, each dataset), what builds the deck (the "
                "attach list and prompt assembly/m365.md gives), and what stays internal; the inventory then lists "
-               "it, and --verify-only verifies it like any other file. start_here names it when present.\n"
+               "it, and --verify-only verifies it like any other file and lists an errors row when the draft lacks "
+               "it. start_here names it when present.\n"
                "Exit 0 only when names_problems, findings, outline, charts, "
                "headings, markdown, claims, "
                "questions, storyline, open_questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
@@ -2809,9 +2849,9 @@ def parse_chart(text: str) -> tuple:
     """Parse a --chart value into (result_id, [columns] or None, selection), refusing any other text.
 
     The grammar is closed: RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]]. The first '@'
-    opens the row selection, so a column name holding '@' or ',' cannot be named. Before it, RESULT is a
-    simple name, and the first ':' opens COLUMNS, comma-separated names, each stripped of surrounding spaces
-    and none empty. After it, first=<n>, n a whole number from 1 to 999999999 written without leading
+    opens the row selection, so a column name holding '@' or ',' cannot be named in COLUMNS, though the
+    @where column may hold either. Before it, RESULT is a simple name, and the first ':' opens COLUMNS,
+    comma-separated names, each stripped of surrounding spaces and none empty. After it, first=<n>, n a whole number from 1 to 999999999 written without leading
     zeros, takes the table's first n rows; where=<column>=<value>[,<value>] takes, in table order, the rows
     whose column holds one of the values exactly as the saved table writes it, the column ending at the first
     '=' and stripped, so no value can hold ',' and none may be empty. selection is "all", {"first": n}, or
@@ -2850,8 +2890,16 @@ def _spec(text, what):
 
 
 def _number(text):
-    """Whether a cell is a finite number cell, the only kind a percent or [round] changes."""
-    return bool(_NUMBER_CELL.fullmatch(text)) and math.isfinite(float(text))
+    """Whether a cell is a finite number cell, the only kind a percent or [round] changes. A cell whose
+    exponent is too large for a decimal to hold, such as 1e-9999999999999999999, is none: it is written as
+    saved, as an overflowing one is."""
+    if not (_NUMBER_CELL.fullmatch(text) and math.isfinite(float(text))):
+        return False
+    try:
+        Decimal(text)
+    except ArithmeticError:
+        return False
+    return True
 
 
 def _unrounded(text, percent=False) -> bool:
@@ -3204,7 +3252,8 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "and dataset selection: no --chart records charts none. With only --result it records "
                "provenance and leaves exported files untouched.\n"
                f"--chart takes {_CHART_FORM}, a closed grammar: the first '@' opens the row selection, so a "
-               "column name holding '@' or ',' cannot be named; before it, the first ':' opens the columns, "
+               "column name holding '@' or ',' cannot be named in COLUMNS, though the @where column may hold "
+               "either; before it, the first ':' opens the columns, "
                "comma-separated, none empty. @first=<n> (a whole number from 1 to 999999999, no leading zero) takes the "
                "saved table's first n rows, in its stable order; @where=<column>=<value>[,<value>] takes, in table order, the rows whose "
                "column holds one of the values exactly as the table writes it, before value labels, so no value "
@@ -3691,7 +3740,7 @@ _OPEN_SLIDES = ("Limitations and open caveats", "Open questions")
 
 
 def open_caveats(directory, record: dict) -> list[dict]:
-    """Every caveat a release carries, new or carried forward, so its report never calls it clean while one
+    """The open caveats a release carries, new or carried forward, so its report never calls it clean while one
     remains: the headline and then each top-level bullet of the deck's Limitations and open caveats and Open
     questions slides in the findings.md under directory, as it renders and in deck order, as {"slide",
     "line", "text", "sub"}, nested items in sub and a headline's sub empty; then each represented flag
@@ -3888,8 +3937,8 @@ def cli_release(root: Path, argv: list[str]) -> int:
                "lists unmatched_flags and dispositions. Its draft_markers rows do not refuse: run check-draft "
                "--verify-only first to show them.\nOn success it prints the report fields: datasets, "
                "dispositions (new: absent from the prior release's manifest), open_caveats, provenance_gaps, "
-               "checkout_only_acquisitions, verify (the local copy), and storage.\nopen_caveats lists every caveat "
-               "the release carries, new or carried forward: the headline and then each bullet of the deck's "
+               "checkout_only_acquisitions, verify (the local copy), and storage.\nopen_caveats lists the open "
+               "caveats the release carries, new or carried forward: the headline and then each bullet of the deck's "
                "Limitations and open caveats and Open questions slides, wherever they stand, as slide, line, "
                "text, and sub (nested items, empty for a headline), then each represented flag released with "
                "its caveat, as finding, reason, and "

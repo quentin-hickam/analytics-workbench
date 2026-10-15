@@ -18,7 +18,7 @@ charts/                      # only when findings.md specifies charts: chart-N.c
 datasets/                    # only when datasets were selected
 ```
 
-`START-HERE.md` is plain text telling whoever holds the package or a release what to send the audience (the deck once built, `methodology-note.md` when present, `datasets/`), what builds the deck (the attach list and prompt from `assembly/m365.md`), and what stays internal (`methodology.md`, `manifest.json`, `deck-rules.md`). `check-draft`, not `export`, writes it, before the inventory: `export` runs before the narratives and any methodology note are final, and `check-draft` runs last, on the files as they ship. `--verify-only` verifies it like any other file.
+`START-HERE.md` is plain text telling whoever holds the package or a release what to send the audience (the deck once built, `methodology-note.md` when present, `datasets/`), what builds the deck (the attach list and prompt from `assembly/m365.md`), and what stays internal (`methodology.md`, `manifest.json`, `deck-rules.md`). `check-draft`, not `export`, writes it, before the inventory: `export` runs before the narratives and any methodology note are final, and `check-draft` runs last, on the files as they ship. `--verify-only` verifies it like any other file and refuses a draft that lacks it, since every release includes it.
 
 Shared formats live in root `package-format/`: `findings-template.md`, `methodology-template.md`, `methodology-note-template.md`, `deck-rules.md`, `assembly/m365.md`, and `manifest-template.md`. They are shared across investigations; preserve existing files. The project's copies govern: `findings-template.md` holds the translation rule and slide rules, and `manifest-template.md` the manifest fields.
 
