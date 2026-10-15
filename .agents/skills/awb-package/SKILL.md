@@ -11,7 +11,7 @@ Packaging **serializes** recorded results: it reuses recorded evidence, exports,
 
 1. **Establish** the investigation, package name, dataset selection, and Audience.
 2. **Gather** the record on the read path the change needs.
-3. **Write** `findings.md`, with every **Chart N.** specification, and `methodology.md` from the project's templates, and copy the deck rules and assembly files. This creates the draft.
+3. **Review the headlines, then write** `findings.md`, with every **Chart N.** specification, and `methodology.md` from the project's templates, and copy the deck rules and assembly files. Review headlines before a new draft's full slides; skip the checkpoint for a revision that keeps the storyline.
 4. **Export the files and provenance** with `export` on every revision, then review the flags.
 5. **Review** the narratives with a read-only reviewer against every review rule.
 6. **Check** last with `check-draft`, until done.
@@ -34,14 +34,23 @@ Read the **Audience** section of the investigation's `brief.md`: who will see or
 
 Recover the business question, intended decision or exploratory purpose, audience, usefulness criteria, and evidence the contract needs, with the data limitations and errors that affect interpretation.
 
-When a brief section names a ledger question ID, resolve it with `python3 src/awb.py questions list --all` and `python3 src/awb.py state` (pass `--investigation <name>` to commands for another investigation). An `answered` question supplies its recorded text or linked result's value only when absent from `state`'s answers resting only on unsettled findings; `list` prints each linked finding's status. Any other status, missing ID, or failed lookup leaves the element unsettled. When unsettled, ask only if the question is open and its answerer is `user`, recording the answer with `python3 src/awb.py questions answer Q-NNN --text "<answer>" --by "<the user>"` before writing; otherwise carry the unsettled element, including any usefulness criterion, in both narratives: in `findings.md` in the audience's words, naming its owner; its ID only in `methodology.md`'s **What makes the answer useful:** (or matching) line. Never present it as settled.
+Read the ledger with `python3 src/awb.py questions list --all` and each represented result's recorded settings `answers` to derive the storyline under the contract's **Ledger storyline** rules (pass `--investigation <name>` to commands for another investigation).
+
+When a brief section names a ledger question ID, resolve it with that list. An `answered` question supplies its recorded text or linked result's value; `answered (awaiting recheck)` leaves it unsettled, as does any other status, missing ID, or failed lookup. The list prints each linked finding's status. When unsettled, ask only if the question is open and its answerer is `user`, recording the answer with `python3 src/awb.py questions answer Q-NNN --text "<answer>" --by "<the user>"` before writing; otherwise carry the unsettled element, including any usefulness criterion, in both narratives: in `findings.md` in the audience's words, naming its owner; its ID only in `methodology.md`'s **What makes the answer useful:** (or matching) line. Never present it as settled.
 
 ## 3. Write the draft
+
+### Review the headlines
+
+For a new draft, write the title slide and every slide headline in storyline order, including the conditional **Open questions** slide, before writing the full slide bodies. Show these headlines to the user and ask them to approve or reorder them; wait for their answer before expanding the slides. Apply an approved reorder consistently with the ledger's parent and priority fields so the draft still satisfies the contract. A revision that keeps the storyline skips this step; a changed storyline returns here before full slides are rewritten.
+
+### Write the full slides
 
 Create the draft at the contract's paths, or revise the same files. A draft in an earlier format is rewritten whole in the current format on its next revision; releases stay frozen.
 
 - Before writing, give each column a chart or dataset will export a display name from the glossary in `foundation/display.toml`, e.g. `[columns]` then `return_rate = "Return rate"`; **Data:** lines and dataset headers use these names.
 - `findings.md` is the deck outline under the slide rules and translation rule in `package-format/findings-template.md`; its **Answer** slide is the executive summary.
+- Order finding slides and include **Open questions** under the contract's **Ledger storyline** rules. Report every finding with no linked ledger question, even though its placement last passes the check.
 - `methodology.md` follows `package-format/methodology-template.md` in the workbench's own vocabulary.
 - Copy `package-format/deck-rules.md` and `package-format/assembly/m365.md` into the draft unchanged, at the same paths under it.
 - When a revision brings in facts the investigation records lack, such as a limitation the user supplies, record them in the investigation's `history.md` as record maintenance with the revision, so neither narrative states more than the records.
@@ -71,7 +80,7 @@ A `numbers` row is a number no represented result records. Repair it by the firs
 
 ## 7. Report
 
-Report the review's last line and any accepted `warning` violations, the draft path, the audience `findings.md` is written for, the included datasets, each chart with the result it serializes, provenance gaps, and unresolved caveats. Say it is a working copy the next revision overwrites; marking it delivered freezes it as a numbered release. When a represented flagged finding lacks an applicable disposition, say `awb-release` will ask for one before releasing.
+Report the review's last line and any accepted `warning` violations, the draft path, the audience `findings.md` is written for, the included datasets, each chart with the result it serializes, provenance gaps, unresolved caveats, and the check's `unlinked_findings`. When `open_questions_count` exceeds five, report the count so the audience can review the longer slide. Say it is a working copy the next revision overwrites; marking it delivered freezes it as a numbered release. When a represented flagged finding lacks an applicable disposition, say `awb-release` will ask for one before releasing.
 
 Tell the user how to build the deck: in a Microsoft 365 Copilot app chat, add the PowerPoint agent, attach `findings.md`, every file in `charts/`, `methodology.md`, `deck-rules.md`, and `assembly/m365.md`, and ask for a deck built under those instructions. Datasets travel beside the deck and are not attached.
 

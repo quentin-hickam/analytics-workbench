@@ -1683,3 +1683,195 @@ def test_claim_strength_follows_cited_results_and_records(project, capsys):
     (directory / "manifest.json").write_text(json.dumps(record))
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and "manifest: manifest.json records no results list; rerun export" in report["errors"]
+
+
+def storyline_fixture(project):
+    state = project / "investigations/inv/state.md"
+    write(project, "investigations/inv/state.md", state.read_text().replace("causal (experiment: randomized discount test)", "association"))
+    provenance = load(project / "src/provenance.py", "ledger_story_fixture")
+    for text, parent, priority in [
+        ("How large is the change?", "", "should"),
+        ("Where is the change?", "Q-001", "must"),
+        ("Which customers changed?", "", "must"),
+        ("Which detail helps?", "", "could"),
+    ]:
+        provenance.add_question(project, "inv", text, kind="analytical", answerer="data", origin="scope",
+                                parent=parent, priority=priority)
+    settings = project / "investigations/inv/settings.toml"
+    settings.write_text(settings.read_text().replace('[results.r-001]', '[results.r-001]\nanswers = ["Q-001", "Q-002"]')
+                        .replace('[results.r-002]', '[results.r-002]\nanswers = ["Q-003"]'))
+    for question, result in (("Q-001", "r-001"), ("Q-002", "r-001"), ("Q-003", "r-002")):
+        provenance.answer_question(project, "inv", question, results=[result])
+    draft = project / "deliveries/inv/pkg/draft"
+    shutil.rmtree(draft / "charts")
+    write(draft, "methodology.md", "# Methodology\n\n## Findings\n\n"
+          "### Customer rates differ\n\n**Claim strength:** association\n\n[r-002](../../../../investigations/inv/evidence/r-002.json)\n\n"
+          "### Regional rates differ\n\n**Claim strength:** association\n\nResult: r-001\n\n"
+          "### Coverage remains limited\n\n**Claim strength:** association\n\nNo recorded answer is claimed here.\n\n"
+          "How many claims closed late?\n\nWhich regions close claims late?\n")
+    return draft
+
+
+# Only slides outside the longest run already in order are reported, so one moved slide is one row.
+@pytest.mark.parametrize("headlines, misplaced", [
+    (["Customer rates differ", "Regional rates differ", "Coverage remains limited"], []),
+    (["Regional rates differ", "Customer rates differ", "Coverage remains limited"],
+     [("Regional rates differ", "Q-002", 2)]),
+    (["Coverage remains limited", "Customer rates differ", "Regional rates differ"],
+     [("Coverage remains limited", None, 3)]),
+    (["Coverage remains limited", "Regional rates differ", "Customer rates differ"],
+     [("Coverage remains limited", None, 3), ("Regional rates differ", "Q-002", 2)]),
+])
+def test_check_draft_orders_findings_from_priority_then_tree(project, capsys, headlines, misplaced):
+    draft = storyline_fixture(project)
+    write(draft, "findings.md", "# Order quality\nOperations leads, all regions\n\n## Findings\n\n" +
+          "".join(f"### {headline}\n\n- Rates vary across groups.\n\n**Notes:** Compare the groups.\n\n" for headline in headlines))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert [(row["slide"], row["question"], row["expected_position"]) for row in report["storyline"]] == misplaced
+    assert report["unlinked_findings"] == ["Coverage remains limited"]
+    assert report["passed"] is (not misplaced), report
+    assert code == (1 if misplaced else 0)
+    # Read-only verification uses the same checks and reports the same rows.
+    _, verified = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert verified["storyline"] == report["storyline"]
+
+
+@pytest.mark.parametrize("required, body, placement, problem", [
+    (False, None, "after", None),
+    (False, "- What caused the delay?", "after", "no unanswered must"),
+    (True, None, "after", "missing Open questions"),
+    (True, "- What caused the delay?", "after", None),
+    (True, "* What **caused** the delay?", "after", None),
+    (True, "1. What [caused](https://example.invalid) the delay?", "after", None),
+    (True, "- What caused\n  the delay?", "after", None),
+    (True, "- Why were orders late?", "after", "missing question"),
+    (True, "- Q-001: What caused the delay?", "after", "unexpected question"),
+    (True, "- What caused the delay?\n- What caused the delay?", "after", "repeated question"),
+    (True, "- What caused the delay?\n  - Ask the owner", "after", "nested bullets"),
+    (True, "- What caused the delay?", "before", "after Limitations"),
+    (True, "- What caused the delay?", "late", "before What changed"),
+    (True, "- What caused the delay?", "twice", "exactly one"),
+    (True, "What caused the delay?", "after", "missing question"),
+    (True, "- What caused the delay?\n\n**Chart 2.** Table: supporting rates\n- **Data:** column: Rate", "after", "takes no chart"),
+])
+def test_check_draft_open_questions_rows(project, capsys, required, body, placement, problem):
+    provenance = load(project / "src/provenance.py", "ledger_open_fixture")
+    provenance.add_question(project, "inv", "What caused the delay?", kind="context", answerer="user",
+                            origin="scope", priority="must" if required else "could")
+    # A parked must remains unresolved; set-aside and settled questions are excluded.
+    for text, state in (("Which period?", "declined"), ("Which definition?", "superseded"), ("Which scope?", "answered")):
+        entry = provenance.add_question(project, "inv", text, kind="context", answerer="user", origin="scope", priority="must")
+        if state == "answered":
+            provenance.answer_question(project, "inv", entry["id"], text="Current scope", by="user")
+        else:
+            provenance.set_question(project, "inv", [entry["id"]], state, reason="Set aside")
+    draft = project / "deliveries/inv/pkg/draft"
+    limitations = "\n## Limitations and open caveats\n\n**Headline:** Coverage remains limited\n\n**Notes:** Interpret with care.\n"
+    changed = "\n## What changed since the last version\n\n**Headline:** Coverage is clearer\n\n**Notes:** Definitions are clearer.\n"
+    opened = ("\n## Open questions\n\n**Headline:** Some questions remain\n\n" + body +
+              "\n\n**Notes:** These answers matter.\n") if body is not None else ""
+    parts = {"after": limitations + opened + changed, "before": opened + limitations + changed,
+             "late": limitations + changed + opened, "twice": limitations + opened + opened + changed}
+    write(draft, "findings.md", FINDINGS + parts[placement])
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    if problem:
+        assert code == 1 and any(problem in row["problem"] for row in report["open_questions"]), report
+    else:
+        assert report["open_questions"] == [] and code == 0 and report["passed"], report
+    _, verified = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert verified["open_questions"] == report["open_questions"]
+
+
+def test_open_questions_includes_parked_and_recheck_without_truncation(project, capsys):
+    provenance = load(project / "src/provenance.py", "ledger_complete_fixture")
+    questions = ["Which regions need review?", "Which period applies?", "Which owner decides?",
+                 "Which population matters?", "Which definition applies?", "Which caveat matters?"]
+    for index, text in enumerate(questions):
+        provenance.add_question(project, "inv", text, kind="context", answerer="data" if index == 0 else "user",
+                                origin="scope", priority="must")
+    settings = project / "investigations/inv/settings.toml"
+    settings.write_text(settings.read_text().replace('[results.r-001]', '[results.r-001]\nanswers = ["Q-001"]'))
+    provenance.answer_question(project, "inv", "Q-001", results=["r-001"])
+    provenance.set_question(project, "inv", ["Q-002"], "parked", reason="Waiting on owner")
+    provenance.flag_findings(project, "inv", [{"result": "r-001", "reason": "Changed input"}])
+    draft = project / "deliveries/inv/pkg/draft"
+    record = manifest(project)
+    record["revalidation_flags"] = [{"finding": "West volume is stable", "reason": "Changed input", "represented_in": "none", "disposition": "none"}]
+    write(draft, "manifest.json", json.dumps(record))
+    before_open = FINDINGS + "\n## Limitations and open caveats\n\n**Headline:** Coverage remains limited\n\n**Notes:** Interpret carefully.\n"
+    opened = "\n## Open questions\n\n**Headline:** These answers still matter\n\n" + "\n".join("- " + text for text in questions) + "\n\n**Notes:** Confirm the unanswered questions.\n"
+    write(draft, "findings.md", before_open + opened)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["open_questions_count"] == 6
+    assert report["open_questions"] == [] and report["outline"] == [] and code == 0, report
+    write(draft, "findings.md", before_open + opened.replace("- Which regions need review?\n", ""))
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert any(row.get("question") == "Which regions need review?" and row["problem"] == "missing question"
+               for row in report["open_questions"])
+
+
+@pytest.mark.parametrize("citation, unlinked", [
+    ("Result: r-001", ["Coverage remains limited"]),
+    ("Result: `r-001`", ["Coverage remains limited"]),
+    ("[Evidence](../../../../investigations/inv/evidence/r-001.json)", ["Coverage remains limited"]),
+    ("Result (r-001).", ["Coverage remains limited"]),
+    ("Result: r-001-extra", ["Regional rates differ", "Coverage remains limited"]),
+    ("<!-- Result: r-001 -->", ["Regional rates differ", "Coverage remains limited"]),
+    ("The regional result", ["Regional rates differ", "Coverage remains limited"]),
+    (None, ["Regional rates differ", "Coverage remains limited"]),
+])
+def test_storyline_citation_grammar_reports_unlinked_text(project, capsys, citation, unlinked):
+    draft = storyline_fixture(project)
+    write(draft, "findings.md", "# Order quality\nOperations leads, all regions\n\n## Findings\n\n"
+          "### Customer rates differ\n\n**Notes:** Compare customers.\n\n"
+          "### Regional rates differ\n\n**Notes:** Compare regions.\n\n"
+          "### Coverage remains limited\n\n**Notes:** Interpret carefully.\n")
+    path = draft / "methodology.md"
+    if citation is None:
+        (project / "investigations/inv/evidence/r-001.json").unlink()
+    else:
+        path.write_text(path.read_text().replace("Result: r-001", citation))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["unlinked_findings"] == unlinked and report["storyline"] == []
+    assert code == 0, report
+
+
+@pytest.mark.parametrize("settings_text, empty_ledger, expected", [
+    ('[results.r-001]\nquestion = "Which regions?"\nanswers = "Q-001"\n', False, "answers must be a list"),
+    ('[results.r-001]\nquestion = "Which regions?"\nanswers = ["Q-999"]\n', False, "questions.json does not hold"),
+    ('[results.r-001]\nquestion = "Which regions?"\nanswers = ["Q-999"]\n', True, "questions.json does not hold"),
+    ('[parameters]\nscope = "current"\n', False, "settings"),
+    ('[results.r-001\n', False, "settings"),
+])
+def test_storyline_refuses_unreadable_or_invalid_declared_answers(project, capsys, settings_text, empty_ledger, expected):
+    draft = storyline_fixture(project)
+    write(draft, "findings.md", "# Order quality\nOperations leads, all regions\n\n## Findings\n\n"
+          "### Regional rates differ\n\n**Notes:** Compare the regions.\n")
+    # Use the alternative settings file named in the evidence, rather than assume settings.toml.
+    evidence = project / "investigations/inv/evidence/r-001.json"
+    recorded = json.loads(evidence.read_text())
+    recorded["settings"]["path"] = "investigations/inv/analysis.toml"
+    evidence.write_text(json.dumps(recorded))
+    write(project, "investigations/inv/analysis.toml", settings_text)
+    if empty_ledger:
+        write(project, "investigations/inv/questions.json", '{"schema": "awb-questions/1", "questions": []}')
+        (project / "investigations/inv/questions.md").unlink()
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and any("storyline check:" in error and expected in error for error in report["errors"]), report
+
+
+def test_storyline_should_precedes_could_and_ties_keep_order(project, capsys):
+    draft = storyline_fixture(project)
+    path = project / "investigations/inv/settings.toml"
+    path.write_text(path.read_text().replace('answers = ["Q-001", "Q-002"]', 'answers = ["Q-001"]')
+                    .replace('answers = ["Q-003"]', 'answers = ["Q-004"]'))
+    write(draft, "findings.md", "# Order quality\nOperations leads, all regions\n\n## Findings\n\n"
+          "### Customer rates differ\n\n**Notes:** Compare customers.\n\n"
+          "### Regional rates differ\n\n**Notes:** Compare regions.\n")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert [(row["slide"], row["question"], row["expected_position"]) for row in report["storyline"]] == [
+        ("Customer rates differ", "Q-004", 2)]
+    # Equal question priority and position leave the author's ordering intact.
+    path.write_text(path.read_text().replace('answers = ["Q-004"]', 'answers = ["Q-001"]'))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["storyline"] == [] and code == 0, report

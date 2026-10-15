@@ -9,9 +9,9 @@ Write every section in the audience's words: the glossary's business terms for n
 ## Slide rules
 
 - The file opens with a `#` heading giving the deck title in the audience's words, followed by one subtitle line naming the audience, population, and period in plain words. Together they are the title slide.
-- Each `##` section below is one slide, in this order, except **Findings**, which is a deck section holding one slide per `###` finding. Order the finding slides by relevance to the decision; that order is the storyline.
+- Each `##` section below is one slide, in this order, except **Findings**, which is a deck section holding one slide per `###` finding. Order finding slides by the highest-priority ledger question their results' recorded settings `answers` identify (`must`, `should`, `could`), then that question's depth-first position in the ledger tree, whose siblings sort by priority then ID. Findings answering no ledger question go last and are named in the draft report.
 - A slide's headline is one sentence of at most 15 words stating its point with its key number, never a topic label. A finding slide's `###` heading is its headline; every other slide opens with a `**Headline:**` line.
-- The slide body is at most five bullets, each one claim with its number written exactly as the slide should show it. Content that does not fit goes to another slide or into the notes. A slide holds nothing besides its headline, bullets, chart, and notes; the title slide holds only its subtitle line.
+- The slide body is at most five bullets, each one claim with its number written exactly as the slide should show it. **Open questions** is exempt from the bullet limit so it can list every required question. Other content that does not fit goes to another slide or into the notes. A slide holds nothing besides its headline, bullets, chart, and notes; the title slide holds only its subtitle line.
 - Word each finding no more strongly than its claim strength in the investigation's state. Below causal, say what moved together or differed ("stores offering the discount had 4 points fewer late orders"), never that one thing drives, causes, or leads to another; `check-draft` refuses such wording anywhere on the slide, its headline and **Caveat:** bullets included.
 - A caveat sits on the slide of the claim it qualifies, as a bullet beginning **Caveat:**. A caveat on a flagged conclusion begins **Awaiting revalidation:** followed by the reason in plain words, on every slide where that conclusion appears.
 - Each slide after the title slide ends with a `**Notes:**` paragraph, the speaker notes: what a presenter needs to explain the slide, such as the fuller reasoning, the plain-language method behind this point, and context the bullets compress. Notes add no claim the bullets and the methodology do not support.
@@ -61,6 +61,14 @@ Give the method in plain language: the definitions the answer depends on; the so
 **Headline:** <the limitation that matters most to the decision>
 
 List the source limitations, assumptions, and unresolved issues that limit interpretation. List each flagged finding as unresolved, with its reason.
+
+## Open questions
+
+**Headline:** <what remains unanswered for the decision>
+
+List exactly the unanswered `must` ledger questions, one per top-level bullet, in their exact rendered ledger wording with no question IDs or extra commentary. Normal inline Markdown formatting is allowed; nested bullets are not. Include open and parked questions and answered data questions displaying **answered (awaiting recheck)** because any answering finding is flagged or superseded. Declined or superseded questions are set aside and excluded. Omit the whole slide when no required questions remain. Include every required question even when there are more than five, and report that count.
+
+**Notes:** <why the unanswered questions matter to the decision>
 
 ## What changed since the last version
 

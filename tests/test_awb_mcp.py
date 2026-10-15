@@ -4,6 +4,7 @@
 # test_setup_installs_into_a_folder_without_helpers: setup round trip: check writes nothing, then install writes src/awb.py and the receipt; a folder without workbench markers exits 1 with the installer's hint.
 # test_read_commands_round_trip_and_write_nothing: every read command without DuckDB (state, questions, stale, review-rules, check-draft, status, help) runs its helper and leaves the project, .git included, unchanged.
 # test_records_round_trip: records adds a question, edits next steps, adds a review rule, flags through stdin, and runs clean-record, each writing its record.
+# test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit; read returns both changes while keeping its answer, and attempts to change answered question content or replace its answer are refused.
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
 # test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, read shows sql, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
 # test_read_sql_refuses_writes: read sql and profile refuse COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, CREATE, a SELECT calling enable_profiling with save_location or enable_logging with file storage, and a query() whose SQL differs between the plan check and the run, and write no file; read refuses arguments outside its command and help topics outside the helpers.
@@ -265,6 +266,40 @@ def test_records_round_trip(workbench, connect):
     text, error = client.call("records", command="clean-record", args=["absent", "--dry-run"], stdin="{}")
     assert error and "absent" in text
     assert client.roots_asked == 6
+
+
+def test_question_tree_metadata_round_trip(workbench, connect):
+    client = connect(cwd=workbench)
+    for args in (["add", "What should the retention plan decide?", "--kind", "decision",
+                  "--answerer", "user", "--origin", "scope"],
+                 ["add", "Which regions churn most?", "--kind", "analytical", "--answerer", "data",
+                  "--origin", "scope", "--parent", "Q-001", "--priority", "must"],
+                 ["add", "Which period should the plan cover?", "--kind", "context", "--answerer", "user",
+                  "--origin", "scope"]):
+        text, error = client.call("records", command="questions", args=args)
+        assert not error, text
+    text, error = client.call("read", command="questions", all=True)
+    assert not error, text
+    assert "  Q-002 open [data, analytical, must; parent: Q-001] Which regions churn most?" in text
+    text, error = client.call("records", command="questions", args=[
+        "answer", "Q-003", "--text", "The next quarter", "--by", "user"])
+    assert not error, text
+    text, error = client.call("records", command="questions", args=[
+        "edit", "Q-003", "--parent", "Q-001", "--priority", "could"])
+    assert not error, text
+    text, error = client.call("read", command="questions", all=True)
+    assert not error, text
+    assert ("  Q-003 answered [user, context, could; parent: Q-001] "
+            "Which period should the plan cover? -> The next quarter (user)") in text
+    for flag, value in (("--text", "A different question?"), ("--kind", "analytical"),
+                        ("--answerer", "stakeholder"), ("--unblocks", "Another decision")):
+        refusal, error = client.call("records", command="questions", args=[
+            "edit", "Q-003", flag, value, "--priority", "must"])
+        assert error and "only an open or parked question" in refusal
+    refusal, error = client.call("records", command="questions", args=[
+        "answer", "Q-003", "--text", "The next year", "--by", "user"])
+    assert error and "an answer is never replaced" in refusal
+    assert client.call("read", command="questions", all=True) == (text, False)
 
 
 def test_concurrent_write_calls_keep_every_update(workbench, connect):

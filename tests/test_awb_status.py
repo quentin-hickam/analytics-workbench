@@ -1092,3 +1092,52 @@ def test_probe_upstream_flag_reaches_the_probe(workbench, monkeypatch, capsys):
     status.main()
     files = json.loads(capsys.readouterr().out)["upstream"]["files"]
     assert [(file["path"], file["result"]) for file in files] == [("a.csv", "changed")]
+
+
+@pytest.mark.parametrize("unsettled", ["revalidation-needed", "revalidation-needed (was supported)",
+                                       "revalidation-needed (was provisional)", "revalidation-needed (was superseded)", "superseded"])
+def test_question_status_json_derives_recheck_from_any_answer(workbench, unsettled):
+    write(workbench, "investigations/churn/state.md", f'''# State
+Last updated: 2026-10-01
+
+## Current findings
+| Finding | Evidence | Status | Claim | Revalidation reason or caveat |
+| --- | --- | --- | --- | --- |
+| Regional cut | [r1](evidence/r1.json) | {unsettled} | association | |
+| Overall cut | [r2](evidence/r2.json) | supported | association | |
+''')
+    questions = []
+    for qid, answerer, stored, results in [
+        ("Q-001", "data", "answered", ["r1", "r2"]),
+        ("Q-002", "data", "answered", ["r2"]),
+        ("Q-003", "user", "answered", []),
+        ("Q-004", "stakeholder", "open", []),
+        ("Q-005", "data", "superseded", ["r1"]),
+    ]:
+        questions.append(dict(id=qid, text="Which regions?", answerer=answerer, status=stored,
+                              results=results, kind="context", answer="Confirmed" if answerer == "user" else "",
+                              by="user" if answerer == "user" else "", parent="", priority="should",
+                              unblocks="", origin="scope", reason="Scope changed" if stored == "superseded" else "",
+                              updated="2026-10-01"))
+    path = write(workbench, "investigations/churn/questions.json", json.dumps({"schema": "awb-questions/1", "questions": questions}))
+    before = path.read_bytes()
+    output = status.collect(workbench)["active"]["questions"]
+    assert output["counts"] == {"answered (awaiting recheck)": 1, "answered": 2, "open": 1, "superseded": 1}
+    assert output["awaiting_recheck"] == [f"Q-001 answered (awaiting recheck) [data, context] Which regions? -> r1 ({unsettled}); r2 (supported)"]
+    assert output["open"] == ["Q-004 [stakeholder, context] Which regions?"]
+    assert "answered_by_unsettled" not in output
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("unrecognized", ["flagged", "revalidation-needed (review pending)", "superseded (was supported)", "revalidation-needed (was unknown)"])
+def test_recheck_status_refuses_unsupported_finding_status_text(workbench, unrecognized):
+    path = workbench / "investigations/churn/state.md"
+    path.write_text(path.read_text().replace("evidence.json | revalidation-needed (was supported)",
+                                            f"[r1](evidence/r1.json) | {unrecognized}"))
+    write(workbench, "investigations/churn/questions.json", json.dumps({"schema": "awb-questions/1", "questions": [
+        {"id": "Q-001", "text": "Which regions?", "status": "answered", "answerer": "data", "kind": "analytical",
+         "answer": "", "by": "", "results": ["r1"], "parent": "", "priority": "must", "origin": "scope",
+         "reason": "", "unblocks": "", "updated": "2026-10-01"}]}))
+    result = status.collect(workbench)
+    assert result["active"]["questions"]["awaiting_recheck"] == []
+    assert any("Unrecognized finding status" in row["reason"] for row in result["uncertainties"])
