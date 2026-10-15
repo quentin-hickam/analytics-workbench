@@ -50,8 +50,9 @@
 # test_numbers_count_lines_as_the_claims_check_does_after_a_comment: a comment holding a line break that str.splitlines() sees (U+2028, form feed, NEL) keeps the numbers check's line numbers on the claims check's, so the accepted-claim skip cannot land on the next line.
 # test_methodology_note_is_checked_with_rows_naming_it: a clean methodology-note.md passes and joins the inventory; an internal name, an untraced number, causal wording above the strongest represented claim, and an HTML block in it fail check-draft and release with rows naming the file; without it check-draft reports exactly what it did before.
 # test_check_draft_counts_main_and_appendix_slides: slides counts the main sequence, title included, and the appendix apart; How we know under ## Appendix passes.
-# test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section and its wording is not read; an appendix finding slide is held to its claim strength.
-# test_presentation_order_decides_finding_order_when_set: absent or none leaves the ledger order; a non-ledger order the slides follow passes, inline markup read as the heading is; an order missing a finding, listing one twice, naming a heading no slide has, out of the slides' order, not a list, or holding a blank entry fails storyline in both modes.
+# test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section; an appendix finding slide is held to its claim strength.
+# test_appendix_how_we_know_and_limitations_wording_is_not_read: with only an association result represented, causal wording on How we know and Limitations under ## Appendix gives no claims row, and the same wording on an appendix finding slide is refused.
+# test_presentation_order_decides_finding_order_when_set: absent or none leaves the ledger order; a non-ledger order the slides follow passes, inline markup read as the heading is; an order missing a finding, listing one twice, naming a heading no slide has, out of the slides' order, not a list, holding a blank entry, or recorded as JSON null fails storyline in both modes.
 # test_export_keeps_presentation_order: export keeps the hand-recorded presentation_order.
 # test_presentation_order_is_no_provenance_gap: a presentation_order heading that starts with Unknown is no release provenance gap, as allowed_numbers is not.
 # test_storyline_orders_main_and_appendix_findings_each_by_the_ledger: main and appendix finding slides are ranked separately, the appendix numbering on.
@@ -2116,7 +2117,7 @@ def test_appendix_slides_are_checked_like_main_slides(project, capsys):
     west = DECK_FINDINGS[DECK_FINDINGS.index(WEST):DECK_FINDINGS.index("### Discounts")]
     how = DECK_FINDINGS[DECK_FINDINGS.index("## How we know"):DECK_FINDINGS.index("## Limitations")]
     moved = appendix_deck(DECK_FINDINGS.replace(how, ""), west, "\n" + how.replace("## How", "### How"))
-    # How we know needs no methodology section, and its caveat wording is not read, from the appendix too.
+    # How we know needs no methodology section from the appendix too.
     claim_draft(project, moved)
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["passed"] and report["headings"] == [] and report["claims"] == [], report
@@ -2128,7 +2129,31 @@ def test_appendix_slides_are_checked_like_main_slides(project, capsys):
         (WEST_DISCOUNT, "drives", text[:text.index("drives")].count("\n") + 1)]
 
 
+def test_appendix_how_we_know_and_limitations_wording_is_not_read(project, capsys):
+    # Only the association result is represented, so causal wording on a read slide is refused.
+    discount = DECK_FINDINGS[DECK_FINDINGS.index("### Discounts"):DECK_FINDINGS.index("## How we know")]
+    closing = DECK_FINDINGS[DECK_FINDINGS.index("## How we know"):]
+    findings = (DECK_FINDINGS.replace(discount, "").replace(closing, "")
+                .replace("Discounts drive 4 points fewer late orders", "Late orders rose in the west"))
+    methodology = CLAIM_METHODOLOGY[:CLAIM_METHODOLOGY.index("### Discounts")]
+    moved = findings + "## Appendix\n\n" + closing.replace("## ", "### ")
+    claim_draft(project, moved, methodology, results=("r-009",))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["claims"] == [], report
+    assert report["slides"] == {"main": 3, "appendix": 2}, report
+    # The same wording on an appendix finding slide is read.
+    slide = closing.replace("## How we know", "### Feed outage").replace("**Headline:** Totals reconcile to the "
+                                                                          "ledger\n\n", "")
+    slide = slide[:slide.index("## Limitations")]
+    claim_draft(project, moved + "\n" + slide, methodology + "\n### Feed outage\n\n" + WEST_CLAIM
+                + "\n\nResult `r-009`.\n", results=("r-009",))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and [(row["section"], row["phrase"]) for row in report["claims"]] == [
+        ("Feed outage", "due to")], report
+
+
 ORDER = ["Regional rates differ", "Coverage remains limited", "Customer rates differ"]
+NULL = object()  # presentation_order recorded as JSON null, which is malformed rather than absent
 
 
 def ordered_deck(project, headlines, order):
@@ -2136,7 +2161,7 @@ def ordered_deck(project, headlines, order):
     write(draft, "findings.md", deck("".join(f"### {headline}\n\n- Rates vary across groups.\n\n**Notes:** Compare "
                                              "the groups.\n\n" for headline in headlines)))
     if order is not None:
-        set_manifest(project, presentation_order=order)
+        set_manifest(project, presentation_order=None if order is NULL else order)
     return draft
 
 
@@ -2163,7 +2188,11 @@ def ordered_deck(project, headlines, order):
     ([ORDER[0], ORDER[1], ""],
      [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
                    "or none")]),
-], ids=["absent", "none", "followed", "missing", "repeated", "unknown", "moved", "markup", "not a list", "blank"])
+    (NULL,
+     [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
+                   "or none")]),
+], ids=["absent", "none", "followed", "missing", "repeated", "unknown", "moved", "markup", "not a list", "blank",
+        "null"])
 def test_presentation_order_decides_finding_order_when_set(project, capsys, order, rows):
     ordered_deck(project, ORDER, order)
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
