@@ -29,6 +29,7 @@
 # test_unreadable_enumeration_is_unknown_not_empty: an unreadable directory yields unknown, never an empty inventory.
 # test_none_chosen_is_a_recorded_decision: `none chosen`, backticked or bare `none`, reports availability none chosen, not unrecorded.
 # test_absent_storage_remains_actionable_when_acquisitions_and_releases_exist: absent lines read unrecorded alongside acquisitions and releases.
+# test_latest_release_in_storage_reads_the_storage_layout: with reachable release storage, a package's latest release counts as stored only at <location>/<investigation>/<package>/<n>/, not under an earlier released/ folder; unrecorded or unreachable storage leaves it null.
 # test_upstream_probe_reports_each_file_changed_unchanged_or_unknown_without_writes: land()'s upstream fields drive one HEAD per probeable file; ETag wins over Last-Modified unless only the ETag changed, a weak ETag and an equal date in another form match, HTTP and network errors are unknown, and nothing is written.
 # test_an_unusable_server_validator_is_unknown_and_the_probe_continues: a blank ETag or a Last-Modified that does not parse (including an overflowing year or offset) gives no evidence of change; the other validator decides if usable, else the file is unknown; two unparseable dates are compared as text; later files are still probed.
 # test_a_relanded_url_is_checked_only_in_its_latest_acquisition: after a changed upstream is landed again, only the newest acquisition of that source and URL is probed and the earlier one counts as superseded, even when the newer one records no validator.
@@ -629,6 +630,26 @@ def test_absent_storage_remains_actionable_when_acquisitions_and_releases_exist(
     assert result["landed_data_storage"]["availability"] == "unrecorded"
     assert result["release_storage"]["availability"] == "unrecorded"
     assert result["uncertainties"] == []
+
+
+def test_latest_release_in_storage_reads_the_storage_layout(workbench, tmp_path_factory):
+    package(workbench, "none")
+    assert status.collect(workbench)["packages"][0]["latest_release_in_storage"] is None  # storage unrecorded
+    store = tmp_path_factory.mktemp("store")
+    readme = workbench / "README.md"
+    readme.write_text(readme.read_text().replace("not yet recorded", f"`{store}`"))
+    result = status.collect(workbench)
+    assert result["release_storage"]["availability"] == "reachable"
+    assert result["packages"][0]["latest_release_in_storage"] is False
+    (store / "churn/review/released/002").mkdir(parents=True)  # an earlier layout's copy is not read
+    assert status.collect(workbench)["packages"][0]["latest_release_in_storage"] is False
+    (store / "churn/review/002").mkdir(parents=True)
+    result = status.collect(workbench)
+    assert result["packages"][0]["latest_release_in_storage"] is True and result["uncertainties"] == []
+    readme.write_text(readme.read_text().replace(str(store), str(store / "gone")))
+    result = status.collect(workbench)
+    assert result["release_storage"]["availability"] == "unreachable"
+    assert result["packages"][0]["latest_release_in_storage"] is None
 
 
 def test_status_reads_rendered_table_with_json_present(workbench):

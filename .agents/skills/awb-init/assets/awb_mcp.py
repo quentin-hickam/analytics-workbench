@@ -175,8 +175,9 @@ TOOLS = [
                      "openWorldHint": False}},
     _write_tool(
         "package", "Build package draft",
-        "Write a package draft's exports and manifest. command export: chart and dataset files and "
-        "producing state; check-draft: run every draft check and rewrite the manifest inventory (the read "
+        "Write a package draft's exports and manifest. command export: chart and dataset files, a --chart's "
+        "@first=<n> or @where=<column>=<value> row selection included, and producing state; check-draft: run "
+        "every draft check, write START-HERE.md, and rewrite the manifest inventory (the read "
         "tool's check-draft verifies without writing).",
         ("export", "check-draft")),
     _write_tool(

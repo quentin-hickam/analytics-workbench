@@ -23,7 +23,7 @@ Commits: on request
 - `data/raw/` holds independently landed originals when data has been acquired, one directory per acquisition with its `provenance.json`. It is excluded from Git, so originals persist only where the project copies them, recorded in the `Landed data is kept at` line above.
 - `data/parquet/` holds validated publications for the default batch workflow, each with its `publication.json`; each canonical view names the publication it reads.
 - `data/cache/` holds only deliberate, rebuildable expensive results recorded in the foundation catalog.
-- `deliveries/` holds package drafts and numbered releases, created only on a package request. It is excluded from Git, so releases persist only where the project copies them, recorded in the `Released packages are kept at` line above.
+- `deliveries/` holds package drafts and numbered releases, created only on a package request. Each draft's `START-HERE.md` says which files go to the audience, which build the deck, and which stay internal. The folder is excluded from Git, so releases persist only where the project copies them, recorded in the `Released packages are kept at` line above, each as `<location>/<investigation>/<package>/<n>/`.
 
 Directories are created when needed, so a new workbench may contain only the foundation records and `foundation/references/`, the helpers under `src/`, and its first investigation.
 
