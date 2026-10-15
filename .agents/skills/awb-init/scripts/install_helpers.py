@@ -24,10 +24,10 @@ then the file to merge the entry into as the fallback for other shells or a host
 For Claude Code the fallback says to close every Claude Code session first, since Claude Code rewrites
 that file while it runs. Known limits: this prints a merge entry, not a complete replacement config; it
 neither reads existing registrations nor detects the host, checks host policies, or imports
-credentials. With an awb registration already present, claude mcp add-json refuses it (run
-claude mcp remove --scope user awb first) and codex mcp add replaces it; what copilot mcp add does was
-not checked. Variables belong in env, never envFile. Config destinations use COPILOT_HOME or
-CODEX_HOME when nonempty, otherwise the host's default home path.
+credentials. With an awb registration already present, claude mcp add-json and copilot mcp add refuse
+it with exit 1 (run claude mcp remove --scope user awb or copilot mcp remove awb first) and codex mcp
+add replaces it. Variables belong in env, never envFile. Config destinations use COPILOT_HOME,
+CLAUDE_CONFIG_DIR or CODEX_HOME when nonempty, otherwise the host's default home path.
 
 Install/check modes print one line of JSON:
   project, workbench  the project root and whether workbench markers exist; when absent, missing lists
@@ -311,7 +311,7 @@ def _add_command(host):
 SERVER_HOSTS = {
     "copilot": (lambda: _home("COPILOT_HOME", ".copilot") / "mcp-config.json", _json_entry, _add_command("copilot"),
                 ""),
-    "claude": (lambda: Path.home() / ".claude.json", _json_entry, _claude_command,
+    "claude": (lambda: _home("CLAUDE_CONFIG_DIR", "") / ".claude.json", _json_entry, _claude_command,
                " Close every Claude Code session first, since Claude Code rewrites that file while it runs."),
     "codex": (lambda: _home("CODEX_HOME", ".codex") / "config.toml", _codex_entry, _add_command("codex"), ""),
 }
@@ -336,7 +336,7 @@ def print_server_entry(host):
     if old_python or virtual:
         print("Use a stable Python 3.10+ interpreter outside a project virtual environment.", file=sys.stderr)
     print("Register awb with the host's own command, in a POSIX shell such as bash or zsh:", file=sys.stderr)
-    print(shlex.join(command(entry)), file=sys.stderr)
+    print(" ".join(shlex.quote(part) for part in command(entry)), file=sys.stderr)  # shlex.join needs 3.8.
     print("Fallback, for other shells or when that command is unavailable: merge the printed awb entry into "
           f"{destination()}; preserve other configuration.{fallback_note}", file=sys.stderr)
 

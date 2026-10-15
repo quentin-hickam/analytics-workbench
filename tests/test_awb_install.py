@@ -18,8 +18,8 @@
 # test_upgrade_replaces_only_earlier_copies: --upgrade rewrites earlier helpers, package formats and guides, records them in the receipt, and leaves customized ones byte for byte.
 # test_upgrade_replace_and_remove_retired: named customized copies are replaced; unmodified retired files are removed with their emptied directory and receipt entry; customized retired files stay.
 # test_cli_arguments: --replace repeats one path per flag, needs --upgrade, and rejects an uncopied path with exit 2.
-# test_print_json_server_entry_without_writing: copilot and claude print the same JSON stdio entry with their own destination (COPILOT_HOME moves only copilot's); both option spellings print without writing.
-# test_print_server_entry_interpreter_warnings: old Python or a virtual environment warns only on stderr before the registration lines, with unchanged host entry and no writes; a stable Python 3.10+ emits no warning.
+# test_print_json_server_entry_without_writing: copilot and claude print the same JSON stdio entry with their own destination (COPILOT_HOME moves only copilot's, CLAUDE_CONFIG_DIR only claude's); both option spellings print without writing.
+# test_print_server_entry_interpreter_warnings: old Python, down to one without shlex.join, or a virtual environment warns only on stderr before the registration lines, with unchanged host entry and no writes; a stable Python 3.10+ emits no warning.
 # test_print_codex_server_entry_with_quoted_unicode_paths: native TOML with absolute paths and safe quoting; default/overridden destination, without writing.
 # test_print_host_registration_command: each host's own registration command prints on stderr, POSIX-quoted with absolute interpreter and server paths that hold spaces, quotes and Unicode, before the fallback merge line, which for claude says to close Claude Code first; the entry still prints on stdout; nothing is written or run.
 # test_server_entry_refusals_write_nothing: exact host choices and print-only mode refuse unknown/missing values, unknown/abbreviated options, and install arguments with exit 2 and no stdout or writes.
@@ -401,18 +401,20 @@ def test_cli_arguments(upgradable):
     assert json.loads(result.stdout)["files"]["src/provenance.py"] == "customized"
 
 
-@pytest.mark.parametrize("arguments, copilot_home, destination", [
-    (["--mcp-config", "copilot"], None, "home/.copilot/mcp-config.json"),
-    (["--mcp-config=copilot"], None, "home/.copilot/mcp-config.json"),
-    (["--mcp-config", "copilot"], "copilot config", "copilot config/mcp-config.json"),
-    (["--mcp-config", "claude"], None, "home/.claude.json"),
-    (["--mcp-config", "claude"], "copilot config", "home/.claude.json"),
+@pytest.mark.parametrize("arguments, config_dirs, destination", [
+    (["--mcp-config", "copilot"], {}, "home/.copilot/mcp-config.json"),
+    (["--mcp-config=copilot"], {}, "home/.copilot/mcp-config.json"),
+    (["--mcp-config", "copilot"], {"COPILOT_HOME": "copilot config"}, "copilot config/mcp-config.json"),
+    (["--mcp-config", "copilot"], {"CLAUDE_CONFIG_DIR": "claude config"}, "home/.copilot/mcp-config.json"),
+    (["--mcp-config", "claude"], {}, "home/.claude.json"),
+    (["--mcp-config", "claude"], {"COPILOT_HOME": "copilot config"}, "home/.claude.json"),
+    (["--mcp-config", "claude"], {"CLAUDE_CONFIG_DIR": "claude config"}, "claude config/.claude.json"),
 ])
-def test_print_json_server_entry_without_writing(tmp_path, arguments, copilot_home, destination):
+def test_print_json_server_entry_without_writing(tmp_path, arguments, config_dirs, destination):
     env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
     env.pop("COPILOT_HOME", None)
-    if copilot_home is not None:
-        env["COPILOT_HOME"] = str(tmp_path / copilot_home)
+    env.pop("CLAUDE_CONFIG_DIR", None)
+    env.update({variable: str(tmp_path / directory) for variable, directory in config_dirs.items()})
     before = snapshot(tmp_path)
     result = subprocess.run([sys.executable, str(SCRIPT), *arguments],
                             cwd=tmp_path, env=env, capture_output=True, text=True)
@@ -440,6 +442,7 @@ FALLBACK_NOTES = {
 @pytest.mark.parametrize("version, virtual, warnings", [
     ((3, 10), False, []),
     ((3, 9), False, ["Warning: this interpreter is older than Python 3.10."]),
+    ((3, 7), False, ["Warning: this interpreter is older than Python 3.10."]),
     ((3, 14), True, ["Warning: this interpreter runs in a virtual environment."]),
     ((3, 9), True, ["Warning: this interpreter is older than Python 3.10.",
                     "Warning: this interpreter runs in a virtual environment."]),
@@ -448,6 +451,7 @@ def test_print_server_entry_interpreter_warnings(tmp_path, monkeypatch, capsys, 
                                                version, virtual, warnings):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("COPILOT_HOME", raising=False)
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("CODEX_HOME", raising=False)
     monkeypatch.setattr(sys, "version_info", (3, 10))
     monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "stable-python"))
@@ -465,6 +469,8 @@ def test_print_server_entry_interpreter_warnings(tmp_path, monkeypatch, capsys, 
     destination_line = stable.err
 
     monkeypatch.setattr(sys, "version_info", version)
+    if version < (3, 8):
+        monkeypatch.delattr(shlex, "join")  # Added in Python 3.8.
     if virtual:
         monkeypatch.setattr(sys, "prefix", str(tmp_path / "project/.venv"))
     installer.print_server_entry(host)
@@ -529,11 +535,12 @@ def test_print_host_registration_command(tmp_path, host, destination):
     server.parent.mkdir(parents=True)
     shutil.copyfile(SCRIPT, script)
     shutil.copyfile(SKILLS / "awb-init/assets/awb_mcp.py", server)
-    python = tmp_path / "stable python" / "python3"
+    python = tmp_path / "stable \"py\" it's 🐍" / "python3"
     python.parent.mkdir()
     python.symlink_to(Path(sys.executable).resolve())
     env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
     env.pop("COPILOT_HOME", None)
+    env.pop("CLAUDE_CONFIG_DIR", None)
     env.pop("CODEX_HOME", None)
     before = snapshot(tmp_path)
     result = subprocess.run([str(python), str(script), "--mcp-config", host],
