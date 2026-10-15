@@ -159,8 +159,9 @@ def _evidence_files(root, investigation):
 # two headings apart. group: the paragraph or heading the line belongs to, None for blank, fence, and
 # hidden lines. start: the line opens a paragraph. declares: it opens a top-level paragraph at column 0,
 # the only place a **Claim strength:** line counts. item: the list depth of the item the line opens, 1 for a
-# top-level item, else 0. inside: the line is in a list item or block quote.
-_Line = namedtuple("_Line", "number kind level title plain prose spaced links group start declares item inside")
+# top-level item, else 0. listed: the line is in a list item, so a paragraph it opens continues that item; a
+# paragraph opened in a block quote outside any list is a block of its own.
+_Line = namedtuple("_Line", "number kind level title plain prose spaced links group start declares item listed")
 
 _FENCE = re.compile(r"( {0,3})(`{3,}|~{3,})")
 _CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.DOTALL)
@@ -318,7 +319,7 @@ def _view(text):
 
     def row(number, kind, leaf="", **fields):
         rows.append({"number": number, "kind": kind, "leaf": leaf, "level": 0, "title": None, "group": None,
-                     "start": False, "inside": False, "indent": 0, "item": 0, **fields})
+                     "start": False, "inside": False, "indent": 0, "item": 0, "listed": False, **fields})
 
     for number, line in enumerate(text.splitlines(), start=1):
         line = line.expandtabs(4)
@@ -372,6 +373,7 @@ def _view(text):
                 break
             para = False
         inside, indent = bool(stack), _indent(rest)
+        listed = any(container is not None for container in stack)
 
         if not rest.strip():
             row(number, "text")
@@ -437,7 +439,7 @@ def _view(text):
             group += 1
             row(number, "text", rest, group=group, start=True, inside=inside, indent=indent)
             para = True
-        rows[-1]["item"] = item
+        rows[-1].update(item=item, listed=listed)
     if fence is not None:
         refuse(fence[1], "a code fence never closed", "a fence closed by a matching fence line")
     if comment is not None:
@@ -472,7 +474,7 @@ def _view(text):
         view.append(_Line(entry["number"], entry["kind"], entry["level"],
                           _collapse(_shown(entry["plain"])) if entry["kind"] == "heading" else None, entry["plain"],
                           entry["prose"], entry["spaced"], entry["links"], entry["group"], entry["start"], declares,
-                          entry["item"], entry["inside"]))
+                          entry["item"], entry["listed"]))
     return view, sorted(forms)
 
 
@@ -1530,7 +1532,7 @@ def _blocks(lines):
         if line.item:
             blocks.append({"kind": "item", "line": line.number, "depth": line.item, "first": line.plain,
                            "text": text, "gap": gap})
-        elif text and (line.start and (not line.inside or _CHART_SPEC.match(line.plain)) or not blocks):
+        elif text and (line.start and (not line.listed or _CHART_SPEC.match(line.plain)) or not blocks):
             blocks.append({"kind": "paragraph", "line": line.number, "depth": 0, "first": line.plain,
                            "text": text, "gap": gap})
         elif text:

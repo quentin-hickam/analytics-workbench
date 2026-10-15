@@ -1,8 +1,8 @@
 # Kept cases:
 # test_parse_outline_derives_the_deck: the title slide, one slide per ## section but Findings and per ### finding, with section, headline, bullets and nested bullets, notes, and chart; every chart with its form, comparison, fields, and slide; nothing is written.
-# test_parse_outline_reads_as_it_renders: a comment hides a bullet, a fence is no bullet, a chart's fields end at a blank line so a later Caveat bullet stays on the slide, a list-item specification is a chart, a field already given is a bullet, and a wrapped bullet is one bullet.
+# test_parse_outline_reads_as_it_renders: a comment hides a bullet, a fence is no bullet, a chart's fields end at a blank line so a later Caveat bullet stays on the slide, a list-item specification is a chart, a field already given is a bullet, and a wrapped bullet is one bullet, a block quote inside it included.
 # test_outline_problems_clean_deck: a deck following every slide rule has no rows; a 15-word headline and five bullets pass.
-# test_outline_problems_rows: each slide rule broken gives its row with slide, line, and problem; a deck without its # heading also has its subtitle on no slide, and one without ## Findings has each finding outside it.
+# test_outline_problems_rows: each slide rule broken gives its row with slide, line, and problem, a block quote outside a list being a paragraph of its own; a deck without its # heading also has its subtitle on no slide, and one without ## Findings has each finding outside it.
 # test_chart_data_reads_roles: role: header pairs in order, case-insensitive roles, headers kept whole, colons in a header kept.
 # test_check_charts_every_form_passes: a specification in each of the seven forms, its Data line naming that form's roles, and a file with those columns passes.
 # test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, and a column the file lacks give one row each.
@@ -135,6 +135,8 @@ Sub
 - A bullet that wraps
 onto a second line
 
+  > A quote in the bullet
+
 - **Chart 2.** Table: the grid
   - **Data:** column: Month; column: Cases
   - **Data:** a second Data is a bullet
@@ -143,7 +145,8 @@ onto a second line
 """)
     slide = outline["slides"][0]
     assert [b["text"] for b in slide["bullets"]] == [
-        "Shown bullet", "Caveat: a slide caveat after the blank line", "A bullet that wraps onto a second line"]
+        "Shown bullet", "Caveat: a slide caveat after the blank line",
+        "A bullet that wraps onto a second line A quote in the bullet"]
     assert slide["bullets"][-1]["sub"] == ["Data: a second Data is a bullet"]
     assert [(c["number"], c["form"], c["fields"]) for c in outline["charts"]] == [
         (1, "Column", {"Data": "category: Month; value: Cases"}),
@@ -203,6 +206,18 @@ LONG = " ".join(["word"] * 15) + " 21%"
      ("How we know", 50, "2 charts; a slide carries at most one")),
     ("- Claims are counted once.\n", "- Claims are counted once.\n\nA loose paragraph.\n",
      ("How we know", 48, "text outside the headline, bullets, chart, and notes; make it a bullet or move it into "
+                         "the notes")),
+    ("first half of the year\n", "first half of the year\n> Draft for discussion, not for circulation\n",
+     ("title", 3, "the title slide holds only the # heading, its subtitle line, and notes; move this to a slide")),
+    ("**Headline:** Totals reconcile to the finance ledger\n",
+     "**Headline:** Totals reconcile to the finance ledger\n\n> A quoted remark.\n",
+     ("How we know", 46, "text outside the headline, bullets, chart, and notes; make it a bullet or move it into "
+                         "the notes")),
+    (NOTES, NOTES + '\n> "We are always behind in March." Regional manager\n',
+     ("How we know", 50, "text outside the headline, bullets, chart, and notes; make it a bullet or move it into "
+                         "the notes")),
+    (NOTES, NOTES + "\n> **Caveat:** March records are incomplete.\n",
+     ("How we know", 50, "text outside the headline, bullets, chart, and notes; make it a bullet or move it into "
                          "the notes")),
     (NOTES, "", ("How we know", 42, "no **Notes:** paragraph; end the slide with one")),
     (NOTES, NOTES + "\n**Notes:** More.\n", ("How we know", 50, "2 **Notes:** paragraphs; merge them into one")),
