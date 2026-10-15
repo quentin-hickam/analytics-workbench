@@ -6,6 +6,7 @@
 # test_present_helpers_are_classified_and_kept: current, earlier and customized copies are reported and left byte for byte without --upgrade.
 # test_receipt_alone_decides_earlier: a file matching its receipt entry is earlier; a file whose entry differs, or without an entry such as one installed before receipts, is customized.
 # test_package_formats_install_on_request: --package-formats installs missing formats into the receipt; without it present formats go unreported.
+# test_every_package_format_ships: every file under awb-package's package-format assets, the methodology note template included, is a copied package format at the same path.
 # test_check_writes_nothing: --check reports missing helpers and the absent requirements file without writing.
 # test_existing_dependency_files_are_only_reported: requirements.txt and pyproject.toml are read for missing entries, never edited; a wheel URL declares its package, not its scheme; a UTF-16 file and its quoted -r include are read, and a wheel path with extras declares its package; lines and includes the reader cannot read are listed as unread beside the status.
 # test_unreadable_requirements_are_unchecked: a requirements.txt that exists but cannot be read is unchecked, not incomplete with every package missing.
@@ -200,6 +201,15 @@ def test_package_formats_install_on_request(project, imports_ok):
     assert {path: receipt(project)[path] for path in formats - {"package-format/deck-rules.md"}} == {
         path: sha(ASSETS[path].read_bytes()) for path in formats - {"package-format/deck-rules.md"}}
     assert receipt(project)["package-format/deck-rules.md"] == sha(earlier_version("package-format/deck-rules.md"))
+
+
+def test_every_package_format_ships():
+    # Each template awb-package writes a draft from, the methodology note's included, installs with --package-formats.
+    shipped = SKILLS / "awb-package/assets/package-format"
+    assets = {"package-format/" + path.relative_to(shipped).as_posix() for path in shipped.rglob("*") if path.is_file()}
+    assert "package-format/methodology-note-template.md" in assets
+    assert assets == {path for path in installer.COPIED if path.startswith("package-format/")}
+    assert all(installer.COPIED[path] == "awb-package/assets/" + path for path in assets)
 
 
 def test_check_writes_nothing(project, imports_ok):

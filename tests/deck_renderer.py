@@ -3,9 +3,10 @@
 A test fixture, kept out of the distributed archive. It proves the deck contract in
 package-format/deck-rules.md is complete enough to build a deck from without Microsoft 365: everything it
 places comes from the outline `awb_draft.parse_outline` derives and from the chart files. It follows the
-content rules (one slide per outline slide, headlines, bullets, and notes verbatim, every chart drawn from
-its file at the file's values, intervals as error bars, the source line with what the intervals mean and
-the caveat's reason, and alt text from the specification) and leaves styling, sections, and theme to the
+content rules (one slide per outline slide, with a divider slide before the appendix, headlines, bullets,
+and notes verbatim, every chart drawn from its file at the file's values, intervals as error bars, the
+source line with what the intervals mean and the caveat's reason, and alt text from the specification)
+and leaves styling, sections, and theme to the
 builders users run. It marks no value with the caveat's asterisk: **Caveat:** names that value only in
 words. Like any builder that cannot ask, it
 refuses a draft that `check-draft`'s outline and chart checks fail, naming each row.
@@ -44,7 +45,7 @@ CHART_TYPES = {
 }
 _FIXED_TIME = datetime(2000, 1, 1)
 _ZIP_TIME = (1980, 1, 1, 0, 0, 0)
-_TITLE, _CONTENT = 0, 1  # the default template's layouts
+_TITLE, _CONTENT, _SECTION = 0, 1, 2  # the default template's layouts
 _CHART_BOX = (Inches(5.0), Inches(1.6), Inches(4.6), Inches(4.6))
 
 
@@ -224,7 +225,16 @@ def render(draft_dir, output):
     title.placeholders[1].text = outline["title"]["subtitle"]
     _notes(title, outline["title"]["notes"])
     charts = {chart["number"]: chart for chart in outline["charts"]}
+    divided = False
     for spec in outline["slides"]:
+        if spec["appendix"] and not divided:
+            # deck-rules.md: the appendix opens with a divider slide titled Appendix, holding nothing else.
+            divider = deck.slides.add_slide(deck.slide_layouts[_SECTION])
+            divider.shapes.title.text = "Appendix"
+            for placeholder in list(divider.placeholders):
+                if placeholder.placeholder_format.idx != 0:
+                    placeholder._element.getparent().remove(placeholder._element)
+            divided = True
         slide = deck.slides.add_slide(deck.slide_layouts[_CONTENT])
         slide.shapes.title.text = spec["headline"]
         body = slide.placeholders[1]
