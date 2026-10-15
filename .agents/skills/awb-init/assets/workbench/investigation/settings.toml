@@ -1,13 +1,16 @@
-# Scope and settings for run.py. A result's evidence records [parameters] and the result's own
-# table; editing either, its question included, marks that result stale until it is rerun. [eda],
-# other results' tables, and a table's answers don't.
+# Scope and settings for run.py. A result's evidence records the [parameters] entries it reads, those
+# its queries name as $name and those its table lists in parameters = [...], and the result's own
+# table; editing either, its question included, marks that result stale until it is rerun. Other
+# [parameters] entries, [eda], other results' tables, and a table's answers don't.
 
 [parameters]
-# Named query parameters: a result query reads `start` as $start. Use TOML dates for dates.
+# Named query parameters: a result query reads `start` as $start. Use TOML dates for dates. A query
+# names letters, digits, and _ only, so a name with '-' reaches only a producer whose table lists it.
 # start = 2026-01-01
 # end = 2026-06-30
 
-# One table per result. The ID names its query, saved table, evidence file, and findings row.
+# One table per result. The ID, a letter or digit then letters, digits, '.', '_', or '-', names its
+# query, producer module, saved table, evidence file, and findings row.
 # question is required: one line, the question this result answers in the user's own words, never
 # paraphrased. inputs optionally names the datasets or views the producer reads. Evidence copies both.
 # [results.orders-by-month]
@@ -16,8 +19,13 @@
 # answers = ["Q-004"]  # optional: ledger data questions this result answers; run.py marks them answered.
 #                      # Linking computes nothing, so adding or changing answers never makes the result stale.
 # queries = ["queries/orders-by-month.sql"]  # default: ["queries/<id>.sql"]; a producer may use more
+# code = ["helpers.py"]  # optional: files its queries read directly, such as a lookup CSV in read_csv(),
+#                        # or its producer, producers/<id>.py, imports or reads, relative to this
+#                        # folder; each must exist, and a folder is refused, so list its files.
+#                        # Evidence counts only these, its queries, its producer, run.py, and src/.
+# parameters = ["minimum_orders"]  # optional: [parameters] its producer reads that no query names as $name
 #
-# Validation spec for validate(): static checks here, run-time counts from a run.py producer.
+# Validation spec for validate(): static checks here, run-time counts from the result's producer.
 #   required_columns = [names that must exist]
 #   nulls = { column = maximum null fraction, 0 to 1 }
 #   row_counts = [{ step, before, after, min_ratio?, max_ratio? }]  # max_ratio defaults to 1.0;

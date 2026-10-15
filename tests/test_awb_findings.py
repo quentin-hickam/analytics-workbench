@@ -13,9 +13,13 @@
 # test_file_and_underscore_segments_are_paths: a file extension or underscore in any segment identifies a path.
 # test_workbench_roots_are_paths: known workbench roots identify single-slash paths; src/awb.py stays a path.
 # test_project_name_roots_are_paths: a slash token with a given name or plain-word root as any segment is a path, and prose otherwise.
+# test_rerun_after_committing_its_code_needs_no_second_promotion: the reproduction of finding 5.4 of the 2026-10-15 UX simulation, which did not reproduce: a result recorded on uncommitted code and promoted stays current once that code is committed, and a rerun keeps its row, so one promotion suffices.
 
 import importlib.util
+import json
 from pathlib import Path
+import shutil
+import subprocess
 
 import pytest
 
@@ -24,6 +28,10 @@ ASSET = Path(__file__).resolve().parents[1] / ".agents/skills/awb-package/assets
 spec = importlib.util.spec_from_file_location("awb_draft_findings", ASSET)
 draft = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(draft)
+PROVENANCE = Path(__file__).resolve().parents[1] / ".agents/skills/awb-init/assets/awb_provenance.py"
+spec = importlib.util.spec_from_file_location("awb_provenance_findings", PROVENANCE)
+provenance = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(provenance)
 
 
 @pytest.fixture
@@ -209,3 +217,64 @@ def test_project_name_roots_are_paths(write):
         {"line": 1, "kind": "path", "text": "orders/region"},
         {"line": 1, "kind": "path", "text": "reports/orders"},
     ]
+
+
+def git(root, *args):
+    return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c",
+                           "commit.gpgsign=false", *args], cwd=root, check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
+def test_rerun_after_committing_its_code_needs_no_second_promotion(tmp_path):
+    investigation = tmp_path / "investigations/inv"
+    (investigation / "queries").mkdir(parents=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/ops.py").write_text("x = 1\n")
+    (investigation / "run.py").write_text("import ops\n")
+    (investigation / "queries/r1.sql").write_text("select 1 as n\n")
+    (investigation / "settings.toml").write_text(
+        '[parameters]\nyear = 2026\n\n[results.r1]\nquestion = "How many orders closed?"\n')
+    templates = PROVENANCE.parent / "workbench/investigation"
+    for record in ("state.md", "history.md"):
+        shutil.copyfile(templates / record, investigation / record)
+    git(tmp_path, "init", "-q")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "-qm", "records")
+    checks = [{"name": "scope", "outcome": "pass", "detail": "Orders closed in 2026."}]
+
+    def produce():
+        # What run.py does for one result: capture the prior, replace evidence and table, write the row.
+        prior = provenance.prior_result(tmp_path, "inv", "r1")
+        (investigation / "evidence/r1.json").unlink(missing_ok=True)
+        (investigation / "results").mkdir(exist_ok=True)
+        (investigation / "results/r1.csv").write_text("n\n1\n")
+        provenance.record_evidence(tmp_path, "inv", "r1", views=[], checks=checks,
+                                   settings_path="investigations/inv/settings.toml")
+        return provenance.record_finding(tmp_path, "inv", "r1", checks, prior=prior)
+
+    def outcomes():
+        return [c["outcome"] for c in provenance.compare_evidence(tmp_path, investigation / "evidence/r1.json")]
+
+    # First run on uncommitted code: run.py and the query are edited and not yet committed.
+    (investigation / "run.py").write_text("import ops  # adapted\n")
+    (investigation / "queries/r1.sql").write_text("select 1 as n -- closed orders\n")
+    assert produce()["action"] == "added"
+    evidence = json.loads((investigation / "evidence/r1.json").read_text())
+    assert {e["path"] for e in evidence["producing_uncommitted_changes"]} == {
+        "investigations/inv/run.py", "investigations/inv/queries/r1.sql"}
+    provenance.update_findings(tmp_path, "inv", ["r1"], text="One order closed", status="supported",
+                               reason="Checked against the source.")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "-qm", "analysis")
+    # Committing the code it ran on leaves the result current, so nothing asks for a rerun.
+    assert outcomes() == ["pass"] * 5
+    # A rerun anyway, now on committed code, keeps the row: it stays supported, and no second promotion is due.
+    history = (investigation / "history.md").read_text()
+    assert produce() == {"action": "kept", "status": "supported", "claim": "association", "history": False}
+    assert outcomes() == ["pass"] * 5
+    assert json.loads((investigation / "evidence/r1.json").read_text())["producing_uncommitted_changes"] == []
+    assert (investigation / "history.md").read_text() == history
+    assert provenance.findings_drift(tmp_path, "inv") == []
+    assert "| One order closed | [r1](evidence/r1.json) | supported | association | |" in (
+        investigation / "state.md").read_text()

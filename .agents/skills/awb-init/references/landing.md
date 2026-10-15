@@ -1,6 +1,6 @@
 # Landing helper
 
-Call the project copy at `src/preparation/landing.py`. The `land`, `retain`, `publish`, and `sql` commands cover supplied files and select-based conversions; `python3 src/awb.py <command> --help` gives each one's arguments and output. This reference covers the two library calls for what the commands cannot do.
+Call the project copy at `src/preparation/landing.py`. The `land`, `retain`, `publish`, and `sql` commands cover supplied files and select-based conversions; `python3 src/awb.py <command> --help` gives each one's arguments and output. This reference covers the two library calls for what the commands cannot do, and what the read-only commands read.
 
 ## Fetch a source with `land()`
 
@@ -17,6 +17,12 @@ The fetch script reads credentials from environment variables, with local values
 For a conversion a select cannot express, call `publish()` with a `convert` callable.
 
 `publish(root, dataset, publication_id, convert, *, acquisitions, validate=None, notes=None) -> Path` calls `convert(partial_directory)`, runs the dataset's checks declared in `foundation/datasets.toml` over the Parquet files it wrote, then calls `validate(partial_directory)`. A malformed declaration of any dataset, or declared checks without the `duckdb` package, refuses before `convert` runs. A failing declared check raises `ChecksFailed`, whose `checks` lists every declared check. Use `validate` for checks a declaration cannot express: raise on failure or return the Python boolean `False`; every other return value permits publication, and a returned string becomes the detail of its `validate` check. `acquisitions` lists completed acquisition directories, absolute or project-relative. Conversion reads them without modification. `publication.json` is reserved; the helper records inputs, hashes, Git HEAD (or `uncommitted`), and the checks with their outcomes, then renames the output directory. Record the publication in `foundation/catalog.md` as the `publish` command's `catalog_row` would.
+
+## Read landed files without writing
+
+`sql --read-only`, `profile --read-only`, and the MCP `read` tool run SELECT statements whose table functions read files or the catalog. The file readers include `read_csv`, `read_parquet`, `read_json`, `read_text`, `read_blob`, and `read_xlsx`, so a read-only query can read a landed Excel file, for example to check it before writing its conversion. `read_xlsx` comes from DuckDB's `excel` extension. The read-only session installs no extension but loads one already installed. Install it once without `--read-only`: `python3 src/awb.py sql "INSTALL excel; SELECT 1"`, or the `data` tool's `sql` over MCP. `read_xlsx` writes nothing: its arguments name a file, a sheet, and a range, and only `COPY` writes an `.xlsx`, which read-only SQL refuses. Reading an `.xlsx` without the extension, through `read_xlsx` or a plain `FROM 'book.xlsx'`, fails on one line saying how to install it.
+
+Read-only SQL also refuses SQL built from a string, because the plan it checks need not be the plan that runs: `query()`, `query_table()`, and the macros calling them, such as the `histogram` and `histogram_values` table macros. The `histogram()` aggregate runs. A view file's CREATE whose body does not parse alone, such as a macro with two bodies or a `CREATE TABLE ... WITH NO DATA`, is checked by token, so `histogram()` is refused there too, and the refusal says so. Once a view file's CREATE MACRO runs, the session reads the macro's body back from DuckDB's catalog and refuses the view file if that body calls SQL built from a string.
 
 ## Both calls
 

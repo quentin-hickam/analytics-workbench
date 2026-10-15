@@ -2,21 +2,23 @@
 """Run script for this investigation: produce, validate, and record each result.
 
 Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With no IDs it
-produces every result in settings.toml. It refuses to run, exiting 2, while a wanted result's
-table lacks its question or declares answers the question ledger does not hold as data questions,
-and exits 1 when the ledger cannot be read. For each result it runs the result's saved queries in
-a fresh session of canonical views, validates the result, saves the table and its profile under
-results/, records evidence under evidence/, writes its state.md findings row, and prints one
+produces every result in settings.toml. It refuses to run, exiting 2, while a wanted result's ID
+cannot name its files, or its table lacks its question, lists code that is not files in the project
+or parameters that are not names, or declares answers the question ledger does not hold as data
+questions, and exits 1 when the ledger cannot be read. For each result it runs the result's saved
+queries in a fresh session of canonical views, validates the result, saves the table and its profile
+under results/, records evidence under evidence/, writes its state.md findings row, and prints one
 compact JSON line with the paths, failed and unassessed checks, and what it did to the row, with
 the row's status and claim strength.
 
 Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml,
 with the question it answers, and its query in queries/<id>.sql. A result whose table declares
 answers = ["Q-NNN"] marks those question ledger rows answered, and its output line lists them.
-Add a producer below only when a result needs more than its query, and put reusable operations in
-src/. Requires duckdb and pandas.
+A result that needs more than its query gets a producer module, producers/<id>.py, described below,
+so adding a result never edits this file; put reusable operations in src/. Requires duckdb and pandas.
 """
 
+import importlib.util
 import json
 import re
 import sys
@@ -37,7 +39,8 @@ sys.path.insert(0, str(ROOT))
 from src.exploration.validate import profile, validate  # noqa: E402
 from src.preparation.landing import session  # noqa: E402
 from src.provenance import (  # noqa: E402
-    ledger_answerers, prior_result, record_evidence, record_finding, result_problems, views_read)
+    ledger_answerers, prior_result, producer_path, record_evidence, record_finding, result_parameters,
+    result_problems, views_read)
 
 
 def run(connection, sql, parameters):
@@ -51,20 +54,44 @@ def produce(connection, sql, parameters):
     return run(connection, sql[0], parameters), {}
 
 
-# Producers for results that need more than one query's output, by result ID. A producer
-# receives the session, the texts of the result's queries (settings `queries`, in order), and
-# the [parameters] table; it returns (frame, measured), where measured holds validation spec
-# entries only known at run time, such as row_counts or joins.left_rows. Read further data
-# through saved queries listed in settings so their views are recorded. Example:
+# A result that needs more than its first query's output has a producer module,
+# producers/<result-id>.py, named by the result ID exactly. It defines
+# produce(connection, sql, parameters), which receives the session, the texts of the result's
+# queries (settings `queries`, in order), and only the [parameters] entries the result reads: those
+# its queries name as $name and those its table lists in parameters = [...]. Reading any other
+# raises KeyError; a listed name [parameters] does not set raises it with [], and get() gives the
+# default. It returns (frame, measured), where measured holds validation spec entries only
+# known at run time, such as row_counts or joins.left_rows. run.py gives the module run() above
+# before loading it. Read further data through saved queries listed in settings so their views are
+# recorded, and list any other file it imports or reads, or the result's queries read directly, in
+# its table's code = [...], since evidence records only declared files as the result's code.
+# Example, producers/orders-by-month.py:
 #
-# def orders_by_month(connection, sql, parameters):
+# def produce(connection, sql, parameters):
 #     before = int(run(connection, sql[1], parameters)["orders"].iloc[0])  # unfiltered count
 #     frame = run(connection, sql[0], parameters)
 #     return frame, {"row_counts": [{"step": "period filter", "before": before,
 #                                    "after": int(frame["orders"].sum()), "min_ratio": 0.01}]}
-PRODUCERS = {
-    # "orders-by-month": orders_by_month,
-}
+def producer(result_id):
+    """The result's produce() from its producer module, or the default producer when it has none."""
+    path = HERE / producer_path(result_id)
+    if not path.is_file():
+        return produce
+    # Each character other than a letter or digit becomes _ and its hex code, so no two IDs share a name.
+    name = "producer_" + "".join(c if c.isalnum() else f"_{ord(c):02x}" for c in result_id)
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    module.run = run
+    # Registered as an import is, so dataclasses and pickle can look the module up by name.
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(spec.name, None)
+        raise
+    if not callable(getattr(module, "produce", None)):
+        raise ValueError(f"{path.relative_to(ROOT).as_posix()} defines no produce(connection, sql, parameters)")
+    return module.produce
 
 
 def _spec(validation, measured):
@@ -78,7 +105,9 @@ def _spec(validation, measured):
 def produce_result(connection, result_id, config, parameters):
     queries = config.get("queries", [f"queries/{result_id}.sql"])
     sql = [(HERE / query).read_text() for query in queries]
-    frame, measured = PRODUCERS.get(result_id, produce)(connection, sql, parameters)
+    # The producer gets only the parameters the result reads, and evidence records those.
+    scoped = result_parameters(sql, config, parameters)
+    frame, measured = producer(result_id)(connection, sql, scoped)
     checks = validate(frame, _spec(config.get("validation", {}), measured))
     # What the rerun replaces: the evidence citation, and the table, checks and settings it compares.
     prior = prior_result(ROOT, NAME, result_id)
@@ -92,7 +121,8 @@ def produce_result(connection, result_id, config, parameters):
     profile_path.write_text(json.dumps(profile(frame), indent=2) + "\n")
     # Settings `views` overrides detection when a result reads views its queries do not name.
     views = config.get("views") or views_read(ROOT, [HERE / query for query in queries])
-    evidence = record_evidence(ROOT, NAME, result_id, views=views, settings_path=SETTINGS, checks=checks)
+    evidence = record_evidence(ROOT, NAME, result_id, views=views, settings_path=SETTINGS, checks=checks,
+                               parameters=scoped)
     # Writes findings and renders the row; failure before findings are saved removes this evidence.
     state = record_finding(ROOT, NAME, result_id, checks, prior=prior)
     return {
@@ -116,7 +146,8 @@ def main(argv):
         print(f"settings.toml defines no result {', '.join(unknown)}" if unknown else
               "settings.toml defines no [results.<id>] tables", file=sys.stderr)
         return 2
-    # Check answers against the ledger now: a rerun replaces the prior evidence before recording.
+    # Check answers against the ledger, and code against the files, now: a rerun replaces the prior
+    # evidence before recording.
     declares = any(isinstance(results[result_id], dict) and results[result_id].get("answers") for result_id in wanted)
     try:
         questions = ledger_answerers(ROOT, NAME) if declares else None
@@ -124,7 +155,7 @@ def main(argv):
         print(error, file=sys.stderr)
         return 1
     problems = [problem for result_id in wanted
-                for problem in result_problems(result_id, results[result_id], questions)]
+                for problem in result_problems(result_id, results[result_id], questions, folder=HERE)]
     if problems:
         print("\n".join(f"settings.toml: {problem}" for problem in problems), file=sys.stderr)
         return 2
