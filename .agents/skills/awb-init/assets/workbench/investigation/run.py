@@ -63,8 +63,9 @@ def produce(connection, sql, parameters):
 # default. It returns (frame, measured), where measured holds validation spec entries only
 # known at run time, such as row_counts or joins.left_rows. run.py gives the module run() above
 # before loading it. Read further data through saved queries listed in settings so their views are
-# recorded, and list any other file it imports or reads in its table's code = [...], since evidence
-# records only declared files as the result's code. Example, producers/orders-by-month.py:
+# recorded, and list any other file it imports or reads, or the result's queries read directly, in
+# its table's code = [...], since evidence records only declared files as the result's code.
+# Example, producers/orders-by-month.py:
 #
 # def produce(connection, sql, parameters):
 #     before = int(run(connection, sql[1], parameters)["orders"].iloc[0])  # unfiltered count
