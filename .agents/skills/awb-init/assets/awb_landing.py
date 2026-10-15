@@ -21,6 +21,7 @@ Paths are sorted POSIX paths relative to their acquisition or publication.
 """
 
 import argparse
+import atexit
 import hashlib
 import json
 import math
@@ -1163,9 +1164,11 @@ def session(project_root: str | Path, *,
     02_derived.sql.
 
     read_only=True opens a session that writes nothing: no extension installs, no
-    persistent secrets, spill files outside the project, configuration locked once
-    the views load, and a refusal when a view file attaches a writable database.
-    Run queries in it through read_only_sql(), which admits only SELECT statements.
+    persistent secrets, spill files in a private temporary directory removed at exit,
+    and configuration locked once the views load. View files may then hold only CREATE
+    and SELECT statements, checked in every file before any runs, so a view file's
+    ATTACH, COPY, or other statement is refused rather than run. Run queries in the
+    session through read_only_sql(), which admits only SELECT statements.
     """
     try:
         import duckdb
@@ -1176,26 +1179,32 @@ def session(project_root: str | Path, *,
         # file_search_path is a comma-separated list with no escape for a comma.
         raise ValueError(f"session() cannot use a project root containing a comma: {root}")
     directory = _under(root, views_dir)
-    # An in-memory database spills to .tmp/ under the working directory by default.
+    views = []
+    for path in sorted(directory.glob("*.sql")):
+        if path.is_file():
+            try:
+                views.append((path, path.read_text(encoding="utf-8")))
+                if read_only:  # every file is checked before any statement runs
+                    _refuse_statements(views[-1][1], ("CREATE", "SELECT"), "in a read-only session, which "
+                                       "loads only CREATE and SELECT statements from view files")
+            except Exception as error:
+                raise RuntimeError(f"Failed to load view file: {path}") from error
+    if read_only:
+        # An in-memory database spills to .tmp/ under the working directory by default; a fixed
+        # name under the shared temp directory could belong to another user.
+        spill = tempfile.mkdtemp(prefix="awb-duckdb-")
+        atexit.register(shutil.rmtree, spill, True)
     connection = duckdb.connect(config={
         "autoinstall_known_extensions": False, "allow_persistent_secrets": False,
-        "temp_directory": str(Path(tempfile.gettempdir()) / "awb-duckdb")}) if read_only else duckdb.connect()
+        "temp_directory": str(Path(spill) / "spill")}) if read_only else duckdb.connect()
     try:
         connection.execute("SET file_search_path = ?", [str(root)])
-        for path in sorted(directory.glob("*.sql")):
-            if not path.is_file():
-                continue
+        for path, text in views:
             try:
-                connection.execute(path.read_text(encoding="utf-8"))
+                connection.execute(text)
             except Exception as error:
                 raise RuntimeError(f"Failed to load view file: {path}") from error
         if read_only:
-            writable = connection.execute(
-                "SELECT database_name FROM duckdb_databases() WHERE path IS NOT NULL AND NOT readonly "
-                "ORDER BY database_name").fetchall()
-            if writable:
-                raise ValueError("a read-only session refuses view files that attach a writable database ("
-                                 + ", ".join(name for name, in writable) + "); attach it with (READ_ONLY)")
             connection.execute("SET lock_configuration = true")
     except BaseException:
         connection.close()
@@ -1207,12 +1216,18 @@ def read_only_sql(connection, text):
     """Run SQL text in a read-only session(): only SELECT statements, refusing COPY, ATTACH, INSTALL,
     LOAD, EXPORT, SET, PRAGMA, CALL, CREATE, and every other kind before any statement runs. Returns
     the last statement's relation, as connection.sql() does."""
+    _refuse_statements(text, ("SELECT",), "(only SELECT runs here, and a PIVOT is one only with an IN (...) "
+                       "list of its values)")
+    return connection.sql(text)
+
+
+def _refuse_statements(text, allowed, where):
+    """Raise unless every statement of SQL text, as DuckDB's parser types it, is of an allowed kind."""
     import duckdb
     for statement in duckdb.extract_statements(text):
-        if statement.type != duckdb.StatementType.SELECT:
-            kind = getattr(statement.type, "name", "") or " ".join(statement.query.split()[:1]).upper()
-            raise ValueError(f"read-only: refused a {kind or 'non-SELECT'} statement; only SELECT runs here")
-    return connection.sql(text)
+        kind = getattr(statement.type, "name", "") or "unknown"
+        if kind not in allowed:
+            raise ValueError(f"read-only: refused statement kind {kind} {where}; run it without --read-only")
 
 
 def _sql_argument(root, argument):
