@@ -2,6 +2,7 @@
 # test_handshake_ping_and_tool_list: initialize answers 2025-11-25, echoes an earlier legacy version but not 2025-03-26 (which requires batches), and answers 2025-11-25 to an unknown one; initialized gets no reply; ping answers {}; tools/list gives seven tools, readOnlyHint true only on read, openWorldHint true only on read, destructiveHint left to its default (true), no outputSchema; stdout carries only JSON-RPC lines.
 # test_unknown_methods_fail_at_once: server/discover and any other unknown request get -32601 at once; a bad line gets -32700, a non-2.0 message, one with an id and neither method nor result, or one whose id is not a string, number, or null -32600, an unknown tool or a non-string tool name -32602; the server keeps serving.
 # test_setup_installs_into_a_folder_without_helpers: setup round trip: check writes nothing, then install writes src/awb.py and the receipt; a folder without workbench markers exits 1 with the installer's hint.
+# test_setup_runs_under_awb_python_over_a_recorded_interpreter: with AWB_PYTHON set, setup runs under it while README records another interpreter, reports the line overridden, and leaves it as written.
 # test_read_commands_round_trip_and_write_nothing: every read command without DuckDB (state, questions, stale, review-rules, check-draft, status, help) runs its helper and leaves the project, .git included, unchanged.
 # test_records_round_trip: records adds a question, edits next steps, adds a review rule, flags through stdin, and runs clean-record, each writing its record.
 # test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit; read returns both changes while keeping its answer, and attempts to change answered question content or replace its answer are refused.
@@ -229,6 +230,23 @@ def test_setup_installs_into_a_folder_without_helpers(tmp_path, connect):
     text, error = client.call("setup", project=str(bare))
     assert error and '"workbench": false' in text and "exit status 1" in text
     assert list(bare.iterdir()) == []
+
+
+def test_setup_runs_under_awb_python_over_a_recorded_interpreter(tmp_path, connect):
+    root = scaffold(tmp_path / "wb")
+    other = tmp_path / "other/bin/python"
+    other.parent.mkdir(parents=True)
+    other.write_text("#!/bin/sh\n")
+    readme = root / "README.md"
+    readme.write_text(readme.read_text().replace("Project interpreter: not yet recorded",
+                                                 f"Project interpreter: {other}"))
+    before = readme.read_bytes()
+    client = connect(cwd=root)  # the server runs helpers under AWB_PYTHON, this interpreter
+    for check in (True, False):
+        text, error = client.call("setup", check=check)
+        assert not error and text.endswith("exit status 0"), text
+        assert json.loads(text.split("\n\n")[0])["interpreter"]["status"] == "overridden"
+    assert readme.read_bytes() == before and (root / "src/awb.py").is_file()
 
 
 def test_read_commands_round_trip_and_write_nothing(workbench, connect):

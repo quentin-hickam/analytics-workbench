@@ -50,16 +50,19 @@ Install/check modes print one line of JSON:
   interpreter        README's `Project interpreter: <path>` line for this interpreter, the path relative
                      to the project inside it (in_project) and absolute outside it, with its status:
                      written, current, replaced (was names the old value, which named no file), missing
-                     (--check), or unrecorded without a readable README.md. A README naming another
+                     (--check), unrecorded without a readable README.md, or overridden when $AWB_PYTHON
+                     names this interpreter, which leaves the line as it is. A README naming another
                      existing interpreter, or repeating the line, is an error: rerun with that
-                     interpreter, or edit the line to switch.
+                     interpreter, or edit the line to switch. So is a project .venv or venv interpreter
+                     other than this one while README records none: rerun with it, or name the
+                     interpreter to use on the line.
 Package formats stay absent until awb-package copies them with --package-formats.
 The project's install receipt, .awb-receipt.json, maps each file this script installed or replaced to
 its SHA-256: a file matching its entry is unmodified. A file without an entry is customized unless
 it equals the shipped asset.
 Existing dependency files are only read, and no package is installed. Exit status: 0 done; 1 not a
-workbench, Python too old, an unreadable receipt, or README naming another interpreter, nothing
-written; 2 unusable arguments.
+workbench, Python too old, an unreadable receipt, README naming another interpreter, or a project
+venv passed over, nothing written; 2 unusable arguments.
 """
 
 import argparse
@@ -195,6 +198,10 @@ def _interpreter(root, check):
     cli = _cli()
     value, in_project = _interpreter_text(root)
     report = {"line": f"{cli.INTERPRETER_LINE} {value}", "in_project": in_project}
+    # AWB_PYTHON overrides README for awb.py and the MCP server, which runs this script under it.
+    configured = cli.locate(os.environ["AWB_PYTHON"]) if os.environ.get("AWB_PYTHON") else None
+    if configured and cli.same_interpreter(configured):
+        return {**report, "status": "overridden"}, None, None
     status, recorded, detail = cli.read_interpreter(root)
     if status == "refused" and recorded is None:
         return report, f"{detail}; keep one, then rerun", None
@@ -203,6 +210,12 @@ def _interpreter(root, check):
             return {**report, "status": "current"}, None, None
         return report, (f"README's Project interpreter is {recorded}, not this interpreter ({sys.executable}); "
                         "rerun with it, or edit that line to switch"), None
+    # With no interpreter recorded, awb.py runs the project's own venv: record that one, not this one.
+    venv, _ = cli.project_venv(root)
+    if venv is not None and not cli.same_interpreter(venv):
+        return report, (f"the project has its own interpreter, {venv.relative_to(root).as_posix()}, and README "
+                        "records none; rerun with it, or name the interpreter to use on README's Project "
+                        "interpreter line"), None
     was = {"was": recorded} if status == "refused" else {}
     try:
         # Lines keep their endings, so a CRLF README keeps them and untouched lines keep their bytes.

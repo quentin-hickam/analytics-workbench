@@ -5,6 +5,8 @@
 # test_interpreter_line_accepted_and_refused_forms: README's `Project interpreter:` line is read only at column 0, once, as `not yet recorded` or a path to an existing file, absolute or project-relative, in optional backticks; a repeated or empty line or a path naming no file is refused with the reason.
 # test_awb_reexecutes_under_the_project_interpreter: run by another interpreter, src/awb.py reruns itself under the project's .venv interpreter, noting it on stderr; run by that interpreter it runs once, silently; README's recorded interpreter comes before .venv, a refused line is noted and skipped, and AWB_PYTHON overrides both.
 # test_reexecution_never_loops: an interpreter that execs another one is run once, not again, because the rerun carries a marker it clears for its own subprocesses.
+# test_aliases_of_one_interpreter_are_the_same: outside a virtual environment, two links to one binary are the same interpreter, so neither reruns the other; a virtual environment's link to it, or another file, is not.
+# test_recorded_interpreter_that_cannot_run_is_noted: a README interpreter that exists but cannot be executed is noted on stderr and the command runs under the interpreter that started it, without a traceback.
 
 import importlib.util
 import os
@@ -98,6 +100,8 @@ def stub_project(tmp_path):
                                                 "    print(sys.executable)\n    return 0\n")
     (tmp_path / ".venv/bin").mkdir(parents=True)
     os.symlink(sys.executable, tmp_path / ".venv/bin/python")
+    # As in every virtual environment, pyvenv.cfg makes it one, apart from the interpreter it links to.
+    (tmp_path / ".venv/pyvenv.cfg").write_text(f"home = {os.path.dirname(sys.executable)}\n")
     return tmp_path
 
 
@@ -152,3 +156,40 @@ def test_reexecution_never_loops(tmp_path):
     (root / "src/provenance.py").write_text("import os\n\n\ndef cli_stale(root, argv):\n"
                                             "    print(os.environ.get('AWB_REEXECUTED'))\n    return 0\n")
     assert run(sys.executable, root).stdout.strip() == "None"
+
+
+@pytest.mark.skipif(os.name == "nt" or sys.prefix != sys.base_prefix,
+                    reason="POSIX links to an interpreter outside any virtual environment")
+def test_aliases_of_one_interpreter_are_the_same(tmp_path):
+    cli = install(tmp_path)
+    links = []
+    for name in ("a/bin/python", "b/bin/python3"):
+        links.append(tmp_path / name)
+        links[-1].parent.mkdir(parents=True)
+        os.symlink(sys.executable, links[-1])
+    assert all(cli.same_interpreter(link) for link in links)
+    # A virtual environment's link sees other packages, and another file is another interpreter.
+    venv = tmp_path / "env/bin/python"
+    venv.parent.mkdir(parents=True)
+    os.symlink(sys.executable, venv)
+    (tmp_path / "env/pyvenv.cfg").write_text(f"home = {os.path.dirname(sys.executable)}\n")
+    other = tmp_path / "c/bin/python"
+    other.parent.mkdir(parents=True)
+    other.write_text("#!/bin/sh\n")
+    assert not cli.same_interpreter(venv) and not cli.same_interpreter(other)
+    # Started through one link with README naming the other, awb.py runs once, without a note.
+    root = stub_project(tmp_path / "project")
+    (root / "README.md").write_text(f"# P\n\nProject interpreter: {links[1]}\n")
+    result = run(links[0], root)
+    assert result.returncode == 0 and result.stdout.strip() == str(links[0]) and result.stderr == ""
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_recorded_interpreter_that_cannot_run_is_noted(tmp_path):
+    root = stub_project(tmp_path)
+    (root / "notes.txt").write_text("not an interpreter\n")
+    (root / "README.md").write_text("# P\n\nProject interpreter: notes.txt\n")
+    result = run(sys.executable, root)
+    assert result.returncode == 0 and result.stdout.strip() == sys.executable
+    assert f"awb.py: cannot run {root.resolve() / 'notes.txt'} (README's Project interpreter)" in result.stderr
+    assert f"continuing under {sys.executable}" in result.stderr and "Traceback" not in result.stderr

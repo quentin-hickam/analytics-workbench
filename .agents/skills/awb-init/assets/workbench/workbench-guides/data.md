@@ -8,7 +8,7 @@ Existing project layouts remain authoritative. Read `references/landing.md` only
 
 Assess a candidate from its documentation or schema when that settles relevance and fitness; inspect records only from landed copies, landing only what the assessment needs. Record the assessment, its basis, and its references in `foundation/sources.md` under its rules.
 
-Keep each data dictionary, manual, codebook, or schema export that an assessment or catalog row relies on under `foundation/references/<source-id>/`, and suggest committing it. Material whose license or confidentiality bars committing it stays out of Git, as a landed original does: keep it at a retained location outside the checkout and record that location and its SHA-256 as the source's reference, in the form `foundation/sources.md` gives. Link a reference from the catalog rows that rely on it as `foundation/catalog.md` describes.
+Keep each data dictionary, manual, codebook, or schema export that an assessment or catalog row relies on under `foundation/references/<source-id>/`, and suggest committing it unless README's `Code history:` line says `none`. Material whose license or confidentiality bars committing it stays out of Git, as a landed original does: keep it at a retained location outside the checkout and record that location and its SHA-256 as the source's reference, in the form `foundation/sources.md` gives. Link a reference from the catalog rows that rely on it as `foundation/catalog.md` describes.
 
 Land user-supplied or already-downloaded files:
 
@@ -16,7 +16,7 @@ Land user-supplied or already-downloaded files:
 python3 src/awb.py land <source> <acquisition-id> <file-or-directory>... [--request TEXT] [--records NAME=COUNT] [--notes TEXT]
 ```
 
-Land an archive, such as a `.zip`, as received, with the members a conversion reads extracted beside it in the same `land` call, and record in `--notes` that the archive is the original; a workbook is published through DuckDB's `read_xlsx`, with Excel serial dates converted explicitly. `references/landing.md` (**Archives and spreadsheets**) gives both.
+Land an archive, such as a `.zip`, as received, with the members a conversion reads extracted beside it in the same `land` call, and record in `--notes` that the archive is the original; a workbook is published through DuckDB's `read_xlsx`, with Excel serial dates and times converted explicitly. `references/landing.md` (**Archives and spreadsheets**) gives both.
 
 For an API or other fetched source, save the fetch as `src/preparation/fetch_<source>.py`, taking the acquisition ID as its argument and calling `land()` from `src/preparation/landing.py` with a `fetch` callable and the upstream URL, without credentials, and validators it receives; run it by path with a new acquisition ID, then run `python3 src/awb.py retain`. Land a changed upstream again under a new acquisition ID, only on request; rerunning analysis never re-lands.
 
@@ -30,7 +30,7 @@ Fetch scripts read credentials from environment variables; local values may sit 
 
 ## Publish and prepare
 
-Save the conversion as `src/preparation/<dataset>.sql`, one SELECT reading landed files by project-relative path. Declare the dataset's checks (columns and types, not-null, key and uniqueness, accepted values, ranges, row count) under `[datasets.<dataset>.checks]` in `foundation/datasets.toml`, starting from `assets/workbench/foundation/datasets.toml`, which documents the keys. Put a check a declaration cannot express in `src/preparation/<dataset>-check.sql`, a query over the view `publication` whose returned rows are failures. Suggest committing these first so the publication's `conversion_commit` holds them. Then publish:
+Save the conversion as `src/preparation/<dataset>.sql`, one SELECT reading landed files by project-relative path. Declare the dataset's checks (columns and types, not-null, key and uniqueness, accepted values, ranges, row count) under `[datasets.<dataset>.checks]` in `foundation/datasets.toml`, starting from `assets/workbench/foundation/datasets.toml`, which documents the keys. Put a check a declaration cannot express in `src/preparation/<dataset>-check.sql`, a query over the view `publication` whose returned rows are failures. Unless README's `Code history:` line says `none`, suggest committing these first so the publication's `conversion_commit` holds them. Then publish:
 
 ```
 python3 src/awb.py publish <dataset> <publication-id> --from <acquisition-dir> --sql <select.sql> [--check <check.sql>]

@@ -190,7 +190,8 @@ TOOLS = [
     {"name": "setup", "title": "Install workbench helpers",
      "description": "Install or upgrade the workbench helpers, guides, and package formats in a project "
                     "with workbench markers (AGENTS.md, foundation/, or investigations/), and record the "
-                    "interpreter that runs them on README's Project interpreter line, through awb-init's "
+                    "interpreter that runs them on README's Project interpreter line unless AWB_PYTHON "
+                    "overrides it, through awb-init's "
                     "install_helpers.py. check reports without writing.",
      "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
          "project": PROJECT,

@@ -9,7 +9,8 @@ compact output for the conversation and keep complete records in files.
 
 Run as a script, it first reruns itself under the project's interpreter when another one started it:
 $AWB_PYTHON, else README's `Project interpreter` line, else the project's .venv or venv interpreter,
-the order the awb MCP server follows. A rerun is noted on stderr and happens at most once.
+the order the awb MCP server follows. A rerun is noted on stderr and happens at most once; an
+interpreter that cannot be started is noted, and the command runs under the one that started it.
 """
 
 import importlib.util
@@ -148,6 +149,15 @@ def read_interpreter(root):
     return "recorded", value, path
 
 
+def project_venv(root):
+    """(interpreter path, folder) of the project's .venv or venv, else (None, None)."""
+    for folder in (".venv", "venv"):
+        for candidate in (Path(root) / folder / "bin" / "python", Path(root) / folder / "Scripts" / "python.exe"):
+            if candidate.is_file():
+                return candidate, folder
+    return None, None
+
+
 def project_python(root):
     """(interpreter, source, note) for the project: $AWB_PYTHON, else README's recorded interpreter,
     else .venv's or venv's, else (None, None, note). The note names a refused README line."""
@@ -157,25 +167,40 @@ def project_python(root):
     status, _, detail = read_interpreter(root)
     if status == "recorded":
         return str(detail), "README's Project interpreter", None
-    for folder in (".venv", "venv"):
-        for candidate in (Path(root) / folder / "bin" / "python", Path(root) / folder / "Scripts" / "python.exe"):
-            if candidate.is_file():
-                return str(candidate), f"the project's {folder}", detail if status == "refused" else None
-    return None, None, detail if status == "refused" else None
+    note = detail if status == "refused" else None
+    venv, folder = project_venv(root)
+    if venv is not None:
+        return str(venv), f"the project's {folder}", note
+    return None, None, note
+
+
+def locate(command):
+    """The file an interpreter command names: a path as given, or a bare name, as AWB_PYTHON may give,
+    looked up on PATH; None when it names no file."""
+    if os.path.dirname(command):
+        return command if os.path.isfile(command) else None
+    return shutil.which(command)
 
 
 def same_interpreter(path):
     """Whether this process runs `path`: the same file once its directories are resolved, or the same
-    virtual environment. The file itself is never resolved: a venv's python links to a base interpreter
-    whose packages it does not see."""
+    virtual environment. A venv's python is never resolved, since it links to a base interpreter whose
+    packages it does not see; outside virtual environments, two names for one binary, such as python3
+    and the python3.13 it links to, are the same interpreter."""
     def place(name):
         name = Path(os.path.abspath(name))
         return os.path.normcase(os.path.join(os.path.realpath(name.parent), name.name))
     if place(sys.executable) == place(path):
         return True
     environment = Path(os.path.abspath(path)).parent.parent
-    return ((environment / "pyvenv.cfg").is_file()
-            and os.path.normcase(os.path.realpath(environment)) == os.path.normcase(os.path.realpath(sys.prefix)))
+    if (environment / "pyvenv.cfg").is_file():
+        return os.path.normcase(os.path.realpath(environment)) == os.path.normcase(os.path.realpath(sys.prefix))
+    if sys.prefix != sys.base_prefix:
+        return False
+    try:
+        return os.path.samefile(path, sys.executable)
+    except OSError:
+        return False
 
 
 def _rerun_under_project_python(argv):
@@ -187,8 +212,7 @@ def _rerun_under_project_python(argv):
         print(f"awb.py: {note}; it is skipped", file=sys.stderr)
     if target is None:
         return
-    # AWB_PYTHON may name a command on PATH rather than a path.
-    found = (target if os.path.isfile(target) else None) if os.path.dirname(target) else shutil.which(target)
+    found = locate(target)
     if not found:
         print(f"awb.py: {source} names no interpreter: {target}", file=sys.stderr)
         return
@@ -197,10 +221,14 @@ def _rerun_under_project_python(argv):
     print(f"awb.py: running under {found} ({source}) instead of {sys.executable}", file=sys.stderr, flush=True)
     command = [found, str(Path(__file__).resolve()), *argv]
     environment = {**os.environ, REEXECUTED: "1"}
-    if os.name == "nt":  # Windows has no exec that keeps the process; wait for the rerun instead.
-        sys.exit(subprocess.call(command, env=environment))
-    sys.stdout.flush()
-    os.execve(found, command, environment)
+    try:
+        if os.name == "nt":  # Windows has no exec that keeps the process; wait for the rerun instead.
+            sys.exit(subprocess.call(command, env=environment))
+        sys.stdout.flush()
+        os.execve(found, command, environment)
+    except OSError as error:  # an existing file that is no interpreter, or one whose own interpreter is gone
+        print(f"awb.py: cannot run {found} ({source}): {error.strerror or error}; continuing under "
+              f"{sys.executable}", file=sys.stderr)
 
 
 if __name__ == "__main__":

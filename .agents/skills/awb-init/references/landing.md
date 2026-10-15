@@ -34,7 +34,7 @@ Publish a workbook (`.xlsx`) through DuckDB's spreadsheet reader, `read_xlsx`, w
 SELECT ... FROM read_xlsx('data/raw/<source>/<acquisition-id>/<extracted-folder>/<book>.xlsx', sheet = '<sheet>', all_varchar = true)
 ```
 
-Under `all_varchar`, a date cell can arrive as its Excel serial day number, such as `45292` for 2024-01-01. Convert it explicitly, `DATE '1899-12-30' + CAST(<column> AS INTEGER)` for a workbook in Excel's default 1900 date system (right from March 1900 on) or `DATE '1904-01-01' + CAST(<column> AS INTEGER)` for one in the 1904 system, and check a few converted dates against the workbook before publishing.
+Under `all_varchar`, a date cell can arrive as its Excel serial day number, such as `45292` for 2024-01-01, and a date-time cell with the time of day as its fraction, such as `45292.75` for 18:00 that day. Convert a date explicitly, `DATE '1899-12-30' + CAST(FLOOR(CAST(<column> AS DOUBLE)) AS INTEGER)` for a workbook in Excel's default 1900 date system (right from March 1900 on) or the same from `DATE '1904-01-01'` for one in the 1904 system. `FLOOR` drops the time: a cast to `INTEGER` alone rounds, which moves every cell from noon on to the next day. To keep the time, convert to a timestamp, `TIMESTAMP '1899-12-30' + to_milliseconds(round(CAST(<column> AS DOUBLE) * 86400000))`, or the same from `TIMESTAMP '1904-01-01'`. Check a few converted values against the workbook before publishing, including one with an afternoon time.
 
 ## Read landed files without writing
 

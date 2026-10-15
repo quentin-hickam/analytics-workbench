@@ -420,7 +420,7 @@ def test_commands_state_the_cli_fallback_scripts_by_path_and_the_interpreter():
     assert "In every workbench command, `python3` means README's `Project interpreter`." in commands
     readme = (ROOT / '.agents/skills/awb-init/assets/workbench/README.md').read_text(encoding='utf-8')
     assert re.search(r'^Project interpreter: not yet recorded$', readme, re.M)
-    for skill in ('awb-clean', 'awb-explore'):
+    for skill in ('awb-clean', 'awb-explore', 'awb-package'):
         text = ' '.join((ROOT / f'.agents/skills/{skill}/SKILL.md').read_text(encoding='utf-8').split())
         assert "README's `Project interpreter`" in text, skill
 
@@ -433,6 +433,14 @@ def test_no_code_history_means_no_commits_or_suggestions():
     analysis = ' '.join((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/analysis.md')
                         .read_text(encoding='utf-8').split())
     assert "while its `Code history:` line says `none`, do neither" in analysis
+    # The guide and skill that suggest a commit at a step say so too, where the step is read.
+    data = ' '.join((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/data.md')
+                    .read_text(encoding='utf-8').split())
+    assert "suggest committing it unless README's `Code history:` line says `none`" in data
+    assert ("Unless README's `Code history:` line says `none`, suggest committing these first so the "
+            "publication's `conversion_commit` holds them") in data
+    clean = ' '.join((ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8').split())
+    assert "Unless README's `Code history:` line says `none`, commit `foundation/quality.json`" in clean
     init = ' '.join(section((ROOT / '.agents/skills/awb-init/SKILL.md').read_text(encoding='utf-8'),
                             '## 1. Resolve the target').split())
     assert '`Code history: none (<reason>)`' in init

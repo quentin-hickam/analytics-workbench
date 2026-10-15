@@ -1,6 +1,6 @@
 # Analytics workbench
 
-One data foundation, `foundation/`, serves every investigation; reusable operations in `src/`; each question's records in `investigations/<name>/`.
+`foundation/` holds the data foundation every investigation shares, `src/` reusable operations, and `investigations/<name>/` each question's records.
 
 ## Start or resume
 
@@ -21,7 +21,7 @@ When the host offers the `awb` MCP server, use its tools for `awb.py` commands, 
 
 If a write tool is refused or unavailable, run its CLI command, keep using the tools that work, and say so once. Skill scripts run by path, never as `awb.py` commands.
 
-In every workbench command, `python3` means README's `Project interpreter`. Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists them. Compute through saved queries: run every query with `awb.py sql`, and counts, null rates, and distinct values with `awb.py profile`; save a query you run twice as `investigations/<name>/exploration/<topic>.sql`. Run helpers, customized or not, as black boxes; open one's source only to adapt or debug it. Repair a missing helper or package through `awb-init`.
+In every workbench command, `python3` means README's `Project interpreter`. Run workbench helpers with `python3 src/awb.py <command>`; `--help` lists them. Compute through saved queries: run every query with `awb.py sql`, and counts, null rates, and distinct values with `awb.py profile`; save a query you run twice as `investigations/<name>/exploration/<topic>.sql` and rerun it by path. Run helpers, customized or not, as black boxes; open one's source only to adapt or debug it. Repair a missing helper or package through `awb-init`.
 
 ## Conversation
 
@@ -45,6 +45,6 @@ Settle ambiguous terms with concrete examples and the data. Record shared meanin
 
 Change findings, issues, and next steps with `awb.py state finding`, `state issues`, and `state next`; record a question the work raises with `awb.py questions add`, and the user's answer with `questions answer`. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. Record a reader the user names in the brief's Audience section.
 
-Commit when asked; when README's `Commits:` line says `as I go`, which you set when the user asks, also commit analytical code as you go. Otherwise suggest one at most once a session while analytical code is uncommitted, so evidence carries a SHA. While README's `Code history:` line says `none`, make and suggest no commits.
+Commit when asked; when README's `Commits:` line says `as I go`, which you set when the user asks, also commit analytical code as you go. Otherwise suggest one at most once a session while analytical code is uncommitted. While README's `Code history:` line says `none`, make and suggest no commits.
 
 Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen. Take a user's correction to a package draft through `awb-package`, which keeps one later drafts could repeat in `foundation/review-rules.md`.

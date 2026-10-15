@@ -24,12 +24,16 @@ relative to PROJECT_ROOT or absolute inside it, and one of the checks its public
 the citation, with the check's outcome and the root-relative path, is appended to the row's Current
 treatment once.
 
-A new entry is an issue the analyst found that the scan did not report. Its evidence is a saved
-query's project-relative path ending in .sql, which must be a file in the project and is written as
-code, or any other one-line text, such as a reference and page, written as given. Its row gets the
-next ID, the observation followed by `; evidence <evidence>`, and no scan marker or quality.json
-link. An Active row with the same object and observation is that entry already recorded, as when a
-call is run again: its judgment cells are set instead.
+A new entry is an issue the analyst found that the scan did not report. Its evidence is one line of
+text, its runs of whitespace read as one space. Evidence that ends in .sql, in any case, after one
+pair of surrounding backticks is set aside, or that ends in .sql followed by a backtick, cites a
+saved query: it must be that query's path alone, relative to PROJECT_ROOT, without spaces or
+backticks, naming a file inside the project, and is written as one code span of its normalized
+path. Any other text, such as a reference and page, is written as given. Evidence citing a saved
+query that is missing, outside the project, or inside a sentence is refused. Its row gets the next
+ID, the observation followed by `; evidence <evidence>`, and no scan marker or quality.json link.
+An Active row with the same object and observation is that entry already recorded, as when a call
+is run again: its judgment cells are set instead.
 
 Quality issue rows get the next ID, the scan's counts and examples, and the marker
 `<scan>#<key>` with its scan date. foundation/quality.json holds hashed scan links and recorded
@@ -253,12 +257,15 @@ def _new_entries(root, new):
         if bool(entry.get("correction")) != bool(entry.get("change")):
             raise RecordError(f"{name}: give both correction and change, or neither")
         evidence = " ".join(entry["evidence"].split())
-        if evidence.endswith(".sql"):
-            path = Path(os.path.normpath(root / evidence))
-            if (Path(evidence).is_absolute() or "`" in evidence or " " in evidence
+        # A path in backticks is the same citation as a bare one, so it is checked the same way.
+        bare = evidence[1:-1].strip() if len(evidence) > 1 and evidence[0] == evidence[-1] == "`" else evidence
+        if re.search(r"\.sql`?$", bare, re.IGNORECASE):
+            path = Path(os.path.normpath(root / bare))
+            if (Path(bare).is_absolute() or "`" in bare or " " in bare
                     or not path.is_relative_to(root) or not path.is_file()):
-                raise RecordError(f"{name} evidence names no saved query: {evidence}; give a saved query's "
-                                  "path relative to the project root, or a reference in words")
+                raise RecordError(f"{name} evidence names no saved query: {evidence}; evidence ending in .sql must "
+                                  "be a saved query's path alone, relative to the project root and naming a file "
+                                  "in it; otherwise give a reference in words that does not end in .sql")
             evidence = f"`{path.relative_to(root).as_posix()}`"
         checked.append((name, entry, evidence))
     return checked
@@ -330,7 +337,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                               "with no single row and ID to link; give the rows distinct IDs and one marker, "
                               "or revise a row by its quality ID")
 
-    # Allocate IDs first so {S1} and {Q-004} placeholders resolve anywhere in the decisions.
+    # Allocate IDs first so {S1}, {N1}, and {DQ-004} placeholders resolve anywhere in the decisions.
     ids, new_ids, named = {}, _next_ids(active), {}
     for issue_id in issues:
         if issue_id in revised:

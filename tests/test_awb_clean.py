@@ -36,7 +36,9 @@
 # test_fresh_record_allocates_dq_ids: a project without quality rows gets DQ-001 onward.
 # test_existing_q_prefix_continues: a quality record already numbered Q-NNN keeps Q- for new rows.
 # test_analyst_authored_issue_gets_the_next_id_and_no_link: a `new` entry writes a row with the next ID, its object, observation and evidence, and no scan marker or quality.json link; {N1} resolves elsewhere in the call; a correction on it has no rescan suffix; rerunning the call updates the row instead of adding another.
-# test_new_issues_and_decision_keys_refuse_what_they_do_not_accept: a `new` entry missing a column, with an unknown key, naming a saved query that does not exist or a .sql path outside the project, with only one of correction and change, or not a list of objects, and an unknown top-level decision key, each refuse and write nothing.
+# test_new_issues_and_decision_keys_refuse_what_they_do_not_accept: a `new` entry missing a column, with an unknown key, with evidence ending in .sql, in any case or in backticks, that is not the path alone of a saved query in the project (missing, outside it, or inside a sentence), with only one of correction and change, or not a list of objects, and an unknown top-level decision key, each refuse and write nothing.
+# test_new_issue_evidence_accepted_forms: a saved query's path, bare, in backticks, `./`-prefixed, or with an upper-case .SQL, is written as one code span of its project-relative path; other text, backticks included, is written as given.
+# test_catalog_template_keeps_rows_in_its_table: the shipped catalog.md names the section record_cleaning.py reads and keeps its guidance above the table, so a row added under its last row stays in the table and record sets it; a row added after text below the table is refused by line.
 
 import hashlib
 import importlib.util
@@ -929,6 +931,17 @@ def test_analyst_authored_issue_gets_the_next_id_and_no_link(tmp_path):
     ({"new": [analyst_issue(evidence="investigations/churn/exploration/absent.sql")]},
      "N1 evidence names no saved query: investigations/churn/exploration/absent.sql"),
     ({"new": [analyst_issue(evidence="../elsewhere/gap.sql")]}, "N1 evidence names no saved query"),
+    # A path in backticks, or with an upper-case extension, is still checked.
+    ({"new": [analyst_issue(evidence="`investigations/churn/exploration/absent.sql`")]},
+     "N1 evidence names no saved query: `investigations/churn/exploration/absent.sql`"),
+    ({"new": [analyst_issue(evidence="`../elsewhere/gap.sql`")]}, "N1 evidence names no saved query"),
+    ({"new": [analyst_issue(evidence="investigations/churn/exploration/absent.SQL")]},
+     "N1 evidence names no saved query"),
+    # Text ending in .sql, or in a .sql code span, claims a saved query: the path must stand alone.
+    ({"new": [analyst_issue(evidence="the query in investigations/churn/exploration/march-gap.sql")]},
+     "evidence ending in .sql must be a saved query's path alone"),
+    ({"new": [analyst_issue(evidence="see `investigations/churn/exploration/march-gap.sql`")]},
+     "evidence ending in .sql must be a saved query's path alone"),
     ({"new": [analyst_issue(correction="Drop them")]}, "N1: give both correction and change, or neither"),
     ({"new": analyst_issue()}, "new must be a list of issue objects"),
     ({"new": ["March gap"]}, "new must be a list of issue objects"),
@@ -937,10 +950,56 @@ def test_analyst_authored_issue_gets_the_next_id_and_no_link(tmp_path):
      "decisions have unknown keys: flag; expected date, issues, new, findings, flags, catalog"),
 ])
 def test_new_issues_and_decision_keys_refuse_what_they_do_not_accept(tmp_path, decisions, message):
-    scan_file(tmp_path, delta=False)
-    write(tmp_path, "investigations/churn/exploration/march-gap.sql", "SELECT 1\n")
+    # The project is a subdirectory, so `../elsewhere/gap.sql` names a file that exists outside it.
+    root = tmp_path / "project"
+    scan_file(root, delta=False)
+    write(root, "investigations/churn/exploration/march-gap.sql", "SELECT 1\n")
     write(tmp_path, "elsewhere/gap.sql", "SELECT 1\n")
     before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
     with pytest.raises(recorder.RecordError, match=re.escape(message)):
+        recorder.record(root, "orders", decisions, today=TODAY)
+    assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize("evidence, written", [
+    ("investigations/churn/exploration/march-gap.sql", "`investigations/churn/exploration/march-gap.sql`"),
+    ("`investigations/churn/exploration/march-gap.sql`", "`investigations/churn/exploration/march-gap.sql`"),
+    ("  ./investigations/churn//exploration/march-gap.sql ", "`investigations/churn/exploration/march-gap.sql`"),
+    ("investigations/churn/exploration/upper.SQL", "`investigations/churn/exploration/upper.SQL`"),
+    ("ERP manual, section 4.2", "ERP manual, section 4.2"),
+    ("`ERP export notes`", "`ERP export notes`"),
+    ("march-gap.sql shows it", "march-gap.sql shows it"),
+])
+def test_new_issue_evidence_accepted_forms(tmp_path, evidence, written):
+    write(tmp_path, "investigations/churn/exploration/march-gap.sql", "SELECT 1\n")
+    write(tmp_path, "investigations/churn/exploration/upper.SQL", "SELECT 1\n")
+    [(name, _, recorded)] = recorder._new_entries(tmp_path.resolve(), [analyst_issue(evidence=evidence)])
+    assert (name, recorded) == ("N1", written)
+
+
+CATALOG_ROW = ("| `orders` | canonical view | one row per order | `data/parquet/orders/p1/` | "
+               "`foundation/views/01_orders.sql` |  |  |  |")
+
+
+def test_catalog_template_keeps_rows_in_its_table(tmp_path):
+    template = (TEMPLATES / "foundation/catalog.md").read_text()
+    section = template.split(recorder.DATASETS + "\n")[1].strip().splitlines()
+    # The guidance sits above the table, so a row added under its last row stays in the table.
+    assert section[-1].startswith("| --- |")
+    assert "`record_cleaning.py`" in template.split(recorder.DATASETS)[0]
+    scan_file(tmp_path, delta=False)
+    decisions = {"issues": {"S2": judgment()},
+                 "catalog": {"name": "orders", "cells": {"Quality constraints": "Age 9999 is open ({S2})"}}}
+    write(tmp_path, "foundation/catalog.md", template.rstrip("\n") + "\n" + CATALOG_ROW + "\n")
+    assert recorder.record(tmp_path, "orders", decisions, today=TODAY)["catalog"] == "updated orders"
+    catalog = (tmp_path / "foundation/catalog.md").read_text()
+    assert catalog.count("| `orders` |") == 1 and "| Age 9999 is open (DQ-001) |" in catalog
+    # A row added after text below the table is refused by its line, before anything is written.
+    path = write(tmp_path, "foundation/catalog.md", template.rstrip("\n") + "\n\nA note.\n\n" + CATALOG_ROW + "\n")
+    scan_file(tmp_path, delta=False)
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    line = path.read_text().splitlines().index(CATALOG_ROW) + 1
+    with pytest.raises(recorder.RecordError, match=rf"foundation/catalog.md: a row at line {line} \(`orders`\) sits "
+                                                   r"outside the table under '## Published datasets and views'"):
         recorder.record(tmp_path, "orders", decisions, today=TODAY)
     assert {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()} == before
