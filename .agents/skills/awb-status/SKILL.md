@@ -42,7 +42,8 @@ Finish with up to five requests whose state applies, risk rows first, then progr
 | `active.counts` has `revalidation-needed` | "Recheck the findings awaiting recheck" | `python3 investigations/<name>/run.py` | risk |
 | A package's `unmatched_flags` is above zero | "Revise the <package> draft to carry the new caveats" | `awb-package` | risk |
 | A package's `rerun_since_draft` lists results | "Revise the <package> draft to the rerun results" | `awb-package` | risk |
-| A release exists and `release_storage` is `unrecorded` or `unreachable`, or a package's `latest_release_in_storage` is false | "Record where releases are kept" | `awb-release` | risk |
+| A release exists and `release_storage` is `unrecorded` or `unreachable` | "Record where releases are kept" | `awb-release` | risk |
+| A package's `latest_release_in_storage` is false | "Copy the <package> releases to storage" | `python3 src/awb.py copy-releases <investigation> <package>` | risk |
 | Acquisitions exist and `landed_data_storage` is `unrecorded` or `unreachable`, or `reachable` with acquisitions held only in this checkout | "Record where landed data is kept" | AGENTS.md record maintenance | risk |
 | `sources.documentation_without_reference` lists a source | "Keep the documentation behind the <source> assessment" | `workbench-guides/data.md` | risk |
 | `git.state_status` is `out of date` | "Update the investigation state" | `python3 src/awb.py state` | risk |

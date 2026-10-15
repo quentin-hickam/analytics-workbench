@@ -2118,7 +2118,8 @@ def chart_file_problems(root, investigation, draft, record) -> list[dict]:
         if not _chart_entry(entry):
             rows.append({"chart": label, "problem": f"the manifest's charts entry for {file} records no selection, "
                                                     "columns, headers, value labels, percent, or rounding; rerun "
-                                                    "export to record them"})
+                                                    "export with every --chart to record them (a --result-only "
+                                                    "export keeps this entry)"})
             continue
         table = Path(root) / "investigations" / investigation / "results" / f"{entry['result_id']}.csv"
         try:
@@ -2756,14 +2757,23 @@ def _labels_from(record, where):
     return columns, values
 
 
+def _percent_from(value, where):
+    """A [percent] table's columns list, as `where` names the table in the file."""
+    if not (isinstance(value, dict) and set(value) == {"columns"} and isinstance(value["columns"], list)
+            and all(isinstance(column, str) and column for column in value["columns"])):
+        raise ValueError(f"{_DISPLAY}: {where}percent] holds one key, columns, a list of column names")
+    return list(value["columns"])
+
+
 def display_names(root) -> dict:
     """Return {columns, values, round, percent, results} from foundation/display.toml, empty when it is absent.
 
     The file holds only [columns] (column: display name), [values.<column>] (coded value: label), [round]
     (column: decimal places), [percent] with one key, columns = [...] (columns whose fractions show 100 times
-    larger), and [results."<result>"] tables holding columns and values tables, which replace the global ones
-    for that result's files, a values table for its whole column. Anything else raises ValueError. A name or
-    a number of places is checked where a column is exported.
+    larger), and [results."<result>"] tables holding columns, values, and percent tables, which replace the
+    global ones for that result's files, a values table for its whole column and a percent table for every
+    column. A result without a percent table has None there. Anything else raises ValueError. A name or a
+    number of places is checked where a column is exported.
     """
     path = Path(root) / _DISPLAY
     try:
@@ -2775,21 +2785,20 @@ def display_names(root) -> dict:
             raise ValueError(f"{_DISPLAY}: unknown key {key!r}; the file holds only [columns], [values.<column>], "
                              "[round], [percent], and [results.\"<result>\"]")
     columns, values = _labels_from(record, "[")
-    percent = record.get("percent", {"columns": []})
-    if not (isinstance(percent, dict) and set(percent) == {"columns"} and isinstance(percent["columns"], list)
-            and all(isinstance(column, str) and column for column in percent["columns"])):
-        raise ValueError(f"{_DISPLAY}: [percent] holds one key, columns, a list of column names")
+    percent = _percent_from(record.get("percent", {"columns": []}), "[")
     results = {}
-    for result_id, entry in _table(record.get("results", {}), "[results.\"<result>\"] holds a columns table and "
-                                                               "a values table for one result").items():
+    for result_id, entry in _table(record.get("results", {}), "[results.\"<result>\"] holds a columns table, a "
+                                                               "values table, and a percent table for one "
+                                                               "result").items():
         where = f'[results."{result_id}"'
-        if not isinstance(entry, dict) or not set(entry) <= {"columns", "values"}:
-            raise ValueError(f"{_DISPLAY}: {where}] holds only a columns table and a values table")
+        if not isinstance(entry, dict) or not set(entry) <= {"columns", "values", "percent"}:
+            raise ValueError(f"{_DISPLAY}: {where}] holds only a columns table, a values table, and a percent table")
         own_columns, own_values = _labels_from(entry, where + ".")
-        results[result_id] = {"columns": own_columns, "values": own_values}
+        results[result_id] = {"columns": own_columns, "values": own_values,
+                              "percent": _percent_from(entry["percent"], where + ".") if "percent" in entry else None}
     return {"columns": columns, "values": values,
             "round": _table(record.get("round", {}), "[round] maps each column to its decimal places"),
-            "percent": list(percent["columns"]), "results": results}
+            "percent": percent, "results": results}
 
 
 def parse_chart(text: str) -> tuple:
@@ -2798,12 +2807,11 @@ def parse_chart(text: str) -> tuple:
     The grammar is closed: RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]]. The first '@'
     opens the row selection, so a column name holding '@' or ',' cannot be named. Before it, RESULT is a
     simple name, and the first ':' opens COLUMNS, comma-separated names, each stripped of surrounding spaces
-    and none empty. After it, first=<n>, n a whole number from 1 written without leading zeros, takes the
-    table's first n rows;
-    where=<column>=<value>[,<value>] takes, in table order, the rows whose column holds one of the values
-    exactly as the saved table writes it, the column ending at the first '=' and stripped, so no value can
-    hold ',' and none may be empty. selection is "all", {"first": n}, or {"where": {"column", "values"}}.
-    Anything else raises ValueError naming the part that does not fit.
+    and none empty. After it, first=<n>, n a whole number from 1 to 999999999 written without leading
+    zeros, takes the table's first n rows; where=<column>=<value>[,<value>] takes, in table order, the rows
+    whose column holds one of the values exactly as the saved table writes it, the column ending at the first
+    '=' and stripped, so no value can hold ',' and none may be empty. selection is "all", {"first": n}, or
+    {"where": {"column", "values"}}. Anything else raises ValueError naming the part that does not fit.
     """
     def refuse(reason):
         raise ValueError(f"--chart {text!r}: {reason}; write {_CHART_FORM}")
@@ -2820,7 +2828,7 @@ def parse_chart(text: str) -> tuple:
     kind, equals, rest = selection.partition("=")
     if equals and kind == "first":
         if not re.fullmatch(r"[1-9][0-9]{0,8}", rest):
-            refuse("@first takes a whole number of rows from 1, without leading zeros")
+            refuse("@first takes a whole number of rows from 1 to 999999999, without leading zeros")
         return result_id, columns, {"first": int(rest)}
     if equals and kind == "where":
         column, equals, values = rest.partition("=")
@@ -2844,9 +2852,10 @@ def _number(text):
 
 def _unrounded(text, percent=False) -> bool:
     """Whether a cell shows more than UNROUNDED_PLACES decimal places: a finite number cell whose saved text,
-    the file's text unless rounded, has more once trailing zeros are dropped and any exponent applied,
-    counting two fewer in a percent column. So 366.89000039169395 and 1e-05 are unrounded, and 21.3500,
-    which is 21.35, is not; digits beyond a float's precision count, since the file shows them."""
+    the file's text unless rounded, has more once trailing zeros are dropped, any exponent applied, and a
+    percent column's 100-fold scaling applied, so a percent column's saved fraction may carry two more. So
+    366.89000039169395 and 1e-05 are unrounded, and 21.3500, which is 21.35, is not; digits beyond a float's
+    precision count, since the file shows them."""
     if not _number(text):
         return False
     places = -Decimal(text).normalize(_EXACT).as_tuple().exponent
@@ -2948,7 +2957,9 @@ def _shape(root, investigation, result_id, columns, selection, display, rounding
     if unknown or unselected:
         return None, None, None, problems  # the cells a file would hold are unknown, so rounding waits
     selected = _select(table, selection)
-    percent = [c for c in chosen if c in display["percent"]]
+    # A result's own percent list replaces the global one, so a column already holding percents there is kept.
+    own_percent = display["results"].get(result_id, {}).get("percent")
+    percent = [c for c in chosen if c in (display["percent"] if own_percent is None else own_percent)]
     places = {}
     for column in chosen:
         if column in rounding:
@@ -3190,7 +3201,7 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "provenance and leaves exported files untouched.\n"
                f"--chart takes {_CHART_FORM}, a closed grammar: the first '@' opens the row selection, so a "
                "column name holding '@' or ',' cannot be named; before it, the first ':' opens the columns, "
-               "comma-separated, none empty. @first=<n> (a whole number from 1, no leading zero) takes the "
+               "comma-separated, none empty. @first=<n> (a whole number from 1 to 999999999, no leading zero) takes the "
                "saved table's first n rows, in its stable order; @where=<column>=<value>[,<value>] takes, in table order, the rows whose "
                "column holds one of the values exactly as the table writes it, before value labels, so no value "
                "can hold ',' or be empty. Malformed text is refused with exit 2; a selection naming no column "
@@ -3199,15 +3210,18 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "foundation/display.toml holds [columns] (column = display name), [values.<column>] (coded "
                "value = label), [round] (column = decimal places, 0 to 20), [percent] with columns = [...] "
                "(fractions shown 100 times larger, scaled exactly before rounding), and [results.\"<result>\"] "
-               "with columns and values tables that replace the global ones for that result, a values table for "
-               "its whole column; any other key is an error.\nEvery exported column needs a non-blank display "
-               "name; gaps are listed together with display_stub, lines for absent names to fill in under "
-               "[columns] (a blank name is fixed in place), and nothing is written. A number cell a file holds "
-               f"is unrounded when its saved text, trailing zeros dropped and any exponent applied, has more "
-               f"than {UNROUNDED_PLACES} decimal places, two fewer in a percent column (366.89000039169395 and "
+               "with columns, values, and percent tables that replace the global ones for that result, a values "
+               "table for its whole column and a percent table for every column, so a column that already holds "
+               "percents in one result is not scaled again; any other key is an error.\nEvery exported column "
+               "needs a non-blank display name; gaps are listed together with display_stub, lines for absent "
+               "names to fill in under [columns] (a blank name is fixed in place), and nothing is written. A "
+               "number cell a file holds "
+               f"is unrounded when its saved text, with trailing zeros dropped, any exponent applied, and a "
+               f"percent column's 100-fold scaling applied, has more than {UNROUNDED_PLACES} decimal places, so "
+               f"a percent column's saved fraction may carry {UNROUNDED_PLACES + 2} (366.89000039169395 and "
                "1e-05 are; 21.3500, which is 21.35, is not); a column holding one needs places under [round] "
-               "or --round, listed with round_stub, lines to fill in under [round] from the slide's number "
-               "format.\nlabel_warnings "
+               "or --round, listed with round_stub, lines to paste under [round] once each \"\" is replaced "
+               "with the places the slide's number format shows, unquoted, such as \"share\" = 1.\nlabel_warnings "
                "lists each column whose [columns] name labels files from results with different questions "
                "and no [results.\"<result>\".columns] name; it is a warning, and the files are written.\n"
                "The manifest's charts entries record each chart's result, columns, selection, headers, value "
@@ -3609,13 +3623,14 @@ _OPEN_SLIDES = ("Limitations and open caveats", "Open questions")
 
 def open_caveats(directory, record: dict) -> list[dict]:
     """Every caveat a release carries, new or carried forward, so its report never calls it clean while one
-    remains: each top-level bullet of the deck's Limitations and open caveats and Open questions slides in
-    the findings.md under directory, as it renders and in deck order, as {"slide", "line", "text", "sub"},
-    nested items in sub; then each represented flag released with its caveat, as {"finding", "reason",
-    "represented_in"}. An omitted flag carries no caveat."""
-    rows = [{"slide": slide["heading"], "line": bullet["line"], "text": bullet["text"], "sub": bullet["sub"]}
+    remains: the headline and then each top-level bullet of the deck's Limitations and open caveats and Open
+    questions slides in the findings.md under directory, as it renders and in deck order, as {"slide",
+    "line", "text", "sub"}, nested items in sub and a headline's sub empty; then each represented flag
+    released with its caveat, as {"finding", "reason", "represented_in"}. An omitted flag carries no caveat."""
+    rows = [{"slide": slide["heading"], "line": block["line"], "text": block["text"], "sub": block.get("sub", [])}
             for slide in read_outline(Path(directory) / "findings.md")["slides"]
-            if not slide["finding"] and slide["heading"] in _OPEN_SLIDES for bullet in slide["bullets"]]
+            if not slide["finding"] and slide["heading"] in _OPEN_SLIDES
+            for block in slide["headlines"][:1] + slide["bullets"]]
     flags = record.get("revalidation_flags")
     return rows + [{"finding": flag.get("finding"), "reason": flag.get("reason"),
                     "represented_in": flag["represented_in"]}
@@ -3805,9 +3820,10 @@ def cli_release(root: Path, argv: list[str]) -> int:
                "--verify-only first to show them.\nOn success it prints the report fields: datasets, "
                "dispositions (new: absent from the prior release's manifest), open_caveats, provenance_gaps, "
                "checkout_only_acquisitions, verify (the local copy), and storage.\nopen_caveats lists every caveat "
-               "the release carries, new or carried forward: each bullet of the deck's Limitations and open "
-               "caveats and Open questions slides, wherever they stand, as slide, line, text, and sub (nested "
-               "items), then each represented flag released with its caveat, as finding, reason, and "
+               "the release carries, new or carried forward: the headline and then each bullet of the deck's "
+               "Limitations and open caveats and Open questions slides, wherever they stand, as slide, line, "
+               "text, and sub (nested items, empty for a headline), then each represented flag released with "
+               "its caveat, as finding, reason, and "
                "represented_in; while one remains, the release is not clean.\nThe release is "
                "deliveries/<investigation>/<package>/released/<n>/; storage holds its copy at "
                "<location>/<investigation>/<package>/<n>/.\nstorage.status is copied or "

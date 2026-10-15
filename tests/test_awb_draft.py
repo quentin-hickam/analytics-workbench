@@ -35,21 +35,22 @@
 # test_export_refuses_missing_evidence_or_unnamed_chart_result: a missing evidence file, or a --result call that leaves out a charted result, writes nothing.
 # test_export_writes_charts_datasets_and_manifest: display names, mapped codes, and rounding shape a saved result into a chart and a dataset; the manifest records each chart's and dataset's shaping, passing export checks for serialized results only, and producing state for every represented result.
 # test_export_gives_an_unrounded_float_column_a_round_gap_and_stub: a column showing more than four decimal places without [round] is an error row per file with round_stub lines to paste under [round], and nothing is written; only the cells a file holds count; a blank pasted stub is its own error; [round] or --round covers the column, and the manifest records the places.
-# test_unrounded_cells_follow_the_stated_threshold: accepted and refused rows for the stated rule: a finite number cell is unrounded when its saved text, trailing zeros aside and any exponent applied, has more than four decimal places, two fewer in a percent column, digits beyond a float's precision included; text, NaN, infinity, an overflowing exponent, separators, underscores, and spaces never are.
+# test_unrounded_cells_follow_the_stated_threshold: accepted and refused rows for the stated rule: a finite number cell is unrounded when its saved text, trailing zeros aside, any exponent applied, and a percent column's 100-fold scaling applied, has more than four decimal places, digits beyond a float's precision included; text, NaN, infinity, an overflowing exponent, separators, underscores, and spaces never are.
 # test_export_percent_scales_fractions_and_records_them: [percent] columns are scaled by 100 exactly from the saved text before rounding, in charts and datasets, and recorded in the manifest's charts and dataset_selection entries; a top-level list, a non-list, or another key under [percent] is refused.
-# test_per_result_display_names_override_the_global_ones: [results."<id>".columns] and .values name one result's columns and values over the global names, a per-result value table replacing the global one whole; another key under a result is refused.
+# test_per_result_display_names_override_the_global_ones: [results."<id>".columns] and .values name one result's columns and values over the global names, a per-result value table replacing the global one whole; another key under a result, or a percent table of another shape, is refused.
+# test_a_per_result_percent_list_replaces_the_global_one: [results."<id>".percent] lists one result's percent columns in place of [percent], so a column already holding percents in one result is not scaled again; the manifest records each file's list and check-draft reapplies it.
 # test_export_warns_when_one_name_labels_results_with_different_questions: a global [columns] name labeling files from results with different questions is a label_warnings row, the files still written; the same question or a per-result name gives none.
 # test_chart_selection_grammar_accepts / test_chart_selection_grammar_refuses: accepted and refused rows for --chart RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]], each refusal naming the part that does not fit.
 # test_export_selects_chart_rows_and_records_the_selection: @first=10 writes the first 10 rows and @where the matching rows in table order, the manifest recording each selection; an unknown column, a value no row holds, or too many rows is an error, malformed syntax and a dataset selection exit 2, and nothing is written.
-# test_check_draft_refuses_a_chart_file_that_differs_from_its_selection: a hand-edited value, an extra row, a renamed header, or a changed saved table fails check-draft in both modes and refuses release; a chart file with no charts entry, an entry from an earlier export, an entry whose file is missing, and a malformed charts field each give a row.
+# test_check_draft_refuses_a_chart_file_that_differs_from_its_selection: a hand-edited value, an extra row, a renamed header, or a changed saved table fails check-draft in both modes and refuses release; a chart file with no charts entry, an entry from an earlier export, which a --result-only export keeps, so its row names the export with every --chart, an entry whose file is missing, and a malformed charts field each give a row.
 # test_check_draft_writes_start_here_before_the_inventory: check-draft writes START-HERE.md's three parts, listing the methodology note and datasets when present, before the inventory lists it; --verify-only writes none and reports an edited one; the prompt is assembly/m365.md's.
 # test_check_draft_reports_draft_markers_as_information: draft, working copy, or not a numbered release in the title, subtitle, a heading or headline, or title notes is an informational draft_markers row in both modes; drafted, redraft, working copies, other notes, and bullets are not read as markers.
 # test_export_checks_follow_the_represented_set: a represented result not serialized keeps its entry; a result outside the represented set drops; an export without --chart removes the chart files and records charts none.
 # test_export_names_every_gap_and_blocks_stale_results: every missing display name is listed at once; a changed setting blocks a serializing export with a stop message and writes nothing; --no-datasets records none; --chart without a dataset choice is refused.
 # test_export_display_stub_names_each_gap_once: missing display names on chart and dataset paths give one quoted [columns] line each, deduplicated, a dotted column kept as one key; a blank name gets its own error and no stub line, so the stub pastes as valid TOML.
 # test_release_refuses_failed_check_or_pending_disposition: a failing verify, an unmatched flag, or a none/revalidate disposition creates no release; a missing or unknown disposition or malformed places fail the check's flag_entries; represented_in none needs no disposition.
-# test_release_reports_fields_for_the_report: datasets, dispositions marked new against the prior release's manifest (unknown when it is unreadable), open caveats (the Limitations and open caveats slide's bullets, then flags released with their caveat, new or carried forward), provenance gaps, checkout-only acquisitions, and a clean local verify.
-# test_open_caveats_read_the_deck_wherever_its_caveat_slides_stand: the Open questions slide's bullets and a Limitations and open caveats slide moved under ## Appendix are read in deck order, nested items kept with their bullet; finding slides, omitted flags, and unrepresented flags give no row.
+# test_release_reports_fields_for_the_report: datasets, dispositions marked new against the prior release's manifest (unknown when it is unreadable), open caveats (the Limitations and open caveats slide's headline and bullets, then flags released with their caveat, new or carried forward), provenance gaps, checkout-only acquisitions, and a clean local verify.
+# test_open_caveats_read_the_deck_wherever_its_caveat_slides_stand: the Open questions slide's headline and bullets and a Limitations and open caveats slide moved under ## Appendix are read in deck order, each headline before its bullets, nested items kept with their bullet; a Limitations slide holding only its headline gives that headline's row; finding slides, omitted flags, and unrepresented flags give no row.
 # test_release_manifest_lists_runtime_per_result: export copies each represented result's runtime block into its results entry, unknown when the evidence has none or a null one, as stale reads it, and the release manifest keeps them; each unread requirements line is a provenance gap.
 # test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy at <location>/<investigation>/<package>/<n>/ compared, with no released/ folder there.
 # test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do, naming <location>/<investigation>/<package>/<n>/.
@@ -1157,8 +1158,9 @@ def test_export_gives_an_unrounded_float_column_a_round_gap_and_stub(project, ca
     ("21.35000000000000142", False, True), ("0.1000000000000000055511151231257827", False, True),
     ("1e-999", False, True), ("12.50000000", True, False), ("-0.00", False, False)])
 def test_unrounded_cells_follow_the_stated_threshold(cell, percent, unrounded):
-    # A number cell is unrounded when its saved text, trailing zeros aside and any exponent applied, has more
-    # than four decimal places, two fewer for a percent column; text that is not a finite plain number never is.
+    # A number cell is unrounded when its saved text, trailing zeros aside, any exponent applied, and a percent
+    # column's 100-fold scaling applied, has more than four decimal places, so a percent column's saved fraction
+    # may carry six; text that is not a finite plain number never is.
     draft = load(ASSETS["src/packaging/draft.py"], "draft_unrounded")
     assert draft._unrounded(cell, percent) is unrounded
 
@@ -1217,7 +1219,44 @@ def test_per_result_display_names_override_the_global_ones(project, capsys):
     write(project, "foundation/display.toml", DISPLAY + '\n[results."r-002".labels]\nregion = "Sales region"\n')
     code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,late_rate", "--no-datasets")
     assert code == 1 and out["errors"] == [
-        'foundation/display.toml: [results."r-002"] holds only a columns table and a values table']
+        'foundation/display.toml: [results."r-002"] holds only a columns table, a values table, and a percent '
+        'table']
+    write(project, "foundation/display.toml", DISPLAY + '\n[results."r-002".percent]\ncolumns = "n"\n')
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,late_rate", "--no-datasets")
+    assert code == 1 and out["errors"] == [
+        'foundation/display.toml: [results."r-002".percent] holds one key, columns, a list of column names']
+
+
+def test_a_per_result_percent_list_replaces_the_global_one(project, capsys):
+    # share holds fractions in r-001 and percents already in r-002: a global [percent] would scale r-002's
+    # 21.35 to 2135, so r-002 takes its own list, here empty, and keeps its values as saved.
+    write(project, "investigations/inv/results/r-001.csv", "region,share\nW,0.2135\n")
+    write(project, "investigations/inv/results/r-002.csv", "region,share\nW,21.35\nE,2.68\n")
+    display = ('[columns]\nregion = "Region"\nshare = "Share of claims (%)"\n\n[percent]\ncolumns = ["share"]\n\n'
+               '[results."r-002".percent]\ncolumns = []\n')
+    write(project, "foundation/display.toml", display)
+    argv = ("export", "inv", "pkg", "--chart", "r-002", "--dataset", "fractions=r-001")
+    code, out = run(project, capsys, *argv)
+    assert out["written"], out
+    draft = project / "deliveries/inv/pkg/draft"
+    assert (draft / "charts/chart-1.csv").read_text() == "Region,Share of claims (%)\nW,21.35\nE,2.68\n"
+    assert (draft / "datasets/fractions.csv").read_text() == "Region,Share of claims (%)\nW,21.35\n"
+    record = manifest(project)
+    assert record["charts"][0]["percent"] == [] and record["dataset_selection"][0]["percent"] == ["share"]
+    assert "chart-1: Share of claims (%) <- r-002.share" in out["methodology_lines"]
+    # check-draft reapplies the list the entry records, so the chart file matches its result.
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert not [row for row in report["charts"] if "differs" in row["problem"]], report["charts"]
+    # A result's own list names its percent columns whole: one naming the column scales it again.
+    write(project, "foundation/display.toml", display.replace("columns = []", 'columns = ["share"]'))
+    run(project, capsys, *argv)
+    assert (draft / "charts/chart-1.csv").read_text() == "Region,Share of claims (%)\nW,2135\nE,268\n"
+    # Without a global list, only the result that lists the column scales it.
+    write(project, "foundation/display.toml", display.replace('[percent]\ncolumns = ["share"]', "[round]")
+          .replace('[results."r-002".percent]\ncolumns = []', '[results."r-001".percent]\ncolumns = ["share"]'))
+    run(project, capsys, *argv)
+    assert (draft / "charts/chart-1.csv").read_text() == "Region,Share of claims (%)\nW,21.35\nE,2.68\n"
+    assert (draft / "datasets/fractions.csv").read_text() == "Region,Share of claims (%)\nW,21.35\n"
 
 
 COLLISION = ("results answering different questions share this [columns] name; confirm it fits each, "
@@ -1247,6 +1286,7 @@ def test_export_warns_when_one_name_labels_results_with_different_questions(proj
     ("r-001:region,late_rate", ("r-001", ["region", "late_rate"], "all")),
     ("r-001: region , late_rate@first=10", ("r-001", ["region", "late_rate"], {"first": 10})),
     ("r-001@first=1", ("r-001", None, {"first": 1})),
+    ("r-001@first=999999999", ("r-001", None, {"first": 999999999})),
     ("r-001:store,sales@where=region=W,E", ("r-001", ["store", "sales"],
                                             {"where": {"column": "region", "values": ["W", "E"]}})),
     ("r-001@where=contact=ops@example.com", ("r-001", None,
@@ -1266,13 +1306,13 @@ def test_chart_selection_grammar_accepts(text, parsed):
     ("r-001:region,,n", "a column name is empty"),
     ("r-001@", "the row selection is not @first=<n> or @where=<column>=<value>[,<value>]"),
     ("r-001@last=3", "the row selection is not @first=<n> or @where=<column>=<value>[,<value>]"),
-    ("r-001@first=0", "@first takes a whole number of rows from 1, without leading zeros"),
-    ("r-001@first=007", "@first takes a whole number of rows from 1, without leading zeros"),
-    ("r-001@first=-1", "@first takes a whole number of rows from 1, without leading zeros"),
-    ("r-001@first=ten", "@first takes a whole number of rows from 1, without leading zeros"),
-    ("r-001@first=1e3", "@first takes a whole number of rows from 1, without leading zeros"),
-    ("r-001@first=1234567890", "@first takes a whole number of rows from 1, without leading zeros"),
-    ("r-001@first=10@where=region=W", "@first takes a whole number of rows from 1, without leading zeros"),
+    ("r-001@first=0", "@first takes a whole number of rows from 1 to 999999999, without leading zeros"),
+    ("r-001@first=007", "@first takes a whole number of rows from 1 to 999999999, without leading zeros"),
+    ("r-001@first=-1", "@first takes a whole number of rows from 1 to 999999999, without leading zeros"),
+    ("r-001@first=ten", "@first takes a whole number of rows from 1 to 999999999, without leading zeros"),
+    ("r-001@first=1e3", "@first takes a whole number of rows from 1 to 999999999, without leading zeros"),
+    ("r-001@first=1234567890", "@first takes a whole number of rows from 1 to 999999999, without leading zeros"),
+    ("r-001@first=10@where=region=W", "@first takes a whole number of rows from 1 to 999999999, without leading zeros"),
     ("r-001@where=region", "@where needs a column, =, and values separated by commas, none empty"),
     ("r-001@where==W", "@where needs a column, =, and values separated by commas, none empty"),
     ("r-001@where=region=", "@where needs a column, =, and values separated by commas, none empty"),
@@ -1360,9 +1400,16 @@ def test_check_draft_refuses_a_chart_file_that_differs_from_its_selection(projec
     # Every chart file is one export recorded, with the shaping it applied.
     set_manifest(project, charts=[{"path": "charts/chart-1.csv", "result_id": "r-001"}])
     _, report = run(project, capsys, "check-draft", "inv", "pkg")
-    assert report["charts"] == [{"chart": "Chart 1", "problem": "the manifest's charts entry for chart-1.csv records "
-                                 "no selection, columns, headers, value labels, percent, or rounding; rerun export "
-                                 "to record them"}]
+    old_entry = [{"chart": "Chart 1", "problem": "the manifest's charts entry for chart-1.csv records no selection, "
+                  "columns, headers, value labels, percent, or rounding; rerun export with every --chart to record "
+                  "them (a --result-only export keeps this entry)"}]
+    assert report["charts"] == old_entry
+    # A --result-only export, as a revision that only adds caveats runs, keeps the entry, so the row names the
+    # full export that records it.
+    code, out = run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    assert out["written"] and manifest(project)["charts"] == [{"path": "charts/chart-1.csv", "result_id": "r-001"}]
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["charts"] == old_entry
     for charts in ("none", [], None):
         set_manifest(project, charts=charts)
         _, report = run(project, capsys, "check-draft", "inv", "pkg")
@@ -1529,7 +1576,11 @@ def test_release_reports_fields_for_the_report(project, capsys):
                                           "  - Their dates are being corrected\n\n**Notes:**")
     write(project, "deliveries/inv/pkg/draft/findings.md", findings)
     line = findings.splitlines().index("- Prices are as recorded; VAT treatment is unconfirmed") + 1
-    slide = [{"slide": "Limitations and open caveats", "line": line,
+    # The slide's headline states the limitation that matters most, so it is the first caveat listed.
+    slide = [{"slide": "Limitations and open caveats",
+              "line": findings.splitlines().index("**Headline:** Coverage remains limited") + 1,
+              "text": "Coverage remains limited", "sub": []},
+             {"slide": "Limitations and open caveats", "line": line,
               "text": "Prices are as recorded; VAT treatment is unconfirmed", "sub": []},
              {"slide": "Limitations and open caveats", "line": line + 1,
               "text": "Late orders in the west await revalidation", "sub": ["Their dates are being corrected"]}]
@@ -1572,12 +1623,25 @@ def test_open_caveats_read_the_deck_wherever_its_caveat_slides_stand(tmp_path):
              {"finding": "F2", "reason": "dropped", "represented_in": ["chart 2"], "disposition": "omit"},
              {"finding": "F3", "reason": "unrelated", "represented_in": "none"}]
     assert draft.open_caveats(tmp_path, {"revalidation_flags": flags}) == [
+        {"slide": "Open questions", "line": lines.index("**Headline:** One question remains") + 1,
+         "text": "One question remains", "sub": []},
         {"slide": "Open questions", "line": lines.index("- Are prices net of VAT?") + 1,
          "text": "Are prices net of VAT?", "sub": []},
+        {"slide": "Limitations and open caveats", "line": lines.index("**Headline:** Coverage remains limited") + 1,
+         "text": "Coverage remains limited", "sub": []},
         {"slide": "Limitations and open caveats", "line": lines.index("- History before 2009 is not visible") + 1,
          "text": "History before 2009 is not visible", "sub": ["Earlier orders were archived"]},
         {**FLAG, "represented_in": ["chart 1"]}]
     assert draft.open_caveats(tmp_path, {"revalidation_flags": "none"})[-1]["slide"] == "Limitations and open caveats"
+    # A Limitations slide holding only its headline and notes passes every check, and its headline is the
+    # deck's main open caveat, so the release still lists it.
+    findings = BASE + LIMITATIONS.replace("Coverage remains limited", "VAT treatment of retail B is unconfirmed")
+    write(tmp_path, "findings.md", findings)
+    assert draft.outline_problems(tmp_path / "findings.md") == []
+    assert draft.open_caveats(tmp_path, {"revalidation_flags": "none"}) == [
+        {"slide": "Limitations and open caveats",
+         "line": findings.splitlines().index("**Headline:** VAT treatment of retail B is unconfirmed") + 1,
+         "text": "VAT treatment of retail B is unconfirmed", "sub": []}]
 
 
 def test_release_manifest_lists_runtime_per_result(project, capsys):

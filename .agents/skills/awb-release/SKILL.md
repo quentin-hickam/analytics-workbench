@@ -54,4 +54,4 @@ When the user asks only to record or change where released packages are kept, re
 
 Report the review's outcome and any accepted `warning` violations, then from the `release` output: `release` and `release_number`; `datasets`, or none; `dispositions`, separating those marked `new` (absent from the prior release's manifest) from those carried forward; `provenance_gaps`; each `checkout_only_acquisitions` entry as an acquisition held only in this checkout; and the storage result as in **5. Copy to storage**, copy instruction included.
 
-List every `open_caveats` entry, those carried forward included: the bullets of the deck's **Limitations and open caveats** and **Open questions** slides, then each flag released with its caveat. While one remains, never call the release clean or say nothing is outstanding.
+List every `open_caveats` entry, those carried forward included: the headline and bullets of the deck's **Limitations and open caveats** and **Open questions** slides, then each flag released with its caveat. While one remains, never call the release clean or say nothing is outstanding.

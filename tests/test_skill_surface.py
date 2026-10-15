@@ -244,4 +244,26 @@ def test_release_shows_draft_markers_and_reports_every_open_caveat():
     report = section('.agents/skills/awb-release/SKILL.md', '## Report')
     # An open caveat the deck states, such as one on its limitations slide, is listed too, not only a flag.
     assert '`open_caveats`' in report and '**Limitations and open caveats**' in report
+    # The limitations slide's headline states the caveat that matters most, so it is listed with the bullets.
+    assert 'the headline and bullets of the deck' in report
     assert 'never call the release clean' in report and 'say nothing is outstanding' in report
+
+
+def test_status_asks_to_copy_releases_when_recorded_storage_lacks_the_latest():
+    # latest_release_in_storage is false only when storage is recorded and reachable, so the request copies the
+    # releases there rather than asking again where releases are kept.
+    rows = [line for line in (ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').splitlines()
+            if line.startswith('| ')]
+    copy = [row for row in rows if '`latest_release_in_storage`' in row]
+    assert copy == ['| A package\'s `latest_release_in_storage` is false | "Copy the <package> releases to storage" '
+                    '| `python3 src/awb.py copy-releases <investigation> <package>` | risk |']
+    record = [row for row in rows if 'Record where releases are kept' in row]
+    assert len(record) == 1 and 'latest_release_in_storage' not in record[0]
+
+
+def test_a_caveat_only_revision_names_the_full_export_for_a_charts_row():
+    # A --result-only export keeps the manifest's charts entries, so a charts row asking to rerun export
+    # needs every --chart.
+    export = section('.agents/skills/awb-package/SKILL.md', '## 4. Export the files and provenance')
+    assert 'pass only `--result`' in export
+    assert 'A `check-draft` `charts` row that asks to rerun export needs the full export, with every `--chart`.' in export
