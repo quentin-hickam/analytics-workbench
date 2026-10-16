@@ -10,7 +10,7 @@
 # test_questions_check_reads_methodology_as_it_renders: a question wrapped, emphasized, linked, escaped, in a code span, heading, or list item, or after a comment block on its line matches; one only in a comment, inline or a block, in fenced code, split over two paragraphs, or reworded does not.
 # test_questions_check_matches_a_code_span_as_written: a question holding brackets, a tilde, an edge underscore, an asterisk, a character reference, or a backslash matches when a code span shows it exactly as written.
 # test_questions_check_refuses_a_commented_question: the issue's probe, a question only inside an HTML comment, fails check-draft's questions; a manifest question with inline markup matches as it renders.
-# test_questions_check_leaves_out_image_text: a question only in an image's text, a linked image's included, or split by an image, with text or without, does not match; one in a link's text, in prose beside an image or after its text, in a code span showing an image's syntax, after an escaped !, or in a reference image, which never resolves, matches.
+# test_questions_check_leaves_out_image_text: a question only in an image's text, a linked image's included, or split by an image, with text or without, does not match, nor does one in an image's text that holds an autolink or, after an escaped backslash or backtick, a code span with a bracket, or in an image after an escaped backslash; one in a link's text, in prose beside an image or after its text, in a code span showing an image's syntax, after an escaped backslash too, after an escaped !, or in a reference image, which never resolves, matches.
 # test_other_checks_still_read_image_text: the names scan and the shared reading keep an image's text, so a name in it is a findings row.
 # test_check_draft_help_and_references_agree_on_the_rendered_reading: the check-draft help text, helpers.md, and the comment above _view name numbers as the only check that does not read the rendered view, and state that it skips only the comments that view drops; the help and helpers.md state how questions are read, image text left out.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
@@ -64,9 +64,10 @@
 # test_claim_strength_follows_cited_results_and_records: a slide citing several results takes the weakest claim; one citing none takes the weakest represented; with no causal finding the Answer slide fails too; a missing Claim, a missing results list, and a missing or differing methodology Claim strength line each fail.
 # test_numbers_skip_a_claim_strength_line_the_claims_check_accepts: numbers on a causal Claim strength line that repeats its result's Claim cell give no numbers row, while a line continuing its paragraph is read; a line the claims check refuses, another design or no experiment named, keeps its numbers; check_numbers skips only the claim_lines it is given.
 # test_numbers_count_lines_as_the_claims_check_does_after_a_comment: a comment holding a line break that str.splitlines() sees (U+2028, form feed, NEL) keeps the numbers check's line numbers on the claims check's, so the accepted-claim skip cannot land on the next line.
-# test_numbers_check_drops_only_the_comments_the_draft_renders: a number after a <!-- in a code span, escaped, in fenced code, or written <!-->, with a later -->, is read, as the rendered view shows it; with no <!--, or one code span holding a whole comment, it is read; one in a comment, a block or within its paragraph, across a list item's lines, after tabs, or in a heading, is skipped and the text after --> is read; a comment never closed hides the rest of the file from both.
+# test_numbers_check_drops_only_the_comments_the_draft_renders: a number after a <!-- in a code span (after an escaped backslash or backtick too), escaped, in fenced code, in a link's target or title, or written <!-->, with a later -->, is read, as the rendered view shows it, and so is one between escaped backticks; with no <!--, or one code span holding a whole comment, it is read; one in a comment, a block, within its paragraph or a link's text, across a list item's lines, after tabs, or in a heading, is skipped and the text after --> is read; a comment opening its line and never closed hides the rest of the file from both, an empty last line included; the numbers check reads exactly the view's lines outside fenced code.
+# test_a_comment_marker_written_as_text_is_no_comment_never_closed: a <!-- in a link's target or title, a code span after an escaped backslash or backtick, or escaped is no markdown row; one in text that no --> closes within its paragraph is.
 # test_check_draft_reads_numbers_after_a_comment_marker_written_as_text: the issue's code span shape in methodology.md fails check-draft in both modes with its numbers row, and release refuses.
-# test_numbers_check_and_rendered_view_drop_the_same_comments: across a seeded corpus of 2,000 random narratives, the words the rendered view drops as comment are exactly those the numbers check's source lines blank.
+# test_numbers_check_and_rendered_view_drop_the_same_comments: across a seeded corpus of 2,000 random narratives, link targets and escaped code spans among their pieces, the words the rendered view drops as comment are exactly those the numbers check's source lines blank, and the numbers check reads exactly the view's lines outside fenced code.
 # test_methodology_note_is_checked_with_rows_naming_it: a clean methodology-note.md passes and joins the inventory; an internal name, an untraced number, causal wording above the strongest represented claim, and an HTML block in it fail check-draft and release with rows naming the file; without it check-draft reports exactly what it did before.
 # test_check_draft_counts_main_and_appendix_slides: slides counts the main sequence, title included, and the appendix apart; How we know under ## Appendix passes.
 # test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section; an appendix finding slide is held to its claim strength.
@@ -471,6 +472,14 @@ QUESTION_IMAGES = {
     "in prose": ("Question (r-002): {q}", True),
     "in prose beside an image": ("![Renewals by quarter](charts/renewals.png) Question (r-002): {q}", True),
     "in an image's text and in prose": ("![{q}](charts/renewals.png)\n\nQuestion (r-002): {q}", True),
+    "in an image's text and in prose after it": ("![{q}](charts/renewals.png) Question (r-002): {q}", True),
+    # A bracket in an autolink, or in a code span after an escaped backslash or backtick, closes nothing.
+    "only in an image's text holding an autolink with ]": ("![{q} <https://example.com/a]>](charts/r.png)", False),
+    "only in an image's text holding an autolink with [": ("![{q} <https://example.com/[>](charts/r.png)", False),
+    "only in an image's text holding \\\\ and a code span with ]": ("![{q} C:\\\\`]`](charts/r.png)", False),
+    "only in an image's text holding \\` and a code span with ]": ("![{q} \\``]`](charts/r.png)", False),
+    "only in an image's text after an escaped backslash": ("\\\\![{q}](charts/renewals.png)", False),
+    "in a code span after an escaped backslash": ("C:\\\\`![{q}](charts/renewals.png)`", True),
     "in a code span showing an image's syntax": ("`![{q}](charts/renewals.png)`", True),
     "after an escaped !, which makes a link": ("\\![{q}](charts/renewals.png)", True),
     "in a reference image, which never resolves": ("![{q}][renewals]", True),
@@ -2481,15 +2490,25 @@ COMMENT_SHAPES = {
         f"```\n<!--\n```\n\n{UNTRACED}\n\nIt closes with -->.\n", ["37%"]),
     "an empty comment <!--> before it, and a bare --> after it": (
         f"Notes <!--> go here.\n\n{UNTRACED}\n\nIt closes with -->.\n", ["37%"]),
+    # The same within one paragraph, where the reading once took the <!-- for a comment's start.
+    "a code span holding <!-- after an escaped backslash": (f"Write C:\\\\`<!--` then {UNTRACED} Then `-->` ends it.\n",
+                                                           ["37%"]),
+    "a code span holding <!-- after an escaped backtick": (f"A tick \\``<!--` then {UNTRACED} Then `-->` ends it.\n",
+                                                          ["37%"]),
+    "a link's title holding <!--": (f"See [the note](x.png \"<!--\"). {UNTRACED} It closes with -->.\n", ["37%"]),
+    "a link's target holding <!--": (f"See [the note](<!--x>). {UNTRACED} It closes with -->.\n", ["37%"]),
+    "escaped backticks around it, which open no code span": ("Renewals fell \\` then 37% in Q3 \\` end.\n", ["37%"]),
     # Controls, and comments where a column or a line of the source differs from the rendered text's.
     "no <!--": (f"{UNTRACED}\n", ["37%"]),
     "one code span holding <!-- x -->": (f"A note is written `<!-- x -->`.\n\n{UNTRACED}\n", ["37%"]),
     "a comment holding it": (f"<!--\n{UNTRACED}\n-->\n", []),
     "a comment within its paragraph": (f"Notes <!-- {UNTRACED} --> go here.\n", []),
+    "a comment within a link's text": (f"See [the note <!-- {UNTRACED} -->](x.png).\n", []),
     "a comment across lines of a list item": (f"- Notes <!-- a\n  {UNTRACED} --> about 40 stores\n", ["40"]),
     "a comment after tabs": (f"Notes\t\t<!-- {UNTRACED} -->\t40 stores.\n", ["40"]),
     "a comment in a heading": (f"## Notes <!-- {UNTRACED} --> 40 ##\n", ["40"]),
     "a comment never closed, which the markdown check refuses": (f"<!--\n{UNTRACED}\n", []),
+    "a comment never closed, before an empty last line": (f"<!--\n{UNTRACED}\n\n", []),
 }
 
 
@@ -2500,8 +2519,29 @@ def test_numbers_check_drops_only_the_comments_the_draft_renders(tmp_path, shape
     path = tmp_path / "methodology.md"
     path.write_text(text)
     assert [row["text"] for row in draft.check_numbers(path, [Decimal(12)])] == rows
-    # The rendered view the other checks read shows the sentence exactly when the numbers check reads it.
-    assert any("37%" in line.plain for line in draft._read_view(path)[0]) == ("37%" in rows)
+    # The rendered view the other checks read shows the sentence exactly when the numbers check reads it, and the
+    # numbers check reads every line the view holds outside fenced code, so their line numbers agree.
+    view = draft._read_view(path)[0]
+    assert any("37%" in line.plain for line in view) == ("37%" in rows)
+    assert [number for number, _, _ in draft._unfenced(path)] == [line.number for line in view if line.kind != "code"]
+
+
+@pytest.mark.parametrize("text, refused", [
+    ("See [the note](x.png \"<!--\") here.\n", False),
+    ("See [the note](<!--x>) here.\n", False),
+    ("Write C:\\\\`<!--` here.\n", False),
+    ("A tick \\``<!--` here.\n", False),
+    ("Write \\<!-- here.\n", False),
+    ("Notes <!-- here.\n", True),
+    ("Notes `x` <!-- here.\n", True),
+])
+def test_a_comment_marker_written_as_text_is_no_comment_never_closed(text, refused):
+    # A <!-- in a link's target or title, a code span, or an escape opens no comment, so it is no comment left
+    # open either; one in plain text that no --> closes within its paragraph is still refused.
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_comment_open")
+    assert [problem for _, problem in draft._view(text)[1]] == (
+        ["unsupported Markdown: a comment never closed at line 1; rewrite as a comment closed with --> in the same "
+         "paragraph, or delete it"] if refused else [])
 
 
 def test_check_draft_reads_numbers_after_a_comment_marker_written_as_text(project, capsys):
@@ -2521,7 +2561,7 @@ def test_check_draft_reads_numbers_after_a_comment_marker_written_as_text(projec
 # Pieces of the random narratives the agreement check reads: comment markers, code spans, escapes, fences, containers,
 # tabs, and the line breaks str.splitlines() sees. Its words are unique markers, zq1x, zq2x, ..., which no markup changes.
 CORPUS_INLINE = ("fell", "37%", "<!--", "-->", "<!-->", "<!--->", "\\<!--", "\\\\<!--", "`", "``", "`<!--`", "`-->`",
-                 "\\", " ", "\t", "[", "]", "![", "*", "_", "##")
+                 "\\", "\\\\`", "\\``", " ", "\t", "[", "]", "![", "*", "_", "##", "](x.png \"<!--\")", "](<!--x>)")
 CORPUS_STARTS = ("", "", "", "- ", "> ", "# ", "1. ", "```", "~~~", "    ", "  ", "\t", "> - ", "<!-- ", "---")
 CORPUS_BREAKS = ("\n", "\n", "\n\n", "\r\n", "\u2028", "\x0c", "\x85")
 
@@ -2549,6 +2589,8 @@ def test_numbers_check_and_rendered_view_drop_the_same_comments(tmp_path):
         kept = " ".join(line for _, line, _ in draft._unfenced(path)) + " " + code
         dropped = [marker for marker in markers if marker not in shown]
         assert dropped == [marker for marker in markers if marker not in kept], "".join(pieces)
+        assert [number for number, _, _ in draft._unfenced(path)] == [line.number for line in view
+                                                                       if line.kind != "code"], "".join(pieces)
         hidden += len(dropped)
     assert hidden > 1000  # the corpus puts many words in comments, so it tests agreement rather than assuming it
 
