@@ -10,7 +10,9 @@
 # test_questions_check_reads_methodology_as_it_renders: a question wrapped, emphasized, linked, escaped, in a code span, heading, or list item, or after a comment block on its line matches; one only in a comment, inline or a block, in fenced code, split over two paragraphs, or reworded does not.
 # test_questions_check_matches_a_code_span_as_written: a question holding brackets, a tilde, an edge underscore, an asterisk, a character reference, or a backslash matches when a code span shows it exactly as written.
 # test_questions_check_refuses_a_commented_question: the issue's probe, a question only inside an HTML comment, fails check-draft's questions; a manifest question with inline markup matches as it renders.
-# test_check_draft_help_and_references_agree_on_the_rendered_reading: the check-draft help text, helpers.md, and the comment above _view name numbers as the only check that does not read the rendered view, and the help states how questions are read.
+# test_questions_check_leaves_out_image_text: a question only in an image's text, a linked image's included, or split by an image, with text or without, does not match; one in a link's text, in prose beside an image or after its text, in a code span showing an image's syntax, after an escaped !, or in a reference image, which never resolves, matches.
+# test_other_checks_still_read_image_text: the names scan and the shared reading keep an image's text, so a name in it is a findings row.
+# test_check_draft_help_and_references_agree_on_the_rendered_reading: the check-draft help text, helpers.md, and the comment above _view name numbers as the only check that does not read the rendered view, and state that it skips only the comments that view drops; the help and helpers.md state how questions are read, image text left out.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
 # test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
@@ -62,6 +64,9 @@
 # test_claim_strength_follows_cited_results_and_records: a slide citing several results takes the weakest claim; one citing none takes the weakest represented; with no causal finding the Answer slide fails too; a missing Claim, a missing results list, and a missing or differing methodology Claim strength line each fail.
 # test_numbers_skip_a_claim_strength_line_the_claims_check_accepts: numbers on a causal Claim strength line that repeats its result's Claim cell give no numbers row, while a line continuing its paragraph is read; a line the claims check refuses, another design or no experiment named, keeps its numbers; check_numbers skips only the claim_lines it is given.
 # test_numbers_count_lines_as_the_claims_check_does_after_a_comment: a comment holding a line break that str.splitlines() sees (U+2028, form feed, NEL) keeps the numbers check's line numbers on the claims check's, so the accepted-claim skip cannot land on the next line.
+# test_numbers_check_drops_only_the_comments_the_draft_renders: a number after a <!-- in a code span, escaped, in fenced code, or written <!-->, with a later -->, is read, as the rendered view shows it; with no <!--, or one code span holding a whole comment, it is read; one in a comment, a block or within its paragraph, across a list item's lines, after tabs, or in a heading, is skipped and the text after --> is read; a comment never closed hides the rest of the file from both.
+# test_check_draft_reads_numbers_after_a_comment_marker_written_as_text: the issue's code span shape in methodology.md fails check-draft in both modes with its numbers row, and release refuses.
+# test_numbers_check_and_rendered_view_drop_the_same_comments: across a seeded corpus of 2,000 random narratives, the words the rendered view drops as comment are exactly those the numbers check's source lines blank.
 # test_methodology_note_is_checked_with_rows_naming_it: a clean methodology-note.md passes and joins the inventory; an internal name, an untraced number, causal wording above the strongest represented claim, and an HTML block in it fail check-draft and release with rows naming the file; without it check-draft reports exactly what it did before.
 # test_check_draft_counts_main_and_appendix_slides: slides counts the main sequence, title included, and the appendix apart; How we know under ## Appendix passes.
 # test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section; an appendix finding slide is held to its claim strength.
@@ -76,6 +81,7 @@
 import hashlib
 import importlib.util
 import json
+import random
 import re
 import shutil
 import subprocess
@@ -454,15 +460,56 @@ def test_questions_check_refuses_a_commented_question(project, capsys):
     assert run(project, capsys, "check-draft", "inv", "pkg")[1]["questions"] == []
 
 
+# Where methodology.md writes r-002's question beside an image, and whether the questions check finds it there.
+# An image shows a picture: its text shows only when the image fails to load, or to a screen reader.
+QUESTION_IMAGES = {
+    "only in an image's text": ("![{q}](charts/renewals.png)", False),
+    "only in the text of an image inside a link": ("[![{q}](charts/renewals.png)](https://example.com)", False),
+    "split by an image": ("Which regions ![map](charts/map.png) close claims late?", False),
+    "split by an image without text": ("Which regions ![](charts/map.png) close claims late?", False),
+    "in a link's text": ("[{q}](charts/renewals.png)", True),
+    "in prose": ("Question (r-002): {q}", True),
+    "in prose beside an image": ("![Renewals by quarter](charts/renewals.png) Question (r-002): {q}", True),
+    "in an image's text and in prose": ("![{q}](charts/renewals.png)\n\nQuestion (r-002): {q}", True),
+    "in a code span showing an image's syntax": ("`![{q}](charts/renewals.png)`", True),
+    "after an escaped !, which makes a link": ("\\![{q}](charts/renewals.png)", True),
+    "in a reference image, which never resolves": ("![{q}][renewals]", True),
+}
+
+
+@pytest.mark.parametrize("place", QUESTION_IMAGES)
+def test_questions_check_leaves_out_image_text(project, place):
+    draft = load(project / "src/packaging/draft.py", "draft_image_questions")
+    directory = project / "deliveries/inv/pkg/draft"
+    body, found = QUESTION_IMAGES[place]
+    write(directory, "methodology.md", METHODOLOGY.split("Question (r-002)")[0] + "\n"
+          + body.format(q=QUESTIONS["r-002"]) + "\n")
+    record = json.loads((directory / "manifest.json").read_text())
+    assert draft.question_problems(directory, record) == ([] if found else [
+        {"result_id": "r-002", "question": QUESTIONS["r-002"], "problem": NOT_REPEATED}])
+
+
+def test_other_checks_still_read_image_text(tmp_path):
+    # Only the questions check leaves an image's text out; for the names scan, reading it is the stricter choice.
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_image_names")
+    path = tmp_path / "findings.md"
+    path.write_text("![Late orders in orders_view by region](charts/chart-1.csv)\n")
+    assert [(row["kind"], row["text"]) for row in draft.check_findings(path)] == [("identifier", "orders_view")]
+    assert "orders_view" in draft._read_view(path)[0][0].plain
+
+
 def test_check_draft_help_and_references_agree_on_the_rendered_reading(project, capsys):
     cli = load(project / "src/awb.py", "awb_cli_help")
     with pytest.raises(SystemExit):
         cli.main(["check-draft", "--help"])
     help_text = " ".join(capsys.readouterr().out.split())
     assert "Every check but numbers reads the narratives as they render." in help_text
-    assert "a question in a comment or fenced code does not count" in help_text
+    assert "a question in a comment, fenced code, or an image's text does not count" in help_text
+    assert "without the comments and fenced code the rendered reading drops" in help_text
     helpers = (SKILLS / "awb-package/references/helpers.md").read_text()
     assert "Every draft check but `numbers` reads" in helpers and "`questions` rows" in helpers
+    assert "A question only in a comment, in fenced code, or in an image's text does not count" in helpers
+    assert "A comment is what the reading above drops" in helpers
     source = ASSETS["src/packaging/draft.py"].read_text()
     assert "# Every draft check but numbers reads the narratives (findings.md, methodology.md, and methodology-note.md" in source
 
@@ -2419,6 +2466,91 @@ def test_numbers_count_lines_as_the_claims_check_does_after_a_comment(project, c
                 .replace(DISCOUNT_CLAIM, f"**Claim strength:** {HOLDOUT}\nacross 77 stores"))
     report = run(project, capsys, "check-draft", "inv", "pkg")[1]
     assert report["claims"] == [] and report["numbers"] == [{"file": "methodology.md", "line": 16, "text": "77"}]
+
+
+# Where a <!-- stands around "Renewals fell 37% in Q3.", and the numbers check_numbers reports with no recorded value
+# tracing 37 or 40: a <!-- that opens no comment as the draft renders hides nothing, and a comment hides what it holds.
+UNTRACED = "Renewals fell 37% in Q3."
+COMMENT_SHAPES = {
+    # The issue's three shapes, and an empty comment, each with a later --> that once closed a comment.
+    "a code span holding <!-- before it, and one holding --> after it": (
+        f"A note opens with `<!--`.\n\n{UNTRACED}\n\nIt closes with `-->`.\n", ["37%"]),
+    "an escaped <!-- before it, and a bare --> after it": (
+        f"A note opens with \\<!--.\n\n{UNTRACED}\n\nIt closes with -->.\n", ["37%"]),
+    "a fenced block holding <!-- before it, and a bare --> in later prose": (
+        f"```\n<!--\n```\n\n{UNTRACED}\n\nIt closes with -->.\n", ["37%"]),
+    "an empty comment <!--> before it, and a bare --> after it": (
+        f"Notes <!--> go here.\n\n{UNTRACED}\n\nIt closes with -->.\n", ["37%"]),
+    # Controls, and comments where a column or a line of the source differs from the rendered text's.
+    "no <!--": (f"{UNTRACED}\n", ["37%"]),
+    "one code span holding <!-- x -->": (f"A note is written `<!-- x -->`.\n\n{UNTRACED}\n", ["37%"]),
+    "a comment holding it": (f"<!--\n{UNTRACED}\n-->\n", []),
+    "a comment within its paragraph": (f"Notes <!-- {UNTRACED} --> go here.\n", []),
+    "a comment across lines of a list item": (f"- Notes <!-- a\n  {UNTRACED} --> about 40 stores\n", ["40"]),
+    "a comment after tabs": (f"Notes\t\t<!-- {UNTRACED} -->\t40 stores.\n", ["40"]),
+    "a comment in a heading": (f"## Notes <!-- {UNTRACED} --> 40 ##\n", ["40"]),
+    "a comment never closed, which the markdown check refuses": (f"<!--\n{UNTRACED}\n", []),
+}
+
+
+@pytest.mark.parametrize("shape", COMMENT_SHAPES)
+def test_numbers_check_drops_only_the_comments_the_draft_renders(tmp_path, shape):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_comment_shapes")
+    text, rows = COMMENT_SHAPES[shape]
+    path = tmp_path / "methodology.md"
+    path.write_text(text)
+    assert [row["text"] for row in draft.check_numbers(path, [Decimal(12)])] == rows
+    # The rendered view the other checks read shows the sentence exactly when the numbers check reads it.
+    assert any("37%" in line.plain for line in draft._read_view(path)[0]) == ("37%" in rows)
+
+
+def test_check_draft_reads_numbers_after_a_comment_marker_written_as_text(project, capsys):
+    # The issue's first shape in methodology.md: release's mechanical check reports the untraced number.
+    draft = project / "deliveries/inv/pkg/draft"
+    write(draft, "methodology.md", METHODOLOGY + f"\nA note opens with `<!--`.\n\n{UNTRACED}\n\nIt closes with `-->`.\n")
+    rows = [{"file": "methodology.md", "line": 15, "text": "37%"}]
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["numbers"] == rows
+    code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert code == 1 and report["numbers"] == rows and report["verify"] == []
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["check"]["numbers"] == rows
+    assert not (project / "deliveries/inv/pkg/released").exists()
+
+
+# Pieces of the random narratives the agreement check reads: comment markers, code spans, escapes, fences, containers,
+# tabs, and the line breaks str.splitlines() sees. Its words are unique markers, zq1x, zq2x, ..., which no markup changes.
+CORPUS_INLINE = ("fell", "37%", "<!--", "-->", "<!-->", "<!--->", "\\<!--", "\\\\<!--", "`", "``", "`<!--`", "`-->`",
+                 "\\", " ", "\t", "[", "]", "![", "*", "_", "##")
+CORPUS_STARTS = ("", "", "", "- ", "> ", "# ", "1. ", "```", "~~~", "    ", "  ", "\t", "> - ", "<!-- ", "---")
+CORPUS_BREAKS = ("\n", "\n", "\n\n", "\r\n", "\u2028", "\x0c", "\x85")
+
+
+def test_numbers_check_and_rendered_view_drop_the_same_comments(tmp_path):
+    # Across a random corpus, the words the rendered view drops as comment are exactly the words the numbers check's
+    # source lines blank. Fenced code, which both skip, is set aside, so a marker missing from the view was in a comment.
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_comment_agreement")
+    rng, path, hidden = random.Random(79), tmp_path / "methodology.md", 0
+    for _ in range(2000):
+        pieces, markers = [], []
+        for _ in range(rng.randint(1, 12)):
+            pieces.append(rng.choice(CORPUS_STARTS))
+            for _ in range(rng.randint(0, 6)):
+                if rng.random() < 0.35:
+                    markers.append(f"zq{len(markers)}x")
+                    pieces.append(f" {markers[-1]} ")
+                else:
+                    pieces.append(rng.choice(CORPUS_INLINE))
+            pieces.append(rng.choice(CORPUS_BREAKS))
+        path.write_bytes("".join(pieces).encode())
+        view, lines = draft._read_view(path)[0], path.read_text(encoding="utf-8").splitlines()
+        code = " ".join(lines[line.number - 1] for line in view if line.kind == "code")
+        shown = " ".join(line.plain for line in view if line.kind != "code") + " " + code
+        kept = " ".join(line for _, line, _ in draft._unfenced(path)) + " " + code
+        dropped = [marker for marker in markers if marker not in shown]
+        assert dropped == [marker for marker in markers if marker not in kept], "".join(pieces)
+        hidden += len(dropped)
+    assert hidden > 1000  # the corpus puts many words in comments, so it tests agreement rather than assuming it
 
 
 def storyline_fixture(project):
