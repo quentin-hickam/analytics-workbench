@@ -195,7 +195,7 @@ _HTML_BLOCK = re.compile(
 _HTML_LINE = re.compile(r" {0,3}(?:<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:\"[^\"]*\"|'[^']*'"
                         r"|[^\s\"'=<>`]+))?)*\s*/?>|</[A-Za-z][A-Za-z0-9-]*\s*>)[ \t]*$")
 # Inline: a code span that opens first is code. A backslash before a backtick or `<` makes it a literal
-# character, opening nothing. Comments within a paragraph are read by `_inline_comments`.
+# character, opening nothing. Comments and code spans within a paragraph are read by `_inline_spans`.
 _SPAN = r"(?<![`\\])(`+)(?!`).+?(?<!`)\1(?!`)"
 # An inline HTML tag other than a line break: its attributes can hide the text it wraps.
 _INLINE_TAG = re.compile(_SPAN + r"|(?<!\\)<(?!br\s*/?>)/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>",
@@ -320,16 +320,23 @@ def _target_end(text, index):
     return end.end() if end else None
 
 
-def _inline_comments(text):
-    """A paragraph's comments as (start, end) in its text, and where a `<!--` opens one never closed, or None.
+def _inline_spans(text):
+    """A paragraph's comments and code spans, each as (start, end) in its text, and where a `<!--` opens a
+    comment never closed, or None.
 
-    Read left to right, as CommonMark reads them: a `<!--` in an escape, a code span, an autolink, or a link's or
-    image's target is a character, opening no comment, so it hides nothing.
+    Read left to right across the whole paragraph, as CommonMark reads them: a `<!--` in an escape, a code span,
+    an autolink, or a link's or image's target is a character, opening no comment, so it hides nothing, and a
+    code span wrapped across lines pairs its own backticks only.
     """
-    comments, openers, index = [], 0, 0
+    comments, code, openers, index = [], [], 0, 0
     while found := _INLINE_TOKEN.search(text, index):
         index = found.start()
-        if (end := _literal_end(text, index)) is not None:
+        if text[index] == "`":
+            run = _BACKTICKS.match(text, index)
+            if run.group(1):
+                code.append(run.span())
+            index = run.end()
+        elif (end := _literal_end(text, index)) is not None:
             index = end
         elif text[index] == "[":
             openers, index = openers + 1, index + 1
@@ -337,12 +344,12 @@ def _inline_comments(text):
             openers, index = openers - 1, _target_end(text, index + 1) or index + 1
         elif text.startswith("<!--", index):
             if not (comment := _COMMENT_SPAN.match(text, index)):
-                return comments, index
+                return comments, code, index
             comments.append(comment.span())
             index = comment.end()
         else:
             index += 1
-    return comments, None
+    return comments, code, None
 
 
 def _code_spans(text):
@@ -440,12 +447,12 @@ def _interrupts(text, paragraph=True):
 
 
 def _view(text, *, image_text=True):
-    """Markdown as it renders: one _Line per source line, the refused forms as (line, problem), and the
-    comments it drops as (start, end) offsets in text, in order.
+    """Markdown as it renders: one _Line per source line, the refused forms as (line, problem), the comments it
+    drops, and its code spans, each as (start, end) offsets in text, in order.
 
     image_text=False reads each image as the picture it shows (`_pictured`), never its text.
     """
-    rows, forms, refused, comments = [], [], set(), []
+    rows, forms, refused, comments, code = [], [], set(), [], []
     stack = []          # open containers, outermost first: None for a block quote, else [content indent, empty]
     fence = comment = None  # comment: (line number, offset in text) of an open comment block
     para = False        # the previous line is paragraph text, which the next may continue
@@ -610,11 +617,12 @@ def _view(text, *, image_text=True):
             paragraphs.setdefault(entry["group"], []).append(index)
     for indexes in paragraphs.values():
         joined = "\n".join(rows[i]["leaf"] for i in indexes)
-        spans, unclosed = _inline_comments(joined)
+        spans, code_spans, unclosed = _inline_spans(joined)
         if unclosed is not None:
             refuse(rows[indexes[joined.count("\n", 0, unclosed)]]["number"], "a comment never closed",
                    "a comment closed with --> in the same paragraph, or delete it")
         comments += [(place(joined, indexes, start), place(joined, indexes, end)) for start, end in spans]
+        code += [(place(joined, indexes, start), place(joined, indexes, end)) for start, end in code_spans]
         for start, end in reversed(spans):
             joined = joined[:start] + "\n" * joined.count("\n", start, end) + joined[end:]
         found = next((m for m in _INLINE_TAG.finditer(joined) if not m.group(1)), None)
@@ -637,7 +645,7 @@ def _view(text, *, image_text=True):
                           _collapse(_shown(entry["plain"])) if entry["kind"] == "heading" else None, entry["plain"],
                           entry["prose"], entry["spaced"], entry["links"], entry["group"], entry["start"], declares,
                           entry["item"], entry["listed"]))
-    return view, sorted(forms), sorted(comments)
+    return view, sorted(forms), sorted(comments), sorted(code)
 
 
 # ---------------------------------------------------------------- internal names in findings.md
@@ -741,21 +749,28 @@ def _scan_line(number, line, roots, pattern, found):
 
 # The line breaks str.splitlines() sees.
 _LINE_BREAK = re.compile("\r\n|[\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
+_NOT_LINE_BREAK = re.compile("[^\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 
 
 def _unfenced(path):
-    """Yield (line number, line, opens a fence) for each source line outside fenced code, comments blanked.
+    """Yield (line number, line, opens a fence) for each source line outside fenced code, comments and code
+    spans blanked.
 
     The numbers check reads source lines, not the rendered view, but drops only the fenced code and comments
     `_view` drops, so a `<!--` in a code span, fenced code, or a link's target, or escaped, opens no comment here
-    either.
+    either. Code spans are `_view`'s too, paired across the whole paragraph, so `_quantities`, which reads a line
+    with only the lines around it, never pairs a backtick a span on an earlier line closed.
     """
     text = Path(path).read_text(encoding="utf-8")
-    view, _, comments = _view(text)
+    view, _, comments, code = _view(text)
     # A blanked comment is one space and a newline for each line break it held, so line numbers match `_view`'s;
-    # a comment ending the file can leave its last line empty, which str.splitlines() then leaves out.
-    for start, end in reversed(comments):
-        text = text[:start] + " " + "\n" * len(_LINE_BREAK.findall(text, start, end)) + text[end:]
+    # a comment ending the file can leave its last line empty, which str.splitlines() then leaves out. A blanked
+    # code span keeps its line breaks and its length, so the columns around it stay where they were.
+    for start, end, kind in sorted([(*span, "comment") for span in comments] + [(*span, "code") for span in code],
+                                   reverse=True):
+        blank = (" " + "\n" * len(_LINE_BREAK.findall(text, start, end)) if kind == "comment"
+                 else _NOT_LINE_BREAK.sub(" ", text[start:end]))
+        text = text[:start] + blank + text[end:]
     lines = text.splitlines()
     lines += [""] * (len(view) - len(lines))
     for line, source in zip(view, lines):
@@ -1381,19 +1396,20 @@ _SCALES = {"k": 3, "thousand": 3, "m": 6, "mn": 6, "million": 6, "b": 9, "bn": 9
            "tn": 12, "trillion": 12}
 
 
-def _quantities(line, before="", after="", *, marker=True):
+def _quantities(line, before="", after="", *, marker=True, code=True):
     """Yield (text, body, unit, start, end) for each number a line states, after the skips check_numbers names.
 
     `before` and `after` are the lines of the same paragraph around `line`, read only so that a context or a
     unit a line wrap splits from its number is still seen. `marker` is false where a leading number cannot
-    be a list marker. Every skip blanks with spaces, so `start` and `end` index the line as written; `end`
+    be a list marker. `code` is false where the code spans are already blanked across their paragraph, as
+    `_unfenced` blanks them, so no backtick is paired within these lines alone. Every skip blanks with spaces, so `start` and `end` index the line as written; `end`
     passes the line's length when a unit stands after the wrap.
     """
     offset = len(before) + 1 if before else 0
     if marker and (found := _LIST_MARKER.match(line)):
         line = _blank(line, 0, found.end())
     text = (before + "\n" if before else "") + line + ("\n" + after if after else "")
-    for start, end in _code_spans(text):
+    for start, end in _code_spans(text) if code else ():
         text = _blank(text, start, end)
     text = _CURRENCY.sub(lambda match: " " * len(match.group(0)), text)
     text = _NOT_QUANTITY.sub(lambda match: " " * len(match.group(0)), _blank_names(text))
@@ -1620,7 +1636,7 @@ def check_numbers(path: str | os.PathLike, values, *, allowed=(), claim_lines=()
         offset = len(before) + 1 if before else 0
         joined = (before + "\n" if before else "") + line + ("\n" + after if after else "")
         spans = [found.span() for pattern in patterns for found in pattern.finditer(joined)]
-        for text, body, unit, start, end in _quantities(line, before, after, marker=not wraps):
+        for text, body, unit, start, end in _quantities(line, before, after, marker=not wraps, code=False):
             covered = any(low <= offset + start and offset + end <= high for low, high in spans)
             if not covered and not _traces(body, unit, values):
                 rows.append({"file": Path(path).name, "line": number, "text": text})
