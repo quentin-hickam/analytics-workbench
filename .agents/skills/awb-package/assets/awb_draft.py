@@ -152,7 +152,8 @@ def _evidence_files(root, investigation):
 # Every draft check but numbers reads the narratives (findings.md, methodology.md, and methodology-note.md
 # when the draft holds it) through `_view`, one reading of what renders, so a form that hides text from the
 # reader hides it from every such check, and a form that shows text shows it to every such check. The
-# numbers check reads source lines (`_unfenced`), as the check-draft help text says. The reading covers the
+# numbers check reads source lines (`_unfenced`), as the check-draft help text says, outside the fenced code
+# and comments this reading drops, so a `<!--` that opens no comment hides nothing from it. The reading covers the
 # Markdown subset helpers.md lists. A block form outside it that could hide or move text is refused
 # (`markdown_problems`) rather than guessed at, so it never passes.
 
@@ -193,23 +194,38 @@ _HTML_BLOCK = re.compile(
     r"|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:\s|/?>|$))", re.IGNORECASE)
 _HTML_LINE = re.compile(r" {0,3}(?:<[A-Za-z][A-Za-z0-9-]*(?:\s+[A-Za-z_:][\w.:-]*(?:\s*=\s*(?:\"[^\"]*\"|'[^']*'"
                         r"|[^\s\"'=<>`]+))?)*\s*/?>|</[A-Za-z][A-Za-z0-9-]*\s*>)[ \t]*$")
-# Inline: a code span that opens first is code, so a `<!--` inside one opens nothing.
-# A backslash before a backtick or `<` makes it a literal character, opening nothing.
+# Inline: a code span that opens first is code. A backslash before a backtick or `<` makes it a literal
+# character, opening nothing. Comments within a paragraph are read by `_inline_comments`.
 _SPAN = r"(?<![`\\])(`+)(?!`).+?(?<!`)\1(?!`)"
-_INLINE_COMMENT = re.compile(_SPAN + r"|(?<!\\)<!--(?:-?>|.*?-->)", re.DOTALL)
-_OPEN_COMMENT = re.compile(_SPAN + r"|(?<!\\)<!--", re.DOTALL)
 # An inline HTML tag other than a line break: its attributes can hide the text it wraps.
 _INLINE_TAG = re.compile(_SPAN + r"|(?<!\\)<(?!br\s*/?>)/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>",
                          re.DOTALL | re.IGNORECASE)
+# An inline link's or image's target, after the bracket closing its text.
+_TARGET = r"\(\s*(<[^<>\n]*>|(?:[^()\s]|\([^()\s]*\))*)(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^()]*\)))?\s*\)"
 # Code spans and autolinks render as themselves; an inline link's target renders as nothing. A reference
 # link `[text][label]` never resolves, since every definition is refused, so it renders as written, label
 # included (group 4); the claims check's spaced reading also drops the label, as the link would render if
 # a definition were added, so a phrase is found either way.
 _PIECE = re.compile(
     _SPAN + rf"|(?<!\\)(<{_URI}>)"
-    r"|\]\(\s*(<[^<>\n]*>|(?:[^()\s]|\([^()\s]*\))*)(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^()]*\)))?\s*\)"
+    r"|\]" + _TARGET +
     r"|(?<!\\)\]\[([^\]]*)\]",
     re.DOTALL)
+# From a backtick: the code span its run opens, or the run alone when no run of its length closes it.
+_BACKTICKS = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)|`+", re.DOTALL)
+# An email autolink, as CommonMark defines one.
+_EMAIL_AUTOLINK = re.compile(r"<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+                             r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*>")
+# An inline target's parts as CommonMark reads them: its `(` and a destination in <>, else the destination's
+# escapes, runs, and parentheses, then its optional title and `)`.
+_TARGET_OPEN = re.compile(r"\(\s*(<(?:\\.|[^\\<>\n])*>)?")
+_DESTINATION_PIECE = re.compile(r"\\[!-/:-@\[-`{-~]|\\|[^\\()\s]+|[()]")
+_TITLE_END = re.compile(r"""\s*\)|\s+(?:"(?:\\.|[^\\"])*"|'(?:\\.|[^\\'])*'|\((?:\\.|[^\\()])*\))\s*\)""", re.DOTALL)
+_COMMENT_SPAN = re.compile(r"<!--(?:-?>|.*?-->)", re.DOTALL)
+# Where an escape, a code span, an autolink, a link's text or target, or a comment may start.
+_INLINE_TOKEN = re.compile(r"[\\`<\[\]]")
+# What an image shows in place of its text when image_text is off: one character no question holds.
+_PICTURE = "\ufffc"
 _BREAK_TAG = re.compile(r"(?<!\\)<br\s*/?>", re.IGNORECASE)
 _TAG = re.compile(r"(?<!\\)</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>")
 # Emphasis and strikethrough: every `*` and `~` first, then each `_` run not inside a word, as in
@@ -277,6 +293,107 @@ def _inline(text):
     return "".join(plain), "".join(prose), "".join(spaced), links
 
 
+def _literal_end(text, index):
+    """Where the escape, code span, or autolink starting at text[index] ends, or None. Read left to right, as
+    CommonMark reads them, so the backtick after an escaped backslash or backtick may open a code span; a
+    bracket or `!` inside any of them is a character, opening and closing nothing."""
+    if text[index] == "\\":
+        return index + 2
+    if text[index] == "`":
+        return _BACKTICKS.match(text, index).end()
+    link = (_AUTOLINK.match(text, index) or _EMAIL_AUTOLINK.match(text, index)) if text[index] == "<" else None
+    return link.end() if link else None
+
+
+def _target_end(text, index):
+    """The end of the inline target opening with the `(` at text[index], or None: a destination in <>, or with
+    its parentheses balanced to any depth, escapes read first, then an optional title, as CommonMark reads one."""
+    opened = _TARGET_OPEN.match(text, index)
+    if not opened:
+        return None
+    at, depth = opened.end(), 0
+    if opened.group(1) is None:
+        while (piece := _DESTINATION_PIECE.match(text, at)) and (depth or piece[0] != ")"):
+            depth += {"(": 1, ")": -1}.get(piece[0], 0)
+            at = piece.end()
+    end = _TITLE_END.match(text, at) if not depth else None
+    return end.end() if end else None
+
+
+def _inline_comments(text):
+    """A paragraph's comments as (start, end) in its text, and where a `<!--` opens one never closed, or None.
+
+    Read left to right, as CommonMark reads them: a `<!--` in an escape, a code span, an autolink, or a link's or
+    image's target is a character, opening no comment, so it hides nothing.
+    """
+    comments, openers, index = [], 0, 0
+    while found := _INLINE_TOKEN.search(text, index):
+        index = found.start()
+        if (end := _literal_end(text, index)) is not None:
+            index = end
+        elif text[index] == "[":
+            openers, index = openers + 1, index + 1
+        elif text[index] == "]" and openers:  # a target follows only a ] that closes a [
+            openers, index = openers - 1, _target_end(text, index + 1) or index + 1
+        elif text.startswith("<!--", index):
+            if not (comment := _COMMENT_SPAN.match(text, index)):
+                return comments, index
+            comments.append(comment.span())
+            index = comment.end()
+        else:
+            index += 1
+    return comments, None
+
+
+def _code_spans(text):
+    """The code spans in text as (start, end), read as `_literal_end` reads them, so an escaped backtick opens
+    and closes none."""
+    spans, index = [], 0
+    while found := _INLINE_TOKEN.search(text, index):
+        index = found.start()
+        if text[index] == "`":
+            run = _BACKTICKS.match(text, index)
+            if run.group(1):
+                spans.append(run.span())
+            index = run.end()
+        else:
+            end = _literal_end(text, index)
+            index = end if end is not None else index + 1
+    return spans
+
+
+def _pictured(text):
+    """Inline text with each image's text read as the picture it shows, `_PICTURE`, line breaks kept. Its `![`
+    and target stay, for `_inline` to drop as it drops a link's. Image text shows only when the image fails
+    to load, or to a screen reader.
+
+    One pass pairs each `]` with the `[` it closes, as nesting does; an image is a `[` right after an
+    unescaped `!` whose `]` an inline target follows, and an image inside it goes with it."""
+    images, openers, bang, index = {}, [], None, 0
+    while index < len(text):
+        if (end := _literal_end(text, index)) is not None:
+            index = end
+            continue
+        if text[index] == "[":
+            openers.append((index, bang == index - 1))
+        elif text[index] == "]" and openers:
+            opened, image = openers.pop()
+            if end := _target_end(text, index + 1):
+                if image:
+                    images[opened] = index
+                index = end
+                continue
+        elif text[index] == "!":
+            bang = index
+        index += 1
+    pieces, last = [], 0
+    for opened, closed in sorted(images.items()):
+        if opened > last:
+            pieces.append(text[last:opened + 1] + _PICTURE + "\n" * text.count("\n", opened + 1, closed))
+            last = closed
+    return "".join(pieces) + text[last:]
+
+
 def _shown(plain):
     """plain text as it shows: a code span's content without its backticks, an autolink without its brackets."""
     return _AUTOLINK.sub(r"\1", _CODE_SPAN.sub(lambda match: match[2], plain))
@@ -288,6 +405,16 @@ def _collapse(text):
 
 def _indent(text):
     return len(text) - len(text.lstrip(" "))
+
+
+def _source_column(line, column):
+    """The index in `line` of the character at `column` of line.expandtabs(4), or len(line) past its end."""
+    width = 0
+    for index, char in enumerate(line):
+        width += 4 - width % 4 if char == "\t" else 1
+        if width > column:
+            return index
+    return len(line)
 
 
 def _opens_fence(text):
@@ -312,30 +439,50 @@ def _interrupts(text, paragraph=True):
                 or _RULE.match(text) or _opens_fence(text) or _item_width(text, paragraph) is not None)
 
 
-def _view(text):
-    """Markdown as it renders, one _Line per source line, and the refused forms as (line, problem)."""
-    rows, forms, refused = [], [], set()
+def _view(text, *, image_text=True):
+    """Markdown as it renders: one _Line per source line, the refused forms as (line, problem), and the
+    comments it drops as (start, end) offsets in text, in order.
+
+    image_text=False reads each image as the picture it shows (`_pictured`), never its text.
+    """
+    rows, forms, refused, comments = [], [], set(), []
     stack = []          # open containers, outermost first: None for a block quote, else [content indent, empty]
-    fence = comment = None
+    fence = comment = None  # comment: (line number, offset in text) of an open comment block
     para = False        # the previous line is paragraph text, which the next may continue
     group = 0
+    sources, starts = text.splitlines(), [0]
+    for source in text.splitlines(keepends=True):
+        starts.append(starts[-1] + len(source))
+
+    def position(number, column):
+        """The offset in text of a column of line `number` as its tabs expand."""
+        return starts[number - 1] + _source_column(sources[number - 1], column)
+
+    def place(joined, indexes, at):
+        """The offset in text of offset `at` in a paragraph's leaves, `joined` by line breaks from rows `indexes`."""
+        entry = rows[indexes[joined.count("\n", 0, at)]]
+        return position(entry["number"], entry["at"] + at - joined.rfind("\n", 0, at) - 1)
 
     def refuse(number, what, how):
         if number not in refused:
             refused.add(number)
             forms.append((number, f"unsupported Markdown: {what} at line {number}; rewrite as {how}"))
 
+    # at: the column of the expanded line where leaf starts. A leaf is the end of its line but for a heading's,
+    # which passes its own.
     def row(number, kind, leaf="", **fields):
         rows.append({"number": number, "kind": kind, "leaf": leaf, "level": 0, "title": None, "group": None,
-                     "start": False, "inside": False, "indent": 0, "item": 0, "listed": 0, **fields})
+                     "start": False, "inside": False, "indent": 0, "item": 0, "listed": 0,
+                     "at": len(line) - len(leaf), **fields})
 
-    for number, line in enumerate(text.splitlines(), start=1):
-        line = line.expandtabs(4)
+    for number, source in enumerate(sources, start=1):
+        line = source.expandtabs(4)
         if comment is not None:
             end = line.find("-->")
             if end < 0:
                 row(number, "hidden")
                 continue
+            comments.append((comment[1], position(number, end + 3)))
             comment, group = None, group + 1
             row(number, "html", line[end + 3:], group=group, start=True)
             para = False
@@ -416,9 +563,11 @@ def _view(text):
                        "a comment at the start of its line, outside lists and quotes")
                 row(number, "text", rest, group=group, start=True, inside=inside, indent=indent)
             elif (end := rest.find("-->", 2)) < 0:
-                comment = number
+                comment = (number, position(number, len(line) - len(rest)))
                 row(number, "hidden")
             else:
+                comments.append((position(number, len(line) - len(rest)),
+                                 position(number, len(line) - len(rest) + end + 3)))
                 row(number, "html", rest[end + 3:], group=group, start=True)
             para = False
         elif _HTML_BLOCK.match(rest) or _HTML_LINE.match(rest):
@@ -438,7 +587,7 @@ def _view(text):
                 row(number, "text", rest, group=group, start=True, inside=inside, indent=indent)
             else:
                 row(number, "heading", re.sub(r"(?:^|[ \t])#+[ \t]*$", "", heading[2]), group=group,
-                    level=len(heading[1]))
+                    level=len(heading[1]), at=len(line) - len(rest) + heading.start(2))
             para = False
         elif _RULE.match(rest):
             row(number, "text")
@@ -451,7 +600,8 @@ def _view(text):
     if fence is not None:
         refuse(fence[1], "a code fence never closed", "a fence closed by a matching fence line")
     if comment is not None:
-        refuse(comment, "a comment never closed", "a comment closed with -->, or delete it")
+        refuse(comment[0], "a comment never closed", "a comment closed with -->, or delete it")
+        comments.append((comment[1], len(text)))  # hides every line after it
 
     paragraphs = {}
     for index, entry in enumerate(rows):
@@ -459,15 +609,19 @@ def _view(text):
         if entry["group"] is not None:
             paragraphs.setdefault(entry["group"], []).append(index)
     for indexes in paragraphs.values():
-        joined = _INLINE_COMMENT.sub(lambda m: m.group(0) if m.group(1) else "\n" * m.group(0).count("\n"),
-                                     "\n".join(rows[i]["leaf"] for i in indexes))
-        for pattern, what, how in ((_OPEN_COMMENT, "a comment never closed",
-                                     "a comment closed with --> in the same paragraph, or delete it"),
-                                    (_INLINE_TAG, "an inline HTML tag", "Markdown emphasis or plain text")):
-            found = next((m for m in pattern.finditer(joined) if not m.group(1)), None)
-            if found:
-                refuse(rows[indexes[joined.count("\n", 0, found.start())]]["number"], what, how)
-        plain, prose, spaced, links = _inline(joined)
+        joined = "\n".join(rows[i]["leaf"] for i in indexes)
+        spans, unclosed = _inline_comments(joined)
+        if unclosed is not None:
+            refuse(rows[indexes[joined.count("\n", 0, unclosed)]]["number"], "a comment never closed",
+                   "a comment closed with --> in the same paragraph, or delete it")
+        comments += [(place(joined, indexes, start), place(joined, indexes, end)) for start, end in spans]
+        for start, end in reversed(spans):
+            joined = joined[:start] + "\n" * joined.count("\n", start, end) + joined[end:]
+        found = next((m for m in _INLINE_TAG.finditer(joined) if not m.group(1)), None)
+        if found:
+            refuse(rows[indexes[joined.count("\n", 0, found.start())]]["number"], "an inline HTML tag",
+                   "Markdown emphasis or plain text")
+        plain, prose, spaced, links = _inline(joined if image_text else _pictured(joined))
         for offset, (i, *texts) in enumerate(zip(indexes, *(text.split("\n") for text in (plain, prose, spaced)))):
             rows[i].update(zip(("plain", "prose", "spaced"), texts), links=[t for o, t in links if o == offset])
 
@@ -483,7 +637,7 @@ def _view(text):
                           _collapse(_shown(entry["plain"])) if entry["kind"] == "heading" else None, entry["plain"],
                           entry["prose"], entry["spaced"], entry["links"], entry["group"], entry["start"], declares,
                           entry["item"], entry["listed"]))
-    return view, sorted(forms)
+    return view, sorted(forms), sorted(comments)
 
 
 # ---------------------------------------------------------------- internal names in findings.md
@@ -585,29 +739,28 @@ def _scan_line(number, line, roots, pattern, found):
     return [{"line": number, "kind": kind, "text": text} for _, kind, text in sorted(found)]
 
 
-# The numbers check reads source lines, not the rendered view: it drops comments and fenced code only.
-_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+# The line breaks str.splitlines() sees.
+_LINE_BREAK = re.compile("\r\n|[\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 
 
 def _unfenced(path):
-    """Yield (line number, line, opens a fence) for each line outside fenced code and HTML comments."""
+    """Yield (line number, line, opens a fence) for each source line outside fenced code, comments blanked.
+
+    The numbers check reads source lines, not the rendered view, but drops only the fenced code and comments
+    `_view` drops, so a `<!--` in a code span, fenced code, or a link's target, or escaped, opens no comment here
+    either.
+    """
     text = Path(path).read_text(encoding="utf-8")
-    # A blanked comment keeps every line break str.splitlines() sees, so line numbers match `_view`'s.
-    text = _COMMENT.sub(lambda match: " " + "\n" * (len(match.group(0).splitlines()) - 1), text)
-    fence = None
-    for number, line in enumerate(text.splitlines(), start=1):
-        if fence is not None:
-            closing = _FENCE.match(line)
-            if (closing and closing.group(2)[0] == fence[0] and len(closing.group(2)) >= len(fence)
-                    and not line[closing.end():].strip()):
-                fence = None
-            continue
-        opening = _FENCE.match(line)
-        if opening and not (opening.group(2)[0] == "`" and "`" in line[opening.end():]):
-            fence = opening.group(2)
-            yield number, line, True
-            continue
-        yield number, line, False
+    view, _, comments = _view(text)
+    # A blanked comment is one space and a newline for each line break it held, so line numbers match `_view`'s;
+    # a comment ending the file can leave its last line empty, which str.splitlines() then leaves out.
+    for start, end in reversed(comments):
+        text = text[:start] + " " + "\n" * len(_LINE_BREAK.findall(text, start, end)) + text[end:]
+    lines = text.splitlines()
+    lines += [""] * (len(view) - len(lines))
+    for line, source in zip(view, lines):
+        if line.kind != "code":
+            yield line.number, source, line.kind == "fence"
 
 
 def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]:
@@ -849,8 +1002,8 @@ def flag_entry_problems(record: dict) -> list[dict]:
     return problems
 
 
-def _read_view(path):
-    return _view(Path(path).read_text(encoding="utf-8"))
+def _read_view(path, **options):
+    return _view(Path(path).read_text(encoding="utf-8"), **options)
 
 
 def _regions(view):
@@ -872,11 +1025,13 @@ def question_problems(draft, record: dict) -> list[dict]:
 
     methodology.md is read as it renders (`_view`): each paragraph or heading's text as it shows, code spans
     unwrapped and whitespace collapsed, so a wrapped or formatted question matches and one in a comment or
-    fenced code does not. The question matches as written or rendered the same way, and must fall within one
-    block: as written, so a code span showing it exactly counts though it holds a markup character.
+    fenced code does not. An image shows a picture, not its text, so a question only in an image's text does
+    not match either, though the other checks read that text. The question matches as written or rendered the
+    same way, and must fall within one block: as written, so a code span showing it exactly counts though it
+    holds a markup character.
     """
     blocks = {}
-    for line in _read_view(Path(draft) / "methodology.md")[0]:
+    for line in _read_view(Path(draft) / "methodology.md", image_text=False)[0]:
         if line.group is not None:
             blocks.setdefault(line.group, []).append(line.plain)
     shown = [_collapse(_shown("\n".join(lines))) for lines in blocks.values()]
@@ -1238,8 +1393,9 @@ def _quantities(line, before="", after="", *, marker=True):
     if marker and (found := _LIST_MARKER.match(line)):
         line = _blank(line, 0, found.end())
     text = (before + "\n" if before else "") + line + ("\n" + after if after else "")
-    for pattern in (_CODE_SPAN, _CURRENCY):
-        text = pattern.sub(lambda match: " " * len(match.group(0)), text)
+    for start, end in _code_spans(text):
+        text = _blank(text, start, end)
+    text = _CURRENCY.sub(lambda match: " " * len(match.group(0)), text)
     text = _NOT_QUANTITY.sub(lambda match: " " * len(match.group(0)), _blank_names(text))
     text = re.sub(r"\]\([^)\n]*\)", lambda match: "]" + " " * (len(match.group(0)) - 1), text)
     matches = list(_NUMBER.finditer(text))
@@ -2656,8 +2812,10 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "\nnumbers lists, as file, line, and text, each number in findings.md, methodology.md, or "
                "methodology-note.md that no represented result's table, profile, check details, or settings round "
                "to and the manifest's allowed_numbers does not cover by its text or a phrase around it, reading "
-               "source lines without comments or fenced code, and skipping a methodology.md **Claim strength:** "
-               "line the claims check accepts, whose numbers repeat state.md's Claim cell; numbers_problems names "
+               "source lines without the comments and fenced code the rendered reading drops, so a <!-- in a code "
+               "span, fenced code, or a link's target, or escaped, hides nothing, and skipping a methodology.md "
+               "**Claim strength:** line the claims check accepts, whose numbers repeat state.md's Claim cell; "
+               "numbers_problems names "
                "a missing table, an unreadable table, profile, or evidence file, or a malformed results or "
                "allowed_numbers.\n"
                "unmatched_flags lists each finding state.md flags whose exact finding and reason the manifest's "
@@ -2666,7 +2824,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "that is neither none nor a list of places, and an unknown disposition.\nquestions lists each "
                "manifest results entry without a question, or whose question methodology.md does not repeat "
                "verbatim within one paragraph or heading as it renders, the question read as written or rendered the "
-               "same way: a code span counts, and a question in a comment or fenced code does not count.\n"
+               "same way: a code span counts, and a question in a comment, fenced code, or an image's text does "
+               "not count, nor does one running across an image.\n"
                "draft_markers lists, as where, line, marker, and text, the word draft or the phrase working copy "
                "or not a numbered release, any case, whole words, in the title, subtitle, a slide heading or "
                "**Headline:**, or the title slide's notes; it is informational, since a release copies the draft "
