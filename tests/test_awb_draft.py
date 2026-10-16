@@ -393,6 +393,9 @@ def test_check_draft_requires_each_question_in_methodology(project, capsys):
 QUESTION_PLACES = {
     "only in a comment block": ("<!-- Which regions close claims late? -->", False),
     "in a comment within a paragraph": ("Question (r-002): <!-- Which regions close claims late? --> to come.", False),
+    "in a comment opened in a stray ](...)": ("Intro ](x<!--) Which regions close claims late? -->", False),
+    "in a comment opened in what a \\ before a space keeps from being a target": (
+        "See [a](x\\ <!--) Which regions close claims late? -->", False),
     "in fenced code": ("```\nWhich regions close claims late?\n```", False),
     "split over two paragraphs": ("Which regions close\n\nclaims late?", False),
     "reworded": ("Which regions closed claims late?", False),
@@ -2516,6 +2519,8 @@ COMMENT_SHAPES = {
     "a comment holding it": (f"<!--\n{UNTRACED}\n-->\n", []),
     "a comment within its paragraph": (f"Notes <!-- {UNTRACED} --> go here.\n", []),
     "a comment within a link's text": (f"See [the note <!-- {UNTRACED} -->](x.png).\n", []),
+    "a comment opened in a stray ](...), which no [ makes a target": (f"Intro ](x<!--) {UNTRACED} -->\n", []),
+    "a comment opened after a \\ before a space, which ends a target": (f"See [a](x\\ <!--) {UNTRACED} -->\n", []),
     "a comment across lines of a list item": (f"- Notes <!-- a\n  {UNTRACED} --> about 40 stores\n", ["40"]),
     "a comment after tabs": (f"Notes\t\t<!-- {UNTRACED} -->\t40 stores.\n", ["40"]),
     "a comment in a heading": (f"## Notes <!-- {UNTRACED} --> 40 ##\n", ["40"]),

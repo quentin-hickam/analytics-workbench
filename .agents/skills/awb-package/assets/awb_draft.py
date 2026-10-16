@@ -219,11 +219,11 @@ _EMAIL_AUTOLINK = re.compile(r"<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[
 # An inline target's parts as CommonMark reads them: its `(` and a destination in <>, else the destination's
 # escapes, runs, and parentheses, then its optional title and `)`.
 _TARGET_OPEN = re.compile(r"\(\s*(<(?:\\.|[^\\<>\n])*>)?")
-_DESTINATION_PIECE = re.compile(r"\\.|[^\\()\s]+|[()]", re.DOTALL)
+_DESTINATION_PIECE = re.compile(r"\\[!-/:-@\[-`{-~]|\\|[^\\()\s]+|[()]")
 _TITLE_END = re.compile(r"""\s*\)|\s+(?:"(?:\\.|[^\\"])*"|'(?:\\.|[^\\'])*'|\((?:\\.|[^\\()])*\))\s*\)""", re.DOTALL)
 _COMMENT_SPAN = re.compile(r"<!--(?:-?>|.*?-->)", re.DOTALL)
-# Where an escape, a code span, an autolink, a link's target, or a comment may start.
-_INLINE_TOKEN = re.compile(r"[\\`<\]]")
+# Where an escape, a code span, an autolink, a link's text or target, or a comment may start.
+_INLINE_TOKEN = re.compile(r"[\\`<\[\]]")
 # What an image shows in place of its text when image_text is off: one character no question holds.
 _PICTURE = "\ufffc"
 _BREAK_TAG = re.compile(r"(?<!\\)<br\s*/?>", re.IGNORECASE)
@@ -326,13 +326,15 @@ def _inline_comments(text):
     Read left to right, as CommonMark reads them: a `<!--` in an escape, a code span, an autolink, or a link's or
     image's target is a character, opening no comment, so it hides nothing.
     """
-    comments, index = [], 0
+    comments, openers, index = [], 0, 0
     while found := _INLINE_TOKEN.search(text, index):
         index = found.start()
         if (end := _literal_end(text, index)) is not None:
             index = end
-        elif text[index] == "]" and (end := _target_end(text, index + 1)):
-            index = end
+        elif text[index] == "[":
+            openers, index = openers + 1, index + 1
+        elif text[index] == "]" and openers:  # a target follows only a ] that closes a [
+            openers, index = openers - 1, _target_end(text, index + 1) or index + 1
         elif text.startswith("<!--", index):
             if not (comment := _COMMENT_SPAN.match(text, index)):
                 return comments, index
