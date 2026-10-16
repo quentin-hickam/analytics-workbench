@@ -163,6 +163,7 @@ These come from the tool-call audit in `docs/tool-call-audit-2026-10-11/`, which
 - `check-draft`'s `numbers` check reads text between escaped backticks, as in ``fell \` 37% \` in``, which it used to skip as a code span.
 - `check-draft`'s `questions` check no longer accepts a question that `methodology.md` holds only in an image's text, which shows only when the image fails to load, or to a screen reader. The check reads an image as the picture it shows, so a question cannot run across one either. An image is found as CommonMark finds one: escapes, code spans, and autolinks, an email's too, are read first, so a bracket inside one does not end an image's text early, and a target may nest or escape parentheses or escape a quote in its title. The other checks still read an image's text.
 - `references/helpers.md`, the `check-draft` help text, and the design record say which comments `numbers` skips and that the `questions` check leaves image text out; `helpers.md` also says that a fence or comment starting at column 0 and never closed hides the rest of the file rather than being read as text.
+- `check-draft`'s `numbers` check pairs a code span's backticks across its whole paragraph, as the draft renders it. It used to pair them only within a line and the lines around it, so in hard-wrapped prose a code span closing on an earlier line paired its closing backtick with the next span's opening one, and a number between them, such as `37%` in a line after `` `status =`` wrapped to `` 'active'` ``, was skipped as code.
 
 ### Added
 
