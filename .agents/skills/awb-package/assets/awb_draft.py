@@ -213,8 +213,14 @@ _PIECE = re.compile(
     re.DOTALL)
 # From a backtick: the code span its run opens, or the run alone when no run of its length closes it.
 _BACKTICKS = re.compile(r"(`+)(?!`).+?(?<!`)\1(?!`)|`+", re.DOTALL)
-_IMAGE_TARGET = re.compile(_TARGET)
-_LINK_TARGET = re.compile(r"\]" + _TARGET)
+# An email autolink, as CommonMark defines one.
+_EMAIL_AUTOLINK = re.compile(r"<[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+                             r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*>")
+# An inline target's parts as CommonMark reads them: its `(` and a destination in <>, else the destination's
+# escapes, runs, and parentheses, then its optional title and `)`.
+_TARGET_OPEN = re.compile(r"\(\s*(<(?:\\.|[^\\<>\n])*>)?")
+_DESTINATION_PIECE = re.compile(r"\\.|[^\\()\s]+|[()]", re.DOTALL)
+_TITLE_END = re.compile(r"""\s*\)|\s+(?:"(?:\\.|[^\\"])*"|'(?:\\.|[^\\'])*'|\((?:\\.|[^\\()])*\))\s*\)""", re.DOTALL)
 _COMMENT_SPAN = re.compile(r"<!--(?:-?>|.*?-->)", re.DOTALL)
 # Where an escape, a code span, an autolink, a link's target, or a comment may start.
 _INLINE_TOKEN = re.compile(r"[\\`<\]]")
@@ -295,8 +301,23 @@ def _literal_end(text, index):
         return index + 2
     if text[index] == "`":
         return _BACKTICKS.match(text, index).end()
-    link = _AUTOLINK.match(text, index) if text[index] == "<" else None
+    link = (_AUTOLINK.match(text, index) or _EMAIL_AUTOLINK.match(text, index)) if text[index] == "<" else None
     return link.end() if link else None
+
+
+def _target_end(text, index):
+    """The end of the inline target opening with the `(` at text[index], or None: a destination in <>, or with
+    its parentheses balanced to any depth, escapes read first, then an optional title, as CommonMark reads one."""
+    opened = _TARGET_OPEN.match(text, index)
+    if not opened:
+        return None
+    at, depth = opened.end(), 0
+    if opened.group(1) is None:
+        while (piece := _DESTINATION_PIECE.match(text, at)) and (depth or piece[0] != ")"):
+            depth += {"(": 1, ")": -1}.get(piece[0], 0)
+            at = piece.end()
+    end = _TITLE_END.match(text, at) if not depth else None
+    return end.end() if end else None
 
 
 def _inline_comments(text):
@@ -310,8 +331,8 @@ def _inline_comments(text):
         index = found.start()
         if (end := _literal_end(text, index)) is not None:
             index = end
-        elif target := _LINK_TARGET.match(text, index):
-            index = target.end()
+        elif text[index] == "]" and (end := _target_end(text, index + 1)):
+            index = end
         elif text.startswith("<!--", index):
             if not (comment := _COMMENT_SPAN.match(text, index)):
                 return comments, index
@@ -355,10 +376,10 @@ def _pictured(text):
             openers.append((index, bang == index - 1))
         elif text[index] == "]" and openers:
             opened, image = openers.pop()
-            if target := _IMAGE_TARGET.match(text, index + 1):
+            if end := _target_end(text, index + 1):
                 if image:
                     images[opened] = index
-                index = target.end()
+                index = end
                 continue
         elif text[index] == "!":
             bang = index
@@ -729,10 +750,13 @@ def _unfenced(path):
     """
     text = Path(path).read_text(encoding="utf-8")
     view, _, comments = _view(text)
-    # A blanked comment is one space and every line break it held, so line numbers match `_view`'s.
+    # A blanked comment is one space and a newline for each line break it held, so line numbers match `_view`'s;
+    # a comment ending the file can leave its last line empty, which str.splitlines() then leaves out.
     for start, end in reversed(comments):
-        text = text[:start] + " " + "".join(_LINE_BREAK.findall(text, start, end)) + text[end:]
-    for line, source in zip(view, text.splitlines()):
+        text = text[:start] + " " + "\n" * len(_LINE_BREAK.findall(text, start, end)) + text[end:]
+    lines = text.splitlines()
+    lines += [""] * (len(view) - len(lines))
+    for line, source in zip(view, lines):
         if line.kind != "code":
             yield line.number, source, line.kind == "fence"
 
