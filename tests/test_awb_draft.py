@@ -68,7 +68,8 @@
 # test_a_comment_marker_written_as_text_is_no_comment_never_closed: a <!-- in a link's target or title, a code span after an escaped backslash or backtick, or escaped is no markdown row; one in text that no --> closes within its paragraph is.
 # test_check_draft_reads_numbers_after_a_comment_marker_written_as_text: the issue's code span shape in methodology.md fails check-draft in both modes with its numbers row, and release refuses.
 # test_numbers_check_and_rendered_view_drop_the_same_comments: across a seeded corpus of 2,000 random narratives, link targets and escaped code spans among their pieces, the words the rendered view drops as comment are exactly those the numbers check's source lines blank, code spans aside, which it blanks by design, and the numbers check reads exactly the view's lines outside fenced code.
-# test_numbers_check_pairs_code_spans_across_the_paragraph: a number after a code span wrapped across lines, a span on a later line after it, is read, as the draft shows it; one inside a wrapped span is skipped; a span on one line keeps its result.
+# test_numbers_check_pairs_code_spans_across_the_paragraph: a number after a code span wrapped across lines, a span on a later line after it, is read, as the draft shows it; one inside a wrapped span is skipped; a span on one line keeps its result. A line opening with a span, all code, or ending a wrapped span still leaves a numbered line after it wrapping the paragraph, in a quote too, so its number is read.
+# test_an_allowed_text_quoting_a_code_span_covers_its_number: an allowed text holding a code span matches the line as written and covers its number.
 # test_methodology_note_is_checked_with_rows_naming_it: a clean methodology-note.md passes and joins the inventory; an internal name, an untraced number, causal wording above the strongest represented claim, and an HTML block in it fail check-draft and release with rows naming the file; without it check-draft reports exactly what it did before.
 # test_check_draft_counts_main_and_appendix_slides: slides counts the main sequence, title included, and the appendix apart; How we know under ## Appendix passes.
 # test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section; an appendix finding slide is held to its claim strength.
@@ -2630,6 +2631,15 @@ WRAPPED_CODE = {
     "control: the first span on one line": (
         "We kept rows where `status = 'active'` held.\nThat left 37% of accounts, per `orders`.\n", [(2, "37%")]),
     "a number inside a span wrapped across lines": ("We kept rows where `status =\n40 'active'` held.\n", []),
+    # A span opening a line, or a line all code, leaves the next line wrapping it, so 377. starts no list.
+    "a line opening with a span before a numbered line": (
+        "Monthly orders per account in\n`orders_view` rose to\n377. Orders per account fell 12%.\n", [(3, "377")]),
+    "the same in a quote": (
+        "> Monthly orders per account in\n> `orders_view` rose to\n> 377. Orders per account fell 12%.\n", [(3, "377")]),
+    "a line all code before a numbered line": (
+        "We counted the accounts matching\n`status = 'active'`\n377. Of those, 341% renewed.\n", [(3, "377"), (3, "341%")]),
+    "a wrapped span's end opening the line before a numbered line": (
+        "We filtered `status =\n'active'` and got\n377. Done.\n", [(3, "377")]),
 }
 
 
@@ -2640,6 +2650,15 @@ def test_numbers_check_pairs_code_spans_across_the_paragraph(tmp_path, shape):
     path = tmp_path / "methodology.md"
     path.write_text(text)
     assert [(row["line"], row["text"]) for row in draft.check_numbers(path, [Decimal(12)])] == rows
+
+
+def test_an_allowed_text_quoting_a_code_span_covers_its_number(tmp_path):
+    # Allowed texts match the line as written, code spans included, though numbers are read with them blanked.
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_allowed_code")
+    path = tmp_path / "methodology.md"
+    path.write_text("Per `orders` 40 stores.\n")
+    assert [row["text"] for row in draft.check_numbers(path, [])] == ["40"]
+    assert draft.check_numbers(path, [], allowed={"`orders` 40"}) == []
 
 
 def storyline_fixture(project):

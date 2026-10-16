@@ -753,29 +753,38 @@ _NOT_LINE_BREAK = re.compile("[^\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 
 
 def _unfenced(path):
-    """Yield (line number, line, opens a fence) for each source line outside fenced code, comments and code
-    spans blanked.
+    """Yield (line number, line, opens a fence) for each source line outside fenced code, comments blanked."""
+    for number, line, opens, _ in _source_lines(path):
+        yield number, line, opens
+
+
+def _source_lines(path):
+    """Yield (line number, line, opens a fence, bare) for each source line outside fenced code, comments blanked;
+    bare is the line with its code spans blanked too, keeping its length, so the two share every column.
 
     The numbers check reads source lines, not the rendered view, but drops only the fenced code and comments
     `_view` drops, so a `<!--` in a code span, fenced code, or a link's target, or escaped, opens no comment here
-    either. Code spans are `_view`'s too, paired across the whole paragraph, so `_quantities`, which reads a line
-    with only the lines around it, never pairs a backtick a span on an earlier line closed.
+    either. It decides line wraps and list markers and matches allowed texts on the line, which keeps its code
+    spans as written, and reads numbers from bare: code spans are `_view`'s, paired across the whole paragraph,
+    so a backtick a span on an earlier line closed is never paired again within a line and the lines around it.
     """
     text = Path(path).read_text(encoding="utf-8")
     view, _, comments, code = _view(text)
     # A blanked comment is one space and a newline for each line break it held, so line numbers match `_view`'s;
     # a comment ending the file can leave its last line empty, which str.splitlines() then leaves out. A blanked
-    # code span keeps its line breaks and its length, so the columns around it stay where they were.
-    for start, end, kind in sorted([(*span, "comment") for span in comments] + [(*span, "code") for span in code],
-                                   reverse=True):
-        blank = (" " + "\n" * len(_LINE_BREAK.findall(text, start, end)) if kind == "comment"
-                 else _NOT_LINE_BREAK.sub(" ", text[start:end]))
-        text = text[:start] + blank + text[end:]
-    lines = text.splitlines()
-    lines += [""] * (len(view) - len(lines))
-    for line, source in zip(view, lines):
+    # code span keeps its line breaks and its length.
+    kept, bare, last = [], [], 0
+    for start, end, comment in sorted([(*span, True) for span in comments] + [(*span, False) for span in code]):
+        blank = " " + "\n" * len(_LINE_BREAK.findall(text, start, end)) if comment else None
+        kept += [text[last:start], blank or text[start:end]]
+        bare += [text[last:start], blank or _NOT_LINE_BREAK.sub(" ", text[start:end])]
+        last = end
+    kept, bare = ("".join(pieces + [text[last:]]).splitlines() for pieces in (kept, bare))
+    kept += [""] * (len(view) - len(kept))
+    bare += [""] * (len(view) - len(bare))
+    for line, source, blanked in zip(view, kept, bare):
         if line.kind != "code":
-            yield line.number, source, line.kind == "fence"
+            yield line.number, source, line.kind == "fence", blanked
 
 
 def check_findings(path: str | os.PathLike, *, names=(), roots=()) -> list[dict]:
@@ -1621,22 +1630,24 @@ def check_numbers(path: str | os.PathLike, values, *, allowed=(), claim_lines=()
     state.md Claim cell, so its numbers trace to the record.
     """
     patterns = [re.compile(r"\s+".join(map(re.escape, text.split()))) for text in allowed if text.strip()]
-    rows, lines = [], list(_unfenced(path))
-    for index, (number, line, opens) in enumerate(lines):
+    rows, lines = [], list(_source_lines(path))
+    for index, (number, line, opens, bare) in enumerate(lines):
         if opens or number in claim_lines:
             continue
         previous = lines[index - 1] if index and lines[index - 1][0] == number - 1 else None
         following = lines[index + 1] if index + 1 < len(lines) and lines[index + 1][0] == number + 1 else None
         wraps = previous is not None and not previous[2] and _continues(previous[1], line)
-        before = previous[1] if wraps else ""
-        after = following[1] if following is not None and not following[2] and _continues(line, following[1]) \
-            else ""
-        before, line, after = _unquoted(before), _unquoted(line), _unquoted(after)
+        follows = following is not None and not following[2] and _continues(line, following[1])
+        # Wraps, list markers, and allowed texts read the line with its code spans; numbers read it without them.
+        before, line, after = (_unquoted(text) for text in (previous[1] if wraps else "", line,
+                                                            following[1] if follows else ""))
+        reads = [_unquoted(text) for text in (previous[3] if wraps else "", bare, following[3] if follows else "")]
+        marker = not wraps and bool(_LIST_MARKER.match(line))
         # The text _quantities reads, so an allowed text and a row's text match across the same wrap.
         offset = len(before) + 1 if before else 0
         joined = (before + "\n" if before else "") + line + ("\n" + after if after else "")
         spans = [found.span() for pattern in patterns for found in pattern.finditer(joined)]
-        for text, body, unit, start, end in _quantities(line, before, after, marker=not wraps, code=False):
+        for text, body, unit, start, end in _quantities(reads[1], reads[0], reads[2], marker=marker, code=False):
             covered = any(low <= offset + start and offset + end <= high for low, high in spans)
             if not covered and not _traces(body, unit, values):
                 rows.append({"file": Path(path).name, "line": number, "text": text})
