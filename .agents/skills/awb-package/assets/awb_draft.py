@@ -4035,10 +4035,13 @@ _KINDS = ("full", "scoped")
 # What a review reads, in the order the fingerprint hashes it, and each one's file in the snapshot; then
 # each represented result's evidence file the manifest's results name, by its path, in sorted order.
 # The brief is keyed brief.md and read from the investigation; its questions and Audience set what a review checks.
+# The glossary and source register are read whole, as step 3's readability and source-series checks read them.
 BRIEF = "brief.md"
+GLOSSARY = "foundation/glossary.md"
+SOURCES = "foundation/sources.md"
 _REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.md",
                   METHODOLOGY_NOTE: METHODOLOGY_NOTE, BRIEF: BRIEF, REVIEW_RULES: "review-rules.md",
-                  "revalidation_flags": "revalidation_flags.json"}
+                  GLOSSARY: "glossary.md", SOURCES: "sources.md", "revalidation_flags": "revalidation_flags.json"}
 # show's whole JSON line, as printed, stays within one read tool result (16,000 characters by default).
 _READ_LIMIT = 16000
 _SUMMARY = re.compile(r"review( \(scoped\))?: (?:(clean)|([0-9]+) violations? \(([0-9]+) errors?\), "
@@ -4097,14 +4100,15 @@ def _package_rules(data, investigation, package):
 def review_inputs(root, investigation, package) -> dict:
     """{input: bytes, or None when absent} for exactly what a review reads: the three narratives, the
     investigation's brief.md, the rule file without rules kept for another package (_package_rules), the
-    reduced revalidation_flags as indented JSON, and each evidence file the manifest's results name, which
-    step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a directory
+    glossary and source register whole, the reduced revalidation_flags as indented JSON, and each evidence
+    file the manifest's results name, which step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a directory
     included."""
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     paths = {name: draft / name for name in NARRATIVES + (METHODOLOGY_NOTE,)}
     paths[BRIEF] = root / "investigations" / investigation / BRIEF
     paths[REVIEW_RULES] = root / REVIEW_RULES
+    paths[GLOSSARY], paths[SOURCES] = root / GLOSSARY, root / SOURCES
     inputs = {}
     for name, path in paths.items():
         try:
@@ -4295,7 +4299,7 @@ def review_receipt(root, investigation, package) -> dict:
         label = f"{draft}/{MANIFEST} revalidation_flags" if name == "revalidation_flags" else \
             f"investigations/{investigation}/{BRIEF}" if name == BRIEF else \
             f"{REVIEW_RULES} without rules kept for another package" if name == REVIEW_RULES else \
-            f"{draft}/{name}" if name in _REVIEW_INPUTS and name != REVIEW_RULES else name
+            f"{draft}/{name}" if name in _REVIEW_INPUTS and not name.startswith("foundation/") else name
         pieces += difflib.unified_diff(_diff_text(before), _diff_text(current.get(name)),
                                        f"reviewed {label}", label)
     # Cut against what the rest of the printed line leaves, each line counted as JSON encodes it, so a quote
@@ -4329,6 +4333,7 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
         "record", formatter_class=raw, help="record a review's report and what it read",
         description="Record a review's report: snapshot the draft's findings.md, methodology.md, "
                     "methodology-note.md when present, the investigation's brief.md when present, "
+                    "foundation/glossary.md and foundation/sources.md when present, "
                     "foundation/review-rules.md when present without rules kept for another package, and the "
                     "manifest's revalidation_flags (finding, reason, represented_in, and whether the "
                     "disposition is omit) and each evidence file its results name, and write receipt.json with "

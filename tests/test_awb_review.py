@@ -43,6 +43,7 @@
 # test_snapshot_sits_beside_the_draft_and_is_replaced: the snapshot holds exactly what a review reads, under the package's review/, never in draft/, and each record replaces it, a removed note included.
 # test_record_reads_the_report_from_stdin_and_checks_arguments: --report - reads standard input; an unknown kind, a missing or unreadable report, and a blank or multi-line --accept exit 2 and write nothing; a missing draft is refused.
 # test_brief_change_makes_a_review_stale: the investigation's brief.md is snapshotted with the review, and an edit to it shows stale with brief.md alone in changed and a diff labelled with its path.
+# test_source_register_or_glossary_change_makes_a_review_stale: foundation/sources.md and foundation/glossary.md are snapshotted with the review, and an edit to either, or its removal, shows stale with it alone in changed and a diff labelled with its path.
 # test_show_reports_an_unreadable_receipt_and_bounds_the_diff: a long diff is cut so the printed line, a long prior report and typographic punctuation included, fits one read result, with a note counting the rest; an unreadable or malformed receipt is an error, exit 1, with status none.
 
 import importlib.util
@@ -943,6 +944,23 @@ def test_brief_change_makes_a_review_stale(project, capsys):
     assert out["status"] == "stale" and out["changed"] == ["brief.md"]
     assert "--- reviewed investigations/inv/brief.md\n+++ investigations/inv/brief.md\n" in out["diff"]
     assert "+Methods note length: about 500 words" in out["diff"]
+
+
+@pytest.mark.parametrize("name", ["foundation/sources.md", "foundation/glossary.md"])
+def test_source_register_or_glossary_change_makes_a_review_stale(project, capsys, name):
+    path = project / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("| Source ID | Notes |\n|---|---|\n| orders | reference: [manual](references/orders/manual.md) |\n")
+    record(project, capsys, CLEAN)
+    assert (project / "deliveries/inv/pkg/review/snapshot" / Path(name).name).read_text() == path.read_text()
+    assert show(project, capsys)[1]["status"] == "current"
+    path.write_text(path.read_text().replace("manual.md", "manual-v2.md"))
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == [name]
+    assert f"--- reviewed {name}\n+++ {name}\n" in out["diff"] and "+| orders | reference:" in out["diff"]
+    path.unlink()
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == [name]
 
 
 def test_show_reports_an_unreadable_receipt_and_bounds_the_diff(project, capsys):
