@@ -291,16 +291,22 @@ def _planned(spec):
 
 
 def _validated(name, entry):
-    """[datasets.<name>]'s checks table, else ValueError naming the key at fault."""
+    """[datasets.<name>]'s checks table, else ValueError naming the key at fault. Its lineage list,
+    the columns a conversion adds to say which sheet, file, or row a record came from, is read by
+    awb-clean's scan alone."""
     where = f"{DATASETS} [datasets.{_toml_key(name)}]"
-    if not isinstance(entry, dict) or set(entry) - {"checks"} or not isinstance(entry.get("checks", {}), dict):
+    if (not isinstance(entry, dict) or set(entry) - {"checks", "lineage"}
+            or not isinstance(entry.get("checks", {}), dict)):
         nested = _nested_checks({key: value for key, value in entry.items() if key != "checks"}) \
             if isinstance(entry, dict) else None
         if nested:  # [datasets.orders.v1.checks] nests v1 under orders; it declares nothing for orders.v1
             dotted = ".".join((name,) + nested)
             raise ValueError(f"{where} holds only a checks table; to declare checks for the dataset {dotted}, "
                              f"quote its name: [datasets.{json.dumps(dotted)}.checks]")
-        raise ValueError(f"{where} holds only a checks table")
+        raise ValueError(f"{where} holds only a checks table and a lineage list")
+    lineage = entry.get("lineage")
+    if lineage is not None and not (_names(lineage) and lineage and len(set(lineage)) == len(lineage)):
+        raise ValueError(f"{where}: lineage is malformed; list each lineage column's name once")
     spec = entry.get("checks", {})
     for key, value in spec.items():
         if key not in SHAPES:
@@ -320,6 +326,53 @@ def _validated(name, entry):
     return spec
 
 
+def _inline_table_advice(text, message):
+    """The parser's message, led by advice when it stops at a line break or comment inside an
+    inline table, which TOML 1.0 forbids. The advice is added only when the scan below finds the
+    stopping point inside an unclosed `{` outside strings and comments; otherwise the message is
+    returned as it is."""
+    found = re.search(r"\(at line (\d+), column (\d+)\)", message)
+    if not found:
+        return message
+    lines = text.split("\n")
+    line, column = int(found[1]), int(found[2])
+    offset = sum(len(item) + 1 for item in lines[:line - 1]) + column - 1
+    if line > len(lines) or text[offset:offset + 1] not in ("\n", "\r", "#", ""):
+        return message
+    opened, index, quote = [], 0, None
+    while index < offset:
+        char = text[index]
+        if quote:
+            if char == "\\" and quote in ('"', '"""'):
+                index += 2
+                continue
+            if text.startswith(quote, index):
+                index += len(quote)
+                quote = None
+                continue
+        elif char == "#":
+            index = text.find("\n", index) if "\n" in text[index:] else len(text)
+            continue
+        elif char in "\"'":
+            quote = text[index:index + 3] if text[index:index + 3] in ('"""', "'''") else char
+            index += len(quote)
+            continue
+        elif char == "{":
+            opened.append(index)
+        elif char == "}" and opened:
+            opened.pop()
+        index += 1
+    if not opened or quote:
+        return message
+    start = text.rfind("\n", 0, opened[0]) + 1
+    key = re.search(r'([A-Za-z0-9_-]+|"[^"\n]*")\s*=\s*$', text[start:opened[0]])
+    headers = re.findall(r"^\s*\[([^\[\]\n]+)\]\s*(?:#.*)?$", text[:start], re.M)
+    table = (f"the subtable [{headers[-1].strip()}.{key[1]}]" if key and headers
+             else "a subtable, such as [datasets.<name>.checks.types],")
+    return (f"line {line}: an inline table ({{ ... }}) must stay on one line in TOML; write it on one "
+            f"line, or as {table} with one key = value per line under it ({message})")
+
+
 def declared_checks(project_root: str | Path, dataset: str) -> dict:
     """Return [datasets.<dataset>.checks] from foundation/datasets.toml, {} when none are declared.
 
@@ -332,10 +385,11 @@ def declared_checks(project_root: str | Path, dataset: str) -> dict:
         tomllib = _toml()
     except ImportError as error:
         raise ImportError(f"reading {DATASETS} needs Python 3.11 or the tomli package") from error
+    text = path.read_text(encoding="utf-8")
     try:
-        document = tomllib.loads(path.read_text(encoding="utf-8"))
+        document = tomllib.loads(text)
     except ValueError as error:
-        raise ValueError(f"{DATASETS}: {error}") from error
+        raise ValueError(f"{DATASETS}: {_inline_table_advice(text, str(error))}") from error
     if set(document) - {"datasets"}:  # such as [dataset.<name>.checks], which would declare nothing
         raise ValueError(f"{DATASETS}: unknown table {', '.join(sorted(set(document) - {'datasets'}))}; "
                          "declare checks under [datasets.<name>.checks]")
@@ -569,7 +623,9 @@ def publish(project_root: str | Path, dataset: str, publication_id: str,
         })
     final = root / "data/parquet" / dataset / publication_id
     partial = final.with_name(final.name + ".partial")
-    _refuse_existing(final, partial)
+    _refuse_existing(final)
+    if partial.exists() or partial.is_symlink():
+        raise FileExistsError(f"{partial} is left from an earlier failed publish; remove it before publishing again")
     partial.mkdir(parents=True)
     convert(partial)
     checks = _run_checks(partial, spec) if _planned(spec) else []
@@ -666,12 +722,13 @@ Status is one of:
 - `acquired`: at least one acquisition has completed and the source has not been rejected.
 - `rejected`: assessed as irrelevant or unfit; give the reason under Relevance and fitness and stop preparing it.
 
-Begin Relevance and fitness with the assessment's basis: `from documentation` when documentation or a schema settled it, otherwise `from landed records`. In Notes, record each reference it relied on as a clause in plain text, not inside code, HTML, emphasis, strikethrough, a link or brackets, that opens the cell or follows `;`, `,`, `.` or `<br>`, and that begins `reference:` followed directly by one of two forms:
+Begin Relevance and fitness with the assessment's basis: `from documentation` when documentation or a schema settled it, otherwise `from landed records`. In Notes, record each reference it relied on as a plain-text clause that opens the cell or follows `;`, beginning `reference:` followed directly by one of three forms:
 
-- A link to the copy, `[text](destination)`, such as `reference: [codebook](references/<source-id>/codebook.pdf)`. The text is not empty and has no `[`, `]`, `\\`, `<` or backtick. The destination is either in angle brackets with no `<`, `>` or `\\` inside, which allows spaces, such as `[codebook](<references/hr/data dictionary.pdf>)`, or bare, with no spaces, `<` or `\\`, and with its parentheses balanced.
-- For material kept out of Git, the retained location in single backticks, a comma, and `sha256` with the full 64-digit checksum and no letter, digit, `_`, `\\` or `&` directly after it, such as ``reference: `/secure/<source-id>/manual.pdf`, sha256 <checksum>``. `SHA-256` and `sha256:` are also read.
+- A link to the kept copy: `reference: [codebook](references/<source-id>/codebook.pdf)`.
+- For material kept out of Git, its retained location in backticks and its SHA-256: ``reference: `/secure/<source-id>/manual.pdf`, sha256 <64-digit checksum>``.
+- For documentation read but not kept, an access note giving its URL, the date it was read, and why it was not kept: `reference: read at https://example.org/dictionary.pdf on 2026-10-16, not kept: the server refused downloads (HTTP 403)`. Status reports it as a known limitation.
 
-`awb-status` reads exactly these two forms, ignoring letter case, and lists every other spelling as no reference, including Markdown that renders as a link, such as a link with a title or with brackets in its text. It also stops reading a cell at a link with a title or with a destination neither form allows, at any raw HTML other than `<br>`, at an autolink containing a backtick, bracket or `<`, and at a `*`, `_` or `~` that opens emphasis or strikethrough when a backtick, bracket, `<` or an opening `*`, `_` or `~` of another kind comes before the cell's last `*`, `_` or `~` of that kind that could close it, so put reference clauses before them. To fix a listed entry, rewrite it in one of the forms: drop brackets and backslashes from the link text, write paths with `/`, and put a path with spaces or unbalanced parentheses in angle brackets. An entry such as `reference: not yet retained` counts as no reference.
+When a document's revision postdates the data, say so after its reference, such as `; dictionary revised 2024, after the 2019 data`. `awb-status` lists any other spelling as no reference, with the reason, and an entry such as `reference: not yet retained` counts as none; the `awb-init` skill's `references/landing.md` (**Source references**) gives the exact grammar it reads.
 
 Note failed acquisition attempts in the source's Notes. Use stable source IDs in the catalog, quality record, and investigation records.
 
@@ -748,10 +805,10 @@ def _acquisition_rows(project_root):
 
 
 def _mark_source_acquired(lines, source):
-    """Set the source's Status from candidate to acquired; return its status or `missing`."""
+    """Set the source's Status from candidate to acquired; return (its status or `missing`, whether it changed)."""
     table = _table(lines, "Sources", "Source ID")
     if table is None:
-        return "missing"
+        return "missing", False
     columns, first, end = table
     for index in range(first, end):
         cells = _split_row(lines[index])
@@ -762,9 +819,9 @@ def _mark_source_acquired(lines, source):
         if _plain(status) == "candidate":
             cells[columns.index("Status")] = status.replace("candidate", "acquired")
             lines[index] = _join_row(cells)
-            return "acquired"
-        return _plain(status) or "unrecorded"
-    return "missing"
+            return "acquired", True
+        return _plain(status) or "unrecorded", False
+    return "missing", False
 
 
 def record_acquisition(project_root: str | Path, acquisition_dir: str | Path,
@@ -776,7 +833,8 @@ def record_acquisition(project_root: str | Path, acquisition_dir: str | Path,
     fills a Retained copy cell that is empty or `this checkout only`. A Sources row with
     status `candidate` becomes `acquired`. A missing foundation/sources.md is written from
     SOURCES_TEMPLATE with the row. Returns {"row": "added" | "updated" | "unchanged",
-    "source_status": <status> | "missing"}, plus "created": True when the file was written
+    "source_status": <status> | "missing"}, plus "source_status_changed" naming the edit when
+    it set a Sources row's Status to acquired, and "created": True when the file was written
     from the template; raises LookupError when an existing file has no Acquisitions table.
     """
     root = Path(project_root)
@@ -827,12 +885,14 @@ def record_acquisition(project_root: str | Path, acquisition_dir: str | Path,
             "Notes": _cell(notes) if isinstance(notes, str) else "",
         }
         lines.insert(end, _join_row([values.get(column, "") for column in columns]))
-    status = _mark_source_acquired(lines, source)
+    status, changed = _mark_source_acquired(lines, source)
     if created:
         path.parent.mkdir(parents=True, exist_ok=True)
     if created or "\n".join(lines) != text:
         path.write_text("\n".join(lines), encoding="utf-8")
-    return {"row": outcome, "source_status": status, **({"created": True} if created else {})}
+    return {"row": outcome, "source_status": status,
+            **({"source_status_changed": f"Sources row {source}: Status candidate -> acquired"} if changed else {}),
+            **({"created": True} if created else {})}
 
 
 # Command-line entry points, run as `python3 src/awb.py land|retain|publish ...`. Each prints
@@ -905,6 +965,17 @@ def _settle(root, directory, location, skipped):
     except (LookupError, ValueError, OSError) as error:
         report["ledger"] = {"row": "not written", "error": str(error)}
         succeeded = False
+    # Said once, with the acquisition's new row: awb-status's probe compares these validators.
+    unchecked = []
+    for file in _complete_provenance(directory)["files"] if report["ledger"].get("row") == "added" else []:
+        upstream = file.get("upstream") or {}
+        if (urllib.parse.urlsplit(upstream.get("url") or "").scheme in ("http", "https")
+                and not (upstream.get("etag") or upstream.get("last_modified"))):
+            unchecked.append(file["path"])
+    if unchecked:
+        report["upstream_check"] = (f"not possible for {', '.join(unchecked[:3])}{' and others' if len(unchecked) > 3 else ''}: "
+                                    "the server sent no ETag or Last-Modified, so a later upstream change "
+                                    "cannot be detected; tell the user once")
     return report, succeeded
 
 
@@ -920,7 +991,8 @@ def cli_land(root: Path, argv: list[str]) -> int:
                "absent, and sets a candidate source to acquired; fill its Restrictions yourself. Prints "
                "one JSON line: landed, files, bytes, retention (the retained copy's destination, copied, "
                "conflict, matched, and discrepancies, or skipped with a warning to act on), and ledger "
-               "(row, source_status, and created when sources.md was created; missing means the source "
+               "(row, source_status, source_status_changed when it set the Sources row's Status to acquired, "
+               "and created when sources.md was created; missing means the source "
                "still needs its Sources row). Exit 1 means the files landed but retention or the "
                "row failed; exit 2 means unusable arguments, with nothing landed.")
     parser.add_argument("source", help="source directory name under data/raw/ (one name, not ending "
@@ -985,7 +1057,8 @@ def cli_retain(root: Path, argv: list[str]) -> int:
                "missing rows. Copies never overwrite. Prints one JSON line: location (or the skip "
                "reason), acted_on (each acquisition's retention result, with matched when the destination "
                "holds an identical copy, and its ledger row outcome, with created when sources.md was "
-               "created), already_retained, and still_this_checkout_only. Report every conflict and "
+               "created, and upstream_check when a file's recorded URL came with no ETag or Last-Modified), "
+               "already_retained, and still_this_checkout_only. Report every conflict and "
                "discrepancy. Exit 1 when a retention or row failed.").parse_args(argv)
     location, skipped = _landed_location(root)
     rows = _acquisition_rows(root) or {}
@@ -1029,8 +1102,9 @@ def cli_publish(root: Path, argv: list[str]) -> int:
                "recorded, all passed), view_sql, a canonical view definition for foundation/views/, and "
                "catalog_row, a foundation/catalog.md row to complete with grain and availability. On "
                "refusal (exit 1): published false, error, failed_checks with each failing declared "
-               "check's name and detail, or failing_rows with up to 20 under first, and the partial "
-               "directory left behind. A select returning no rows is refused. Needs duckdb.")
+               "check's name and detail, or failing_rows with up to 20 under first, the partial "
+               "directory left behind, and next_step, which says to remove it before publishing again. "
+               "A select returning no rows is refused. Needs duckdb.")
     parser.add_argument("dataset", help="dataset directory name under data/parquet/")
     parser.add_argument("publication_id", metavar="publication-id",
                         help="new publication directory name under data/parquet/<dataset>/")
@@ -1115,8 +1189,10 @@ def cli_publish(root: Path, argv: list[str]) -> int:
             failures["failed_checks"] = [{"name": check["name"], "detail": check["detail"]}
                                          for check in error.checks if check["outcome"] == "fail"]
         partial = root / "data/parquet" / args.dataset / f"{args.publication_id}.partial"
-        _print({"published": False, "error": f"{type(error).__name__}: {error}", **failures,
-                "partial": _relative(root, partial) if partial.is_dir() else None})
+        left = _relative(root, partial) if partial.is_dir() else None
+        _print({"published": False, "error": f"{type(error).__name__}: {error}", **failures, "partial": left,
+                **({"next_step": f"remove {left}/ before publishing again: publish refuses while it exists"}
+                   if left else {})})
         return 1
     finally:
         connection.close()

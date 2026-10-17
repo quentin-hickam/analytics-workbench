@@ -3,6 +3,7 @@
 # test_scan_reads_views_through_session_and_changes_no_data: a view loads through the project's session(); landed and view files keep their bytes and only the scan file is written.
 # test_text_dates_and_codes_are_typed_conservatively: a day-first text date column is typed by its one covering format, an all-ambiguous one is reported, and leading-zero codes stay text.
 # test_rescan_reports_delta_with_stable_ids_and_inherited_options: a rescan after a correction view reports before and after counts by issue, keeps ids, and reuses the baseline's options.
+# test_duplicate_rows_leave_lineage_columns_out_of_the_match: two sheets holding the same rows under their own sheet and sheet_row values give no duplicate-rows issue matched on every column, and one counting every copy when --lineage names those columns, its examples listing each lineage column's values first; the lineage declared in foundation/datasets.toml is the default, --lineage replaces it, and a rescan keeps the baseline's; an unknown --lineage column, or one naming every column, refuses.
 # test_removed_targets_and_options_are_rejected: a saved .sql query is not a scan target; --rescan takes no scan name; --typed-threshold and --max-categories are gone.
 # test_recorded_markers_mark_issues_as_recorded: issues whose `<scan>#<key>` marker is in the quality record are reported as recorded with their quality ID and recorded count beside the current count.
 # test_record_sets_the_view_row_when_a_publication_shares_its_name: a publication row named like its canonical view leaves the view row the one record sets; two non-view rows with one name still refuse.
@@ -17,6 +18,7 @@
 # test_recorded_status_follows_header_and_count_follows_json: Markdown status is read by header; JSON alone owns the recorded count.
 # test_record_failure_reports_phases_and_retries_once: B or C failure reports completed phases and replaced files; retry appends one correction and keeps flags idempotent.
 # test_record_revises_a_row_by_quality_id: a Q- or DQ- key revises its row's judgment cells and keeps the observation, appends a correction row without a rescan suffix, accepts an unmarked row, and resolves {Q-004}; a dry run writes nothing.
+# test_record_amends_an_observation_and_keeps_the_original: an amend on a recorded row, by quality ID or by a recorded scan issue's ID, replaces the observation with the new text, the date and reason, and the replaced text after `was:`, marker and counts included, so the scan still reads it as recorded; a second amend chains after the first; the same call again changes nothing; an amend on an issue without a row, a malformed amend, or one on a `new` entry refuses and writes nothing.
 # test_record_rejects_bad_quality_id_keys: a foreign scan's marker, two keys naming one row, and an unknown key are rejected and write nothing.
 # test_quality_id_revision_keeps_link_and_placeholder_rules: a quality-ID revision keeps the link's original counts and date, works with reordered Markdown columns, and keeps known-prefix placeholder refusals.
 # test_record_ignores_unvalidated_recorded_placeholders: saved scan metadata cannot supply a placeholder ID when no row carries the issue's marker; the refusal writes nothing.
@@ -203,6 +205,39 @@ def test_rescan_reports_delta_with_stable_ids_and_inherited_options(project, cap
         assert issue["id"] == ids.get(issue["key"], issue["id"])
     variants = next(d for d in record["delta"]["issues"] if d["key"] == "variants:dept:sales")
     assert variants["before"] == 1 and variants["after"] == 1  # case remains until mapped
+
+
+def test_duplicate_rows_leave_lineage_columns_out_of_the_match(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    rows = ["sheet,sheet_row,invoice,amount", "2009-2010,1,100,5", "2009-2010,2,101,6", "2009-2010,3,102,7",
+            "2010-2011,1,101,6", "2010-2011,2,102,7", "2010-2011,3,103,8", "2010-2011,4,103,8"]
+    write(tmp_path, "data/lines.csv", "\n".join(rows) + "\n")
+    record, _ = scanner.scan(tmp_path, "data/lines.csv", today=TODAY)
+    assert "duplicate-rows" not in keys(record) and record["options"]["lineage"] == []
+    assert scanner.main([str(tmp_path), "data/lines.csv", "--lineage", "sheet, sheet_row"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    issue = next(i for i in out["issues"] if i["key"] == "duplicate-rows")
+    assert issue["count"] == 3 and issue["lineage"] == ["sheet", "sheet_row"]
+    assert issue["examples"][0].startswith('{"sheet": ["2009-2010", "2010-2011"], "sheet_row": ["1", "2"')
+    record = json.loads((tmp_path / "foundation/scans/lines.json").read_text())
+    full = keys(record)["duplicate-rows"]
+    assert full["summary"] == "3 extra rows repeating another row in every column but sheet, sheet_row (3 distinct repeated rows)"
+    assert full["detail"] == {"lineage": ["sheet", "sheet_row"]}
+    within = next(e for e in full["examples"] if e["value"]["invoice"] == "103")
+    assert within == {"value": {"sheet": ["2010-2011"], "sheet_row": ["3", "4"], "invoice": "103", "amount": "8"}, "count": 2}
+    assert list(full["examples"][0]["value"])[:2] == ["sheet", "sheet_row"]
+    # A rescan keeps the baseline's lineage; the datasets.toml declaration is the default for a new scan.
+    record, _ = scanner.scan(tmp_path, "data/lines.csv", rescan=True, today=TODAY)
+    assert record["options"]["lineage"] == ["sheet", "sheet_row"] and keys(record)["duplicate-rows"]["count"] == 3
+    write(tmp_path, "foundation/datasets.toml", '[datasets.lines]\nlineage = ["sheet", "sheet_row", "file"]\n')
+    record, _ = scanner.scan(tmp_path, "data/lines.csv", today=TODAY)
+    assert keys(record)["duplicate-rows"]["count"] == 3 and keys(record)["duplicate-rows"]["detail"] == {"lineage": ["sheet", "sheet_row"]}
+    record, _ = scanner.scan(tmp_path, "data/lines.csv", lineage=["sheet"], today=TODAY)
+    assert "duplicate-rows" not in keys(record)  # every copy keeps its own sheet_row
+    for lineage, message in ((["shet"], "--lineage names unknown columns: shet"),
+                             (["sheet", "sheet_row", "invoice", "amount"], "--lineage names every column")):
+        assert scanner.main([str(tmp_path), "data/lines.csv", "--lineage", ",".join(lineage)]) == 2
+        assert message in capsys.readouterr().err
 
 
 def test_removed_targets_and_options_are_rejected(project, capsys):
@@ -427,6 +462,48 @@ def test_record_revises_a_row_by_quality_id(tmp_path, capsys, monkeypatch):
     result = recorder.record(tmp_path, "orders", {"issues": {"DQ-004": {"status": "open"}}}, today=TODAY)
     assert result["updated"] == ["DQ-004"]
     assert "-999 in amount (3 of 45); `orders#sentinel:amount:-999` scanned 2026-10-01 | Skews totals | Nulled in the view | open |" in path.read_text()
+
+
+def test_record_amends_an_observation_and_keeps_the_original(tmp_path):
+    scan_file(tmp_path)
+    path = quality_file(tmp_path)
+    original = "-999 in amount (3 of 45); `orders#sentinel:amount:-999` scanned 2026-10-01"
+    decision = {"issues": {"Q-004": {"amend": {"observation": "-999 in amount marks test orders | not refunds",
+                                               "reason": "the refund reading was withdrawn"}}}}
+    result = recorder.record(tmp_path, "orders", decision, today=TODAY)
+    assert result["amended"] == ["Q-004"] and result["updated"] == ["Q-004"]
+    amended = ("-999 in amount marks test orders \\| not refunds; amended 2026-10-09: the refund reading was withdrawn; "
+               f"was: {original}")
+    text = path.read_text()
+    assert f"| Q-004 | view `orders`, column `amount` | {amended} | Skews totals | Nulled in the view | corrected |" in text
+    # The same call again changes nothing.
+    result = recorder.record(tmp_path, "orders", decision, today=TODAY)
+    assert "amended" not in result and result["updated"] == [] and path.read_text() == text
+    # A second amendment chains after the first; a recorded scan issue's ID amends its row too.
+    decision = {"issues": {"Q-004": {"amend": {"observation": "-999 in amount marks test and demo orders",
+                                               "reason": "demo accounts use it too"}},
+                           "S1": {"amend": {"observation": "Trailing spaces in dept", "reason": "leading spaces were never seen"},
+                                  "status": "open"}},
+                "date": "2026-10-10"}
+    result = recorder.record(tmp_path, "orders", decision)
+    assert result["amended"] == ["Q-004", "Q-003"] and result["quality_ids"]["S1"] == "Q-003"
+    text = path.read_text()
+    assert (f"| -999 in amount marks test and demo orders; amended 2026-10-10: demo accounts use it too; was: {amended} |"
+            in text)
+    assert ("| Trailing spaces in dept; amended 2026-10-10: leading spaces were never seen; was: Spaces (2 of 45); "
+            "`orders#whitespace:dept` scanned 2026-10-01 | Splits counts | Trimmed | open |") in text
+    assert scanner._recorded(tmp_path, "orders", ["whitespace:dept"])["whitespace:dept"]["id"] == "Q-003"
+    for issues, message in (({"S2": {"amend": {"observation": "x", "reason": "y"}, **judgment()}}, "S2: amend changes a recorded row"),
+                            ({"Q-005": {"amend": {"observation": "x"}}}, 'Q-005: amend needs {"observation"'),
+                            ({"Q-005": {"amend": {"observation": " ", "reason": "y"}}}, "Q-005: amend needs"),
+                            ({"Q-005": {"amend": "x"}}, "Q-005: amend needs")):
+        with pytest.raises(recorder.RecordError, match=re.escape(message)):
+            recorder.record(tmp_path, "orders", {"issues": issues}, today=TODAY)
+    new = {"object": "view `orders`", "observation": "x", "evidence": "a reference", **judgment(),
+           "amend": {"observation": "x", "reason": "y"}}
+    with pytest.raises(recorder.RecordError, match="N1 has unknown keys: amend"):
+        recorder.record(tmp_path, "orders", {"new": [new]}, today=TODAY)
+    assert path.read_text() == text
 
 
 def test_record_rejects_bad_quality_id_keys(tmp_path):
