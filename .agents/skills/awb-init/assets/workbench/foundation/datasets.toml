@@ -29,6 +29,14 @@
 #       with an offset bounds a TIMESTAMP column as a UTC time
 #   row_count = { min = 1, max = 1000000 }                     # row_count; either bound optional,
 #       min (default 0) <= max
+# An inline table, such as types = { ... }, stays on one line: TOML forbids a line break inside it.
+# Write a long one as a subtable after the dataset's checks table, one key = value per line:
+#   [datasets.orders.checks.types]
+#   order_id = "BIGINT"
+#   order_day = "DATE"
+# A dataset combining several sheets, files or partitions lists the lineage columns its conversion
+# adds, which say where each row came from, in [datasets.<dataset>] before its checks table, as
+# lineage = ["sheet", "sheet_row"]. No check reads them; awb-clean's duplicate scan leaves them out.
 # A foundation/quality.md row cites a check by name and publication; see awb-clean's record step.
 #
 # [datasets.orders.checks]

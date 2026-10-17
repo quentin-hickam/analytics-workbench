@@ -33,6 +33,7 @@ MAX_PERIODS = 2000
 QUANTILES = (0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99)
 NUMERIC = re.compile(r"^(U?(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT)|FLOAT|DOUBLE|REAL|DECIMAL.*)$")
 TEMPORAL = re.compile(r"^(DATE|TIMESTAMP.*)$")
+INTEGER = re.compile(r"^U?(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT)$")
 MAX_PATTERN_COLUMNS = 12
 MAX_ASSOCIATION_COLUMNS = 15
 MIN_R = 0.5  # smallest |r| printed
@@ -329,17 +330,22 @@ def to_date(value):
     return value.date() if isinstance(value, datetime) else value
 
 
-def coverage(connection, column, period):
-    """Rows per period across the column's whole range, with empty periods as gaps."""
+def coverage(connection, column, period, years=False):
+    """Rows per period across the column's whole range, with empty periods as gaps. An integer
+    year column (years) is its own period, each year from its least to its greatest."""
     c, p = q(column["name"]), period
-    series = connection.execute(f"""
-        WITH counts AS (
-            SELECT CAST(date_trunc('{p}', {c}) AS DATE) AS period, count(*) AS n
-            FROM __eda WHERE {c} IS NOT NULL GROUP BY 1),
-        periods AS (
+    if years:
+        periods = f"SELECT unnest(generate_series(CAST(min({c}) AS BIGINT), CAST(max({c}) AS BIGINT))) AS period FROM __eda"
+    else:
+        periods = f"""
             SELECT CAST(unnest(generate_series(lo, hi, INTERVAL 1 {p.upper()})) AS DATE) AS period
             FROM (SELECT CAST(date_trunc('{p}', min({c})) AS TIMESTAMP) AS lo,
-                         CAST(max({c}) AS TIMESTAMP) AS hi FROM __eda))
+                         CAST(max({c}) AS TIMESTAMP) AS hi FROM __eda)"""
+    series = connection.execute(f"""
+        WITH counts AS (
+            SELECT {bucket(c, p, years)} AS period, count(*) AS n
+            FROM __eda WHERE {c} IS NOT NULL GROUP BY 1),
+        periods AS ({periods})
         SELECT periods.period, coalesce(counts.n, 0) FROM periods LEFT JOIN counts USING (period)
         ORDER BY 1""").fetchall()
     gaps, start = [], None
@@ -348,15 +354,40 @@ def coverage(connection, column, period):
             start = index
         if start is not None and (n != 0 or index == len(series) - 1):
             end = index if n == 0 else index - 1
-            gaps.append({"from": series[start][0].isoformat(), "to": series[end][0].isoformat(),
+            gaps.append({"from": plain(series[start][0]), "to": plain(series[end][0]),
                          "periods": end - start + 1})
             start = None
     counts = [n for _, n in series if n]
     median = statistics.median(counts) if counts else 0
-    low = [{"period": when.isoformat(), "rows": n, "edge": index in (0, len(series) - 1)}
+    low = [{"period": plain(when), "rows": n, "edge": index in (0, len(series) - 1)}
            for index, (when, n) in enumerate(series) if 0 < n < 0.5 * median]
     return {"period": period, "periods": len(series), "median_rows": median, "gaps": gaps,
-            "low_periods": low, "series": [{"period": w.isoformat(), "rows": n} for w, n in series]}
+            "low_periods": low, "series": [{"period": plain(w), "rows": n} for w, n in series]}
+
+
+def bucket(d, period, years=False):
+    """SQL for the period a row falls in: the year itself for an integer year column."""
+    return f"CAST({d} AS BIGINT)" if years else f"CAST(date_trunc('{period}', {d}) AS DATE)"
+
+
+def year_column(chosen, columns, skipped):
+    """The chosen date column when it holds integer years (1 to 9999), else None. An option naming
+    an integer column outside that range is a usage error; a setting is skipped, as any setting
+    that does not fit the dataset is."""
+    if "date_column" not in chosen:
+        return None
+    name, source = chosen["date_column"]
+    column = next((c for c in columns if c["name"] == name and INTEGER.match(c["type"])), None)
+    if column is None or column["numeric"]["min"] is None:
+        return None
+    low, high = column["numeric"]["min"], column["numeric"]["max"]
+    if low < 1 or high > 9999:
+        reason = f"{name} holds integers from {low} to {high}, not years from 1 to 9999"
+        if source == "option":
+            raise ScanError(f"--date-column {reason}")
+        skipped.append({"setting": source, "reason": reason})
+        return None
+    return column
 
 
 def grain(connection, columns, rows, key):
@@ -400,7 +431,7 @@ def keyish(column):
         column["kind"] == "numeric" and re.match(r"^U?(TINYINT|SMALLINT|INTEGER|BIGINT|HUGEINT)$", column["type"]))
 
 
-def null_patterns(connection, columns, date_column, period):
+def null_patterns(connection, columns, date_column, period, years=False):
     nullable = sorted((c for c in columns if c["nulls"]), key=lambda c: -c["nulls"])[:MAX_PATTERN_COLUMNS]
     result = {"columns": [c["name"] for c in nullable], "patterns": [], "by_period": None}
     if not nullable:
@@ -414,16 +445,16 @@ def null_patterns(connection, columns, date_column, period):
         d = q(date_column)
         counts = ", ".join(f"count({q(c['name'])})" for c in nullable)
         series = connection.execute(
-            f"SELECT CAST(date_trunc('{period}', {d}) AS DATE) AS period, count(*) AS n, {counts} "
+            f"SELECT {bucket(d, period, years)} AS period, count(*) AS n, {counts} "
             f"FROM __eda WHERE {d} IS NOT NULL GROUP BY 1 ORDER BY 1").fetchall()
         result["by_period"] = {"date_column": date_column, "period": period, "series": [
-            {"period": row[0].isoformat(), "rows": row[1],
+            {"period": plain(row[0]), "rows": row[1],
              "null_rates": {c["name"]: ratio(row[1] - row[2 + i], row[1]) for i, c in enumerate(nullable)}}
             for row in series]}
     return result
 
 
-def measure_scan(connection, measure, dimensions, date_column, period, min_group, top):
+def measure_scan(connection, measure, dimensions, date_column, period, min_group, top, years=False):
     m = f"CAST(({measure['sql']}) AS DOUBLE)"
     n, mean, sd, total, median, var_pop = connection.execute(
         f"SELECT count({m}), avg({m}), stddev_samp({m}), sum({m}), median({m}), var_pop({m}) "
@@ -451,23 +482,27 @@ def measure_scan(connection, measure, dimensions, date_column, period, min_group
     if date_column and n:
         d = q(date_column)
         series = connection.execute(
-            f"SELECT CAST(date_trunc('{period}', {d}) AS DATE) AS period, count(*), count({m}), "
+            f"SELECT {bucket(d, period, years)} AS period, count(*), count({m}), "
             f"avg({m}), sum({m}) FROM __eda WHERE {d} IS NOT NULL GROUP BY 1 ORDER BY 1").fetchall()
         result["over_time"] = {"date_column": date_column, "period": period, "series": [
-            {"period": w.isoformat(), "rows": r, "n": k, "mean": a, "sum": s} for w, r, k, a, s in series]}
-        result["contrary"] = contrary(connection, m, dimensions, d, min_group, top, result)
+            {"period": plain(w), "rows": r, "n": k, "mean": a, "sum": s} for w, r, k, a, s in series]}
+        result["contrary"] = contrary(connection, m, dimensions, d, min_group, top, result, years)
     return result
 
 
-def contrary(connection, m, dimensions, d, min_group, top, result):
+def contrary(connection, m, dimensions, d, min_group, top, result, years=False):
     """Groups whose mean moves against the overall mean between the two halves of the date range."""
     low, high = connection.execute(f"SELECT min({d}), max({d}) FROM __eda").fetchone()
     if low is None or low == high:
         return []
-    low_ts = datetime.combine(low, time()) if not isinstance(low, datetime) else low
-    high_ts = datetime.combine(high, time()) if not isinstance(high, datetime) else high
-    middle = (low_ts + (high_ts - low_ts) / 2).replace(tzinfo=None).isoformat(sep=" ")
-    early = f"CAST({d} AS TIMESTAMP) < TIMESTAMP {lit(middle)}"
+    if years:
+        middle = (low + high) / 2
+        early = f"{d} < {middle!r}"
+    else:
+        low_ts = datetime.combine(low, time()) if not isinstance(low, datetime) else low
+        high_ts = datetime.combine(high, time()) if not isinstance(high, datetime) else high
+        middle = (low_ts + (high_ts - low_ts) / 2).replace(tzinfo=None).isoformat(sep=" ")
+        early = f"CAST({d} AS TIMESTAMP) < TIMESTAMP {lit(middle)}"
     before, after = connection.execute(
         f"SELECT avg({m}) FILTER (WHERE {early}), avg({m}) FILTER (WHERE NOT ({early})) "
         f"FROM __eda WHERE {d} IS NOT NULL").fetchone()
@@ -559,13 +594,16 @@ def anomalies(scan, today):
             add("extreme-values", name, f"{extreme:,} values beyond 3 IQR "
                 f"(range {fmt(numeric['min'])} to {fmt(numeric['max'])})", "investigation")
         temporal = c.get("temporal") or {}
-        if temporal.get("max") and to_date(plain_date(temporal["max"])) > today:
+        if temporal.get("integer_years"):
+            if temporal["max"] > today.year:
+                add("future-dates", name, f"latest year {temporal['max']} is after {today.year}", "awb-clean")
+        elif temporal.get("max") and to_date(plain_date(temporal["max"])) > today:
             add("future-dates", name, f"latest value {temporal['max']} is after {today}", "awb-clean")
-        if temporal.get("min") and to_date(plain_date(temporal["min"])) < date(1901, 1, 1):
+        if temporal.get("min") and not temporal.get("integer_years") and to_date(plain_date(temporal["min"])) < date(1901, 1, 1):
             add("sentinel-dates", name, f"earliest value {temporal['min']} looks like a placeholder", "awb-clean")
         cov = temporal.get("coverage") or {}
         if cov.get("gaps"):
-            spans = ", ".join(f"{g['from']}..{g['to']}" if g["from"] != g["to"] else g["from"]
+            spans = ", ".join(f"{g['from']}..{g['to']}" if g["from"] != g["to"] else str(g["from"])
                               for g in cov["gaps"][:3])
             add("period-gaps", name, f"empty {cov['period']}s: {sum(g['periods'] for g in cov['gaps'])}, "
                 f"{spans}{' …' if len(cov['gaps']) > 3 else ''}", "investigation")
@@ -627,8 +665,12 @@ def scan_dataset(root, dataset, options):
         if period_choice and period_choice not in PERIODS:
             raise ScanError(f"period {period_choice} ({chosen['period'][1]}) is not one of {', '.join(PERIODS)}")
         connection.execute(f"CREATE TEMP VIEW __eda_all AS SELECT * FROM {source}")
-        names = [row[0] for row in connection.execute("DESCRIBE __eda_all").fetchall()]
-        scope = scope_filters(chosen, names)
+        types = {row[0]: row[1] for row in connection.execute("DESCRIBE __eda_all").fetchall()}
+        names = list(types)
+        parameters = data.get("parameters") if isinstance(data.get("parameters"), dict) else {}
+        scope = scope_filters(chosen, types, parameters)
+        read = {f"parameters.{name}" for name in scope.pop("parameters_read")}
+        unused = [key for key in unused if key not in read]
         condition = " AND ".join(f"({f['sql']})" for f in scope["applied"]) or "TRUE"
         try:
             connection.execute(f"CREATE TEMP VIEW __eda AS SELECT * FROM __eda_all WHERE {condition}")
@@ -654,8 +696,17 @@ def scan_dataset(root, dataset, options):
             c["temporal"]["coverage"] = coverage(
                 connection, c, choose_period(c["temporal"]["min"], c["temporal"]["max"], period_choice))
             c["temporal"]["min"], c["temporal"]["max"] = plain(c["temporal"]["min"]), plain(c["temporal"]["max"])
-        date_column, date_source = pick_date(chosen, temporal)
-        period = next((c["temporal"]["coverage"]["period"] for c in temporal if c["name"] == date_column), None)
+        years = year_column(chosen, columns, scope["skipped"])
+        if years:
+            if period_choice not in (None, "year"):
+                scope["skipped"].append({"setting": chosen["period"][1],
+                                         "reason": f"{years['name']} holds integer years, so the period is year"})
+            years["temporal"] = {"min": years["numeric"]["min"], "max": years["numeric"]["max"], "integer_years": True,
+                                 "coverage": coverage(connection, years, "year", years=True)}
+            date_column, date_source, period = years["name"], chosen["date_column"][1], "year"
+        else:
+            date_column, date_source = pick_date(chosen, temporal)
+            period = next((c["temporal"]["coverage"]["period"] for c in temporal if c["name"] == date_column), None)
         if "date_column" in chosen and chosen["date_column"][0] != date_column:
             scope["skipped"].append({"setting": chosen["date_column"][1],
                                      "reason": f"{chosen['date_column'][0]} is not a populated date column here"})
@@ -686,15 +737,16 @@ def scan_dataset(root, dataset, options):
             "format": FORMAT,
             "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "investigation": investigation, "dataset": record, "scope": scope, "rows": rows,
-            "date_column": {"name": date_column, "source": date_source, "period": period},
+            "date_column": {"name": date_column, "source": date_source, "period": period,
+                            **({"integer_years": True} if years else {})},
             "grain": None, "columns": columns, "null_patterns": None, "measure": None,
             "associations": None, "anomalies": [],
         }
         scan["grain"] = grain(connection, columns, rows, key)
-        scan["null_patterns"] = null_patterns(connection, columns, date_column, period)
+        scan["null_patterns"] = null_patterns(connection, columns, date_column, period, bool(years))
         if measure:
             scan["measure"] = measure_scan(connection, measure, dimensions, date_column, period,
-                                           options.min_group, options.top)
+                                           options.min_group, options.top, bool(years))
             scan["measure"]["dimensions"] = [{"label": d["label"], "source": d["source"]} for d in dimensions]
             scan["associations"] = associations(connection, columns, measure)
     finally:
@@ -738,9 +790,50 @@ def as_scalar(entry):
     return str(entry[0]) if entry else None
 
 
-def scope_filters(chosen, names):
-    applied, skipped = [], []
+# A parameter reference, as run.py reads one in a query: $ then letters, digits, or _, anywhere in the text.
+PARAMETER = re.compile(r"\$(\w+)")
+
+
+def sql_literal(value):
+    """A [parameters] value as SQL: a string quoted, a number as written, in parentheses when negative so
+    that `x - $n` stays a subtraction, a date or date-time typed. None for any other value."""
+    if isinstance(value, str):
+        return lit(value)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) or (isinstance(value, float) and math.isfinite(value)):
+        return f"({value!r})" if math.copysign(1, value) < 0 else repr(value)  # -0.0 too
+    if isinstance(value, datetime):
+        return f"{'TIMESTAMPTZ' if value.tzinfo else 'TIMESTAMP'} {lit(value.isoformat())}"
+    if isinstance(value, date):
+        return f"DATE {lit(value.isoformat())}"
+    return None
+
+
+def with_parameters(sql, source, parameters, read):
+    """The where predicate with each $name replaced by its [parameters] value as a SQL literal, adding each
+    name to `read`. A name [parameters] does not set, or a value no literal writes, is a ScanError."""
+    def replace(match):
+        name = match[1]
+        if name not in parameters:
+            raise ScanError(f"where ({source}) names ${name}, which [parameters] does not set; set it there "
+                            "or write the value in the predicate")
+        literal = sql_literal(parameters[name])
+        if literal is None:
+            raise ScanError(f"where ({source}) names ${name}, whose value {parameters[name]!r} is not a string, "
+                            "number, date, or date-time")
+        read.add(name)
+        return literal
+    return PARAMETER.sub(replace, sql)
+
+
+def scope_filters(chosen, types, parameters=None):
+    """The scope's SQL filters, each where predicate with its $name [parameters] references replaced. An
+    integer date column holds years, so its bounds are compared as integers: an option giving another bound
+    is a usage error, and such a setting is skipped."""
+    applied, skipped, read, names = [], [], set(), types
     for sql in as_list(chosen["where"][0]) if "where" in chosen else []:
+        sql = with_parameters(sql, chosen["where"][1], parameters or {}, read)
         applied.append({"sql": sql, "source": chosen["where"][1]})
     column = chosen.get("date_column")
     for key, op in (("period_start", ">="), ("period_end", "<=")):
@@ -751,10 +844,19 @@ def scope_filters(chosen, names):
             skipped.append({"setting": source, "reason": "no date column is set; pass --date-column"})
         elif column[0] not in names:
             skipped.append({"setting": source, "reason": f"column {column[0]} is not in this dataset"})
+        elif INTEGER.match(types[column[0]]):
+            text = str(value).strip()
+            if re.fullmatch(r"[+-]?\d+", text):
+                applied.append({"sql": f"{q(column[0])} {op} {int(text)}", "source": source})
+            elif source == "option":
+                raise ScanError(f"--{'start' if key == 'period_start' else 'end'} {value}: {column[0]} holds "
+                                "integer years, so give a year, such as 1850")
+            else:
+                skipped.append({"setting": source, "reason": f"{column[0]} holds integer years; {value} is not a year"})
         else:
             applied.append({"sql": f"CAST({q(column[0])} AS DATE) {op} CAST({lit(value)} AS DATE)",
                             "source": source})
-    return {"applied": applied, "skipped": skipped}
+    return {"applied": applied, "skipped": skipped, "parameters_read": sorted(read)}
 
 
 def pick_date(chosen, temporal):
@@ -799,6 +901,9 @@ def table(header, rows):
 def column_summary(c):
     if c.get("unique"):
         return "unique"
+    if (c.get("temporal") or {}).get("integer_years"):
+        t, cov = c["temporal"], c["temporal"]["coverage"]
+        return f"years {t['min']} to {t['max']}; {cov['periods']} years, gaps {len(cov['gaps'])}"
     if c.get("numeric"):
         n, qs = c["numeric"], c["numeric"]["quantiles"]
         return (f"p50 {fmt(qs['p50'])} [p5 {fmt(qs['p5'])}, p95 {fmt(qs['p95'])}] "
@@ -894,10 +999,11 @@ def markdown(scan, path):
 SETTINGS_HELP = """settings: the scan reads the investigation's settings.toml. Each key comes
 from the first of [eda.<dataset>], [eda], [scope], and the top level; period_start and period_end
 then fall back to [parameters] start and end, the period run.py uses. Keys: where (predicate or
-list, joined with AND), date_column, period_start, period_end (inclusive dates), measure (numeric
-column or expression; a boolean gives a rate), dimensions (list), key (the grain's columns, as a
-comma-separated string or a list, each item split on commas like --key), period. Options replace
-settings. A setting that does not fit the dataset prints as `not applied` with its reason; an
+list, joined with AND; a $name in it, or in --where, is the [parameters] value as a SQL literal, and
+a name [parameters] does not set stops the scan), date_column, period_start, period_end (inclusive
+dates), measure (numeric column or expression; a boolean gives a rate), dimensions (list), key (the
+grain's columns, as a comma-separated string or a list, each item split on commas like --key),
+period. Options replace settings. A setting that does not fit the dataset prints as `not applied` with its reason; an
 unconfigured scope or measure prints as `not set` with the options to pass.
 
 --show PATH: dot-separated keys into the saved scan, where a list item is named by its name,
@@ -914,10 +1020,13 @@ def parse(argv):
     parser.add_argument("--investigation", help="investigation name; default: README's active investigation")
     parser.add_argument("--where", action="append", help="SQL predicate selecting the population; repeatable; "
                         "replaces the settings where")
-    parser.add_argument("--date-column", help="date or timestamp column for the period filter, coverage, "
-                        "trends, and null shifts; default: the settings date_column, else the most populated one")
-    parser.add_argument("--start", help="first date in scope, inclusive; needs a date column")
-    parser.add_argument("--end", help="last date in scope, inclusive; needs a date column")
+    parser.add_argument("--date-column", help="date or timestamp column, or integer year column, for the period "
+                        "filter, coverage, trends, and null shifts; default: the settings date_column, else the "
+                        "most populated date or timestamp column")
+    parser.add_argument("--start", help="first date in scope, inclusive, or first year for an integer year column; "
+                        "needs a date column")
+    parser.add_argument("--end", help="last date in scope, inclusive, or last year for an integer year column; "
+                        "needs a date column")
     parser.add_argument("--no-scope", action="store_true", help="ignore the settings where and period (option "
                         "filters still apply); with --label all, scans the whole dataset beside the scoped scan")
     parser.add_argument("--measure", help="numeric column or SQL expression to break down; a boolean gives a rate")

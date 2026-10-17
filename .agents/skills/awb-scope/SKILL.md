@@ -5,6 +5,8 @@ description: "Start or refine an analytics workbench investigation. Use for \"le
 
 # Scope an investigation
 
+Run this skill's commands through the `awb` MCP tools when the host offers them, as the project's `AGENTS.md` **Commands** maps them; the command lines below are the fallback.
+
 Interview the user until the investigation knows what it must answer, for whom, and what it still does not know. Settled decisions go in the brief; every question still open goes in the investigation's question ledger, `questions.md`, rendered from `questions.json`. Scoping writes investigation records only; data work, analysis, and packages follow on request.
 
 ## 1. Find the investigation
@@ -22,7 +24,7 @@ An expansion of the same ask to a population containing the original group is a 
 
 Cover the business question, population or scope, the decision it supports or an exploratory purpose, usefulness criteria, and material unknowns. Record any reader the user describes in the brief's Audience section; `awb-package` asks for it when a package needs it.
 
-**Pace by dependency.** Settle the choices that constrain others first. Ask a decision alone when its answer shapes the next question; ask decisions at the same level together, at most four, each with a recommended answer and its reason. In a rescope, carry settled answers forward and ask only about the decisions the change reopens.
+**Pace by dependency.** Settle the choices that constrain others first. Ask a decision alone when its answer shapes the next question; ask decisions at the same level together, at most four, each with a recommended answer and its reason. A decision is one choice: never number unrelated choices under one item; make each its own decision, and ask any beyond four in a second round. In a rescope, carry settled answers forward and ask only about the decisions the change reopens.
 
 **Follow up before moving on.** When an answer is vague, hedged, or conflicts with an earlier one, restate it as a concrete case, such as "so a customer who downgrades but keeps paying has not churned?", and ask the user to confirm or correct it. Leave no answer recorded in a form two analysts could read differently.
 
@@ -39,7 +41,7 @@ Cover the business question, population or scope, the decision it supports or an
 
 **Record meanings where they belong.** Shared meanings go in `foundation/glossary.md`, an investigation's departure in its brief's Local terms section, dataset and view descriptions in `foundation/catalog.md`, consequential analytical decisions in its history; never in `CONTEXT.md` or ADRs.
 
-Before writing the records, ask the user every open decision they can answer, and the context only they hold, bundling those at the same level, method choices included, as **Pace by dependency** says; record one as an open user question only when the user defers it. The interview is done when the question, population, purpose, and usefulness criteria are each settled in the brief or held open as a ledger question with its answerer, such as a usefulness threshold only a stakeholder owns or a decision the user deferred, which that brief section names by ID; every other material unknown is an open ledger question with its answerer; and no answer received is still vague. Write the records without a separate confirmation round.
+Before writing the records, ask the user every open decision they can answer, and the context only they hold, in rounds of decisions at the same level, method choices included, as **Pace by dependency** says; record one as an open user question only when the user defers it. The interview is done when the question, population, purpose, and usefulness criteria are each settled in the brief or held open as a ledger question with its answerer, such as a usefulness threshold only a stakeholder owns or a decision the user deferred, which that brief section names by ID; every other material unknown is an open ledger question with its answerer; and no answer received is still vague. Write the records without a separate confirmation round.
 
 ## 3. Write the records
 
@@ -60,4 +62,4 @@ An investigation without `questions.json` predates the ledger: move each item of
 
 ## 4. Report
 
-Summarize the investigation, what was settled, the records created or changed, and the open questions grouped by who answers them: those the user deferred, to take up through `awb-scope` when they choose, each stakeholder's to collect, and the data's for `awb-explore` or analysis. When few questions stay open or the user wants to widen the inquiry, suggest `awb-brainstorm`. Suggest `awb-status` for where things stand.
+Summarize the investigation, naming the folder created for it, `investigations/<slug>/`, what was settled, the records created or changed, and the open questions grouped by who answers them: those the user deferred, to take up through `awb-scope` when they choose, each stakeholder's to collect, and the data's for `awb-explore` or analysis. When few questions stay open or the user wants to widen the inquiry, suggest `awb-brainstorm`. Suggest `awb-status` for where things stand.

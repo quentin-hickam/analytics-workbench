@@ -8,7 +8,8 @@ SCAN_NAME names foundation/scans/<SCAN_NAME>.json written by scan_dataset.py. De
      "issues": {"S1": {"impact", "treatment", "status",           judgment columns, required for a new row
                        "correction", "change",                    both or neither: a correction row
                        "findings", "object",                      optional overrides
-                       "check": {"publication", "name"}}},        optional: a publication check to cite
+                       "check": {"publication", "name"},          optional: a publication check to cite
+                       "amend": {"observation", "reason"}}},      optional, on a recorded row only
      "new": [{"object", "observation", "evidence",                an issue the scan did not report
               "impact", "treatment", "status",                    judgment columns, required
               "correction", "change", "findings", "check"}],      optional, as for issues
@@ -18,7 +19,9 @@ SCAN_NAME names foundation/scans/<SCAN_NAME>.json written by scan_dataset.py. De
 Any other key is refused. Text may name an issue as {S1}, {N1} (the first new entry), or {DQ-004};
 it becomes the issue's quality ID. A recorded quality ID, such as DQ-004, also works as a key: it
 revises only judgment cells, keeps the observation and link, and its correction carries no rescan
-suffix. New rows' IDs continue the prefix and numbering the Active table already uses, DQ-001 in a
+suffix. An amend on a recorded row, by either key, replaces its observation with the new text
+followed by `; amended <date>: <reason>; was: <the observation it replaces>`, so the withdrawn text
+and its scan marker stay in the row; the same amendment again, on any day, changes nothing. New rows' IDs continue the prefix and numbering the Active table already uses, DQ-001 in a
 record without IDs. A check names a publication directory, data/parquet/<dataset>/<publication-id>/
 relative to PROJECT_ROOT or absolute inside it, and one of the checks its publication.json records;
 the citation, with the check's outcome and the root-relative path, is appended to the row's Current
@@ -433,7 +436,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     default_findings = ("; ".join(f"{inv}: {', '.join(results)}" for inv, results in by_investigation.items())
                         or decisions.get("findings"))
 
-    added, updated, corrections, rows = [], [], [], []
+    added, updated, corrections, rows, amended = [], [], [], [], []
     judged = {key: active.columns[position(active.columns, name, default)] for key, name, default in (
         ("impact", "Analytical impact", 3), ("treatment", "Current treatment", 4),
         ("status", "Status", len(active.columns) - 1))}
@@ -454,6 +457,22 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                 current = cells[at].replace("\\|", "|") if at < len(cells) else ""  # set() escapes again
             if current is not None and citation not in current:
                 values[treatment] = f"{current}; {citation}" if current else citation
+        if decision.get("amend") is not None:
+            amend = decision["amend"]
+            if (not isinstance(amend, dict) or set(amend) != {"observation", "reason"}
+                    or not all(isinstance(amend[k], str) and amend[k].strip() for k in amend)):
+                raise RecordError(f'{issue_id}: amend needs {{"observation": "<new text>", "reason": "<why>"}}')
+            line_index = revised.get(issue_id) if issue is None else (
+                recorded[issue["key"]][0] if issue["key"] in recorded else None)
+            if line_index is None:
+                raise RecordError(f"{issue_id}: amend changes a recorded row's observation; this issue has no row yet")
+            plain = lambda text: _cell(text).replace("\\|", "|")  # set() escapes again
+            current = _cells(quality[line_index])[observation_at].replace("\\|", "|")
+            text, reason = plain(fill(amend["observation"])), plain(fill(amend["reason"]))
+            # The same amendment recorded on any day is already there; only a new one chains.
+            if not re.match(re.escape(f"{text}; amended ") + "[^:]*" + re.escape(f": {reason}; was: "), current):
+                values[active.columns[observation_at]] = f"{text}; amended {day}: {reason}; was: {current}"
+                amended.append(qid)
         if issue_id in found:  # a new entry: its row, else a new one without a scan marker or link
             line_index, obj, observation = found[issue_id]
             if line_index is not None:
@@ -548,7 +567,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
         batches.setdefault(flag["investigation"], []).append({"result": flag["result"], "reason": fill(flag["reason"])})
     for investigation, batch in batches.items():
         try:
-            preview = provenance.flag_findings(root, investigation, batch, check=True, today=day)
+            preview = provenance.flag_findings(root, investigation, batch, check=True)
         except (ValueError, OSError) as error:
             raise RecordError(str(error)) from error
         rows.extend(preview.get("rows", []))
@@ -597,7 +616,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                 replace(relative, partial)
             phases.append("A")
             for investigation, batch in batches.items():
-                outcome = provenance.flag_findings(root, investigation, batch, today=day)
+                outcome = provenance.flag_findings(root, investigation, batch)
                 flagged_investigations.append(investigation)
                 if outcome["flags"]:
                     written += [f"investigations/{investigation}/findings.json", f"investigations/{investigation}/state.md"]
@@ -620,6 +639,8 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
     result = {"quality_ids": {k: ids[k] for k in [*issues, *entries]}, "added": added, "updated": updated,
               "corrections": appended, "catalog": catalog_result,
               "flags": flagged, "written": written}
+    if amended:
+        result["amended"] = amended
     if repeated:
         result["corrections_unchanged"] = repeated
     if dry_run:

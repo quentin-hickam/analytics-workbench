@@ -4,6 +4,7 @@
 # test_renderer_draws_every_form_from_its_file: each of the seven forms is drawn from its chart file at the file's values and order: bar, column, line, and stacked types with a series pivoted, intervals as custom error bars, each bar, column, and line value axis from zero, scatter points and fit, a table's cells; alt text and the source line (with the **Interval:** text) and caveat line come from the specification.
 # test_renderer_line_axis_follows_axis_field: a line chart's value axis includes zero unless **Axis:** says non-zero baseline, which then joins the source line; other wording, the template's "reason for another" included, keeps zero, and so does a column chart whose **Axis:** says non-zero baseline, leaving it out of the source line.
 # test_renderer_value_axis_spans_zero_and_every_value: a bar, column, or line axis pins zero as its minimum when every value and interval bound is zero or more, and as its maximum when every one is zero or less and one is below zero; it pins an interval bound that reaches past every value, whichever side of zero it lies on; otherwise it leaves the bound automatic, so mixed-sign and all-negative values and every interval stay visible.
+# test_renderer_reads_headers_as_the_data_line_renders: a chart file header holding CO₂ or m² is found by the **Data:** role naming it, both read NFKC-normalized as check-draft compares them, and the series name and table header keep the file's text.
 # test_renderer_is_deterministic: two renders of one draft are byte-identical.
 # test_renderer_refuses_a_draft_breaking_the_contract: an outline or chart row stops the render, naming the rows, and writes nothing.
 # test_renderer_refuses_data_it_cannot_draw: a repeated category and series pair, a blank interval cell, or a negative part of a stacked bar stops the render with a ContractError instead of dropping a row or crashing.
@@ -202,6 +203,21 @@ def test_renderer_draws_every_form_from_its_file(package, tmp_path):
         assert source == [expected if n % 2 else f"{expected}\n* value {n} is partial"]
 
 
+def test_renderer_reads_headers_as_the_data_line_renders(package, tmp_path):
+    # A CO₂ or m² header matches the role naming it, which the **Data:** line renders as CO2 or m2 (NFKC).
+    findings = package / "findings.md"
+    findings.write_text(findings.read_text(encoding="utf-8").replace("value: Closed late (%)", "value: Change in CO₂ (Mt)")
+                        .replace("column: Cases", "column: Area (m²)"), encoding="utf-8")
+    (package / "charts/chart-1.csv").write_text("Region,Change in CO₂ (Mt)\nWest,21.3\nEast,2.7\nNorth,8\n",
+                                                encoding="utf-8")
+    (package / "charts/chart-7.csv").write_text("Region,Area (m²)\nWest,1240\nEast,980\n", encoding="utf-8")
+    slides = list(deck(package, tmp_path).slides)[2:9]
+    bar, table = frames(slides[0])[0], frames(slides[6])[0].table
+    assert [(s.name, list(s.values)) for s in bar.chart.plots[0].series] == [("Change in CO₂ (Mt)", [21.3, 2.7, 8.0])]
+    assert [[cell.text for cell in row.cells] for row in table.rows] == [
+        ["Region", "Area (m²)"], ["West", "1240"], ["East", "980"]]
+
+
 def source_line(slide):
     return [shape.text_frame.text for shape in slide.shapes
             if shape.has_text_frame and shape.text_frame.text.startswith("source")]
@@ -253,7 +269,10 @@ def test_renderer_is_deterministic(package, tmp_path):
 @pytest.mark.parametrize("old, new, row", [
     ("**Headline:** Totals reconcile to the finance ledger",
      "**Headline:** Totals reconcile to the finance ledger and to every regional team's own records in each month",
-     {"slide": "How we know", "problem": "the headline has 16 words; keep it to 15"}),
+     {"slide": "How we know", "severity": "warning",
+      "headline": "Totals reconcile to the finance ledger and to every regional team's own records in each month",
+      "problem": "the headline has 16 words, over the 15-word limit; shorten it with the user's approval, or record "
+                 "their acceptance in accepted_long_headlines"}),
     ("Column: comparison 4", "Pie: comparison 4",
      {"chart": "Chart 4", "problem": "names no chart form (Pie); open the specification with one of: Horizontal "
                                      "bar, Bar with intervals, Line, Column, Stacked bar, Scatter, Table"}),

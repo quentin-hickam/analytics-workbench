@@ -10,13 +10,15 @@ The CLI therefore stays the one code path, and nothing here reimplements a helpe
 
 Tools:
   read     read-only (readOnlyHint): state, questions, sql, profile, stale, review-rules check,
-           check-draft --verify-only, status, eda-show, and help; built from fixed arguments
+           review-receipt show, check-draft --verify-only, status, eda-show, and help; built from fixed
+           arguments
   records  investigation and foundation records: state, questions, review-rules, clean-record
   data     land, retain, publish, sql, profile, eda-scan, clean-scan
   run      an investigation's run.py
-  package  export, check-draft
+  package  export, review-receipt, check-draft
   release  release, copy-releases; these also write to release storage outside the project
-  setup    install_helpers.py; the only tool that accepts a folder without src/awb.py
+  setup    install_helpers.py, under its interpreter argument when given; the only tool that accepts a
+           folder without src/awb.py
 
 Project root, per call: the tool's `project` argument (an absolute path), else the single MCP root
 when the client advertises roots (requested with roots/list), else the working directory. A candidate
@@ -77,7 +79,8 @@ QUESTION_STATUSES = ("open", "answered", "parked", "declined", "superseded")
 AWB_COMMANDS = {"land": (), "retain": (), "publish": (), "sql": (), "profile": (),
                 "state": ("finding", "render", "flag", "issues", "next", "switch"),
                 "questions": ("list", "add", "answer", "status", "edit", "render"),
-                "stale": (), "export": (), "review-rules": ("check", "add"), "check-draft": (),
+                "stale": (), "export": (), "review-rules": ("check", "add"),
+                "review-receipt": ("start", "record", "show"), "check-draft": (),
                 "release": (), "copy-releases": ()}
 HELP_SCRIPTS = ("status", "eda-scan", "clean-scan", "clean-record", "install")
 
@@ -120,21 +123,30 @@ TOOLS = [
      "description": (
          "Read the workbench without changing any file. command: state (resume view of an investigation), "
          "questions (ledger questions; open unless all or status), sql (run SELECT statements, given as a "
-         "query file or SQL text in query, against the foundation views), profile (per-column summary of a "
+         "query file or SQL text in query, against the foundation views, binding $name from params or "
+         "settings), profile (per-column summary of a "
          "view, query file, or SELECT in query), stale (findings whose evidence no longer matches), "
-         "review-rules (check a draft against the review rules), check-draft (verify a release candidate, "
+         "review-rules (check a draft against the review rules), review-receipt (the last draft review's "
+         "report and a diff of what changed since), check-draft (verify a release candidate, "
          "writing nothing), status (project status facts), eda-show (one section of a saved EDA scan of "
          "dataset), help (a command's arguments; topic names it, such as `questions add` or `eda-scan`)."),
      "inputSchema": {"type": "object", "additionalProperties": False, "required": ["command"], "properties": {
          "project": PROJECT,
          "command": {"type": "string", "enum": ["state", "questions", "sql", "profile", "stale", "review-rules",
-                                                "check-draft", "status", "eda-show", "help"]},
+                                                "review-receipt", "check-draft", "status", "eda-show", "help"]},
          "investigation": {"type": "string", "description": "Investigation name under investigations/; "
-                           "default README's active one. Required for review-rules and check-draft."},
-         "package": {"type": "string", "description": "Package name, for review-rules and check-draft."},
+                           "default README's active one. Required for review-rules, review-receipt, and "
+                           "check-draft."},
+         "package": {"type": "string", "description": "Package name, for review-rules, review-receipt, and "
+                                                      "check-draft."},
          "query": {"type": "string", "description": "sql and profile: a query file path (project-relative or "
                    "absolute) or SQL text; profile also takes a view name."},
          "limit": {"type": "integer", "minimum": 0, "description": "sql: rows to print (default 20)."},
+         "params": {"type": "object", "additionalProperties": {"type": "string"},
+                    "description": "sql: values for the query's $name parameters, each written as after "
+                                   "--param name= (2026-01-01 is a date, 5 an integer); they win over settings."},
+         "settings": {"type": "string", "description": "sql: an investigation whose settings [parameters] the "
+                      "query binds and whose views/*.sql it loads."},
          "max_rows": {"type": "integer", "minimum": 1, "description": "profile: sample above this many rows."},
          "all": {"type": "boolean", "description": "questions: list every question."},
          "status": {"type": "array", "items": {"type": "string", "enum": list(QUESTION_STATUSES)},
@@ -179,10 +191,11 @@ TOOLS = [
     _write_tool(
         "package", "Build package draft",
         "Write a package draft's exports and manifest. command export: chart and dataset files, a --chart's "
-        "@first=<n> or @where=<column>=<value> row selection included, and producing state; check-draft: run "
-        "every draft check, write START-HERE.md, and rewrite the manifest inventory (the read "
+        "@first=<n> or @where=<column>=<value> row selection included, and producing state; review-receipt: "
+        "mark a draft review launched (`start`) and record it (`record`, the report on stdin with `--report -`); "
+        "check-draft: run every draft check, write START-HERE.md, and rewrite the manifest inventory (the read "
         "tool's check-draft verifies without writing).",
-        ("export", "check-draft")),
+        ("export", "review-receipt", "check-draft"), stdin=True),
     _write_tool(
         "release", "Release package",
         "Freeze a verified draft as the next numbered release, or copy existing releases to recorded "
@@ -192,10 +205,14 @@ TOOLS = [
      "description": "Install or upgrade the workbench helpers, guides, and package formats in a project "
                     "with workbench markers (AGENTS.md, foundation/, or investigations/), and record the "
                     "interpreter that runs them on README's Project interpreter line unless AWB_PYTHON "
-                    "overrides it, through awb-init's "
-                    "install_helpers.py. check reports without writing.",
+                    "overrides it, through awb-init's install_helpers.py. It runs under interpreter when "
+                    "given, else the one workbench commands use: README's line, else the project's .venv or "
+                    "venv, else this server's own. check reports without writing.",
      "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
          "project": PROJECT,
+         "interpreter": {"type": "string", "description": "Absolute path of the Python that will run the "
+                         "project's analysis, such as <project>/.venv/bin/python; setup runs under it and "
+                         "records it."},
          "check": {"type": "boolean", "description": "Report without writing."},
          "upgrade": {"type": "boolean", "description": "Also replace unmodified earlier copies."},
          "package_formats": {"type": "boolean", "description": "Also install missing package formats."},
@@ -246,6 +263,16 @@ def _integer(arguments, key, minimum):
         return None
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
         raise ToolError(f"{key} must be an integer of at least {minimum}")
+    return value
+
+
+def _params(arguments):
+    value = arguments.get("params", {})
+    if not isinstance(value, dict) or not all(isinstance(text, str) for text in value.values()):
+        raise ToolError("params must be an object of strings")
+    bad = [name for name in value if not re.fullmatch(r"\w+", name)]
+    if bad:
+        raise ToolError(f"params names must be letters, digits, and _: {', '.join(map(repr, bad))}")
     return value
 
 
@@ -343,20 +370,26 @@ def read_command(arguments, root):
         return awb + ["questions", "list"] + inv + ["--all"] * _flag(arguments, "all") \
             + [f"--status={status}" for status in statuses]
     if command in ("sql", "profile"):
-        _check_keys(arguments, ("command", "query", "limit" if command == "sql" else "max_rows"))
+        _check_keys(arguments, ("command", "query", "limit", "params", "settings") if command == "sql"
+                    else ("command", "query", "max_rows"))
         query = _string(arguments, "query", required=True)
         option = "limit" if command == "sql" else "max_rows"
         value = _integer(arguments, option, 0 if command == "sql" else 1)
         extra = [] if value is None else [f"--{option.replace('_', '-')}={value}"]
+        if command == "sql":
+            settings = _string(arguments, "settings", name=True)
+            extra += [f"--settings={settings}"] if settings else []
+            extra += [f"--param={name}={text}" for name, text in _params(arguments).items()]
         return awb + [command, "--read-only"] + extra + ["--", query]
     if command == "stale":
         _check_keys(arguments, ("command", "investigation"))
         return awb + ["stale"] + inv
-    if command in ("review-rules", "check-draft"):
+    if command in ("review-rules", "review-receipt", "check-draft"):
         _check_keys(arguments, ("command", "investigation", "package"))
         investigation = _string(arguments, "investigation", required=True, name=True)
         package = _string(arguments, "package", required=True, name=True)
-        fixed = ["review-rules", "check"] if command == "review-rules" else ["check-draft", "--verify-only"]
+        fixed = {"review-rules": ["review-rules", "check"], "review-receipt": ["review-receipt", "show"],
+                 "check-draft": ["check-draft", "--verify-only"]}[command]
         return awb + fixed + [investigation, package]
     if command == "status":
         _check_keys(arguments, ("command", "probe_upstream"))
@@ -397,14 +430,17 @@ def write_command(tool, arguments, root):
             raise ToolError(f"investigations/{investigation}/run.py does not exist")
         return [_python(root), str(script)] + results, None
     if tool == "setup":
-        _check_keys(arguments, ("check", "upgrade", "package_formats", "replace", "remove_retired"))
+        _check_keys(arguments, ("interpreter", "check", "upgrade", "package_formats", "replace", "remove_retired"))
         replace = _strings(arguments, "replace")
-        argv = [_python(root), _script("install")]
+        interpreter = _string(arguments, "interpreter")
+        if interpreter is not None and not (os.path.isabs(interpreter) and os.path.isfile(interpreter)):
+            raise ToolError(f"interpreter must be the absolute path of an existing file: {interpreter!r}")
+        argv = [interpreter or _python(root), _script("install")]
         argv += ["--check"] * _flag(arguments, "check") + ["--upgrade"] * _flag(arguments, "upgrade")
         argv += ["--package-formats"] * _flag(arguments, "package_formats")
         argv += [f"--replace={path}" for path in replace] + ["--remove-retired"] * _flag(arguments, "remove_retired")
         return argv + ["--", str(root)], None
-    _check_keys(arguments, ("command", "args", "stdin") if tool == "records" else ("command", "args"))
+    _check_keys(arguments, ("command", "args", "stdin") if tool in ("records", "package") else ("command", "args"))
     command = _string(arguments, "command", required=True)
     if command not in WRITE_COMMANDS[tool]:
         raise ToolError(f"{tool} command must be one of: {', '.join(WRITE_COMMANDS[tool])}")

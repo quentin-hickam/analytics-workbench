@@ -94,12 +94,15 @@ def collect(root, *, probe_upstream=False):
         return re.split(r"^##? ", rest, maxsplit=1, flags=re.M)[0].strip()
 
     def ledger(investigation, findings):
-        """The question ledger's counts, open questions, and derived awaiting-recheck answers.
+        """The question ledger's counts, open questions, and derived awaiting-recheck and provisional answers.
 
         roots counts the questions with no parent, which awb-scope keeps for the user's own, and
         must_subquestions the must questions under them, each by displayed status, apart from the
-        totals in counts. None when the investigation has no questions.json. Findings statuses come
-        from state.md's table.
+        totals in counts. by_question gives each root with its findings by status, a finding counting
+        under a root when its result answers the root or any question under it, and
+        findings_without_question the findings no question's results name; both counts are null when
+        the findings table is unreadable. None when the investigation has no questions.json. Findings
+        statuses come from state.md's table.
         """
         path = investigation / "questions.json"
         if not path.exists():
@@ -127,17 +130,50 @@ def collect(root, *, probe_upstream=False):
         recheck = [q for q in questions if q["status"] == "answered" and q["answerer"] == "data"
                    and any(FINDING_STATUSES.get(statuses.get(r)) in ("revalidation-needed", "superseded")
                            for r in q["results"])]
-        displayed = {q["id"]: "answered (awaiting recheck)" if q in recheck else q["status"] for q in questions}
+        # While no answering finding is supported or was before its flag, an unrecognized or missing row included,
+        # the answer is provisional, a recheck included.
+        provisional = [q for q in questions if q["status"] == "answered" and q["answerer"] == "data"
+                       and not any(statuses.get(r) in ("supported", "revalidation-needed (was supported)")
+                                   for r in q["results"])]
+        displayed = {q["id"]: "answered (provisional, awaiting recheck)" if q in recheck and q in provisional
+                     else "answered (awaiting recheck)" if q in recheck else "answered (provisional)"
+                     if q in provisional else q["status"] for q in questions}
         open_questions = [q for q in questions if q["status"] == "open"]
+
+        children = {}
+        for q in questions:
+            children.setdefault(q["parent"], []).append(q)
+
+        def results_under(question, seen):
+            found = set(question["results"])
+            for child in children.get(question["id"], []):
+                if child["id"] not in seen:
+                    seen.add(child["id"])
+                    found |= results_under(child, seen)
+            return found
+
+        rows = [(FINDING_STATUSES.get(row["Status"], row["Status"]),
+                 set(re.findall(r"evidence/([A-Za-z0-9][A-Za-z0-9._-]*)\.json", row["Evidence"]))) for row in findings or []]
+        by_question, linked = [], set()
+        for q in questions:
+            if not q["parent"]:
+                results = results_under(q, {q["id"]})
+                linked |= results
+                by_question.append({"id": q["id"], "text": q["text"], "status": displayed[q["id"]], "origin": q.get("origin"),
+                                    "findings": None if findings is None else dict(Counter(s for s, ids in rows if ids & results))})
+
+        def answered(listed):
+            return [f"{q['id']} {displayed[q['id']]} [{q['answerer']}, {q['kind']}] {q['text']} -> "
+                    + "; ".join(f"{r} ({statuses.get(r, 'no findings row')})" for r in q["results"]) for q in listed]
+
         return {"counts": dict(Counter(displayed[q["id"]] for q in questions)),
                 "roots": dict(Counter(displayed[q["id"]] for q in questions if not q["parent"])),
                 "must_subquestions": dict(Counter(displayed[q["id"]] for q in questions
                                                   if q["parent"] and q["priority"] == "must")),
                 "open_by_answerer": dict(Counter(q["answerer"] for q in open_questions)),
                 "open": [f"{q['id']} [{q['answerer']}, {q['kind']}] {q['text']}" for q in open_questions],
-                "awaiting_recheck": [f"{q['id']} answered (awaiting recheck) [{q['answerer']}, {q['kind']}] {q['text']} -> "
-                                    + "; ".join(f"{r} ({statuses.get(r, 'no findings row')})" for r in q["results"])
-                                    for q in recheck]}
+                "awaiting_recheck": answered(recheck), "provisional": answered(provisional), "by_question": by_question,
+                "findings_without_question": None if findings is None else dict(Counter(s for s, ids in rows if not ids & linked))}
 
     def table(text, columns, path):
         if text is None:
@@ -153,12 +189,15 @@ def collect(root, *, probe_upstream=False):
         return [dict(zip(columns, row)) for row in rows[2:]]
 
     def iso_date(value, path):
+        """Last updated as a date, or as a datetime when it records a time with its UTC offset, as state writers do."""
         try:
-            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value or ""):
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value or ""):
+                return date.fromisoformat(value)
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})", value or ""):
                 raise ValueError
-            return date.fromisoformat(value)
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
-            uncertain(path, "Last updated is not an ISO calendar date")
+            uncertain(path, "Last updated is not an ISO date, or a time with its UTC offset")
             return None
 
     def local_path(value):
@@ -226,6 +265,9 @@ def collect(root, *, probe_upstream=False):
         result["active"] = {"name": slug, "last_updated": updated, "counts": dict(counts) if findings is not None else None, "findings": visible_findings if findings is not None else None,
                             "question": section(brief, "Business question", brief_path), "material_unknowns": section(brief, "Material unknowns", brief_path),
                             "unresolved_issues": section(state, "Unresolved issues", state_path), "next_steps": section(state, "Next steps", state_path)}
+        # Every finding's caveat, flagged or not, so a report never calls nothing open while one remains.
+        result["active"]["caveats"] = None if findings is None else [
+            {"finding": f["finding"], "status": f["status"], "caveat": f["reason"]} for f in visible_findings if f["reason"]]
         result["active"]["questions"] = ledger(investigation, findings)
     others = []
     investigations_path = root / "investigations"
@@ -267,17 +309,20 @@ def collect(root, *, probe_upstream=False):
             uncertain(sources_path, f"Source {row['Source ID']}: Relevance and fitness does not begin with its basis")
         return basis is not None and basis.group(1).lower() == "documentation"
 
-    # The two reference forms foundation/sources.md defines, exactly as it states them; any other
-    # spelling, valid Markdown or not, counts as no reference. Form 1 is `[text](destination)`: non-empty
+    # The reference forms foundation/sources.md defines, exactly as awb-init's references/landing.md
+    # states them; any other spelling, valid Markdown or not, counts as no reference. Form 1 is `[text](destination)`: non-empty
     # text without `[`, `]`, `\`, `<` or a backtick, then a destination in angle brackets without `<`, `>`,
     # `\` or a line break, or a bare one without whitespace, control characters, `<` or `\` whose
     # parentheses balance at any depth. Form 2 is a location in single backticks, a comma, then
     # `sha256` (also `SHA-256`, `sha256:`) and exactly 64 hex digits with no letter, digit, `_`, `\` or `&`
-    # after, which an escape or entity could render as one.
+    # after, which an escape or entity could render as one. Form 3, an access note for documentation
+    # read but not kept, is `read at <URL> on YYYY-MM-DD, not kept: <reason>`, the URL http(s), bare or
+    # in angle brackets; it is a known limitation, listed apart, unless the cell also holds form 1 or 2.
     link_text = re.compile(r"\[[^\[\]\\<`]+\]\(")
     angle_destination = re.compile(r"<[^<>\\\n]+>\)")
     retained = re.compile(r"`[^`\n]*[^`\s][^`\n]*`,\s*sha-?256:?\s*[0-9a-f]{64}(?![\w\\&])", re.I)
     label = re.compile(r"\s*reference:\s*", re.I)
+    access = re.compile(r"read at\s+(?:<https?://[^<>\s]+>|https?://[^<>\s]+)\s+on\s+\d{4}-\d{2}-\d{2},\s*not kept:\s*\S", re.I)
     line_break = re.compile(r"<br\s*/?>", re.I)
     entity = re.compile(r"&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
     # Raw HTML and autolinks, which CommonMark reads before code spans and links. These patterns are
@@ -331,7 +376,8 @@ def collect(root, *, probe_upstream=False):
         return opened and destination(notes, opened.end())
 
     def referenced(notes):
-        """Whether a Notes clause in plain text opens with `reference:` directly followed by one of the two forms."""
+        """("kept" or "access", None) when a Notes clause in plain text opens with `reference:` directly
+        followed by a form, "kept" for form 1 or 2 anywhere in the cell; else (None, why not)."""
         # Read left to right as CommonMark does. A clause opens the cell or follows `;`, `,`, `.` or a
         # `<br>`, outside code spans, raw HTML, autolinks, emphasis, strikethrough, links and brackets;
         # only what directly follows the label counts, so `reference: pending. See [x](y)` records no
@@ -340,7 +386,10 @@ def collect(root, *, probe_upstream=False):
         # delimiter character) or the reading is uncertain (a backtick, bracket or `<` inside an
         # autolink, or a link whose destination this does not read), the rest of the cell counts as
         # no reference.
-        position, clause, brackets = 0, True, 0
+        position, clause, brackets, labelled_once, noted = 0, True, 0, False, None
+
+        def stopped(why):
+            return ("access", None) if noted else (None, f"reading stopped at {why} before a reference in one of the forms")
         # A backslash escapes the punctuation after it, read left to right as the loop below reads it,
         # and an escaped delimiter is literal, so only the unescaped rest of a run opens or closes.
         escaped = {found.end() - 1 for found in re.finditer(rf"\\[{re.escape(string.punctuation)}]", notes)}
@@ -350,7 +399,10 @@ def collect(root, *, probe_upstream=False):
         while position < len(notes):
             labelled = clause and not brackets and label.match(notes, position)
             if labelled and (retained.match(notes, labelled.end()) or link(notes, labelled.end())):
-                return True
+                return "kept", None
+            if labelled and access.match(notes, labelled.end()):
+                noted = "access"
+            labelled_once = labelled_once or bool(labelled)
             clause = False
             char = notes[position]
             if char == "\\" and notes[position + 1:position + 2] in tuple(string.punctuation):
@@ -362,11 +414,11 @@ def collect(root, *, probe_upstream=False):
             elif char == "<":
                 broken = line_break.match(notes, position)
                 if not broken and any(pattern.match(notes, position) for pattern in html):
-                    return False  # Where the element ends, and so whether a clause is inside it, is not read.
+                    return stopped("raw HTML")  # Where the element ends, and so whether a clause is inside it, is not read.
                 linked = autolink.match(notes, position)
                 end = broken.end() if broken else linked and linked.end()
                 if end and any(inner in "`[]<" for inner in notes[position + 1:end]):
-                    return False  # Renderers may split this construct differently.
+                    return stopped("an autolink holding a backtick, bracket or <")  # Renderers may split it differently.
                 position = end or position + 1
                 clause = bool(broken)
             elif char in "*_~":
@@ -378,7 +430,7 @@ def collect(root, *, probe_upstream=False):
                 if closer_start >= end and can_open(notes, position, end):
                     if any(inner in "`[]<" for inner in notes[position:closer_end]) or any(
                             end <= start < closer_start and notes[start] != char and can_open(notes, start, stop) for start, stop in runs):
-                        return False
+                        return stopped("emphasis or strikethrough")
                     end = closer_end
                 position = end
             elif char == "[":
@@ -390,7 +442,7 @@ def collect(root, *, probe_upstream=False):
                 if notes.startswith("(", position + 1):
                     closed = destination(notes, position + 2)
                     if closed is None:
-                        return False
+                        return stopped("a link destination neither form allows")
                     position = closed
                 else:
                     position += 1
@@ -399,11 +451,20 @@ def collect(root, *, probe_upstream=False):
             else:
                 clause = char in ";,."
                 position += 1
-        return False
+        if noted:
+            return noted, None
+        if labelled_once:
+            return None, "what follows reference: is in none of the forms"
+        if re.search(r"reference", notes, re.I):
+            return None, "reference: does not open a clause in plain text"
+        return None, "Notes hold no reference: clause"
 
     # foundation/sources.md states the basis and reference forms these read.
-    result["sources"] = None if registered is None else {"count": len(registered), "documentation_without_reference": [
-        row["Source ID"] for row in registered if documentation_basis(row) and not referenced(row["Notes"])]}
+    assessed = [(row["Source ID"], referenced(row["Notes"])) for row in registered or [] if documentation_basis(row)]
+    result["sources"] = None if registered is None else {
+        "count": len(registered),
+        "documentation_without_reference": [{"source": source, "reason": why} for source, (kind, why) in assessed if not kind],
+        "documentation_access_notes": [source for source, (kind, _) in assessed if kind == "access"]}
     result["landed_data_storage"] = storage(field(readme, "Landed data is kept at", readme_path, optional=True))
     release_line = field(readme, "Released packages are kept at", readme_path, optional=True)
     result["release_storage"] = storage(release_line)
@@ -478,14 +539,19 @@ def collect(root, *, probe_upstream=False):
     else:
         for directory in package_dirs:
             draft = directory / "draft"
-            obj = manifest(draft) if draft.is_dir() else None
+            # A draft holding the headline preview before its first export has no manifest yet, and needs none.
+            preview = draft.is_dir() and not (draft / "manifest.json").exists() \
+                and (draft / ".preview" / "headlines.md").is_file()
+            obj = manifest(draft) if draft.is_dir() and not preview else None
             revised = timestamp(obj, "revised_at", draft / "manifest.json")
             release_dirs = entries(directory / "released", directories=True)
             releases = [p for p in release_dirs or [] if p.name.isascii() and p.name.isdigit()]
             latest = max(releases, key=lambda p: int(p.name)) if releases else None
             # A frozen release is read only for released_at.
             released = timestamp(manifest(latest, release=True), "released_at", latest / "manifest.json") if latest else None
-            entry = {"name": directory.name, "draft_exists": draft.is_dir(), "revised_at": revised.isoformat() if revised else None,
+            entry = {"name": directory.name, "draft_exists": draft.is_dir(),
+                     "draft_stage": "headline preview written, not yet exported" if preview else None,
+                     "revised_at": revised.isoformat() if revised else None,
                      "release_inventory_known": release_dirs is not None, "latest_release": latest.name if latest else None, "released_at": released.isoformat() if released else None,
                      "draft_vs_release": ("ahead" if revised > released else "same_or_older") if revised and released else None}
             # Release storage holds each release at <location>/<investigation>/<package>/<n>/; null when the
@@ -503,7 +569,7 @@ def collect(root, *, probe_upstream=False):
             valid_flags = isinstance(flags, list) and all(valid_flag(f) for f in flags)
             if obj is not None and not valid_flags:
                 uncertain(draft / "manifest.json", "Missing or malformed revalidation_flags; disposition counts unknown")
-            if findings is None and draft.is_dir():
+            if findings is None and draft.is_dir() and not preview:
                 uncertain(draft, "Current findings unknown; flag comparison requires state review")
             confirmed = []
             for finding in flagged:
@@ -521,7 +587,32 @@ def collect(root, *, probe_upstream=False):
             packages.append(entry)
     result["packages"] = packages
     result["git"] = git_status(root, slug, state_date, uncertain)
+    if slug and result["git"].get("has_commits"):
+        result["git"]["uncommitted_evidence"] = uncommitted_evidence(root / "investigations" / slug / "evidence",
+                                                                     entries, uncertain)
     return result
+
+
+def uncommitted_evidence(directory, entries, uncertain):
+    """Result IDs whose evidence names no producing commit, recorded before the repository had one, or
+    None when the evidence cannot be listed. Only a rerun records the commit; an unreadable evidence file
+    is an uncertainty and is listed too, since its commit is unknown."""
+    files = entries(directory)
+    if files is None:
+        return None
+    listed = []
+    for path in files:
+        if path.suffix != ".json" or not path.is_file():
+            continue
+        try:
+            commit = json.loads(path.read_text(encoding="utf-8")).get("producing_commit")
+        except (OSError, UnicodeError, ValueError, AttributeError):
+            uncertain(path, "Cannot read result evidence; its producing commit is unknown")
+            commit = None
+        # A commit SHA is the only value that names one: "uncommitted", {"unknown": ...}, or anything else does not.
+        if not (isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit)):
+            listed.append(path.stem)
+    return listed
 
 
 def upstream(root, probe, uncertain, entries):
@@ -530,7 +621,8 @@ def upstream(root, probe, uncertain, entries):
     Only the latest acquisition of a source to record a URL is checked, by completed_at and then,
     for acquisitions completed in the same second, by the greater acquisition ID: a file of an
     earlier acquisition of the same source and URL counts as superseded, since landing again is how
-    a changed upstream is taken up. probeable_files is null when an acquisition directory or
+    a changed upstream is taken up. not_checkable names, once each, the sources with a latest file
+    whose HTTP URL was recorded without an ETag or Last-Modified. probeable_files is null when an acquisition directory or
     provenance.json could not be read; an uncertainty names each one, and the files that were read
     are still counted and probed. entries is collect()'s directory listing, None when unreadable.
     """
@@ -575,6 +667,10 @@ def upstream(root, probe, uncertain, entries):
         else:
             probeable.append((entry, recorded))
     report = {"probeable_files": len(probeable) if complete else None}
+    # A server that sent neither validator leaves its source uncheckable, a known limitation named once per source.
+    unvalidated = sorted({entry["source"] for entry in not_probeable if entry["reason"] == "no ETag or Last-Modified recorded"})
+    if unvalidated:
+        report["not_checkable"] = unvalidated
     if probe:
         # One timeout per host and port bounds the run when a host is unreachable (VPN off, firewall).
         opener, unresponsive = head_opener(), set()
@@ -844,7 +940,7 @@ def git_status(root, slug, state_date, uncertain):
         if "R" in code or "C" in code:
             changed.append(next(chunks, ""))
     changed = [p[len(project_prefix):] for p in changed if p.startswith(project_prefix)]
-    result = {"available": True, "has_commits": has_head, "uncommitted_paths": len(set(changed)), "mtime_date_basis": "host local timezone; Git dates use recorded commit timezone"}
+    result = {"available": True, "has_commits": has_head, "uncommitted_paths": len(set(changed)), "mtime_date_basis": "host local timezone; latest_commit_date uses the recorded commit timezone"}
     if not has_head:
         result["commit_comparison"] = "no commits yet; all work uncommitted"
     if not slug:
@@ -853,13 +949,14 @@ def git_status(root, slug, state_date, uncertain):
     # The state and the question ledger, a record of its own that state.md does not hold, never date
     # the state: ledger writes alone leave it current.
     exempt = [prefix + name for name in ("state.md", "questions.json", "questions.md")]
-    dates = []
-    missing = []
+    # Each change is (time, path, exact). An exact time is the file's mtime; otherwise it is the time of
+    # the latest commit recording the file, which bounds the change from above.
+    changes, missing, uncommitted = [], [], set()
     for name in sorted(set(changed)):
         if name.startswith(prefix) and name not in exempt:
-            path = root / name
+            uncommitted.add(name)
             try:
-                dates.append((date.fromtimestamp(path.stat().st_mtime), name))
+                changes.append((modified(root / name), name, True))
             except OSError:
                 missing.append(name)
     if missing:
@@ -868,23 +965,98 @@ def git_status(root, slug, state_date, uncertain):
             uncertain(root / name, "Uncommitted change lacks a readable mtime (for example deletion); state date check uncertain")
     if has_head:
         repo_prefix = project_prefix + prefix
-        log = git("log", "-1", "--format=%cs", "--", ":(top,literal)" + repo_prefix, *(":(top,exclude,literal)" + project_prefix + name for name in exempt))
-        if log.returncode:
+        paths = ("--", ":(top,literal)" + repo_prefix, *(":(top,exclude,literal)" + project_prefix + name for name in exempt))
+        log = git("log", "-1", "--format=%cs", *paths)
+        committed = git("-c", "core.quotePath=false", "log", "--format=%x01%ct", "--name-only", *paths)
+        if log.returncode or committed.returncode:
             uncertain(root / prefix, "Cannot read Git commit date")
         elif log.stdout.strip():
-            commit_date = date.fromisoformat(log.stdout.strip())
-            result["latest_commit_date"] = commit_date.isoformat()
-            dates.append((commit_date, "latest investigation commit"))
-    if dates:
-        newest, source = max(dates)
-        result["latest_change"] = {"date": newest.isoformat(), "source": source}
-        if state_date:
-            difference = (newest - state_date).days
-            result["days_after_state"] = difference
-            result["state_status"] = "out of date" if difference > 0 else "indeterminate at date precision" if difference == 0 else "unknown" if missing else "up to date"
-    if "state_status" not in result:
+            result["latest_commit_date"] = date.fromisoformat(log.stdout.strip()).isoformat()
+            latest = {}
+            for line in committed.stdout.splitlines():
+                if line.startswith("\x01"):
+                    commit_time = int(line[1:])
+                elif line.startswith('"'):  # A path Git quotes is not read back: only its commit's time dates it.
+                    latest[line] = max(latest.get(line, commit_time), commit_time)
+                elif line and line.startswith(project_prefix) and line[len(project_prefix):] not in uncommitted:
+                    name = line[len(project_prefix):]
+                    latest[name] = max(latest.get(name, commit_time), commit_time)
+            for name, commit_time in sorted(latest.items()):
+                # A clean file's mtime is its change time unless it postdates the commit, as after a
+                # checkout rewrote it; a quoted, deleted, or rewritten file has only the commit's time.
+                # A commit merged or pulled in carries the time it was made elsewhere, not when it arrived.
+                try:
+                    mtime = modified(root / name)
+                except OSError:
+                    mtime = None
+                if mtime is not None and int(mtime.timestamp()) <= commit_time:
+                    changes.append((mtime, name, True))
+                else:
+                    changes.append((datetime.fromtimestamp(commit_time).astimezone(), name, False))
+    changes = [change for change in changes if not run_output(root, prefix, change[1])]
+    if state_date is None or not changes and not missing:
         result["state_status"] = "unknown" if missing or state_date is None else "no newer dated change found"
+        return result
+    stamped = isinstance(state_date, datetime)
+    state_day = state_date.astimezone().date() if stamped else state_date
+
+    def order(change):
+        """after, before, or unknown, against Last updated: a change in its second, or with a bare date on its day, is not after."""
+        when, _, exact = change
+        if stamped:
+            return ("after" if int(when.timestamp()) > state_date.timestamp() else "before") if exact else \
+                "before" if when <= state_date else "unknown"
+        if when.date() < state_day:
+            return "before"
+        return "after" if exact and when.date() > state_day else "unknown"
+
+    ordered = {"after": [], "before": [], "unknown": []}
+    for change in changes:
+        ordered[order(change)].append(change)
+    if ordered["after"]:
+        result["state_status"] = "out of date"
+        newest = max(ordered["after"])
+        result["days_after_state"] = (newest[0].date() - state_day).days
+    elif missing:
+        result["state_status"] = "unknown"
+        newest = max(changes) if changes else None
+    elif ordered["unknown"]:
+        newest = max(ordered["unknown"])
+        result["state_status"] = "saved the same day as the latest change" if not stamped and newest[0].date() == state_day \
+            else "saved before a later commit, which does not record when its changes were made"
+    else:
+        result["state_status"] = "up to date"
+        newest = max(changes)
+    if newest:
+        result["latest_change"] = {"date": newest[0].date().isoformat(), "time": newest[0].isoformat(timespec="seconds"),
+                                   "source": newest[1]}
     return result
+
+
+def run_output(root, prefix, name):
+    """Whether name is a result's evidence, table, or profile whose evidence is no older than its table and profile.
+
+    run.py writes a result's table and profile, then its evidence, then its finding, which stamps the
+    state, or leaves it as it is when the table, checks, and settings are unchanged (kept). Outputs
+    whose evidence followed them were therefore followed by that finding write, so they never date
+    the state; a failed finding write removes the evidence, and a later edit to the table postdates it.
+    """
+    result_id = r"([A-Za-z0-9][A-Za-z0-9._-]*?)"
+    match = re.fullmatch(re.escape(prefix) + rf"(?:evidence/{result_id}\.json|results/{result_id}(?:\.profile\.json|\.csv))", name)
+    if not match:
+        return False
+    base, result_id = root / prefix, match[1] or match[2]
+    outputs = [base / "results" / f"{result_id}.csv", base / "results" / f"{result_id}.profile.json"]
+    try:
+        evidence = (base / "evidence" / f"{result_id}.json").stat().st_mtime
+        return outputs[0].exists() and all(evidence >= path.stat().st_mtime for path in outputs if path.exists())
+    except OSError:
+        return False
+
+
+def modified(path):
+    """A file's mtime as a local datetime with its UTC offset."""
+    return datetime.fromtimestamp(path.stat().st_mtime).astimezone()
 
 
 def main():

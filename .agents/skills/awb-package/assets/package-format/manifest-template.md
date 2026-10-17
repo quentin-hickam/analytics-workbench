@@ -6,7 +6,8 @@ The manifest is `manifest.json`. Record times in ISO 8601 with a UTC offset, suc
 
 - `investigation`, `package`, and `status` (`draft` or `release`): written by `export` when it creates the manifest;
 - `revised_at`: stamped by `check-draft` when the inventory changes; a release keeps the draft's value;
-- `release_number` (such as `002`), `released_at`, and `prior_release` (the latest numbered release before this one, such as `released/001`, or `none`): written by `release` on the release copy; and
+- `release_number` (such as `002`), `released_at`, and `prior_release` (the latest numbered release before this one, such as `released/001`, or `none`): written by `release` on the release copy;
+- `review`: the passed review the release rests on, its `kind` (`full` or `scoped`), `recorded_at`, and `accepted`, each problem the user accepted with their reason, written by `release` on the release copy from the draft's review receipt; and
 - `inventory`: every file in the package directory, each with its path relative to the package directory using `/` separators, byte size, and SHA-256; directories are not listed. The manifest lists itself by path only, with no size or checksum, since writing them would change them. `python3 src/awb.py check-draft` writes it.
 
 ## Producing state
@@ -35,20 +36,23 @@ The operation that assembled this package, recorded separately from the producin
 
 ## Selection
 
-- `dataset_selection`: each exported dataset as `path`, the `result_id` it serializes, its `columns`, the `percent` columns shown 100 times larger, and the decimal places each rounded column shows (`round`); or an explicit `none`. A manifest from an earlier export may list paths alone; and
-- `charts`: each chart file as `path`, `result_id`, `columns`, the row `selection` (`all`, `{"first": n}`, or `{"where": {"column", "values"}}`), its `headers`, the value labels its rows use (`values`), `percent`, and `round`; or `none`. `check-draft` refuses an entry whose headers, value labels, or percent columns differ from what `foundation/display.toml` gives, reapplies each entry to the result's saved table, and refuses a chart file that differs.
+- `dataset_selection`: each exported dataset as `path`, the `result_id` it serializes, its `columns`, the `percent` columns shown 100 times larger, the `scale` divisor each column's values were divided by, and the decimal places each rounded column shows (`round`); or an explicit `none`. A manifest from an earlier export may list paths alone; and
+- `charts`: each chart file as `path`, `result_id`, `columns`, the row `selection` (`all`, `{"first": n}`, or `{"where": {"column", "values"}}`), its `headers`, the value labels its rows use (`values`), `percent`, `scale`, and `round`; or `none`. `check-draft` traces a narrative number to a `scale` column's values divided by its divisor, and refuses an entry whose headers, value labels, percent columns, or divisors differ from what `foundation/display.toml` gives, reapplies each entry to the result's saved table, and refuses a chart file that differs.
 
-`export` writes both, and each `revalidation_flags` entry's finding and reason, one per flagged finding; you fill `represented_in` and the user's `disposition`, required when `represented_in` lists places. The package contract's **Revalidation caveats** defines the field. `methodology.md` states the row selection, percent scaling, and rounding that `charts` and `dataset_selection` record, as `export`'s `methodology_lines` give them.
+`export` writes both, and each `revalidation_flags` entry's finding and reason, one per flagged finding; you fill `represented_in` and the user's `disposition`, required when `represented_in` lists places. The package contract's **Revalidation caveats** defines the field. `methodology.md` states the row selection, unit scale, percent scaling, and rounding that `charts` and `dataset_selection` record, as `export`'s `methodology_lines` give them.
 
 Say the provenance locates the producing state; never call a package reproducible. Record an undeterminable field as `{"unknown": "<reason>"}`; a string such as `"unknown: evidence lost"` is not read as a provenance gap.
 
 ## Storyline
 
-- `presentation_order`: absent or `none`, or the finding slide headings in the order the user approved, main sequence first and then the appendix, each written as its `###` heading shows.
-  - Record it when the user approves an order of finding slides that differs from the order the ledger gives. Ledger priority and parent stay as they are: they decide what the **Open questions** slide lists.
-  - While it is a list, `check-draft`'s `storyline` rows hold the finding slides to it, and refuse a list that misses or repeats a finding slide or names a heading no finding slide has. A revision that rewords a finding heading rewords its entry here too.
+- `slide_slugs`: each finding slide in deck order as `slug`, `heading`, and `primary`, the first result its methodology section cites, or `none`. `export` writes it once `findings.md` and `methodology.md` exist, and `check-draft` updates each `heading`; both leave it as it is while `check-draft`'s `headings` lists a row.
+  - A slug is taken from the slide's heading the first time it is recorded: its first six words, lowercased ASCII letters and digits joined by hyphens, such as `late-orders-rose-in-the-west`.
+  - A slide keeps its slug while its heading stays, or, reworded, while its primary result stays, so a reworded heading keeps its place in `presentation_order`. A slide reworded while citing no result, or both reworded and given another primary result, takes a new slug.
+- `presentation_order`: absent or `none`, or the finding slide slugs in the order the user approved, main sequence first and then the appendix, as `slide_slugs` and `check-draft`'s `ledger_order` give them.
+  - Record it when the user approves an order of finding slides that differs from the order the ledger gives. Ledger priority, parent, and `show` stay as they are: they decide what the **Open questions** slide lists.
+  - While it is a list, `check-draft`'s `storyline` rows hold the finding slides to it, and refuse a list that misses or repeats a slide's slug or names a slug no finding slide has.
 
-You record it and `export` keeps it.
+You record `presentation_order` and `export` keeps it.
 
 ## Numbers
 
@@ -58,3 +62,10 @@ You record it and `export` keeps it.
   - Never for a number from a recorded result the draft relies on: pass that result to `export` instead, so `results` and the producing state record it. Never for a number computed from results that none records.
 
 You record it and `export` keeps it.
+
+## The user's acceptances
+
+- `accepted_long_headlines`: absent, or `{headline, reason}` for each headline over 15 words the user chose to keep. `headline` is the `outline` row's `headline` exactly, so a reworded headline needs a new entry; `reason` is the user's reason.
+- `helper_drift_confirmed`: absent, or `{file, sha256, reason}` for each `helper_drift` row the user confirmed, `file` and `sha256` copied from the row (`null` for a missing file), so a later change to that file needs a new entry; `reason` is the change and why the user accepts it.
+
+You record each on the user's yes, and `export` keeps them.

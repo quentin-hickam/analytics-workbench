@@ -22,15 +22,24 @@
 # code = ["helpers.py"]  # optional: files its queries read directly, such as a lookup CSV in read_csv(),
 #                        # or its producer, producers/<id>.py, imports or reads, relative to this
 #                        # folder; each must exist, and a folder is refused, so list its files.
-#                        # Evidence counts only these, its queries, its producer, run.py, and src/.
+#                        # Evidence counts only these, its queries, its producer, run.py, views/, and src/.
 # parameters = ["minimum_orders"]  # optional: [parameters] its producer reads that no query names as $name
+# views = ["foundation/views/01_orders.sql"]  # optional: the view files it reads, project-relative, each a
+#                        # .sql file in foundation/views/ or this folder's views/; replaces detection, for a
+#                        # producer that reads views its queries do not name. Shared SQL in views/ loads in
+#                        # every result's session after the foundation views and is every result's code;
+#                        # evidence records it, and the views it reads, whatever this lists. A file it
+#                        # reads directly must be a publication or, by its own path, never a glob
+#                        # or folder, in every result's code; run.py refuses to run otherwise.
 #
 # Validation spec for validate(): static checks here, run-time counts from the result's producer.
 #   required_columns = [names that must exist]
 #   nulls = { column = maximum null fraction, 0 to 1 }
-#   row_counts = [{ step, before, after, min_ratio?, max_ratio? }]  # max_ratio defaults to 1.0;
-#       a nonzero before needs a nonempty after unless min_ratio = 0. Usually from a producer.
-#   joins = { keys = [...], left_rows = N, keys_unique = true }  # left_rows usually from a producer
+#   row_counts = [{ step, before, after, excluded?, min_ratio?, max_ratio? }]  # max_ratio defaults to 1.0;
+#       a nonzero before needs a nonempty after unless min_ratio = 0; excluded = { rule = rows } must
+#       make before = after + excluded. Usually from a producer, through reconcile() (see run.py).
+#   joins = { keys = [...], left_rows = N, keys_unique = true }  # keys and left_rows required; left_rows
+#       here or from a producer as joins.left_rows
 #   scope / metrics / values = { outcome = "pass" | "fail" | "not-applicable", detail = "one sentence" }
 # An omitted key is recorded as not assessed, never as a pass.
 # [results.orders-by-month.validation]

@@ -6,17 +6,23 @@ awb-init's installer places this file at `src/packaging/draft.py`. `src/awb.py` 
         [--dataset NAME=RESULT[:COLUMNS]]... [--no-datasets] [--result RESULT]... [--round COLUMN=PLACES]...
     python3 src/awb.py review-rules check <investigation> <package>
     python3 src/awb.py review-rules add --area AREA --severity error|warning --rule TEXT --fix TEXT [--pattern REGEX] [--scope line|slide|document]
+        [--package INVESTIGATION/PACKAGE] --confirmed
+    python3 src/awb.py review-receipt start <investigation> <package> --kind full|scoped
+    python3 src/awb.py review-receipt record <investigation> <package> --kind full|scoped --report FILE|- [--accept TEXT]...
+    python3 src/awb.py review-receipt show <investigation> <package>
     python3 src/awb.py check-draft <investigation> <package> [--verify-only]
     python3 src/awb.py release <investigation> <package>
     python3 src/awb.py copy-releases <investigation> [<package>]
 
 Each prints one line of JSON. The manifest is the draft's `manifest.json`; chart and dataset files
-are CSV; review rules live in `foundation/review-rules.md`. Standard library only; `export` also needs the project's `src/provenance.py`.
+are CSV; review rules live in `foundation/review-rules.md`, and the last review's record in the package's
+`review/`, beside `draft/`. Standard library only; `export` also needs the project's `src/provenance.py`.
 """
 
 import argparse
 import bisect
 import csv
+import difflib
 import hashlib
 import html
 import importlib.util
@@ -26,6 +32,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import unicodedata
 from collections import Counter, namedtuple
 from datetime import datetime
@@ -36,6 +43,11 @@ MANIFEST = "manifest.json"
 # The optional audience-facing account of method; when the draft holds it, the names, numbers, claims,
 # Markdown, and review-rule checks read it beside findings.md and methodology.md.
 METHODOLOGY_NOTE = "methodology-note.md"
+# The headline checkpoint's preview-and-wait headlines go in .preview/headlines.md under the draft. The folder
+# is not part of the package: the inventory, and so check-draft and release, skip it, and release never copies it.
+PREVIEW = ".preview"
+# What every refusal of a missing draft says: the step that creates it, not the skill already running.
+_NO_DRAFT = "no draft at {}; write findings.md and methodology.md there, then run export"
 _SIMPLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _EVIDENCE_SCHEMA = "awb-evidence/3"
 _EVIDENCE_LINK = re.compile(r"evidence/([A-Za-z0-9][A-Za-z0-9._-]*)\.json")
@@ -1151,6 +1163,25 @@ _CAUSAL = re.compile(r"(?<![\w-])(?:" + "|".join([
 # Slides that describe method, data, and caveats rather than state findings.
 _UNCHECKED = {"How we know", "Limitations and open caveats", "Open questions", "What changed since the last version",
               "Supporting datasets"}
+# The methodology note's section that states limitations, as methodology-note-template.md heads it.
+_NOTE_UNCHECKED = "Limitations"
+# A negated clause, a closed grammar: a phrase is skipped when a negator stands at most four words before it
+# in its clause (directly before it, for a _CONNECTIVE phrase), or, for a noun phrase (effect on, impact, drivers of, causes), when the clause states it
+# unknown within four words after it. A clause ends at a paragraph or item break, at . ; : , ! ? ( ) [ ] or a
+# dash, and at but, and, while, whereas, although, though, or however. A relative word (who, whom, whose,
+# which, that, where) before the negator in its clause, or between the noun phrase and its predicate, makes
+# the negation another clause's ("stores that did not discount drove the rise"), so nothing is skipped.
+_CLAUSE_END = re.compile(r"[.;:,!?()\[\]–—]|\s-\s|\b(?:but|and|while|whereas|although|though|however)\b",
+                         re.IGNORECASE)
+_RELATIVE = re.compile(r"\b(?:who|whom|whose|which|that|where)\b", re.IGNORECASE)
+_NEGATOR = re.compile(r"\b(?:not(?!\s+(?:only|just|merely|simply)\b)|never|cannot|neither|nor|\w+n['’]t"
+                      r"|no\s+(?:evidence|sign|indication|proof|support|test)|without\s+\w+ing)\b", re.IGNORECASE)
+_NOUN_PHRASE = re.compile(r"effects?\s+(?:of|on)|impacts?|drivers?\s+of|causes", re.IGNORECASE)
+# A connective phrase is negated only directly after its negator ("not due to weather"): in "did not fall due to
+# weather" the negator takes the verb, and the sentence may still claim that weather kept sales up.
+_CONNECTIVE = re.compile(r"because\s+of|due\s+to|as\s+a\s+result\s+of|attributable\s+to", re.IGNORECASE)
+_UNKNOWN = re.compile(r"(?:is|are|was|were|remains?|stays?)\s+(?:still\s+)?(?:unknown|unclear|untested"
+                      r"|not\s+(?:known|established|tested))\b", re.IGNORECASE)
 
 
 def _level(cell):
@@ -1224,11 +1255,38 @@ def _declaration_problem(section, cited, ceiling, claims):
     return None
 
 
+def _negated(body, match, breaks):
+    """Whether a causal phrase stands in a negated clause, under the grammar above _CLAUSE_END. `breaks` are
+    the offsets in body where a line of another paragraph, item, or heading starts."""
+    start = max([0, *(at for at in breaks if at <= match.start())])
+    end = min([len(body), *(at for at in breaks if at > match.end())])
+    before, after = body[start:match.start()], body[match.end():end]
+    if ends := list(_CLAUSE_END.finditer(before)):
+        before = before[ends[-1].end():]
+    if cut := _CLAUSE_END.search(after):
+        after = after[:cut.start()]
+    negators = list(_NEGATOR.finditer(before))
+    window = 0 if _CONNECTIVE.fullmatch(" ".join(match.group(0).split())) else 4
+    if negators and len(before[negators[-1].end():].split()) <= window \
+            and not _RELATIVE.search(before[:negators[-1].start()]):
+        return True
+    unknown = _UNKNOWN.search(after) if _NOUN_PHRASE.fullmatch(" ".join(match.group(0).split())) else None
+    return bool(unknown) and len(after[:unknown.start()].split()) <= 4 \
+        and not _RELATIVE.search(after[:unknown.start()])
+
+
 def _phrases(lines, field, level):
-    """Each causal phrase in a region's `field` text: (line offset, phrase, whether in a ### headline)."""
-    body = "\n".join(getattr(line, field) for line in lines)
+    """Each causal phrase in a region's `field` text outside a negated clause: (line offset, phrase, whether in
+    a ### headline)."""
+    texts = [getattr(line, field) for line in lines]
+    body, breaks, offset = "\n".join(texts), [], 0
+    for index, line in enumerate(lines):
+        if index and (line.start or line.group != lines[index - 1].group):
+            breaks.append(offset)
+        offset += len(texts[index]) + 1
     return [(body.count("\n", 0, match.start()), " ".join(match.group(0).split()),
-             level == 3 and match.start() < len(getattr(lines[0], field))) for match in _CAUSAL.finditer(body)]
+             level == 3 and match.start() < len(texts[0])) for match in _CAUSAL.finditer(body)
+            if not _negated(body, match, breaks)]
 
 
 def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
@@ -1240,8 +1298,9 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
     that states conclusions, to the strongest represented claim. A slide the template names keeps its rule
     under ## Appendix, and an appendix finding slide is held like any other. Each finding's methodology
     section states its strength on one `**Claim strength:**` line, a causal one as its results' Claim cell.
-    methodology-note.md, when the draft holds it, is read whole at the strongest represented claim, its
-    rows carrying `file`. Every file is read as it renders (`_view`).
+    methodology-note.md, when the draft holds it, is read at the strongest represented claim but for its
+    ## Limitations section, its rows carrying `file`. Every file is read as it renders (`_view`), and a phrase
+    in a negated clause (`_negated`) is no claim.
     """
     return _claim_review(draft, represented, claims)[0]
 
@@ -1286,7 +1345,11 @@ def _claim_review(draft, represented, claims):
             cited, ceiling = list(represented), deck
         rows += _wording(lines, first, 0 if named else level, ceiling, cited, heading or "title")
     if METHODOLOGY_NOTE in _narratives(draft):
+        part = None
         for level, heading, first, lines in _regions(_read_view(draft / METHODOLOGY_NOTE)[0]):
+            part = heading if level in (1, 2) else part
+            if part == _NOTE_UNCHECKED and level >= 2:
+                continue  # ## Limitations, its ### sections included, states caveats as the deck's slide does
             rows += [{"file": METHODOLOGY_NOTE, **row}
                      for row in _wording(lines, first, 0, deck, list(represented), heading)]
     return rows, accepted
@@ -1334,14 +1397,19 @@ _DATE_ENDS = rf"(?:{_ENDS}|(?=\s+(?:to|through|until|till|and|or|[-–—])\s+{_
 # A year after one of these words, a month name, or a quarter or half, where the period ends.
 _IN = (rf"(?:(?i:\b(?:in|from|since|during|until|till|through|before|after|between|year|FY|CY|fiscal|calendar)\s+"
        rf"|\b(?:early|mid|late)[\s-]+)|{_MONTH}\s+|\b[QH][1-4]\s+)")
+# An English month name, full or in three letters, which a year directly after names whatever follows it.
+_MONTH_NAME = (r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December"
+               r"|(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?)")
 _NOT_QUANTITY = re.compile(
     rf"(?<![\w.])(?:{_YEAR}-(?:1[0-2]|0?[1-9])(?:-{_DAY})?(?:T[0-9:.]+(?:Z|[+-][0-9:]+)?)?{_ALONE}"
     rf"|[0-9]{{1,2}}/[0-9]{{1,2}}/{_YEAR}{_ALONE}"
     r"|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?\s?(?i:[ap]\.?m\.?|UTC|GMT)(?!\w)"
     rf"|[0-9]{{1,2}}:[0-9]{{2}}:[0-9]{{2}}{_ALONE}"
+    rf"|(?<![0-9][,/:])(?:[01][0-9]|2[0-3]):[0-5][0-9]{_ALONE}"
     rf"|{_MONTH}\s+{_DAYS}(?:,?\s+{_YEAR}{_ALONE}{_DATE_ENDS}|{_ALONE}{_DATE_ENDS})"
     rf"|{_DAYS}\s+{_MONTH}(?:,?\s+{_YEAR}{_ALONE})?{_DATE_ENDS}"
     rf"|{_IN}{_YEAR}(?:{_listed(_YEAR)})?{_ALONE}{_ENDS}"
+    rf"|{_MONTH_NAME}\s+{_YEAR}{_ALONE}|\({_YEAR}\)"
     rf"|[Cc]harts\s+[0-9]+{_listed('[0-9]+')}{_ALONE}{_ENDS}|[Cc]harts?\s+[0-9]+{_ALONE})"
     r"|^[ \t]*#{1,6}[ \t]+[0-9]+[.)](?=\s)|\[\^[^\]\n]*\]", re.MULTILINE)
 _LIST_MARKER = re.compile(r"[ \t]*([0-9]{1,9})[.)](?=\s|$)")
@@ -1387,8 +1455,9 @@ def _blank_names(text):
 # A number not glued to a word or a path, with its unit. A word unit or % may stand after any whitespace,
 # a line wrap included; a letter scale (k, M, b) or x is written against its number. Letters written against
 # a number are shown with it (5GB, 30d, 95th). Digits joined by dots, commas, slashes, colons, or spaces between
-# three-digit groups are read as one number: a version or address (3.12.1, 10.0.0.1) is no quantity, and any
-# other join but thousands grouping or one decimal point never traces (1,2,3, 21,3, 3/4, 14:05, 1.234.567, 1 000).
+# three-digit groups are read as one number: a version or address (3.12.1, 10.0.0.1) is no quantity, two numbers
+# joined by one slash (54.8/57.6) are two numbers, and any other join but thousands grouping or one decimal point
+# never traces (1,2,3, 21,3, 1/2/3, 9:30, 1.234.567, 1 000).
 _NUMBER = re.compile(
     r"(?<![^\W_])(?<![^\W_]_)(?<![0-9][.,/:])"
     r"((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)[eE][-+]?[0-9]+|[0-9]{1,3}(?:[ \u00a0\u202f][0-9]{3})+(?:\.[0-9]+)?"
@@ -1400,6 +1469,7 @@ _NUMBER = re.compile(
 _GROUPED = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?"
                       r"|[0-9]+\.[eE][-+]?[0-9]+")
 _VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){2,}")
+_PAIR = re.compile(r"([0-9]+(?:[.,][0-9]+)*)/([0-9]+(?:[.,][0-9]+)*)")
 _RANGE = re.compile(r"\s*(?:[-–—]|to|and)\s*")
 _SCALES = {"k": 3, "thousand": 3, "m": 6, "mn": 6, "million": 6, "b": 9, "bn": 9, "billion": 9,
            "tn": 12, "trillion": 12}
@@ -1431,13 +1501,19 @@ def _quantities(line, before="", after="", *, marker=True, code=True):
         if not unit and not letters and index + 1 < len(matches) and _RANGE.fullmatch(
                 text[match.end():matches[index + 1].start()]):
             unit = matches[index + 1].group(2) or ""  # 10-15%: the lower bound takes the upper's unit
-        if re.fullmatch(r"0[0-9]+", body) or _VERSION.fullmatch(body) and not re.fullmatch(
-                r"[0-9]{1,3}(?:\.[0-9]{3})+", body):
-            continue  # a zero-padded code such as release 002, or a version; 1.234.567 is read
-        if letters and not letters.isalpha():
-            body += letters  # 5½ has no one value
-        yield (" ".join(match.group(0).split()), body, " ".join(unit.lower().split()), match.start() - offset,
-               match.end() - offset)
+        # Two numbers joined by one slash, such as 54.8/57.6 or 368/53.5%, are two numbers, the unit the second's.
+        pair = _PAIR.fullmatch(body)
+        parts = [(pair[1], "", "", match.start(), match.start() + len(pair[1])),
+                 (pair[2], unit, letters, match.start() + len(pair[1]) + 1, match.end())] if pair else [
+                     (body, unit, letters, match.start(), match.end())]
+        for body, unit, letters, start, end in parts:
+            if re.fullmatch(r"0[0-9]+", body) or _VERSION.fullmatch(body) and not re.fullmatch(
+                    r"[0-9]{1,3}(?:\.[0-9]{3})+", body):
+                continue  # a zero-padded code such as release 002, or a version; 1.234.567 is read
+            if letters and not letters.isalpha():
+                body += letters  # 5½ has no one value
+            yield (" ".join(text[start:end].split()), body, " ".join(unit.lower().split()), start - offset,
+                   end - offset)
 
 
 # Arithmetic on written numbers never rounds: every digit a narrative or a record writes is kept.
@@ -1510,11 +1586,26 @@ def _read_exact_json(path):
     return record
 
 
-def recorded_values(root, investigation, results) -> tuple[list, list[str]]:
+def recorded_scales(record: dict) -> list[tuple]:
+    """The [scale] divisors the manifest's charts and dataset_selection entries record, as (result_id, column,
+    divisor); a malformed entry records none, and the charts check reports it."""
+    found = []
+    for field in ("charts", "dataset_selection"):
+        entries = record.get(field)
+        for entry in entries if isinstance(entries, list) else ():
+            scale = entry.get("scale") if isinstance(entry, dict) else None
+            if isinstance(scale, dict) and isinstance(entry.get("result_id"), str):
+                found += [(entry["result_id"], column, divide) for column, divide in scale.items() if _divisor(divide)]
+    return list(dict.fromkeys(found))
+
+
+def recorded_values(root, investigation, results, scales=()) -> tuple[list, list[str]]:
     """Return the sorted magnitudes the manifest's represented results record, and the problems.
 
     Each result contributes every cell of results/<id>.csv, the numbers in results/<id>.profile.json,
     and the numbers in its evidence's check details and settings. JSON numbers are read exactly as written.
+    Each (result_id, column, divisor) of `scales` (`recorded_scales`) whose result is represented adds that
+    column's number cells divided by the divisor, the values its chart or dataset file shows before rounding.
     """
     if not isinstance(results, list) or not all(
             isinstance(entry, dict) and isinstance(entry.get("result_id"), str)
@@ -1546,6 +1637,13 @@ def recorded_values(root, investigation, results) -> tuple[list, list[str]]:
                 _magnitudes(record, values, text=False)  # dtype names such as float64 are not values
             else:
                 _magnitudes(_evidence_numbers(record), values)
+        divisors = [(column, divide) for scaled, column, divide in scales if scaled == result_id]
+        try:
+            rows = _read_table(table)[1] if divisors else []
+        except (OSError, UnicodeError, csv.Error):
+            rows = []  # the table's own problem is already listed
+        for column, divide in divisors:
+            values.update(_scaled(row[column], divide).copy_abs() for row in rows if _number(row.get(column) or ""))
     return sorted(values), problems
 
 
@@ -1567,14 +1665,35 @@ def allowed_numbers(record: dict) -> tuple[set, list[str]]:
 
 
 def _within(values, low, high):
+    """Whether a value lies on low or above it and strictly below high: what rounds half up into the window."""
     index = bisect.bisect_left(values, low)
-    return index < len(values) and values[index] <= high
+    return index < len(values) and values[index] < high
 
 
-def _traces(body, unit, values):
-    # Written to d places, the number stands for any value within half a unit of its last place.
+# Why a numbers row's number traces to nothing, so the row names the rule that applied.
+_ALLOW = "or list its text in the manifest's allowed_numbers with the reason"
+_UNTRACED = {
+    "joined": "digits joined by dots, commas, slashes, or colons read as one number with no single value, so it "
+              f"never traces; write each number apart, {_ALLOW}",
+    "edge": "a recorded value lies exactly on the upper edge of this number's rounding, which rounds half up, as "
+            f"export rounds, to the next digit, so it does not trace; write the number as it rounds half up, {_ALLOW}",
+    "year": "read as a count: a year is skipped only after a month name, alone in parentheses, or after a word "
+            "such as in or since where its period ends; reword it, such as ending the date with a comma, "
+            + _ALLOW,
+    "value": f"no represented result records this number at its written precision; correct it, {_ALLOW}",
+}
+
+
+def _untraced(body, unit, values):
+    """None when a number traces to a recorded value, else the _UNTRACED key naming why it does not.
+
+    Written to d places, the number stands for any value that rounds half up to it, as export rounds (magnitudes,
+    so away from zero): from half a unit below its last place, that edge included, to strictly below half a unit
+    above. A value exactly on the upper edge rounds to the next digit, so it does not trace and gives "edge". A
+    value a query rounded to the lower edge does trace; export's precision_warnings reports that case.
+    """
     if not _GROUPED.fullmatch(body):
-        return False  # 1,2,3, the decimal comma 21,3, 3/4, 14:05, and 1.234.567 have no one value
+        return "joined"  # 1,2,3, the decimal comma 21,3, 1/2/3, 9:30, and 1.234.567 have no one value
     try:
         number, half = _value(body)
         with localcontext(_EXACT):
@@ -1585,8 +1704,14 @@ def _traces(body, unit, values):
             elif unit in _SCALES:
                 windows.append((low.scaleb(_SCALES[unit]), high.scaleb(_SCALES[unit])))
     except (ValueError, ArithmeticError):
-        return False  # an exponent too large to hold traces to nothing
-    return any(_within(values, low, high) for low, high in windows)
+        return "value"  # an exponent too large to hold traces to nothing
+    if any(_within(values, low, high) for low, high in windows):
+        return None
+    if any((index := bisect.bisect_left(values, high)) < len(values) and values[index] == high
+           for _, high in windows):
+        return "edge"
+    return "year" if not unit and re.fullmatch(_YEAR, body) else "value"
+
 
 
 # A line that opens a block (a heading, a bullet, a quote, a table row, or a fence) starts no wrap.
@@ -1620,7 +1745,8 @@ def _continues(previous, line):
 
 
 def check_numbers(path: str | os.PathLike, values, *, allowed=(), claim_lines=()) -> list[dict]:
-    """List each number in a narrative file that no recorded value rounds to and `allowed` does not cover.
+    """List each number in a narrative file that no recorded value rounds to and `allowed` does not cover:
+    {"file", "line", "text", "problem"}, the problem naming the rule that left it untraced (`_UNTRACED`).
 
     `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
     text is written around it, matched on the text the number is read from, so any whitespace or a line
@@ -1649,8 +1775,8 @@ def check_numbers(path: str | os.PathLike, values, *, allowed=(), claim_lines=()
         spans = [found.span() for pattern in patterns for found in pattern.finditer(joined)]
         for text, body, unit, start, end in _quantities(reads[1], reads[0], reads[2], marker=marker, code=False):
             covered = any(low <= offset + start and offset + end <= high for low, high in spans)
-            if not covered and not _traces(body, unit, values):
-                rows.append({"file": Path(path).name, "line": number, "text": text})
+            if not covered and (why := _untraced(body, unit, values)):
+                rows.append({"file": Path(path).name, "line": number, "text": text, "problem": _UNTRACED[why]})
     return rows
 
 
@@ -1672,6 +1798,8 @@ def _scan(directory):
         for name in dirnames + filenames:
             if Path(current, name).is_symlink():
                 raise ValueError(f"Symlink in tree: {Path(current, name)}")
+        if Path(current) == root and PREVIEW in dirnames:
+            dirnames.remove(PREVIEW)  # The headline preview is no package file.
         for name in filenames:
             file = Path(current, name)
             if not file.is_file():
@@ -1688,7 +1816,8 @@ def _scan(directory):
 
 
 def inventory(package_dir: str | os.PathLike) -> list[dict]:
-    """List files in path order, reserving a path-only row for manifest.json."""
+    """List files in path order, reserving a path-only row for manifest.json; a top-level .preview/ folder,
+    the headline preview, is left out."""
     files = _scan(package_dir)
     files[MANIFEST] = {"path": MANIFEST}
     return [files[path] for path in sorted(files)]
@@ -1837,8 +1966,9 @@ def _slide(heading, first, lines):
     """One region read as a slide: headline, bullets, chart specifications, notes, and anything else."""
     blocks = _blocks(lines)
     slide = {"line": first, "heading": heading, "opening": blocks[0]["line"] if blocks else None, "headlines": [],
-             "bullets": [], "notes": [], "after_notes": None, "charts": [], "extra": []}
+             "bullets": [], "notes": [], "after_notes": None, "charts": [], "extra": [], "field_bullets": []}
     chart = depth = None  # depth: the open chart's field depth, set by its first field
+    ended = None  # the chart whose fields the field-named bullets right after them would have continued
     for block in blocks:
         if slide["notes"] and slide["after_notes"] is None:
             slide["after_notes"] = block["line"]
@@ -1858,6 +1988,8 @@ def _slide(heading, first, lines):
                                     for line in block.get("paragraphs", [])]
                 depth = block["depth"]
                 continue
+        # A field-named bullet after a chart's fields ended, at a blank line or a repeated field, is the slide's.
+        ended = chart or ended if block["kind"] == "item" and _CHART_FIELD.match(text) else None
         chart = depth = None
         if block["kind"] != "heading" and _CHART_SPEC.match(block["first"]):
             chart = _chart(block)
@@ -1865,6 +1997,9 @@ def _slide(heading, first, lines):
         elif block["kind"] == "item":
             if block["depth"] == 1 or not slide["bullets"]:
                 slide["bullets"].append({"line": block["line"], "text": text, "sub": []})
+                if ended is not None:
+                    slide["field_bullets"].append({"line": block["line"], "chart": ended["number"],
+                                                   "field": _CHART_FIELD.match(text)[1]})
             else:
                 slide["bullets"][-1]["sub"].append(text)
         elif block["kind"] == "paragraph" and (match := _HEADLINE.match(text)):
@@ -1895,7 +2030,8 @@ def parse_outline(text: str) -> dict:
     as {"line", "slides"}, slides counting the `###` slides under it. counts is {"main", "appendix"}: the
     title slide and the slides before ## Appendix, and the slides under it, without the divider a builder
     adds. The remaining slide keys keep what the checks report: every **Headline:** and **Notes:**
-    paragraph, the first block after the notes, every chart, and text that is none of these.
+    paragraph, the first block after the notes, every chart, text that is none of these, and in field_bullets
+    each bullet opening with a chart field name right after that chart's fields ended, as {"line", "chart", "field"}.
     """
     return _outline(_view(text)[0])
 
@@ -1959,11 +2095,13 @@ def _words(text):
 
 
 def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
-    """List each break of the slide rules in findings.md: {"slide", "line", "problem"}.
+    """List each break of the slide rules in findings.md: {"slide", "line", "problem", "severity"}.
 
-    Every slide after the title has a headline of at most HEADLINE_WORDS words (its `###` heading, or one
-    **Headline:** line), at most SLIDE_BULLETS bullets (Open questions is exempt), at most one chart, and one **Notes:** paragraph that
-    ends it, and holds nothing else. The title slide is the `#` heading with its subtitle line; a `###`
+    Every row is an `error` but a headline over HEADLINE_WORDS words, a `warning` that also carries the
+    `headline` text, which the user may accept in the manifest's accepted_long_headlines. Every slide after
+    the title has a headline of at most HEADLINE_WORDS words (its `###` heading, or one **Headline:** line),
+    at most SLIDE_BULLETS bullets (Open questions is exempt), at most one chart, and one **Notes:** paragraph
+    that ends it, and holds nothing else. The title slide is the `#` heading with its subtitle line; a `###`
     finding slide sits under ## Findings or ## Appendix. The deck holds each _REQUIRED slide once: Answer
     first after the title, then at least one finding slide, with How we know and then Limitations and open
     caveats after the finding slides or under ## Appendix, How we know first when both stand in the same
@@ -1973,8 +2111,8 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
     outline = read_outline(findings_path)
     rows = []
 
-    def row(slide, line, problem):
-        rows.append({"slide": slide, "line": line, "problem": problem})
+    def row(slide, line, problem, severity="error", **extra):
+        rows.append({"slide": slide, "line": line, "problem": problem, "severity": severity, **extra})
 
     title = outline["title"]
     if title is None:
@@ -2017,11 +2155,24 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
             if not words:
                 row(name, line, "the headline is empty; state the slide's point with its key number")
             elif words > HEADLINE_WORDS:
-                row(name, line, f"the headline has {words} words; keep it to {HEADLINE_WORDS}")
+                row(name, line, f"the headline has {words} words, over the {HEADLINE_WORDS}-word limit; shorten it "
+                                "with the user's approval, or record their acceptance in accepted_long_headlines",
+                    "warning", headline=slide["headline"])
+        # A field-named bullet after a chart's fields ended renders as a slide bullet, its field dropped from the
+        # chart, whatever the bullet count. **Caveat:** alone is also a slide bullet of its own (deck-rules.md).
+        strays = [entry for entry in slide["field_bullets"] if entry["field"] != "Caveat"]
+        for entry in strays:
+            row(name, entry["line"], f"this bullet opens with the chart field name {entry['field']} after Chart "
+                f"{entry['chart']}'s fields ended at a blank line or a repeated field, so it is a slide bullet and "
+                "the chart loses the field: keep the chart's fields together, with no blank line between them")
         if len(slide["bullets"]) > SLIDE_BULLETS and (slide["finding"] or name != "Open questions"):
+            fields = Counter(entry["chart"] for entry in strays)
             row(name, slide["bullets"][SLIDE_BULLETS]["line"],
                 f"{len(slide['bullets'])} bullets; keep it to {SLIDE_BULLETS} and move the rest to another slide "
-                "or into the notes")
+                "or into the notes" + "".join(
+                    f"; {count} of them open with a chart field name after Chart {number}'s fields ended, so they "
+                    "count as slide bullets: keep its fields together, with no blank line between them"
+                    for number, count in fields.items()))
         if len(slide["charts"]) > 1:
             row(name, slide["charts"][1]["line"], f"{len(slide['charts'])} charts; a slide carries at most one")
         for extra in slide["extra"]:
@@ -2124,6 +2275,12 @@ _CHART_FILE = re.compile(r"chart-([1-9]\d*)\.csv")
 _IDENTIFIER = re.compile(r"[A-Za-z0-9]_[A-Za-z0-9]|[A-Za-z]\.[A-Za-z]")
 
 
+def _header_text(header):
+    """A chart file's header as a **Data:** line naming it renders: NFKC-normalized, zero-width characters
+    dropped, as `_rendered` reads the line."""
+    return unicodedata.normalize("NFKC", _visible(header))
+
+
 def _check_chart(number, headers, rows):
     if not rows:
         raise ValueError(f"Chart {number} has no rows")
@@ -2207,14 +2364,17 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
         pairs, problems = chart_data(chart)
         rows += [{"chart": label, "problem": problem} for problem in problems]
         if chart["number"] in headers:
+            # The **Data:** line is read as it renders, NFKC-normalized, so a header is compared the same way:
+            # CO₂ in the file matches CO₂ on the line, which renders as CO2.
             named = dict.fromkeys(header for _, header in pairs)
+            shown = {_header_text(header) for header in headers[chart["number"]]}
             for header in named:
-                if header not in headers[chart["number"]]:
+                if header not in shown:
                     rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv has no column "
                                                             f"{header!r}, which **Data:** names"})
             # A column no role names would be drawn by one builder and dropped by another.
             for header in headers[chart["number"]] if pairs else []:
-                if header not in named:
+                if _header_text(header) not in named:
                     rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv column {header!r} is "
                                  f"named by no **Data:** role; name it{_by_role(chart['form'])}, or export the "
                                  "chart without it" + _intervals_note(chart["form"], column=True)})
@@ -2260,6 +2420,7 @@ def _chart_entry(entry):
             and all(isinstance(codes, dict) and all(isinstance(label, str) for label in codes.values())
                     for codes in entry["values"].values())
             and isinstance(entry.get("percent"), list) and all(isinstance(c, str) for c in entry["percent"])
+            and isinstance(entry.get("scale"), dict) and all(_divisor(d) for d in entry["scale"].values())
             and isinstance(entry.get("round"), dict)
             and all(type(p) is int and 0 <= p <= _ROUND_LIMIT for p in entry["round"].values()))
 
@@ -2274,8 +2435,9 @@ def _chart_difference(actual, expected):
 
 
 def _display_difference(entry, saved, display):
-    """Which of an entry's headers, value labels, or percent columns differ from what display.toml now gives
-    for its result and selected rows, or None. Its places can come from --round, so they are not compared."""
+    """Which of an entry's headers, value labels, percent columns, or [scale] divisors differ from what
+    display.toml now gives for its result and selected rows, or None. Its places can come from --round, so they
+    are not compared."""
     names, values, _ = _labels(display, entry["result_id"])
     own_percent = display["results"].get(entry["result_id"], {}).get("percent")
     percent = display["percent"] if own_percent is None else own_percent
@@ -2291,6 +2453,9 @@ def _display_difference(entry, saved, display):
         return "value labels"
     if entry["percent"] != [column for column in entry["columns"] if column in percent]:
         return "percent columns"
+    if entry["scale"] != {column: display["scale"][column] for column in entry["columns"]
+                          if column in display["scale"]}:
+        return "scale divisors"
     return None
 
 
@@ -2298,7 +2463,8 @@ def chart_file_problems(root, investigation, draft, record) -> list[dict]:
     """Match each chart file with the manifest's charts entry export recorded for it, the entry's headers,
     value labels, and percent columns with what foundation/display.toml gives, and the file with its result's
     saved table under that entry's selection, value labels, percent columns, and rounding: {"chart",
-    "problem"}. The numbers check is separate: every plotted value is still a recorded value."""
+    "problem"}. The numbers check is separate: every plotted value is still a recorded value, or one divided by
+    its recorded [scale] divisor, which recorded_values adds."""
     charts = record.get("charts")
     entries = [] if charts is None or charts == "none" else charts
     if not isinstance(entries, list) or not all(isinstance(e, dict) and isinstance(e.get("path"), str)
@@ -2326,8 +2492,8 @@ def chart_file_problems(root, investigation, draft, record) -> list[dict]:
         file = present[name].name
         if not _chart_entry(entry):
             rows.append({"chart": label, "problem": f"the manifest's charts entry for {file} records no selection, "
-                                                    "columns, headers, value labels, percent, or rounding; rerun "
-                                                    "export with every --chart to record them (a --result-only "
+                                                    "columns, headers, value labels, percent, scale, or rounding; "
+                                                    "rerun export with every --chart to record them (a --result-only "
                                                     "export keeps this entry)"})
             continue
         table = Path(root) / "investigations" / investigation / "results" / f"{entry['result_id']}.csv"
@@ -2361,61 +2527,140 @@ def chart_file_problems(root, investigation, draft, record) -> list[dict]:
 
 # ---------------------------------------------------------------- check-draft
 
-def storyline_problems(root, investigation, draft, represented, provenance, order="none"):
-    """Accepted input: the outline reader's Markdown subset (references/helpers.md), with ### finding headlines matched
-    exactly to ### methodology headings. The matching section names represented results using
-    the existing _cited grammar (bounded result IDs or evidence/<ID>.json links, outside
-    comments). Only those results' recorded settings `answers` supply ledger question IDs.
+def _citations(text, represented):
+    """The represented results a methodology section cites, in the order it first cites them: a result ID as a
+    whole code span, `r-001`, or in an evidence path, evidence/r-001.json, wherever it stands. A plain word that
+    is also a result ID, such as monthly, cites nothing."""
+    represented = set(represented)
+    found = [(match.start(), match[1]) for match in _EVIDENCE_LINK.finditer(text) if match[1] in represented]
+    for start, end in _code_spans(text):
+        content = text[start:end].strip("`").strip()
+        if content in represented:
+            found.append((start, content))
+    return list(dict.fromkeys(result for _, result in sorted(found)))
 
-    Missing citations or empty answers are reported in unlinked_findings and sort last; no
-    fallback infers answers from prose or from other represented results. A result without
-    evidence has no declared linkage and is reported as unlinked, preserving the package's
-    existing handling of provenance gaps. Malformed settings
-    or ledgers raise an error. Known limits: a literal result ID mentioned in methodology counts
-    as a citation; the reader cannot judge whether that evidence supports the audience's claim.
-    Ties keep the author's slide order. Existing markdown/headings checks refuse unsupported
-    Markdown and missing/repeated methodology headings.
 
-    A row names each slide outside the longest run of finding slides already in order, so moving
-    one slide reports that slide alone rather than every slide it shifted. The main sequence's finding
-    slides and the appendix's each follow the ledger order, the appendix numbering on from the main.
-
-    `order` is the manifest's presentation_order. When it is a list it decides the order instead: each
-    entry is a finding slide's heading, read as inline Markdown as the heading is, and the list holds
-    every finding slide, main and appendix, exactly once, in deck order. A list entry that is not
-    non-blank text makes the whole field malformed, as does any other value, JSON null included; absent
-    and "none" leave the ledger order in force.
-    """
-    tree = provenance.question_tree(root, investigation)
-    ranks = {q["id"]: (("must", "should", "could").index(q["priority"]), position)
-             for position, q in enumerate(tree)}
+def finding_primaries(draft, represented) -> list[tuple]:
+    """(slide, primary result or None) for each finding slide in deck order, as `read_outline` gives the slide. A
+    slide's primary result is the first one its methodology.md namesake cites (`_citations`), each line read as
+    its rendered text and then its link targets."""
+    draft = Path(draft)
     sections = {}
     for level, heading, _, lines in _regions(_read_view(draft / "methodology.md")[0]):
         if level == 3:
             sections.setdefault(heading, []).extend(" ".join([line.plain, *line.links]) for line in lines)
-    slides = [s for s in read_outline(draft / "findings.md")["slides"] if s["finding"]]
+    return [(slide, next(iter(_citations("\n".join(sections.get(slide["heading"], [])), represented)), None))
+            for slide in read_outline(draft / "findings.md")["slides"] if slide["finding"]]
+
+
+# A slide slug: the first six words of its heading when first recorded, ASCII letters and digits, joined by hyphens.
+_SLUG_WORDS = re.compile(r"[a-z0-9]+")
+
+
+def _slug(heading):
+    words = _SLUG_WORDS.findall(unicodedata.normalize("NFKD", heading).encode("ascii", "ignore").decode().lower())
+    return "-".join(words[:6]) or "slide"
+
+
+def slide_slugs(slides, recorded) -> tuple:
+    """(each slide's slug, the manifest's slide_slugs entries) for slides given as (heading, primary result or
+    None) in deck order, against the manifest's recorded slide_slugs entries.
+
+    Accepted input: recorded is a list of {slug, heading, primary}; anything else, and an entry without text slug
+    and heading or repeating an earlier slug, records nothing. A slide keeps the slug of the recorded entry with
+    its exact heading; otherwise, of the one recorded entry left with its primary result, when no other slide
+    still unmatched has that primary result; otherwise it takes a new slug from its heading (`_slug`), numbered
+    -2, -3, ... past a slug another slide holds. So a reworded heading keeps its slug while its primary result
+    stays, and a slug recorded for a slide no longer in the deck is dropped. export and check-draft keep the
+    recorded entries while `heading_problems` lists a row, since a slide without its methodology section has no
+    primary result to match by. Known limit: a slide reworded while citing no result, reworded and given another
+    primary result, or sharing its primary result with another reworded slide, takes a new slug, which a
+    presentation_order then reports as unlisted; no result tells a reworded slide citing none from a replaced one.
+    """
+    entries, seen = [], set()
+    for entry in recorded if isinstance(recorded, list) else []:
+        if isinstance(entry, dict) and isinstance(entry.get("slug"), str) and isinstance(entry.get("heading"), str) \
+                and entry["slug"] not in seen:
+            entries.append(entry)
+            seen.add(entry["slug"])
+    slugs = {}
+    for index, (heading, _) in enumerate(slides):
+        match = next((entry for entry in entries if entry["heading"] == heading), None)
+        if match is not None:
+            slugs[index] = match["slug"]
+            entries.remove(match)
+    for index, (heading, primary) in enumerate(slides):
+        if index in slugs or primary is None:
+            continue
+        candidates = [entry for entry in entries if entry.get("primary") == primary]
+        rivals = [other for other, (_, result) in enumerate(slides) if other not in slugs and result == primary]
+        if len(candidates) == 1 and rivals == [index]:
+            slugs[index] = candidates[0]["slug"]
+            entries.remove(candidates[0])
+    taken = set(slugs.values())
+    for index, (heading, _) in enumerate(slides):
+        if index not in slugs:
+            base = slug = _slug(heading)
+            number = 2
+            while slug in taken:
+                slug, number = f"{base}-{number}", number + 1
+            slugs[index] = slug
+            taken.add(slug)
+    ordered = [slugs[index] for index in range(len(slides))]
+    return ordered, [{"slug": slug, "heading": heading, "primary": primary or "none"}
+                     for slug, (heading, primary) in zip(ordered, slides)]
+
+
+def storyline_problems(root, investigation, draft, represented, provenance, order="none", recorded=None):
+    """(rows, unlinked_findings, ledger_order, slide_slugs entries) for the draft's finding slide order.
+
+    Accepted input: the outline reader's Markdown subset (references/helpers.md), with ### finding headlines
+    matched exactly to ### methodology headings. A slide ranks by its primary result alone (`finding_primaries`):
+    that result's recorded settings `answers` supply its ledger question IDs, and the highest-priority one, then
+    the earlier in the depth-first walk, ranks the slide; a supporting result it cites later moves nothing. A slide
+    citing no result, or whose primary result answers no question, is in unlinked_findings and ranks last; no
+    fallback infers answers from prose or from its other results. A result without evidence declares no answers.
+    Malformed settings or ledgers raise an error. Known limits: the reader cannot judge whether the primary result
+    supports the audience's claim; within one line, a result named in its text comes before one in a link target.
+    Ties keep the author's slide order.
+
+    A row names each slide outside the longest run of finding slides already in order, so moving one slide
+    reports that slide alone rather than every slide it shifted. The main sequence's finding slides and the
+    appendix's each follow the ledger order, the appendix numbering on from the main. ledger_order lists every
+    finding slide in that order, as slug, heading, primary, question, and appendix.
+
+    `order` is the manifest's presentation_order and `recorded` its slide_slugs, which give each slide its slug
+    (`slide_slugs`). When order is a list it decides the order instead: it holds every finding slide's slug, main
+    and appendix, exactly once, in deck order. A list entry that is not non-blank text makes the whole field
+    malformed, as does any other value, JSON null included; absent and "none" leave the ledger order in force.
+    """
+    tree = provenance.question_tree(root, investigation)
+    ranks = {q["id"]: (("must", "should", "could").index(q["priority"]), position)
+             for position, q in enumerate(tree)}
+    primaries = finding_primaries(draft, represented)
+    slugs, entries = slide_slugs([(slide["heading"], primary) for slide, primary in primaries], recorded)
     ranked, unlinked, answers = [], [], {}
-    for slide in slides:
-        cited = _cited("\n".join(sections.get(slide["heading"], [])), represented)
-        questions = set()
-        for result in cited:
-            if result not in answers:
-                answers[result] = provenance.result_answers(root, investigation, result)
-            questions.update(answers[result])
+    for (slide, primary), slug in zip(primaries, slugs):
+        if primary is not None and primary not in answers:
+            answers[primary] = provenance.result_answers(root, investigation, primary)
+        questions = answers.get(primary, [])
         question = min(questions, key=ranks.__getitem__) if questions else None
         if question is None:
             unlinked.append(slide["heading"])
-        ranked.append((ranks[question] if question else (3, 0), slide, question))
-    if order != "none":
-        return _order_problems(order, [slide for _, slide, _ in ranked]), unlinked
+        ranked.append((ranks[question] if question else (3, 0), {**slide, "slug": slug}, question, primary))
     main = [entry for entry in ranked if not entry[1]["appendix"]]
     behind = [entry for entry in ranked if entry[1]["appendix"]]
+    ledger_order = [{"slug": slide["slug"], "heading": slide["heading"], "primary": primary, "question": question,
+                     "appendix": slide["appendix"]}
+                    for part in (main, behind) for _, slide, question, primary in sorted(part, key=lambda e: e[0])]
+    if order != "none":
+        return _order_problems(order, [slide for _, slide, _, _ in ranked]), unlinked, ledger_order, entries
     rows = []
     for part, offset in ((main, 0), (behind, len(main))):
         rows += [{**row, "question": part[index][2],
                   "problem": f"finding slide is out of place; move it to finding position {row['expected_position']}"}
-                 for index, row in _misplaced([rank for rank, _, _ in part], [s for _, s, _ in part], offset)]
-    return rows, unlinked
+                 for index, row in _misplaced([rank for rank, _, _, _ in part], [s for _, s, _, _ in part], offset)]
+    return rows, unlinked, ledger_order, entries
 
 
 def _misplaced(ranks, slides, offset=0):
@@ -2423,36 +2668,37 @@ def _misplaced(ranks, slides, offset=0):
     ordered = sorted(range(len(ranks)), key=ranks.__getitem__)
     positions = {index: position for position, index in enumerate(ordered, offset + 1)}
     in_order = _longest_ordered_run(ranks)
-    return [(index, {"slide": slide["heading"], "line": slide["line"], "position": offset + index + 1,
-                     "expected_position": positions[index]})
+    return [(index, {"slide": slide["heading"], "slug": slide["slug"], "line": slide["line"],
+                     "position": offset + index + 1, "expected_position": positions[index]})
             for index, slide in enumerate(slides) if index not in in_order]
 
 
 def _order_problems(order, slides):
-    """Rows for a presentation_order that is malformed, misses or repeats a finding slide, names a heading no
+    """Rows for a presentation_order that is malformed, misses or repeats a finding slide's slug, names a slug no
     finding slide has, or that the finding slides, in deck order, do not follow."""
     if not isinstance(order, list) or not all(isinstance(entry, str) and entry.strip() for entry in order):
-        return [{"slide": None, "line": None, "problem": "presentation_order is not none or a list of finding "
-                                                         "headings; record the approved order, or none"}]
-    listed = Counter(_collapse(_shown(_inline(entry)[0])) for entry in order)
-    headings = {slide["heading"] for slide in slides}
+        return [{"slide": None, "line": None, "problem": "presentation_order is not none or a list of finding slide "
+                                                         "slugs; record the approved order, or none"}]
+    listed = Counter(entry.strip() for entry in order)
+    slugs = {slide["slug"] for slide in slides}
     rows = []
-    for heading, count in listed.items():
+    for slug, count in listed.items():
         if count > 1:
-            rows.append({"slide": heading, "line": None,
-                         "problem": f"presentation_order lists this heading {count} times; keep it once"})
-        if heading not in headings:
-            rows.append({"slide": heading, "line": None, "problem": "presentation_order names no finding slide with "
-                                                                    "this heading; give the slide's current heading "
-                                                                    "or remove it"})
-    rows += [{"slide": slide["heading"], "line": slide["line"], "problem": "presentation_order does not list this "
-              "finding slide; add its heading where the user placed it"}
-             for slide in slides if slide["heading"] not in listed]
-    rank = {heading: index for index, heading in enumerate(listed)}
-    placed = [slide for slide in slides if slide["heading"] in rank]
+            rows.append({"slide": None, "slug": slug, "line": None,
+                         "problem": f"presentation_order lists this slug {count} times; keep it once"})
+        if slug not in slugs:
+            rows.append({"slide": None, "slug": slug, "line": None,
+                         "problem": "presentation_order names no finding slide with this slug; give a slug "
+                                    "ledger_order lists, or remove it"})
+    rows += [{"slide": slide["heading"], "slug": slide["slug"], "line": slide["line"],
+              "problem": "presentation_order does not list this finding slide's slug; add it where the user placed "
+                         "the slide"}
+             for slide in slides if slide["slug"] not in listed]
+    rank = {slug: index for index, slug in enumerate(listed)}
+    placed = [slide for slide in slides if slide["slug"] in rank]
     return rows + [{**row, "problem": "finding slide is out of place in presentation_order; move it to finding "
                                       f"position {row['expected_position']}"}
-                   for _, row in _misplaced([rank[slide["heading"]] for slide in placed], placed)]
+                   for _, row in _misplaced([rank[slide["slug"]] for slide in placed], placed)]
 
 
 def _longest_ordered_run(ranks):
@@ -2478,7 +2724,9 @@ def open_question_problems(root, investigation, draft, provenance, *, names, roo
     each required question's audience wording when set, otherwise its text, rendered by
     _inline/_shown with whitespace collapsed, once each.
 
-    Required means priority must and status open, parked, or answered (awaiting recheck).
+    Required means priority must, or the ledger's show flag set, and status open, parked, or either
+    awaiting-recheck display; an answered (provisional) question is answered here, since a draft may
+    represent provisional findings.
     Declined and superseded questions are set aside. Nested bullets, charts, missing/repeated
     questions and any other bullet text are reported; outline/markdown checks report other
     structural forms. Known limits: this compares rendered text, not paraphrases or audience
@@ -2488,8 +2736,9 @@ def open_question_problems(root, investigation, draft, provenance, *, names, roo
     outline reader refuses, which the slide's own names check still covers. Block markup/comments in that wording
     are not an alternate matching form. Notes remain presenter context and do not satisfy a question.
     """
-    questions = [q for q in provenance.question_tree(root, investigation) if q["priority"] == "must"
-                 and q["display_status"] in ("open", "parked", provenance.AWAITING_RECHECK)]
+    questions = [q for q in provenance.question_tree(root, investigation) if (q["priority"] == "must" or q["show"])
+                 and q["display_status"] in ("open", "parked", provenance.AWAITING_RECHECK,
+                                              provenance.PROVISIONAL_RECHECK)]
     expected = Counter(_collapse(_shown(_inline(q["audience"] or q["text"])[0])) for q in questions)
     slides = read_outline(draft / "findings.md")["slides"]
     opened = [(i, slide) for i, slide in enumerate(slides) if not slide["finding"] and slide["heading"] == "Open questions"]
@@ -2506,10 +2755,11 @@ def open_question_problems(root, investigation, draft, provenance, *, names, roo
 
     if not expected:
         if opened:
-            row("no unanswered must questions; omit the Open questions slide", opened[0][1]["line"])
+            row("no unanswered must questions and none marked show; omit the Open questions slide",
+                opened[0][1]["line"])
         return rows, len(questions)
     if not opened:
-        row("missing Open questions slide; list every unanswered must question")
+        row("missing Open questions slide; list every unanswered must question and each one marked show")
         return rows, len(questions)
     if len(opened) != 1:
         row("keep exactly one Open questions slide", opened[1][1]["line"])
@@ -2580,8 +2830,8 @@ M365_PROMPT = "Build a PowerPoint deck from findings.md and the chart files, fol
 def start_here(draft, investigation, package) -> str:
     """START-HERE.md's plain text for a draft as it now stands: send these to your audience (the deck once
     built, methodology-note.md when present, each file under datasets/); to build the deck (the attach list
-    and prompt assembly/m365.md gives, each chart file named); internal (methodology.md, manifest.json,
-    deck-rules.md)."""
+    and prompt assembly/m365.md gives, each chart file named, methodology.md and deck-rules.md marked as for the
+    builder only); internal (manifest.json and the part 2 files). Each file is listed once."""
     draft = Path(draft)
     charts = sorted((int(match[1]), path.name) for path in
                     ((draft / "charts").iterdir() if (draft / "charts").is_dir() else ())
@@ -2593,8 +2843,9 @@ def start_here(draft, investigation, package) -> str:
     audience = ["the deck, once you build it as part 2 says"]
     if (draft / METHODOLOGY_NOTE).is_file():
         audience.append(f"{METHODOLOGY_NOTE}, a plain account of how the analysis was done")
-    attach = ["findings.md", *(f"charts/{name}" for _, name in charts), "methodology.md", "deck-rules.md",
-              "assembly/m365.md"]
+    attach = ["findings.md", *(f"charts/{name}" for _, name in charts),
+              "methodology.md, the full account of the analysis, for the builder only",
+              "deck-rules.md, the rules the deck is built by, for the builder only", "assembly/m365.md"]
     # Plain text, a blank line after each list, so a viewer that renders Markdown joins no line to a list item.
     lines = ["Start here", "",
              f"This folder is the {package} package of the {investigation} investigation. Its files fall into "
@@ -2603,11 +2854,9 @@ def start_here(draft, investigation, package) -> str:
              "2. To build the deck", "",
              "In a Microsoft 365 Copilot app chat, add the PowerPoint agent and attach these files:", "",
              *(f"- {path}" for path in attach), "", "Then send this prompt:", "", M365_PROMPT, "",
-             "3. Internal: keep these, and do not send them", "",
-             "- methodology.md, the full account of the analysis",
+             "3. Internal: keep these; do not send them to the audience", "",
              "- manifest.json, the record of what this package holds and what produced it",
-             "- deck-rules.md, the rules the deck is built by", "",
-             "The other files in part 2 are the deck's source; your audience gets the deck instead."]
+             "- the files part 2 attaches, which build the deck; your audience gets the deck instead"]
     return "\n".join(lines) + "\n"
 
 
@@ -2621,9 +2870,116 @@ def _write_start_here(draft, investigation, package):
         _write_text(path, text)
 
 
+# The brief's Audience line that records a methods note length, in its one written form, and any line that
+# starts like it, after a list marker, `>`, `|`, or `**`, "methodology note" included, so a length recorded
+# in another form is reported rather than read as none.
+_NOTE_LENGTH = re.compile(r"(?:(?:[-*+]|[0-9]+[.)])\s+)?Methods note length: about ([0-9]+) words\.?")
+_NOTE_LENGTH_LIKE = re.compile(r"\s*(?:(?:[-*+>|]|[0-9]+[.)])\s*)*\**method(?:s|ology)\s+note\s+length",
+                               re.IGNORECASE)
+# How far the note may run over the recorded length before the row: 10%, as integer tenths.
+_NOTE_SLACK_TENTHS = 11
+
+
+def note_length_problems(root, investigation, draft) -> list[dict]:
+    """A row when methodology-note.md runs more than 10% over the length the investigation's brief.md
+    records on a `Methods note length: about <n> words` line, or when a line that starts like one is not in
+    that form or two such lines disagree; no row without a note or a recorded length. Words are counted as
+    the note renders: headings, text, and list items, not comments or fenced code. Informational, like
+    slides: it never fails the check."""
+    note = Path(draft) / METHODOLOGY_NOTE
+    if METHODOLOGY_NOTE not in _narratives(draft):
+        return []
+    try:
+        lines = _read_lines(Path(root) / "investigations" / investigation / "brief.md")
+    except FileNotFoundError:
+        return []
+    brief = f"investigations/{investigation}/brief.md"
+    rows, lengths = [], {}
+    for number, line in enumerate(lines, 1):
+        if not _NOTE_LENGTH_LIKE.match(line):
+            continue
+        match = _NOTE_LENGTH.fullmatch(line.strip())
+        if match:
+            lengths.setdefault(int(match[1]), number)
+        else:
+            rows.append({"file": brief, "line": number, "problem": "the methods note length is not written as "
+                                                                  "`Methods note length: about <n> words`"})
+    if len(lengths) > 1:
+        rows.append({"file": brief, "line": sorted(lengths.values())[1],
+                     "problem": f"the brief records more than one methods note length: {sorted(lengths)}"})
+    if len(lengths) == 1:
+        (recorded, number), = lengths.items()
+        words = sum(_words(line.plain) for line in _read_view(note)[0] if line.kind != "fence")
+        if words * 10 > recorded * _NOTE_SLACK_TENTHS:
+            rows.append({"file": METHODOLOGY_NOTE, "words": words, "recorded": recorded,
+                         "problem": f"the note runs {words} words, more than 10% over the about {recorded} words "
+                                    f"{brief}:{number} records; shorten it, or report the length to the user"})
+    return rows
+
+
+# ---------------------------------------------------------------- user acceptances and helper drift
+
+# awb-init's install_helpers.py writes it: each project path it installed or replaced -> that file's SHA-256,
+# taken with CRLF read as LF as _digest takes it, so a checkout that converts line endings is no drift.
+INSTALL_RECEIPT = ".awb-receipt.json"
+# The receipt paths whose files gate a release: the helpers and the package formats.
+_GATING = ("src/", "package-format/")
+
+
+def accepted_long_headlines(record: dict) -> set:
+    """The headlines the manifest's accepted_long_headlines accepts: each entry's exact `headline` text, with a
+    `reason` filled in. Any other entry or value accepts nothing, so a malformed field leaves its rows open."""
+    entries = record.get("accepted_long_headlines")
+    return {entry["headline"] for entry in entries if isinstance(entry, dict) and isinstance(entry.get("headline"), str)
+            and isinstance(entry.get("reason"), str) and entry["reason"].strip()} if isinstance(entries, list) else set()
+
+
+def helper_drift(root) -> list[dict]:
+    """Each helper under src/ and package-format/ file whose content differs from the SHA-256 the install receipt
+    records: {"file", "status", "sha256", "recorded"}, status changed, missing (sha256 null), or unreadable.
+    No receipt, or a file it does not record, gives no row; an unreadable receipt is itself a row, so a gate
+    edited past the receipt is never silently passed."""
+    path = Path(root) / INSTALL_RECEIPT
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(receipt, dict) or not all(isinstance(v, str) for v in receipt.values()):
+            raise ValueError
+    except (OSError, ValueError):
+        return [{"file": INSTALL_RECEIPT, "status": "unreadable", "sha256": _digest(path)[0], "recorded": None}]
+    rows = []
+    for name, recorded in sorted(receipt.items()):
+        digest, status = _digest(Path(root) / name) if name.startswith(_GATING) else (recorded, None)
+        if digest != recorded:
+            rows.append({"file": name, "status": status, "sha256": digest, "recorded": recorded})
+    return rows
+
+
+def _digest(path):
+    """(SHA-256 with CRLF read as LF, "changed") of the file at path, or (None, "missing" or "unreadable")."""
+    try:
+        return hashlib.sha256(Path(path).read_bytes().replace(b"\r\n", b"\n")).hexdigest(), "changed"
+    except FileNotFoundError:
+        return None, "missing"
+    except OSError:
+        return None, "unreadable"
+
+
+def _drift_confirmed(record: dict) -> set:
+    """(file, sha256) pairs the manifest's helper_drift_confirmed confirms, each with a `reason` filled in."""
+    entries = record.get("helper_drift_confirmed")
+    return {(entry["file"], entry.get("sha256")) for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("file"), str)
+            and isinstance(entry.get("sha256"), (str, type(None))) and "sha256" in entry
+            and isinstance(entry.get("reason"), str) and entry["reason"].strip()} if isinstance(entries, list) else set()
+
+
+def _outline_passed(rows):
+    return rows is not None and all(row.get("accepted") for row in rows)
+
+
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
-            and report["outline"] == [] and report["charts"] == [] and report["headings"] == [] and report["markdown"] == []
+            and _outline_passed(report["outline"]) and report["charts"] == [] and report["headings"] == [] and report["markdown"] == []
             and report["claims"] == [] and report["questions"] == []
             and report["storyline"] == [] and report["open_questions"] == []
             and report["verify"] == [] and report["flag_entries"] == [] and report["numbers"] == []
@@ -2637,12 +2993,14 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
               "outline": None, "slides": None, "charts": None, "headings": None, "markdown": None, "claims": None, "questions": None,
-              "storyline": None, "unlinked_findings": None, "open_questions": None, "open_questions_count": None,
+              "storyline": None, "unlinked_findings": None, "ledger_order": None, "open_questions": None,
+              "open_questions_count": None,
               "numbers": None, "numbers_problems": [], "inventory": None, "verify": None,
-              "flag_entries": None, "unmatched_flags": None, "draft_markers": None, "start_here": None,
-              "errors": [], "passed": False}
+              "flag_entries": None, "unmatched_flags": None, "draft_markers": None, "note_length": None,
+              "start_here": None, "helper_drift": [{**row, "confirmed": False} for row in helper_drift(root)],
+              "review": None, "errors": [], "passed": False}
     if not draft.is_dir():
-        report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
+        report["errors"].append(_NO_DRAFT.format(report["draft"]))
         return report
 
     recorded, report["names_problems"] = _recorded_names(root, investigation, package)
@@ -2666,6 +3024,10 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         report["charts"] = check_charts(findings_path, draft / "charts")
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"charts check: {error}")
+    try:
+        report["note_length"] = note_length_problems(root, investigation, draft)
+    except (OSError, UnicodeError) as error:
+        report["errors"].append(f"note length check: {error}")
     try:
         report["headings"] = heading_problems(draft)
     except (OSError, UnicodeError) as error:
@@ -2729,18 +3091,23 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
                 report["claims"], claim_lines = _claim_review(draft, [r["result_id"] for r in represented], claims)
             except (OSError, UnicodeError) as error:
                 report["errors"].append(f"claims check: {error}")
+        slugs = record.get("slide_slugs")
         if provenance is not None:
             try:
-                report["storyline"], report["unlinked_findings"] = storyline_problems(
+                report["storyline"], report["unlinked_findings"], report["ledger_order"], slugs = storyline_problems(
                     root, investigation, draft, [r["result_id"] for r in represented], provenance,
-                    record.get("presentation_order", "none"))
+                    record.get("presentation_order", "none"), record.get("slide_slugs"))
             except (OSError, ValueError, AttributeError) as error:
                 report["errors"].append(f"storyline check: {error}")
+        if report["headings"] != [] and isinstance(record.get("slide_slugs"), list):
+            slugs = record["slide_slugs"]  # kept until the headings agree (`slide_slugs`)
         if not verify_only:
             _write_start_here(draft, investigation, package)  # before the inventory, which then lists it
             rows = inventory(draft)
-            if rows != record.get("inventory"):
-                record.update(inventory=rows, revised_at=_now())
+            if rows != record.get("inventory") or slugs != record.get("slide_slugs"):
+                if rows != record.get("inventory"):
+                    record["revised_at"] = _now()
+                record.update(inventory=rows, slide_slugs=slugs)
                 _write_json(path, record)
         elif not isinstance(record.get("inventory"), list):
             raise ValueError(f"{MANIFEST} records no inventory list; run check-draft without --verify-only")
@@ -2762,7 +3129,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     # strength line the claims check accepts repeats state.md and is skipped.
     if record is not None:
         allowed, problems = allowed_numbers(record)
-        values, more = recorded_values(root, investigation, record.get("results"))
+        values, more = recorded_values(root, investigation, record.get("results"), recorded_scales(record))
         report["numbers_problems"], report["numbers"] = problems + more, []
         for name in _narratives(draft):
             try:
@@ -2771,6 +3138,17 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             except (OSError, UnicodeError) as error:
                 report["errors"].append(f"numbers check: {error}")
 
+    # A long headline passes once the user accepts it; drift is confirmed here and gates only release.
+    accepted, confirmed = (accepted_long_headlines(record), _drift_confirmed(record)) if record else (set(), set())
+    for row in report["outline"] or []:
+        if row["severity"] == "warning":
+            row["accepted"] = row["headline"] in accepted
+    for row in report["helper_drift"]:
+        row["confirmed"] = (row["file"], row["sha256"]) in confirmed
+
+    # Informational: the last review against these files, read after any write above, as release reads it.
+    review = review_receipt(root, investigation, package)
+    report["review"] = {"status": review["status"], "changed": review["changed"]}
     report["passed"] = _structure_passed(report) and report["unmatched_flags"] == []
     return report
 
@@ -2791,24 +3169,36 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                     "each represented result's question in methodology.md, numbers in the narratives, the "
                     "manifest inventory, and state.md's current flags), write START-HERE.md, and rewrite the "
                     "manifest inventory, stamping revised_at when it changes; --verify-only checks a release "
-                    "candidate and writes nothing.",
+                    "candidate and writes nothing. The inventory leaves out the draft's .preview/ folder, the "
+                    "headline preview.",
         epilog="Prints one JSON line.\nmethodology-note.md, when the draft holds it, is read by the findings, "
                "claims, markdown, and numbers checks too; its rows carry file.\n"
                "outline lists, as slide, line, and problem, each break of the slide "
                "rules: a missing # title or subtitle, text outside every slide, a ### finding outside ## Findings "
                "and ## Appendix, "
-               "a missing, repeated, empty, or over-15-word headline, more than five bullets except on Open questions, more than one chart, "
+               "a missing, repeated, empty, or over-15-word headline, a bullet opening with a chart field name other "
+               "than Caveat: after that chart's fields ended (naming the chart), more than five bullets except on "
+               "Open questions (naming the chart when some are such bullets), more than one chart, "
                "text that is no headline, bullet, chart, or notes, and a missing, repeated, or non-final **Notes:** "
                "paragraph; a missing, repeated, or misplaced required slide (Answer first after the title, a finding "
                "slide in the main sequence, then How we know and Limitations and open caveats, either of which may "
                "stand under ## Appendix instead, How we know first when both stand in the main sequence or both "
                "under ## Appendix), its line null when missing; and a slide after ## Appendix outside it, a second "
-               "## Appendix, an appendix slide that stays in the main sequence, or an empty ## Appendix. slides "
+               "## Appendix, an appendix slide that stays in the main sequence, or an empty ## Appendix. Each row's "
+               "severity is error, but an over-15-word headline's is warning: that row carries headline and accepted, "
+               "true once the manifest's accepted_long_headlines lists that exact headline with a reason. slides "
                "counts the main sequence's slides, title included, and the appendix's.\nstoryline lists the "
                "finding slides to move, those outside the longest run already in priority/tree order, the main "
-               "sequence and the appendix each ranked alone, each with its expected position; when the manifest's "
-               "presentation_order is a list it ranks every finding slide instead, and storyline also lists a "
-               "malformed order, a heading it repeats or that no finding slide has, and a finding slide it misses. "
+               "sequence and the appendix each ranked alone, each with its slug and expected position; a slide "
+               "ranks by its primary result, the first its methodology.md section cites as a whole code span or "
+               "an evidence path, and that result's highest ledger question. When the manifest's "
+               "presentation_order is a list of slide slugs it ranks every finding slide instead, and storyline "
+               "also lists a malformed order, a slug it repeats or that no finding slide has, and a finding slide "
+               "it misses. ledger_order lists every finding slide in the derived order, as slug, heading, "
+               "primary, question, and appendix, whatever presentation_order holds. A slide keeps its slug, "
+               "recorded in the manifest's slide_slugs, across a reworded heading while its primary result stays; "
+               "without --verify-only, check-draft records each slide's current heading there once headings "
+               "lists nothing. "
                "unlinked_findings names slides with no declared ledger answer, which go last without a "
                "presentation_order; it is informational.\n"
                "open_questions lists presence, placement, and exact-question-bullet problems on Open questions; "
@@ -2816,18 +3206,21 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "charts lists, as chart and problem, a specification numbered out of order, without "
                "a file, or without a form from deck-rules.md; a **Data:** line missing, malformed, or not naming "
                "its form's roles; a column it names that the file lacks, and a column of the file that it names by "
-               "no role; an item nested under a field or a second paragraph in one; and a chart file without a "
+               "no role, headers compared NFKC-normalized as the line renders; an item nested under a field or a second paragraph in one; and a chart file without a "
                "specification or data rows, or a foreign file. It also lists each chart file the manifest's "
                "charts does not record, an entry whose file is missing or that records no selection, columns, "
-               "headers, value labels, percent, or rounding, an entry whose headers, value labels, or percent "
-               "columns differ from what foundation/display.toml gives, and a file that differs from its result's saved "
-               "table under that entry's selection, labels, percent columns, and rounding (export writes every "
+               "headers, value labels, percent, scale, or rounding, an entry whose headers, value labels, percent "
+               "columns, or scale divisors differ from what foundation/display.toml gives, and a file that differs "
+               "from its result's saved table under that entry's selection, labels, scale, percent columns, and "
+               "rounding (export writes every "
                "chart file; rows are selected with --chart, never by editing the file).\nclaims lists each causal phrase (line, section, phrase, claim, results) "
                "in a findings.md slide, heading included, above its claim strength: a ### finding slide is held to the weakest "
                "Claim in state.md among the results its methodology.md section cites (all represented results "
                "when it cites none), and the title and other slides that state conclusions to the strongest; "
                "How we know, Limitations and open caveats, Open questions, What changed since the last version, and Supporting "
-               "datasets are not read, under ## Appendix too; methodology-note.md is held to the strongest. It also lists a represented result without a recognized Claim, and a "
+               "datasets are not read, under ## Appendix too; methodology-note.md is held to the strongest, its ## "
+               "Limitations section not read; a phrase in a negated clause, under the grammar helpers.md states, "
+               "is no claim. It also lists a represented result without a recognized Claim, and a "
                "finding whose methodology.md section is missing or whose **Claim strength:** line is missing, "
                "repeated, unrecognized, or differs from state.md, a causal design included.\nheadings lists a ### "
                "finding heading without exactly one methodology.md section or repeated in findings.md.\nmarkdown "
@@ -2836,9 +3229,10 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "an indented fence or comment; a setext heading; indented code; an HTML block or inline tag; a link "
                "reference definition; an unclosed fence or comment. Every check but numbers reads the narratives "
                "as they render."
-               "\nnumbers lists, as file, line, and text, each number in findings.md, methodology.md, or "
-               "methodology-note.md that no represented result's table, profile, check details, or settings round "
-               "to and the manifest's allowed_numbers does not cover by its text or a phrase around it, reading "
+               "\nnumbers lists, as file, line, text, and problem (the rule that left it untraced, pointing to "
+               "allowed_numbers), each number in findings.md, methodology.md, or "
+               "methodology-note.md that no represented result's table, profile, check details, settings, or "
+               "recorded [scale] column divided by its divisor rounds half up to, and the manifest's allowed_numbers does not cover by its text or a phrase around it, reading "
                "source lines without the comments and fenced code the rendered reading drops, so a <!-- in a code "
                "span, fenced code, or a link's target, or escaped, hides nothing, and skipping a methodology.md "
                "**Claim strength:** line the claims check accepts, whose numbers repeat state.md's Claim cell; "
@@ -2853,19 +3247,32 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "verbatim within one paragraph or heading as it renders, the question read as written or rendered the "
                "same way: a code span counts, and a question in a comment, fenced code, or an image's text does "
                "not count, nor does one running across an image.\n"
+               "review is the last recorded review against these files, as review-receipt show gives its status "
+               "(none, current, stale, or failed) and changed; it is informational, and release refuses unless "
+               "it is current.\n"
                "draft_markers lists, as where, line, marker, and text, the word draft or the phrase working copy "
                "or not a numbered release, any case, whole words, in the title, subtitle, a slide heading or "
                "**Headline:**, or the title slide's notes; it is informational, since a release copies the draft "
                "byte for byte, so awb-release asks the user to confirm or revise each before releasing.\n"
+               "note_length lists, when the investigation's brief.md records `Methods note length: about <n> "
+               "words`, a methodology-note.md more than 10% longer as it renders, with words and recorded, and a "
+               "brief line that starts like that one but is not in its form, or a second length; it is "
+               "informational, and empty without a note or a recorded length.\n"
                "Without --verify-only it first writes START-HERE.md, plain text in three parts: what to send the "
                "audience (the deck once built, methodology-note.md, each dataset), what builds the deck (the "
-               "attach list and prompt assembly/m365.md gives), and what stays internal; the inventory then lists "
+               "attach list and prompt assembly/m365.md gives, methodology.md and deck-rules.md for the builder "
+               "only), and what stays internal; the inventory then lists "
                "it, and --verify-only verifies it like any other file and lists an errors row when the draft lacks "
                "it. start_here names it when present.\n"
-               "Exit 0 only when names_problems, findings, outline, charts, "
+               "helper_drift lists each src/ helper and package-format/ file whose SHA-256 differs from what "
+               ".awb-receipt.json records, as file, status (changed, missing, or unreadable), sha256 (null when "
+               "missing), recorded, and confirmed, true once the manifest's helper_drift_confirmed lists that file at "
+               "that sha256 with a reason; an unreadable receipt is a row of its own, and no receipt gives none. It "
+               "does not fail this check; release refuses while a row is unconfirmed.\n"
+               "Exit 0 only when names_problems, findings, charts, "
                "headings, markdown, claims, "
                "questions, storyline, open_questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
-               "are all empty.")
+               "are all empty and outline holds only accepted rows.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
                         help="verify against the recorded inventory without rewriting it (the release gate)")
@@ -2883,18 +3290,24 @@ def _git(root, *args):
                           stderr=subprocess.PIPE).stdout.decode()
 
 
+# packaging_state's reasons for a packaging state no commit can record. provenance_gaps lists neither:
+# a project without Git, or a repository before its first commit, has no version to name.
+NO_GIT, NO_COMMIT = "the project is not a git repository", "the checkout has no commit yet"
+_NO_HISTORY = {NO_GIT, NO_COMMIT}
+
+
 def packaging_state(root, paths=("src", "package-format")) -> tuple:
     """Return the packaging checkout's commit and its uncommitted package-source paths."""
     try:
         if _git(root, "rev-parse", "--is-inside-work-tree").strip() != "true":
             raise ValueError
     except (OSError, ValueError, subprocess.CalledProcessError):
-        unknown = {"unknown": "the project is not a git repository"}
+        unknown = {"unknown": NO_GIT}
         return unknown, unknown
     try:
         commit = _git(root, "rev-parse", "--verify", "HEAD").strip()
     except subprocess.CalledProcessError:
-        commit = {"unknown": "the checkout has no commit yet"}
+        commit = {"unknown": NO_COMMIT}
     prefix = _git(root, "rev-parse", "--show-prefix").strip()
     changes = []
     entries = iter(_git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all",
@@ -2958,7 +3371,7 @@ def _load_provenance(root):
 # ---------------------------------------------------------------- export
 
 _DISPLAY = "foundation/display.toml"
-_DISPLAY_KEYS = ("columns", "values", "round", "percent", "results")
+_DISPLAY_KEYS = ("columns", "values", "round", "percent", "scale", "confirmed", "results")
 # A number cell: an optional sign, digits with an optional decimal point, and an optional exponent, as a CSV
 # writer writes a number. Other text, a thousands separator, NaN, and infinity included, is shown as written.
 _NUMBER_CELL = re.compile(r"[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?")
@@ -2966,8 +3379,13 @@ _NUMBER_CELL = re.compile(r"[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-
 UNROUNDED_PLACES = 4
 _ROUND_LIMIT = 20
 _CHART_FORM = "RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]]"
-_COLLISION = ("results answering different questions share this [columns] name; confirm it fits each, "
-              "or name the column for one result under [results.\"<result>\".columns]")
+_COLLISION = ("results answering different questions share this [columns] name; confirm it fits each and list "
+              "the column under [confirmed] columns, or name the column for one result under "
+              "[results.\"<result>\".columns]")
+_PRECISION = ("its fractions are saved to exactly four decimal places, a sign the query rounded them, and shown as "
+              "a percent rounded to {places} they are rounded a second time, which can move the last digit; save "
+              "the result at full precision and round only under [round]")
+_UNMATCHED = "no cell of the saved tables it labels holds this code; a code matches the saved text exactly"
 
 
 def _table(value, problem):
@@ -2987,20 +3405,38 @@ def _labels_from(record, where):
     return columns, values
 
 
-def _percent_from(value, where):
-    """A [percent] table's columns list, as `where` names the table in the file."""
+def _percent_from(value, where, table="percent"):
+    """A [percent] or [confirmed] table's columns list, as `where` names the table in the file."""
     if not (isinstance(value, dict) and set(value) == {"columns"} and isinstance(value["columns"], list)
             and all(isinstance(column, str) and column for column in value["columns"])):
-        raise ValueError(f"{_DISPLAY}: {where}percent] holds one key, columns, a list of column names")
+        raise ValueError(f"{_DISPLAY}: {where}{table}] holds one key, columns, a list of column names")
     return list(value["columns"])
 
 
+def _divisor(value):
+    """Whether a [scale] divisor is a positive finite number, as TOML or JSON writes one."""
+    return type(value) in (int, float) and math.isfinite(value) and value > 0
+
+
+def _scale_from(value):
+    """The [scale] table: each column's divisor, from column = { divide = <a positive number> }."""
+    table = _table(value, "[scale] maps each column to { divide = <a positive number> }")
+    for column, entry in table.items():
+        if not (isinstance(entry, dict) and set(entry) == {"divide"} and _divisor(entry["divide"])):
+            raise ValueError(f"{_DISPLAY}: [scale] {column} is not {{ divide = <a positive number> }}")
+        table[column] = entry["divide"]
+    return table
+
+
 def display_names(root) -> dict:
-    """Return {columns, values, round, percent, results} from foundation/display.toml, empty when it is absent.
+    """Return {columns, values, round, percent, scale, confirmed, results} from foundation/display.toml, empty
+    when it is absent.
 
     The file holds only [columns] (column: display name), [values.<column>] (coded value: label), [round]
     (column: decimal places), [percent] with one key, columns = [...] (columns whose fractions show 100 times
-    larger), and [results."<result>"] tables holding columns, values, and percent tables, which replace the
+    larger), [scale] (column = { divide = <a positive number> }, its values shown divided), [confirmed] with one
+    key, columns = [...] (shared names confirmed to fit every result they label, which label_collisions then
+    leaves out), and [results."<result>"] tables holding columns, values, and percent tables, which replace the
     global ones for that result's files, a values table for its whole column and a percent table for every
     column. A result without a percent table has None there. Anything else raises ValueError. A name or a
     number of places is checked where a column is exported.
@@ -3013,7 +3449,7 @@ def display_names(root) -> dict:
     for key in record:
         if key not in _DISPLAY_KEYS:
             raise ValueError(f"{_DISPLAY}: unknown key {key!r}; the file holds only [columns], [values.<column>], "
-                             "[round], [percent], and [results.\"<result>\"]")
+                             "[round], [percent], [scale], [confirmed], and [results.\"<result>\"]")
     columns, values = _labels_from(record, "[")
     percent = _percent_from(record.get("percent", {"columns": []}), "[")
     results = {}
@@ -3028,7 +3464,9 @@ def display_names(root) -> dict:
                               "percent": _percent_from(entry["percent"], where + ".") if "percent" in entry else None}
     return {"columns": columns, "values": values,
             "round": _table(record.get("round", {}), "[round] maps each column to its decimal places"),
-            "percent": percent, "results": results}
+            "percent": percent, "scale": _scale_from(record.get("scale", {})),
+            "confirmed": _percent_from(record.get("confirmed", {"columns": []}), "[", "confirmed"),
+            "results": results}
 
 
 def parse_chart(text: str) -> tuple:
@@ -3089,27 +3527,44 @@ def _number(text):
     return True
 
 
-def _unrounded(text, percent=False) -> bool:
+def _scaled(text, divide):
+    """A number cell's value divided by its [scale] divisor: exact whenever the quotient has at most 40 more
+    significant digits than the cell's text, as dividing by a power of ten always does."""
+    number = Decimal(text)
+    if divide is None:
+        return number
+    with localcontext(Context(prec=len(text) + 40, Emax=MAX_EMAX, Emin=MIN_EMIN)):
+        return number / Decimal(str(divide))
+
+
+def _places(text, divide=None):
+    """The decimal places a number cell's value shows once divided by its [scale] divisor, trailing zeros
+    dropped and any exponent applied."""
+    return -_scaled(text, divide).normalize(_EXACT).as_tuple().exponent
+
+
+def _unrounded(text, percent=False, divide=None) -> bool:
     """Whether a cell shows more than UNROUNDED_PLACES decimal places: a finite number cell whose saved text,
-    the file's text unless rounded, has more once trailing zeros are dropped, any exponent applied, and a
-    percent column's 100-fold scaling applied, so a percent column's saved fraction may carry two more. So
-    366.89000039169395 and 1e-05 are unrounded, and 21.3500, which is 21.35, is not; digits beyond a float's
-    precision count, since the file shows them."""
+    the file's text unless rounded, has more once trailing zeros are dropped, any exponent applied, its [scale]
+    divisor applied, and a percent column's 100-fold scaling applied, so a percent column's saved fraction may
+    carry two more. So 366.89000039169395 and 1e-05 are unrounded, and 21.3500, which is 21.35, is not; digits
+    beyond a float's precision count, since the file shows them."""
     if not _number(text):
         return False
-    places = -Decimal(text).normalize(_EXACT).as_tuple().exponent
-    return places - (2 if percent else 0) > UNROUNDED_PLACES
+    return _places(text, divide) - (2 if percent else 0) > UNROUNDED_PLACES
 
 
-def _display_cell(text, labels, percent, places):
-    """A saved cell as a file shows it: its value label; else, for a number cell, scaled exactly by 100 in a
-    percent column and rounded half up to its places, as a reader would; else as written."""
+def _display_cell(text, labels, percent, places, divide=None):
+    """A saved cell as a file shows it: its value label; else, for a number cell, divided by its [scale]
+    divisor, scaled exactly by 100 in a percent column, and rounded half up to its places, as a reader would;
+    else as written."""
     if text in labels:
         return labels[text]
-    if not _number(text) or not percent and places is None:
+    if not _number(text) or not percent and places is None and divide is None:
         return text
+    number = _scaled(text, divide)
     with localcontext(_EXACT):
-        number = Decimal(text).scaleb(2) if percent else Decimal(text)
+        number = number.scaleb(2) if percent else number
         if places is not None:
             number = number.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
         return format(number, "f")
@@ -3128,7 +3583,7 @@ def _select(rows, selection):
 def _apply(rows, entry):
     """A file's data rows from a saved table's rows, as an entry export records shapes them."""
     return [[_display_cell(row[column], entry["values"].get(column, {}), column in entry["percent"],
-                           entry["round"].get(column)) for column in entry["columns"]]
+                           entry["round"].get(column), entry["scale"].get(column)) for column in entry["columns"]]
             for row in _select(rows, entry["selection"])]
 
 
@@ -3159,14 +3614,15 @@ def _toml_key(name):
     return '"' + re.sub(r"[\x00-\x1f\x7f]", lambda match: f"\\u{ord(match.group()):04X}", escaped) + '"'
 
 
-def _shape(root, investigation, result_id, columns, selection, display, rounding, gaps, round_gaps):
+def _shape(root, investigation, result_id, columns, selection, display, rounding, gaps, round_gaps, notes):
     """Shape a saved result table for the audience: (entry, rows, sources, problems).
 
     entry records the shaping, which check-draft reapplies (`_apply`): the result, its columns, the row
-    selection, the headers, the value labels the selected rows use, and the columns shown as percents and
-    rounded. sources states it as methodology lines (`_sources`). A column without a display name is
-    appended to `gaps`, and an unrounded one without places to `round_gaps`; only the cells the file holds
-    count.
+    selection, the headers, the value labels the selected rows use, the columns shown as percents, their
+    [scale] divisors, and their places. sources states it as methodology lines (`_sources`). A column without a
+    display name is appended to `gaps`, and an unrounded one without places to `round_gaps`; only the cells the
+    file holds count. `notes` gathers what the warnings read: {"precision": rows, "codes": {table: (codes,
+    cells)}}, each value table's codes with the cells of every saved table it labels (`value_warnings`).
     """
     path = Path(root) / "investigations" / investigation / "results" / f"{result_id}.csv"
     if not path.is_file():
@@ -3199,6 +3655,12 @@ def _shape(root, investigation, result_id, columns, selection, display, rounding
     # A result's own percent list replaces the global one, so a column already holding percents there is kept.
     own_percent = display["results"].get(result_id, {}).get("percent")
     percent = [c for c in chosen if c in (display["percent"] if own_percent is None else own_percent)]
+    scale = {c: display["scale"][c] for c in chosen if c in display["scale"]}
+    own_values = display["results"].get(result_id, {}).get("values", {})
+    for column in chosen:
+        if column in values:
+            where = f'[results."{result_id}".values.{column}]' if column in own_values else f"[values.{column}]"
+            notes["codes"].setdefault(where, (values[column], set()))[1].update(row[column] for row in table)
     places = {}
     for column in chosen:
         if column in rounding:
@@ -3210,7 +3672,7 @@ def _shape(root, investigation, result_id, columns, selection, display, rounding
                 places[column] = value
             continue
         example = next((row[column] for row in selected if row[column] not in values.get(column, {})
-                        and _unrounded(row[column], column in percent)), None)
+                        and _unrounded(row[column], column in percent, scale.get(column))), None)
         if example is not None:
             problems.append(f"{result_id}: column {column!r} has values with more than {UNROUNDED_PLACES} decimal "
                             f"places{' shown as a percent' if column in percent else ''}, trailing zeros aside, "
@@ -3218,6 +3680,15 @@ def _shape(root, investigation, result_id, columns, selection, display, rounding
             round_gaps.append(column)
     if problems:
         return None, None, None, problems
+    # A fraction saved at exactly four places was likely rounded in its query; a percent shown to fewer than two
+    # places rounds it again, so 0.6315 shows as 63.2% where the full value may give 63.1%.
+    for column in percent:
+        if places.get(column) is not None and places[column] < 2:
+            example = next((row[column] for row in selected if row[column] not in values.get(column, {})
+                            and _number(row[column]) and _places(row[column], scale.get(column)) == 4), None)
+            if example is not None:
+                notes["precision"].append({"result_id": result_id, "column": column, "example": example,
+                                           "warning": _PRECISION.format(places=_rounded_to(places[column]))})
     used = {}
     for column in chosen:
         codes = values.get(column, {})
@@ -3225,7 +3696,8 @@ def _shape(root, investigation, result_id, columns, selection, display, rounding
         if labeled:
             used[column] = labeled
     entry = {"result_id": result_id, "columns": chosen, "selection": selection,
-             "headers": [names[c] for c in chosen], "values": used, "percent": percent, "round": places}
+             "headers": [names[c] for c in chosen], "values": used, "percent": percent, "scale": scale,
+             "round": places}
     return entry, _apply(table, entry), _sources(entry), []
 
 
@@ -3240,17 +3712,22 @@ def _sources(entry):
         listed = values[0] if len(values) == 1 else f"{', '.join(values[:-1])} or {values[-1]}"
         lines.append(f"rows <- the rows of {result_id} whose {where['column']} is {listed}")
     for header, column in zip(entry["headers"], entry["columns"]):
-        places = entry["round"].get(column)
-        shaping = ([", times 100"] if column in entry["percent"] else []) + (
-            [] if places is None else [", rounded to whole numbers" if places == 0
-                                       else f", rounded to {places} decimal place{'s' if places != 1 else ''}"])
+        places, divide = entry["round"].get(column), entry["scale"].get(column)
+        shaping = ([] if divide is None else [f", divided by {format(Decimal(str(divide)).normalize(), 'f')}"]) + (
+            [", times 100"] if column in entry["percent"] else []) + (
+            [] if places is None else [f", rounded to {_rounded_to(places)}"])
         lines.append(f"{header} <- {result_id}.{column}{''.join(shaping)}")
     return lines
 
 
+def _rounded_to(places):
+    return "whole numbers" if places == 0 else f"{places} decimal place{'s' if places != 1 else ''}"
+
+
 def label_collisions(display, files, questions) -> list[dict]:
     """Each column whose global [columns] name labels files from results answering different questions, no
-    such result naming the column under its own [results."<id>".columns]: {column, name, results, warning}.
+    such result naming the column under its own [results."<id>".columns] and [confirmed] not listing it:
+    {column, name, results, warning}.
 
     files is [(result_id, [columns])], one per exported file; questions maps each result to its question.
     """
@@ -3258,11 +3735,28 @@ def label_collisions(display, files, questions) -> list[dict]:
     for result_id, columns in files:
         own = display["results"].get(result_id, {}).get("columns", {})
         for column in columns:
-            if column in display["columns"] and column not in own:
+            if column in display["columns"] and column not in own and column not in display["confirmed"]:
                 groups.setdefault(column, {})[result_id] = None
     return [{"column": column, "name": display["columns"][column], "results": list(results), "warning": _COLLISION}
             for column, results in groups.items()
             if len({json.dumps(questions.get(r), sort_keys=True) for r in results}) > 1]
+
+
+def value_warnings(codes) -> list[dict]:
+    """Each code of a value table that looks mistyped against the saved tables it labels in this export: {table,
+    code, warning}. `codes` maps each table, as display.toml names it, to (its codes, the cells it was read
+    against). A code matches the saved text exactly, so a boolean pandas saved as True takes the key "True", not
+    true. A code no cell holds is reported when a cell differs from it only in case, or when no code of its
+    table matches any cell; a shared table listing codes these results leave out gives no row."""
+    rows = []
+    for table, (labels, cells) in codes.items():
+        none = not any(code in cells for code in labels)
+        for code in labels:
+            near = sorted(cell for cell in cells if cell.casefold() == code.casefold())
+            if code not in cells and (near or none):
+                rows.append({"table": table, "code": code,
+                             "warning": _UNMATCHED + (f"; the table writes {near[0]!r}" if near else "")})
+    return rows
 
 
 def export(root, investigation, package, charts=(), datasets=(), results=(), *, no_datasets=False,
@@ -3279,9 +3773,6 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     draft = _package_dir(root, investigation, package) / "draft"
     full = bool(charts or datasets or no_datasets)
     report = {"charts": [], "datasets": [], "written": False, "errors": []}
-    if not draft.is_dir():
-        report["errors"].append(f"no draft at {_rel(root, draft)}; create it with awb-package")
-        return report
     path = draft / MANIFEST
     try:
         report["created"] = not path.exists()
@@ -3291,7 +3782,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
         report["errors"].append(str(error))
         return report
 
-    shaped, sources, gaps, round_gaps = [], [], [], []
+    shaped, sources, gaps, round_gaps, notes = [], [], [], [], {"precision": [], "codes": {}}
     if full:
         rounding = {**display["round"], **(rounding or {})}
         for kind, label, (result_id, columns, *selection) in (
@@ -3299,7 +3790,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
                 + [("dataset", n, spec) for n, spec in datasets]):
             entry, rows, lines, problems = _shape(root, investigation, result_id, columns,
                                                   selection[0] if selection else "all", display, rounding,
-                                                  gaps, round_gaps)
+                                                  gaps, round_gaps, notes)
             report["errors"] += problems
             if not problems:
                 shaped.append((kind, label, entry, rows))
@@ -3338,6 +3829,9 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     if full:
         report["label_warnings"] = label_collisions(
             display, [(entry["result_id"], entry["columns"]) for _, _, entry, _ in shaped], questions)
+        report["precision_warnings"] = list({(row["result_id"], row["column"]): row
+                                             for row in notes["precision"]}.values())
+        report["value_warnings"] = value_warnings(notes["codes"])
 
     checks = {}
     if serialized:
@@ -3360,6 +3854,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
         flags = sync_flags(record.get("revalidation_flags"), state_flags(root, investigation))
     except ValueError as error:
         flags, report["flags_error"] = None, str(error)
+    draft.mkdir(parents=True, exist_ok=True)  # The first export creates the draft folder.
 
     if full:
         frames = [(entry, rows) for kind, _, entry, rows in shaped if kind == "chart"]
@@ -3388,7 +3883,8 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
                 writer.writerows(rows)
             report["datasets"].append({"path": _rel(draft, dataset), "result_id": entry["result_id"]})
             selection.append({"path": _rel(draft, dataset), "result_id": entry["result_id"],
-                              "columns": entry["columns"], "percent": entry["percent"], "round": entry["round"]})
+                              "columns": entry["columns"], "percent": entry["percent"], "scale": entry["scale"],
+                              "round": entry["round"]})
         if directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()
         record["dataset_selection"] = selection or "none"
@@ -3412,8 +3908,20 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     # revalidation_flags follows state.md on every write; an unreadable state.md leaves it as it was.
     if flags is not None:
         record["revalidation_flags"] = flags
+    # Each finding slide's slug, which presentation_order lists, kept across a reworded heading.
+    if (draft / "findings.md").is_file() and (draft / "methodology.md").is_file():
+        try:
+            primaries = finding_primaries(draft, represented)
+            if not (heading_problems(draft) and isinstance(record.get("slide_slugs"), list)):
+                record["slide_slugs"] = slide_slugs([(slide["heading"], primary) for slide, primary in primaries],
+                                                    record.get("slide_slugs"))[1]
+        except (OSError, UnicodeError) as error:
+            report["slide_slugs_error"] = str(error)
     _write_json(path, record)
     report["written"] = True
+    report["slide_slugs"] = [{"slug": entry["slug"], "heading": entry["heading"]}
+                             for entry in record.get("slide_slugs", []) if isinstance(entry, dict)] \
+        if isinstance(record.get("slide_slugs"), list) else []
     commits, changes = fields["producing_commit"], fields["producing_uncommitted_changes"]
     report["results"] = represented
     report["questions"] = questions
@@ -3434,7 +3942,7 @@ def cli_export(root: Path, argv: list[str]) -> int:
                     "scaled, and rounded through foundation/display.toml, a chart's rows selected as its --chart "
                     "says, once compare_evidence passes for every serialized result, and the manifest's "
                     "producing and packaging state from the evidence of every represented result. Creates the "
-                    "manifest when absent.",
+                    "draft folder and the manifest when absent.",
         epilog="Prints one JSON line.\nAny --chart, --dataset, or --no-datasets replaces the whole chart set "
                "and dataset selection: no --chart records charts none. With only --result it records "
                "provenance and leaves exported files untouched.\n"
@@ -3448,27 +3956,34 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "of the table, a value no row holds, or more rows than the table has is an error, and nothing "
                "is written. A --dataset takes no row selection.\n"
                "foundation/display.toml holds [columns] (column = display name), [values.<column>] (coded "
-               "value = label), [round] (column = decimal places, 0 to 20), [percent] with columns = [...] "
-               "(fractions shown 100 times larger, scaled exactly before rounding), and [results.\"<result>\"] "
+               "value = label, matching the saved text exactly, so True, not true), [round] (column = decimal places, 0 to 20), [percent] with columns = [...] "
+               "(fractions shown 100 times larger, scaled exactly before rounding), [scale] (column = { divide = "
+               "<a positive number> }, values divided before percent scaling and rounding), [confirmed] with "
+               "columns = [...] (shared names confirmed to fit every result), and [results.\"<result>\"] "
                "with columns, values, and percent tables that replace the global ones for that result, a values "
                "table for its whole column and a percent table for every column, so a column that already holds "
                "percents in one result is not scaled again; any other key is an error.\nEvery exported column "
                "needs a non-blank display name; gaps are listed together with display_stub, lines for absent "
                "names to fill in under [columns] (a blank name is fixed in place), and nothing is written. A "
                "number cell a file holds "
-               f"is unrounded when its saved text, with trailing zeros dropped, any exponent applied, and a "
+               f"is unrounded when its saved text, with trailing zeros dropped, any exponent and divisor applied, and a "
                f"percent column's 100-fold scaling applied, has more than {UNROUNDED_PLACES} decimal places, so "
                f"a percent column's saved fraction may carry {UNROUNDED_PLACES + 2} (366.89000039169395 and "
                "1e-05 are; 21.3500, which is 21.35, is not); a column holding one needs places under [round] "
                "or --round, listed with round_stub, lines to paste under [round] once each \"\" is replaced "
                "with the places the slide's number format shows, unquoted, such as \"share\" = 1.\nlabel_warnings "
                "lists each column whose [columns] name labels files from results with different questions "
-               "and no [results.\"<result>\".columns] name; it is a warning, and the files are written.\n"
+               "and no [results.\"<result>\".columns] name, unless [confirmed] lists it; value_warnings lists each "
+               "value code no cell of the saved tables it labels holds, when a cell differs from it only in case "
+               "or no code of its table matches any cell; precision_warnings lists each percent "
+               "column shown to fewer than two places whose fractions include one saved to exactly four, a sign "
+               "the query rounded them. Each is a warning, and the files are written.\n"
                "The manifest's charts entries record each chart's result, columns, selection, headers, value "
-               "labels used, percent columns, and places, which check-draft reapplies to verify the file; "
-               "dataset_selection entries record each dataset's result, columns, percent columns, and places.\n"
+               "labels used, percent columns, scale divisors, and places, which check-draft reapplies to verify "
+               "the file; dataset_selection entries record each dataset's result, columns, percent columns, scale "
+               "divisors, and places.\n"
                "methodology_lines states each file's shaping for methodology.md: the rows a chart selects, then "
-               "each header's source column with any percent scaling and rounding.\n"
+               "each header's source column with any division, percent scaling, and rounding.\n"
                "Writes nothing when an evidence file is "
                "missing or any comparison fails (exports_blocked).\nEach write sets revalidation_flags from "
                "state.md's flags (none when it flags nothing), keeping an entry whose finding and reason match "
@@ -3476,7 +3991,9 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "each entry that needs represented_in or, once represented, a disposition. When state.md "
                "cannot be read, flags_error says why and revalidation_flags is left as it was.\nquestions maps "
                "each represented result to the question its evidence records, for methodology.md to repeat "
-               "verbatim; the manifest's results entries record it.\nExit 0 only "
+               "verbatim; the manifest's results entries record it.\nslide_slugs lists each finding slide's slug and "
+               "heading, which the manifest's slide_slugs records with its primary result, once findings.md and "
+               "methodology.md exist; presentation_order lists these slugs.\nExit 0 only "
                "when written and check_charts is empty; 2 for unusable arguments.")
     _package_arguments(parser)
     parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS][@SELECTION]",
@@ -3536,14 +4053,20 @@ _AREA_TEXT = r"(?:[a-z0-9]+-)*[a-z0-9]*[a-z][a-z0-9]*"
 _AREA = re.compile(_AREA_TEXT)
 # [0-9], not \d, which also takes other scripts' digits, such as Arabic-Indic ones.
 _RULE_HEADING = re.compile(rf"## (R-({_AREA_TEXT})-([0-9]{{3,}}))\s*")
-_RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Scope|Fix|Added): ?(.*)")
-_LOOSE_FIELD = re.compile(r"\s*[-*+]?\s*(?:Severity|Rule|Pattern|Scope|Fix|Added)\s*:", re.IGNORECASE)
+_RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Scope|Package|Fix|Added): ?(.*)")
+_LOOSE_FIELD = re.compile(r"\s*[-*+]?\s*(?:Severity|Rule|Pattern|Scope|Package|Fix|Added)\s*:", re.IGNORECASE)
 _MARKDOWN_HEADING = re.compile(r"\s*#{1,6}(?:\s|$)")
 _REQUIRED_FIELDS = ("Severity", "Rule", "Pattern", "Fix")
 # What one violation of a rule covers, and so how check groups its matches: each line (the default, when a
 # rule has no Scope field); each slide, read as the section a #, ##, or ### heading opens as the narrative
 # renders, which in findings.md is one slide and in methodology.md and the note one section; or each file.
 _SCOPES = ("line", "slide", "document")
+# A rule kept for one package names it as <investigation>/<package>; check lists it for that package alone.
+_RULE_PACKAGE = re.compile(rf"({_SIMPLE.pattern})/({_SIMPLE.pattern})")
+# A number in a rule's text, so add can warn when it repeats one a draft states: digits with any thousands
+# groups and decimal part, compared by value. Any digit run counts, a version's parts included, since a
+# needless warning costs a glance and a missed one keeps one draft's figure in every later review.
+_RULE_NUMBER = re.compile(r"(?<![0-9])[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?")
 _BAD_HEADING = ("rule heading is not ## R-<area>-NNN with a lowercase area, its last part holding a letter, "
                 "and a three-digit number")
 _STRAY_HEADING = "heading after the first rule is not a ## R-<area>-NNN rule heading"
@@ -3552,17 +4075,18 @@ _OTHER_BREAK = re.compile("[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 _MATCH_CAP = 20
 _RULES_HEADER = """# Review rules
 
-Rules from the user's corrections to package drafts. The read-only package review checks every rule on \
-every draft; `python3 src/awb.py review-rules check <investigation> <package>` lists each rule with the \
-narrative lines its pattern matches.
+Rules from the user's corrections to package drafts. The read-only package review checks every rule that \
+holds for the draft's package; `python3 src/awb.py review-rules check <investigation> <package>` lists each \
+such rule with the narrative lines its pattern matches.
 
-Add a rule only with `python3 src/awb.py review-rules add`. A rule ID, `R-<area>-NNN`, is never \
+Add a rule only with `python3 src/awb.py review-rules add --confirmed`, after the user says yes to it. A rule ID, `R-<area>-NNN`, is never \
 renumbered, reused, or deleted: edit a rule's other fields in place, and retire a rule by setting its \
 severity to `retired`. A pattern is a Python regular expression in backticks, matched against each line \
 of the draft's `findings.md`, `methodology.md`, and `methodology-note.md` when it has one, or `none` when no \
 pattern can find the problem. An optional scope, `line` (the default), `slide`, or `document`, sets what one \
 violation covers: a line, a slide (in `methodology.md` and the note, a section under a `#`, `##`, or `###` \
-heading), or a whole file.
+heading), or a whole file. An optional package, `<investigation>/<package>`, keeps a rule for that package \
+alone; every other rule holds for every package.
 """
 
 
@@ -3600,8 +4124,10 @@ def parse_review_rules(lines: list) -> tuple:
 
     The grammar is closed. A rule section holds blank lines and `- <Field>: <value>` lines, each field at
     most once: Severity (error, warning, or retired), Rule, Pattern (`regex` in backticks, or none), and
-    Fix, all required; Scope (exactly line, slide, or document; line when absent) and Added, optional. Any
-    other line, field, or value is a problem, and a rule with an unusable Pattern or Scope is unchecked.
+    Fix, all required; Scope (exactly line, slide, or document; line when absent), Package
+    (<investigation>/<package>; every package when absent), and Added, optional. Any other line, field, or
+    value is a problem, and a rule with an unusable Pattern or Scope is unchecked; one with an unusable
+    Package holds for every package, so a typo never hides it.
     Any heading ends a section, and after the first rule every heading must be a rule's. Inside a rule
     section only blank and `- Field:` lines may appear, so a wrapped line starting with `#` is reported
     too; outside one no heading may name a rule and no line may look like a field. A rule that a hand
@@ -3644,7 +4170,8 @@ def parse_review_rules(lines: list) -> tuple:
             current["fields"][field[1]] = field[2].strip()
         elif line.strip():
             problems.append({"rule": current["id"], "line": number,
-                             "problem": "line is not a - Severity, Rule, Pattern, Scope, Fix, or Added field"})
+                             "problem": "line is not a - Severity, Rule, Pattern, Scope, Package, Fix, or "
+                                        "Added field"})
     seen = {}
     for rule in rules:
         fields = rule.pop("fields")
@@ -3661,7 +4188,11 @@ def parse_review_rules(lines: list) -> tuple:
             problems.append({"rule": rule["id"], "problem": f"unknown severity {severity!r}; use error, "
                                                             "warning, or retired"})
         rule.update(severity=severity, rule=fields.get("Rule", ""), fix=fields.get("Fix", ""),
-                    pattern=None, scope=fields.get("Scope", "line"), usable=True)
+                    pattern=None, scope=fields.get("Scope", "line"), package=fields.get("Package"), usable=True)
+        if rule["package"] is not None and not _RULE_PACKAGE.fullmatch(rule["package"]):
+            problems.append({"rule": rule["id"], "problem": f"Package {rule['package']!r} is not "
+                                                            "<investigation>/<package>"})
+            rule["package"] = None
         if fields.get("Pattern"):
             rule["pattern"], problem = _parse_pattern(fields["Pattern"])
             if problem:
@@ -3731,8 +4262,14 @@ def _read_rules(root):
     return parse_review_rules(_read_lines(path))
 
 
+def _for_package(rule, investigation, package):
+    """Whether a rule holds for this package: every rule without a Package field, and one naming it."""
+    return rule["package"] is None or rule["package"] == f"{investigation}/{package}"
+
+
 def check_review_rules(root, investigation, package) -> dict:
-    """List every review rule with the draft narrative lines its pattern matches; writes nothing."""
+    """List every review rule that holds for the package with the draft narrative lines its pattern matches,
+    leaving out a rule kept for another package; writes nothing."""
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"rules_file": REVIEW_RULES, "draft": _rel(root, draft), "rules": [], "problems": [], "errors": []}
@@ -3752,9 +4289,13 @@ def check_review_rules(root, investigation, package) -> dict:
         return report
     rules, report["problems"] = parsed
     for rule in rules:
+        if not _for_package(rule, investigation, package):
+            continue
         row = {"id": rule["id"], "severity": rule["severity"]}
         if rule["scope"] in _SCOPES[1:]:
             row["scope"] = rule["scope"]
+        if rule["package"] is not None:
+            row["package"] = rule["package"]
         if rule["severity"] == "retired":
             row["status"] = "retired"
         elif not rule["usable"]:
@@ -3772,12 +4313,62 @@ def check_review_rules(root, investigation, package) -> dict:
     return report
 
 
-def add_review_rule(root, area, severity, rule, fix, pattern=None, scope=None, *, today=None) -> dict:
+def _draft_numbers(root, drafts):
+    """({value: (narrative path, line)} for the first place each number stands in the drafts' narratives,
+    [warnings for a narrative that cannot be read])."""
+    found, warnings = {}, []
+    for draft in drafts:
+        for name in _narratives(draft):
+            try:
+                lines = _read_lines(draft / name)
+            except FileNotFoundError:
+                continue  # a narrative not written yet states no number
+            except (OSError, UnicodeError) as error:
+                warnings.append(f"{_rel(root, draft / name)} not read for numbers: {error}")
+                continue
+            for number, line in enumerate(lines, 1):
+                for match in _RULE_NUMBER.finditer(line):
+                    found.setdefault(Decimal(match[0].replace(",", "")), (_rel(root, draft / name), number))
+    return found, warnings
+
+
+def rule_number_warnings(root, texts, package=None) -> list[str]:
+    """A warning for each number in texts (the rule and its fix) that a draft's narratives also state: the
+    package's draft for a package rule, else every draft under deliveries/. A rule repeating one draft's
+    figure is usually that draft's correction, not a rule later drafts can follow."""
+    root = Path(root)
+    drafts = [_package_dir(root, *package.split("/")) / "draft"] if package else \
+        sorted(path for path in (root / "deliveries").glob("*/*/draft") if path.is_dir())
+    found, warnings = _draft_numbers(root, drafts)
+    named = {}
+    for text in texts:
+        for match in _RULE_NUMBER.finditer(text):
+            named.setdefault(Decimal(match[0].replace(",", "")), match[0])
+    for value, written in named.items():
+        if value in found:
+            path, line = found[value]
+            warnings.append(f"the rule names {written}, which {path}:{line} also states; a rule says what every "
+                            "later draft must do, so if it holds this draft's figure, reword it in place with "
+                            "the user or keep the correction as an edit")
+    return warnings
+
+
+def add_review_rule(root, area, severity, rule, fix, pattern=None, scope=None, package=None, *,
+                    confirmed=False, today=None) -> dict:
     """Append rule R-<area>-NNN, numbered after every ID the area has used, creating the file if absent.
 
-    A scope is written only when given; a rule without one is checked line by line."""
+    Refuses unless confirmed, the user having said yes to keeping the correction as a standing rule. A
+    scope is written only when given; a rule without one is checked line by line. A package,
+    <investigation>/<package>, must name an existing package and keeps the rule for it alone. warnings
+    lists numbers the rule shares with a draft (rule_number_warnings); they never refuse."""
     root = Path(root)
     path = root / REVIEW_RULES
+    if not confirmed:
+        return {"added": None, "refused": "ask the user first whether later drafts should be checked for this "
+                                          "correction, and pass --confirmed once they say yes"}
+    if package is not None and not _package_dir(root, *package.split("/")).is_dir():
+        return {"added": None, "refused": f"no package at deliveries/{package}; --package names "
+                                          "<investigation>/<package>"}
     try:
         parsed = _read_rules(root)
     except (OSError, UnicodeError) as error:
@@ -3790,6 +4381,7 @@ def add_review_rule(root, area, severity, rule, fix, pattern=None, scope=None, *
     rule_id = f"R-{area}-{number:03d}"
     day = today or datetime.now().astimezone().date().isoformat()
     scoped = f"- Scope: {scope}\n" if scope else ""
+    scoped += f"- Package: {package}\n" if package else ""
     entry = (f"## {rule_id}\n\n- Severity: {severity}\n- Rule: {rule}\n"
              f"- Pattern: {f'`{pattern}`' if pattern else 'none'}\n{scoped}- Fix: {fix}\n- Added: {day}\n")
     existing = path.read_text(encoding="utf-8-sig") if parsed is not None else ""
@@ -3798,7 +4390,7 @@ def add_review_rule(root, area, severity, rule, fix, pattern=None, scope=None, *
     path.parent.mkdir(parents=True, exist_ok=True)
     _write_text(path, existing.rstrip("\n") + "\n\n" + entry)
     return {"added": rule_id, "rules_file": REVIEW_RULES, "created": parsed is None,
-            "rules": len(rules) + 1}
+            "rules": len(rules) + 1, "warnings": rule_number_warnings(root, (rule, fix), package)}
 
 
 def cli_review_rules(root: Path, argv: list[str]) -> int:
@@ -3811,12 +4403,13 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
     actions = parser.add_subparsers(dest="action", required=True, metavar="{check,add}")
     check = actions.add_parser(
         "check", formatter_class=raw, help="list every rule with the draft lines its pattern matches",
-        description="List every review rule with the lines of the draft's findings.md, methodology.md, and "
-                    "methodology-note.md when the draft holds it, that its pattern matches. Writes nothing.",
+        description="List every review rule that holds for the package, a rule kept for another package left "
+                    "out, with the lines of the draft's findings.md, methodology.md, and methodology-note.md "
+                    "when the draft holds it, that its pattern matches. Writes nothing.",
         epilog="Prints one JSON line.\nEach rules row has id, severity, and status: matched (with matches, "
                "at most 20, and more_matches beyond), no match, no pattern (judge the rule by reading), "
                "retired, or unchecked (its problem is listed). A row has scope when the rule's is slide or "
-               "document.\nA line rule's match is one line: file, line, and text. A slide rule's match is "
+               "document, and package when the rule is kept for this package.\nA line rule's match is one line: file, line, and text. A slide rule's match is "
                "one slide, in methodology.md and the note one section, under a #, ##, or ### heading as the "
                "file renders: file, heading (null before the first), the heading's line, and lines, each line "
                "and text. A document rule's match is one file: file and lines. A match lists at most 20 "
@@ -3827,10 +4420,13 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
     add = actions.add_parser(
         "add", formatter_class=raw, help="append the next numbered rule",
         description=f"Append a rule to {REVIEW_RULES}, creating the file when absent, as R-<area>-NNN: the "
-                    "number after every one the area has used, retired rules included.",
-        epilog="Prints one JSON line: added (the new ID), rules_file, created, and rules (the count).\nRefuses, "
-               "writing nothing, when the rule file has problems that `review-rules check` lists.\nExit 0 "
-               "added; 1 refused; 2 unusable arguments.")
+                    "number after every one the area has used, retired rules included. Only with --confirmed: "
+                    "the user said yes to keeping the correction as a standing rule.",
+        epilog="Prints one JSON line: added (the new ID), rules_file, created, rules (the count), and warnings: "
+               "each number the rule or fix names that a draft's narratives also state (the --package draft, "
+               "else every draft), which still adds the rule.\nRefuses, writing nothing, without --confirmed, "
+               "when --package names no package, or when the rule file has problems that `review-rules check` "
+               "lists.\nExit 0 added; 1 refused; 2 unusable arguments.")
     add.add_argument("--area", required=True, help="what the rule governs, lowercase words joined by '-', "
                                                    "the last not all digits, such as periods or "
                                                    "metric-definitions")
@@ -3845,6 +4441,10 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
                           "rather than per line: line (the default, written only when given), slide (one "
                           "slide, in methodology.md and the note one section under a #, ##, or ### heading), "
                           "or document (one file)")
+    add.add_argument("--package", metavar="INVESTIGATION/PACKAGE",
+                     help="keep the rule for this package alone (default: every package)")
+    add.add_argument("--confirmed", action="store_true",
+                     help="the user said yes to keeping the correction as a rule later drafts are checked for")
     args = parser.parse_args(argv)
     if args.action == "check":
         report = check_review_rules(Path(root), _simple(args.investigation, "investigation"),
@@ -3868,10 +4468,478 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
             add.error(f"--{name} is not valid UTF-8")
     if args.pattern is not None and (problem := _pattern_problem(args.pattern)):
         add.error(f"--pattern {problem}")
+    if args.package is not None and not _RULE_PACKAGE.fullmatch(args.package):
+        add.error(f"--package must be <investigation>/<package>, each a simple name: {args.package!r}")
     report = add_review_rule(Path(root), args.area, args.severity, args.rule.strip(), args.fix.strip(),
-                             args.pattern, args.scope)
+                             args.pattern, args.scope, args.package, confirmed=args.confirmed)
     _print(report)
     return 0 if report["added"] else 1
+
+
+# ---------------------------------------------------------------- review receipt
+
+# The record of the last review, beside draft/ so it is never inventoried or released.
+REVIEW_DIR = "review"
+RECEIPT = "receipt.json"
+# What start saw as the reviewer was launched, which the next record binds the report to, and the digest of
+# each report that does not pass and was refused because the draft changed after its start, carried by start.
+STARTED = "started.json"
+_KINDS = ("full", "scoped")
+# What a review reads, in the order the fingerprint hashes it, and each one's file in the snapshot; then
+# each evidence file the manifest's results name and each scan methodology.md names by its foundation/scans/
+# path, which step 3 reads beside a cited quality ID, by its path, in sorted order.
+# The brief is keyed brief.md and read from the investigation; its questions and Audience set what a review checks.
+# The glossary, source register, and quality record are read whole, as step 3's readability, source-series,
+# and cited-check checks read them.
+BRIEF = "brief.md"
+GLOSSARY = "foundation/glossary.md"
+SOURCES = "foundation/sources.md"
+QUALITY = "foundation/quality.md"
+_SCAN_PATH = re.compile(r"foundation/scans/[A-Za-z0-9][A-Za-z0-9._@-]*\.json")
+_REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.md",
+                  METHODOLOGY_NOTE: METHODOLOGY_NOTE, BRIEF: BRIEF, REVIEW_RULES: "review-rules.md",
+                  GLOSSARY: "glossary.md", SOURCES: "sources.md", QUALITY: "quality.md",
+                  "revalidation_flags": "revalidation_flags.json"}
+# show's whole JSON line, as printed, stays within one read tool result (16,000 characters by default).
+_READ_LIMIT = 16000
+_SUMMARY = re.compile(r"review( \(scoped\))?: (?:(clean)|([0-9]+) violations? \(([0-9]+) errors?\), "
+                      r"([0-9]+) narrative problems?, ([0-9]+) command problems?)\.?")
+# A row may be bulleted or numbered, with backticks around it inside or outside the marker; review_summary
+# strips both before matching, as it strips backticks around the last line.
+_ROW_MARKER = re.compile(r"^(?:[-*+]|[0-9]+[.)])\s+")
+_VIOLATION_ROW = re.compile(r"R-\S+ violation (error|warning)(?=\s)")
+_NARRATIVE_ROW = re.compile(r"narrative\s")
+_SUMMARY_FORM = ("`review: clean`, or `review: <v> violations (<e> error), <n> narrative problems, <c> command "
+                 "problems`, opening `review (scoped):` for a scoped review")
+NO_REVIEW = "no passed review of this draft: run the review in awb-package's references/review.md"
+_NEW_REVIEW = "run review-receipt start, launch a new reviewer, and record the report it returns"
+
+
+def _reviewed_flags(record):
+    """The manifest's revalidation_flags reduced to what makes a review stale: each entry's finding, reason,
+    represented_in, and whether its disposition is omit. Anything else, such as release_with_caveat recorded
+    at release, leaves a review current; an entry that is not an object, or a value that is not a list, is
+    kept whole, so any change to it counts."""
+    flags = record.get("revalidation_flags")
+    if not isinstance(flags, list):
+        return flags
+    return [{"finding": flag.get("finding"), "reason": flag.get("reason"),
+             "represented_in": flag.get("represented_in"), "omit": flag.get("disposition") == "omit"}
+            if isinstance(flag, dict) else flag for flag in flags]
+
+
+def _package_rules(data, investigation, package):
+    """The rule file's bytes without the sections of rules kept for another package, so adding or changing
+    one leaves this package's review current, or None when no rule holds for this package, as for an absent
+    file. A file that does not decode or parse cleanly is kept whole, so any change to it still counts."""
+    try:
+        rules, problems = parse_review_rules([line.removesuffix("\r")
+                                              for line in data.decode("utf-8-sig").split("\n")])
+    except UnicodeError:
+        return data
+    if problems:
+        return data
+    if not any(_for_package(rule, investigation, package) for rule in rules):
+        return None
+    lines = data.split(b"\n")
+    # A sound file holds only rule headings after its first rule, so a section runs to the next one; the
+    # last runs to the end of the file, its final newline included, so a rule appended for another package
+    # leaves these bytes exactly as they were.
+    ends = [rule["line"] - 1 for rule in rules[1:]] + [len(lines)]
+    foreign = [(rule["line"] - 1, end) for rule, end in zip(rules, ends)
+               if not _for_package(rule, investigation, package)]
+    if not foreign:
+        return data
+    kept, last = [], 0
+    for start, end in foreign:
+        kept += lines[last:start]
+        last = end
+    kept += lines[last:]
+    return b"\n".join(kept) + (b"\n" if last == len(lines) and kept and kept[-1] != b"" else b"")
+
+
+def review_inputs(root, investigation, package) -> dict:
+    """{input: bytes, or None when absent} for exactly what a review reads: the three narratives, the
+    investigation's brief.md, the rule file without rules kept for another package (_package_rules), the
+    glossary, source register, and quality record whole, the reduced revalidation_flags as indented JSON, and
+    each evidence file the manifest's results name or scan methodology.md names by its foundation/scans/
+    path, which step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a
+    directory included."""
+    root = Path(root)
+    draft = _package_dir(root, investigation, package) / "draft"
+    paths = {name: draft / name for name in NARRATIVES + (METHODOLOGY_NOTE,)}
+    paths[BRIEF] = root / "investigations" / investigation / BRIEF
+    paths[REVIEW_RULES] = root / REVIEW_RULES
+    paths[GLOSSARY], paths[SOURCES], paths[QUALITY] = root / GLOSSARY, root / SOURCES, root / QUALITY
+    inputs = {}
+    for name, path in paths.items():
+        try:
+            inputs[name] = path.read_bytes()
+        except FileNotFoundError:
+            inputs[name] = None
+    if inputs[REVIEW_RULES] is not None:
+        inputs[REVIEW_RULES] = _package_rules(inputs[REVIEW_RULES], investigation, package)
+    record, flags = {}, None
+    try:
+        record = _read_json(draft / MANIFEST)
+        flags = _reviewed_flags(record)
+    except FileNotFoundError:
+        flags = {"manifest": "absent"}
+    except (OSError, ValueError):
+        flags = {"manifest": "unreadable"}
+    inputs["revalidation_flags"] = (json.dumps(flags, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    results = record.get("results") if isinstance(record.get("results"), list) else []
+    evidence = {entry["evidence"] for entry in results if isinstance(entry, dict)
+                and isinstance(entry.get("evidence"), str) and entry["evidence"] not in ("", *_REVIEW_INPUTS)}
+    evidence.update(_SCAN_PATH.findall((inputs["methodology.md"] or b"").decode("utf-8", "replace")))
+    for name in sorted(evidence):
+        try:
+            inputs[name] = (root / name).read_bytes()
+        except FileNotFoundError:
+            inputs[name] = None
+    return inputs
+
+
+def _stored(name):
+    """An input's file in the snapshot; an evidence path is stored under a name derived from it."""
+    return _REVIEW_INPUTS.get(name) or f"evidence/{hashlib.sha256(name.encode()).hexdigest()[:16]}.json"
+
+
+def _digests(inputs):
+    return {name: hashlib.sha256(data).hexdigest() if data is not None else "absent"
+            for name, data in inputs.items()}
+
+
+def _fingerprint(digests):
+    return hashlib.sha256("".join(f"{name}\0{digest}\n" for name, digest in digests.items()).encode()).hexdigest()
+
+
+def review_summary(text, kind, accepted) -> tuple:
+    """(passed, refusal) from a review report: its last non-blank line, as review.md's Brief step 4 writes it.
+
+    passed is True when the line is clean, or when it counts no error violation and no command problem and
+    accepted holds one entry for each warning violation and narrative problem it counts. A refusal names a
+    report no record may rest on: a last line that does not parse, a kind it does not open with, more error
+    than violations, a clean line given acceptances, or a body listing more violation or narrative rows of a
+    kind than the last line counts, so a report that undercounts its own rows never passes."""
+    lines = [line.strip().strip("`").strip() for line in text.splitlines() if line.strip().strip("`").strip()]
+    if not lines:
+        return None, "the report is empty"
+    last = lines[-1]
+    match = _SUMMARY.fullmatch(last)
+    if not match:
+        return None, f"the report's last line is not {_SUMMARY_FORM}: {last[:200]!r}"
+    if bool(match[1]) != (kind == "scoped"):
+        opens = "review (scoped):" if match[1] else "review:"
+        return None, f"--kind {kind} does not match the report's last line, which opens {opens}"
+    violations, errors, narrative, command = (0, 0, 0, 0) if match[2] else map(int, match.group(3, 4, 5, 6))
+    if errors > violations:
+        return None, "the report's last line counts more error violations than violations"
+    if match[2] and accepted:
+        return None, "a clean review has nothing to accept; record it without --accept"
+    body = [_ROW_MARKER.sub("", line, count=1).strip("`").strip() for line in lines[:-1]]
+    rows = Counter(row[1] for row in map(_VIOLATION_ROW.match, body) if row)
+    narrative_rows = sum(1 for line in body if _NARRATIVE_ROW.match(line))
+    if rows["error"] > errors or rows["warning"] > violations - errors or narrative_rows > narrative:
+        return None, (f"the report lists {rows['error']} error and {rows['warning']} warning violations and "
+                      f"{narrative_rows} narrative problems, more than its last line counts")
+    return errors == 0 and command == 0 and len(accepted) == violations - errors + narrative, None
+
+
+def _no_draft(root, package_dir):
+    if not (package_dir / "draft").is_dir():
+        return _NO_DRAFT.format(_rel(root, package_dir / "draft"))
+    return None
+
+
+def start_review(root, investigation, package, kind) -> dict:
+    """Mark a review launched: write review/started.json with its kind and the digest of each input the
+    reviewer will read, so the next record binds its report to what the reviewer read, not to the draft at
+    record time, and carries the reports refused under an earlier start. A scoped start needs a recorded
+    review; a refusal writes nothing."""
+    root = Path(root)
+    package_dir = _package_dir(root, investigation, package)
+    if refusal := _no_draft(root, package_dir):
+        return {"started": False, "refused": refusal}
+    if kind == "scoped" and review_receipt(root, investigation, package)["status"] == "none":
+        return {"started": False, "refused": "no recorded review to scope against; the review is full"}
+    try:
+        earlier = _read_json(package_dir / REVIEW_DIR / STARTED)
+        earlier = earlier.get("earlier", []) + earlier.get("refused", [])
+    except (OSError, ValueError, AttributeError, TypeError):
+        earlier = []
+    try:
+        digests = _digests(review_inputs(root, investigation, package))
+        (package_dir / REVIEW_DIR).mkdir(exist_ok=True)
+        _write_json(package_dir / REVIEW_DIR / STARTED, {"kind": kind, "inputs": digests, "earlier": earlier})
+    except OSError as error:
+        return {"started": False, "refused": f"the draft cannot be read or the start written: {error}"}
+    return {"started": True, "kind": kind}
+
+
+def record_review(root, investigation, package, kind, text, accepted=(), *, now=None) -> dict:
+    """Record a review started with start_review: snapshot what it read under
+    deliveries/<investigation>/<package>/review/ and write receipt.json, replacing the previous record and
+    consuming the start. A report that does not pass is recorded too, so the next review can be scoped
+    against it. Refused, writing nothing, for an unusable report, with no start of this kind, or when an
+    input differs from what start saw, since the reviewer did not read that change; such a report that does
+    not pass is noted in started.json, which is all that refusal writes.
+
+    A report that does not pass is also refused when it is the one recorded, accepted or not, and an input
+    has changed since (show reports stale), or when it was refused for a change under an earlier
+    start: a report in hand never covers an edit. A new reviewer returning the same words is refused too; a
+    report that passes, such as a clean one, is not checked, since the Brief fixes its words.
+
+    With accepted, the report must be the one already recorded, of the same kind, with nothing it read
+    changed since (show reports current or failed): only accepted and passed change, and the snapshot stays
+    the one the review read, so an edit made before the acceptances is never counted as reviewed."""
+    root = Path(root)
+    package_dir = _package_dir(root, investigation, package)
+    if refusal := _no_draft(root, package_dir):
+        return {"recorded": False, "refused": refusal}
+    accepted = list(accepted)
+    passed, refusal = review_summary(text, kind, accepted)
+    if refusal:
+        return {"recorded": False, "refused": refusal}
+    directory = package_dir / REVIEW_DIR
+    if accepted:
+        prior = review_receipt(root, investigation, package)
+        if prior["report"] != text or prior["kind"] != kind:
+            return {"recorded": False, "refused": (
+                f"--accept amends the report already recorded (show reports {prior['status']}), and this is another "
+                "report: record it without --accept first")}
+        if prior["status"] not in ("current", "failed"):
+            return {"recorded": False, "refused": (
+                f"--accept amends the report already recorded while nothing it read has changed (show reports "
+                f"{prior['status']}), so this report cannot be recorded again, with --accept or without: "
+                f"{_NEW_REVIEW}, then record that report again with --accept")}
+        try:
+            receipt = _read_json(directory / RECEIPT)
+            _write_json(directory / RECEIPT, {**receipt, "passed": passed, "accepted": accepted})
+        except (OSError, ValueError) as error:
+            return {"recorded": False, "refused": f"{_rel(root, directory)}: {error}"}
+        return {"recorded": True, "receipt": _rel(root, directory / RECEIPT), "kind": kind, "passed": passed,
+                "accepted": accepted}
+    try:
+        started = _read_json(directory / STARTED)
+    except (OSError, ValueError):
+        started = {}
+    if not isinstance(started, dict) or started.get("kind") != kind:
+        return {"recorded": False, "refused": f"no {kind} review started: run review-receipt start --kind "
+                                              f"{kind} right before launching the reviewer"}
+    try:
+        inputs = review_inputs(root, investigation, package)
+    except OSError as error:
+        return {"recorded": False, "refused": f"the draft cannot be read: {error}"}
+    digests = _digests(inputs)
+    report_digest = hashlib.sha256(text.encode()).hexdigest()
+    if digests != started.get("inputs"):
+        if not passed and report_digest not in started.get("refused", []):
+            try:
+                _write_json(directory / STARTED, {**started, "refused": started.get("refused", []) + [report_digest]})
+            except OSError:
+                pass
+        return {"recorded": False, "refused": "the draft changed after the review started, so the reviewer did not "
+                                              f"read the change and this report cannot be recorded: {_NEW_REVIEW}"}
+    try:
+        prior = _read_json(directory / RECEIPT)
+    except (OSError, ValueError):
+        prior = {}
+    if not passed and (report_digest in started.get("earlier", []) or isinstance(prior, dict) and prior.get(
+            "report") == text and prior.get("inputs") != digests):
+        return {"recorded": False, "refused": "this report was read against an earlier draft, refused or recorded "
+                                              f"before a change, so it cannot be recorded: {_NEW_REVIEW}"}
+    snapshot = directory / "snapshot"
+    try:
+        # The old receipt goes first, so an interrupted record leaves none, and the next review is full.
+        (directory / RECEIPT).unlink(missing_ok=True)
+        if snapshot.exists():
+            shutil.rmtree(snapshot)
+        snapshot.mkdir(parents=True)
+        for name, data in inputs.items():
+            if data is not None:
+                (snapshot / _stored(name)).parent.mkdir(exist_ok=True)
+                (snapshot / _stored(name)).write_bytes(data)
+        receipt = {"recorded_at": now or _now(), "kind": kind, "fingerprint": _fingerprint(digests),
+                   "inputs": digests, "report": text, "passed": passed, "accepted": accepted}
+        _write_json(directory / RECEIPT, receipt)
+        (directory / STARTED).unlink()
+    except OSError as error:
+        return {"recorded": False, "refused": f"{_rel(root, directory)}: {error}"}
+    return {"recorded": True, "receipt": _rel(root, directory / RECEIPT), "kind": kind, "passed": passed,
+            "accepted": accepted}
+
+
+def _diff_text(data):
+    """Lines split at \\n alone, so hunk line numbers are the ones grep -n gives."""
+    if data is None:
+        return []
+    text = data.decode("utf-8", "replace").removeprefix("﻿")
+    parts = text.split("\n")
+    return [part + "\n" for part in parts[:-1]] + ([parts[-1] + "\n"] if parts[-1] else [])
+
+
+def review_receipt(root, investigation, package) -> dict:
+    """The last review's record against the draft now; writes nothing.
+
+    status is none (no receipt), current (it passed and nothing it read has changed), stale (something it
+    read has changed), or failed (nothing changed, but it did not pass). changed names each input whose
+    content differs, and diff is a unified diff of each from what the review read to the current file, cut
+    so the printed line stays within _READ_LIMIT characters, with diff_cut counting the rest."""
+    root = Path(root)
+    directory = _package_dir(root, investigation, package) / REVIEW_DIR
+    report = {"status": "none", "kind": None, "recorded_at": None, "accepted": [], "report": None,
+              "changed": [], "diff": "", "diff_cut": 0, "errors": []}
+    try:
+        receipt = _read_json(directory / RECEIPT)
+    except FileNotFoundError:
+        return report
+    except (OSError, ValueError) as error:
+        report["errors"].append(f"{_rel(root, directory / RECEIPT)}: {error}")
+        return report
+    inputs_seen = receipt.get("inputs")
+    if receipt.get("kind") not in _KINDS or not isinstance(receipt.get("passed"), bool) \
+            or not isinstance(inputs_seen, dict) or not isinstance(receipt.get("accepted"), list):
+        report["errors"].append(f"{_rel(root, directory / RECEIPT)}: not a review receipt; record the review again")
+        return report
+    report.update(kind=receipt["kind"], recorded_at=receipt.get("recorded_at"), accepted=receipt["accepted"],
+                  report=receipt.get("report"))
+    try:
+        current = review_inputs(root, investigation, package)
+    except OSError as error:
+        report["status"] = "stale"
+        report["errors"].append(f"the draft cannot be read: {error}")
+        return report
+    digests = _digests(current)
+    report["changed"] = [name for name in list(digests) + [n for n in inputs_seen if n not in digests]
+                         if digests.get(name) != inputs_seen.get(name)]
+    if report["changed"] or _fingerprint(digests) != receipt.get("fingerprint"):
+        report["status"] = "stale"
+    else:
+        report["status"] = "current" if receipt["passed"] else "failed"
+    draft = _rel(root, _package_dir(root, investigation, package) / "draft")
+    pieces = []
+    for name in report["changed"]:
+        try:
+            before = (directory / "snapshot" / _stored(name)).read_bytes()
+        except OSError:
+            before = None
+        # The rule file is diffed as the review reads it, so its line numbers count only this package's rules.
+        label = f"{draft}/{MANIFEST} revalidation_flags" if name == "revalidation_flags" else \
+            f"investigations/{investigation}/{BRIEF}" if name == BRIEF else \
+            f"{REVIEW_RULES} without rules kept for another package" if name == REVIEW_RULES else \
+            f"{draft}/{name}" if name in _REVIEW_INPUTS and not name.startswith("foundation/") else name
+        pieces += difflib.unified_diff(_diff_text(before), _diff_text(current.get(name)),
+                                       f"reviewed {label}", label)
+    # Cut against what the rest of the printed line leaves, each line counted as JSON encodes it, so a quote
+    # or newline counts twice and a curly quote six times. A prior report too long to leave room cuts it all.
+    budget = _READ_LIMIT - 200 - len(json.dumps(report))
+    kept = 0
+    for line in pieces:
+        budget -= len(json.dumps(line)) - 2
+        if budget < 0:
+            break
+        kept += 1
+    diff = "".join(pieces)
+    if kept < len(pieces):
+        report["diff_cut"] = len(diff) - len("".join(pieces[:kept]))
+        diff = "".join(pieces[:kept]) + f"[... {report['diff_cut']} characters cut; read each changed file in full ...]\n"
+    report["diff"] = diff
+    return report
+
+
+def cli_review_receipt(root: Path, argv: list[str]) -> int:
+    raw = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(
+        prog="awb.py review-receipt", formatter_class=raw,
+        description="Start a draft review, record it with a snapshot of what it read, or show the last one "
+                    "against the draft now.",
+        epilog="The record is deliveries/<investigation>/<package>/review/, beside draft/, so it is never "
+               "inventoried or released.\nRun `awb.py review-receipt <subcommand> --help` for its arguments, "
+               "output, and exit status.")
+    actions = parser.add_subparsers(dest="action", required=True, metavar="{start,record,show}")
+    start = actions.add_parser(
+        "start", formatter_class=raw, help="mark a review launched, right before starting the reviewer",
+        description="Mark a review launched: write review/started.json with its kind and a SHA-256 digest of "
+                    "each input record snapshots. Run it right before starting the reviewer; the next record "
+                    "binds its report to these inputs. It carries the reports an earlier start's record refused.",
+        epilog="Prints one JSON line: started and kind.\nRefuses, writing nothing, when the package has no draft "
+               "or --kind scoped has no recorded review to scope against.\nExit 0 started; 1 refused; 2 "
+               "unusable arguments.")
+    _package_arguments(start)
+    start.add_argument("--kind", required=True, choices=_KINDS, help="full, or scoped against the last record")
+    record = actions.add_parser(
+        "record", formatter_class=raw, help="record a review's report and what it read",
+        description="Record the report of a review begun with start: snapshot the draft's findings.md, "
+                    "methodology.md, methodology-note.md when present, the investigation's brief.md when present, "
+                    "foundation/glossary.md, foundation/sources.md, and foundation/quality.md when present, "
+                    "foundation/review-rules.md when present without rules kept for another package, and the "
+                    "manifest's revalidation_flags (finding, reason, represented_in, and whether the "
+                    "disposition is omit), each evidence file its results name, and each scan methodology.md names "
+                    "by its foundation/scans/<name>.json path, and write receipt.json with "
+                    "a SHA-256 fingerprint of them, the report verbatim, passed, and accepted. Each record "
+                    "replaces the previous one and consumes the start.",
+        epilog=f"The report's last line is {_SUMMARY_FORM}. passed is true when it is clean, or when it counts no "
+               "error violation and no command problem and --accept is given once for each warning violation "
+               "and narrative problem it counts. A report that does not pass is recorded with passed false.\n"
+               "Without --accept, a start of the same --kind must come first, with nothing it saw changed "
+               "since. A report in hand never covers an edit: after any change to what it read, run start, launch "
+               "a new reviewer, and record the report it returns.\n"
+               "With --accept, the report must be the one already recorded, with nothing it read changed since: "
+               "only accepted and passed change, and the snapshot stays the one the review read.\n"
+               "Prints one JSON line: recorded, receipt, kind, passed, and accepted.\nRefuses, writing nothing, "
+               "when the last line does not parse, --kind disagrees with its opening, it counts more errors than "
+               "violations, a clean report is given --accept, the report lists more violation or narrative "
+               "rows than its last line counts, no review of this --kind was started, the draft changed after "
+               "start, --accept comes with another report or after a change, or a report that does not pass is "
+               "the recorded one after a change, or one refused for a change under an "
+               "earlier start. A report that does not pass refused for a change after start is noted in "
+               "started.json, all that refusal writes; a new reviewer returning the same words is refused too.\n"
+               "Exit 0 recorded; 1 refused; "
+               "2 unusable arguments.")
+    _package_arguments(record)
+    record.add_argument("--kind", required=True, choices=_KINDS, help="full, or scoped against the last record")
+    record.add_argument("--report", required=True,
+                        help="the reviewer's report file, project-relative or absolute, or - for standard input")
+    record.add_argument("--accept", action="append", default=[], metavar="TEXT",
+                        help='a problem the user accepted, as "<file>:<line> <quote>: <the user\'s reason>"; '
+                             "once per accepted warning violation or narrative problem")
+    show = actions.add_parser(
+        "show", formatter_class=raw, help="compare the last record with the draft now, writing nothing",
+        description="Compare the last recorded review with the draft now. Writes nothing.",
+        epilog="Prints one JSON line: status (none: no record; current: it passed and nothing it read has "
+               "changed; stale: something it read has changed; failed: nothing has changed, but it did not "
+               "pass), kind, recorded_at, accepted, report (the prior report), changed (each input whose content "
+               "differs; brief.md is the investigation's brief, an evidence file is named by its path), diff (a "
+               "unified diff of each from the reviewed copy to the current file, its + line numbers the current "
+               "file's, the rule file's counting only this package's rules, cut so the printed line stays "
+               f"within {_READ_LIMIT} characters, with diff_cut counting what was cut), and errors.\n"
+               "Exit 0 unless errors is not empty.")
+    _package_arguments(show)
+    args = parser.parse_args(argv)
+    investigation, package = _simple(args.investigation, "investigation"), _simple(args.package, "package")
+    if args.action == "show":
+        report = review_receipt(Path(root), investigation, package)
+        _print(report)
+        return 1 if report["errors"] else 0
+    if args.action == "start":
+        report = start_review(Path(root), investigation, package, args.kind)
+        _print(report)
+        return 0 if report["started"] else 1
+    for text in args.accept:
+        if not text.strip() or text.splitlines() != [text]:
+            record.error("--accept must be one non-blank line")
+    try:
+        if args.report == "-":
+            text = sys.stdin.read()
+        else:
+            path = Path(args.report).expanduser()
+            text = (path if path.is_absolute() else Path(root) / path).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        record.error(f"--report: {error}")
+    report = record_review(Path(root), investigation, package, args.kind, text, [a.strip() for a in args.accept])
+    _print(report)
+    return 0 if report["recorded"] else 1
 
 
 # ---------------------------------------------------------------- release
@@ -3956,7 +5024,9 @@ def provenance_gaps(record: dict) -> list[dict]:
     """Each manifest value recorded as unknown, an {"unknown": reason} object, by its dotted field path,
     with the reason, and each requirements line a result's runtime could not read, whose packages'
     versions went unrecorded. A string is never a gap, so a settings value or a column name such as
-    unknown_pickup is not one."""
+    unknown_pickup is not one. Neither is packaging_commit or packaging_uncommitted_changes unknown for
+    exactly a reason packaging_state gives for a project without Git or without a commit yet; any other
+    reason there is a gap."""
     gaps = []
 
     def walk(value, path):
@@ -3976,6 +5046,9 @@ def provenance_gaps(record: dict) -> list[dict]:
                 walk(item, f"{path}[{index}]")
 
     for key, value in record.items():
+        if key in {"packaging_commit", "packaging_uncommitted_changes"} and _is_unknown(value) \
+                and isinstance(value["unknown"], str) and value["unknown"] in _NO_HISTORY:
+            continue
         if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers", "presentation_order"}:
             walk(value, key)
     return gaps
@@ -4027,7 +5100,8 @@ def storage_location(root) -> tuple:
 
 def _copy_to_storage(root, local, investigation, package, number):
     """Copy one release to <location>/<investigation>/<package>/<n>/. The checkout's released/ folder is not
-    repeated there, so a location the user calls releases holds no releases/.../released/ path."""
+    repeated there, so a location the user calls releases holds no releases/.../released/ path. Every row with a
+    recorded location names that destination in full as path: absolute for a path location, else as recorded."""
     kind, location = storage_location(root)
     if kind == "none-chosen":
         return {"status": "none chosen",
@@ -4037,26 +5111,28 @@ def _copy_to_storage(root, local, investigation, package, number):
                    f"record where released packages are kept, then copy {_rel(root, local)}/ there "
                    f"as <location>/{investigation}/{package}/{number}/")
     if kind != "path":
-        return {"status": kind, "location": location, "instruction": instruction}
+        return {"status": kind, "location": location, "instruction": instruction,
+                **({"path": destination} if destination else {})}
     base = Path(location).expanduser()
     base = base if base.is_absolute() else Path(root) / base
-    if not base.is_dir():
-        return {"status": "unreachable", "location": location, "instruction": instruction}
     target = base / investigation / package / number
+    full = os.path.abspath(target) + os.sep
+    if not base.is_dir():
+        return {"status": "unreachable", "location": location, "path": full, "instruction": instruction}
     try:
         if target.exists():
             # An identical earlier copy is already in place; anything else is left for the user.
             differences = compare_trees(local, target)
             if not differences:
-                return {"status": "already copied", "copy": str(target), "compare_trees": []}
-            return {"status": "conflict", "copy": str(target), "compare_trees": differences,
+                return {"status": "already copied", "copy": str(target), "path": full, "compare_trees": []}
+            return {"status": "conflict", "copy": str(target), "path": full, "compare_trees": differences,
                     "problem": "destination already exists and differs; nothing was overwritten"}
         shutil.copytree(local, target)
         differences = compare_trees(local, target)
     except (OSError, ValueError, shutil.Error) as error:
-        return {"status": "copy failed", "copy": str(target), "problem": str(error),
+        return {"status": "copy failed", "copy": str(target), "path": full, "problem": str(error),
                 "instruction": instruction}
-    return {"status": "copied" if not differences else "mismatch", "copy": str(target),
+    return {"status": "copied" if not differences else "mismatch", "copy": str(target), "path": full,
             "compare_trees": differences}
 
 
@@ -4064,11 +5140,18 @@ _STORAGE_FAILURES = {"conflict", "copy failed", "mismatch"}
 
 
 def release(root, investigation, package) -> dict:
-    """Verify the draft, copy it to the next numbered release, stamp it, and copy it to storage."""
+    """Verify the draft and its review receipt, copy it to the next numbered release, stamp it with the
+    review it passed, and copy it to storage."""
     root = Path(root)
     package_dir = _package_dir(root, investigation, package)
     check_report = check_draft(root, investigation, package, verify_only=True)
     report = {"released": False, "check": {"passed": check_report["passed"]}}
+    # First, since a changed helper or package format may change the gate's own verdict.
+    unconfirmed = [row for row in check_report["helper_drift"] if not row["confirmed"]]
+    if unconfirmed:
+        report["refused"] = "helpers or package formats differ from the install receipt without the user's confirmation"
+        report["helper_drift"] = unconfirmed
+        return report
     if not _structure_passed(check_report):
         report["refused"] = "check-draft --verify-only does not pass"
         report["check"] = check_report
@@ -4079,6 +5162,11 @@ def release(root, investigation, package) -> dict:
         report["refused"] = "flagged findings without a release disposition"
         report["unmatched_flags"] = check_report["unmatched_flags"]
         report["dispositions"] = problems
+        return report
+    review = review_receipt(root, investigation, package)
+    if review["status"] != "current":
+        report["refused"] = NO_REVIEW
+        report["review"] = {"status": review["status"], "changed": review["changed"]}
         return report
 
     released = package_dir / "released"
@@ -4094,16 +5182,19 @@ def release(root, investigation, package) -> dict:
     staging = released / f".{number}.{os.getpid()}.tmp"
     released.mkdir(parents=True, exist_ok=True)
     try:
-        shutil.copytree(package_dir / "draft", staging)
+        # The headline preview stays behind: it is no package file.
+        shutil.copytree(package_dir / "draft", staging,
+                        ignore=lambda folder, names: [PREVIEW] if Path(folder) == package_dir / "draft" else [])
         record.update({"status": "release", "release_number": number, "released_at": _now(),
-                       "prior_release": f"released/{prior.name}" if prior else "none"})
+                       "prior_release": f"released/{prior.name}" if prior else "none",
+                       "review": {key: review[key] for key in ("kind", "recorded_at", "accepted")}})
         _write_json(staging / MANIFEST, record)
         os.rename(staging, target)
     finally:
         if staging.exists():
             shutil.rmtree(staging)
     report.update(released=True, release=_rel(root, target), release_number=number,
-                  released_at=record["released_at"], prior_release=record["prior_release"],
+                  released_at=record["released_at"], prior_release=record["prior_release"], review=record["review"],
                   verify=verify(target, record["inventory"]),
                   datasets=record.get("dataset_selection", {"unknown": "dataset_selection is not recorded"}),
                   dispositions=release_dispositions(record, prior_record),
@@ -4119,11 +5210,13 @@ def cli_release(root: Path, argv: list[str]) -> int:
         prog="awb.py release", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Copy a draft that passes check-draft --verify-only, with every flagged finding "
                     "recorded and disposed, to the next numbered release and to release storage.",
-        epilog="Prints one JSON line.\nRefuses, creating nothing, unless check-draft --verify-only passes and "
-               "every represented revalidation_flags entry is omit or release_with_caveat; a flag refusal "
-               "lists unmatched_flags and dispositions. Its draft_markers rows do not refuse: run check-draft "
+        epilog="Prints one JSON line.\nRefuses, creating nothing, while a check-draft helper_drift row is "
+               "unconfirmed, listing those rows as helper_drift, and unless check-draft --verify-only passes, "
+               "every represented revalidation_flags entry is omit or release_with_caveat, and review-receipt "
+               "show reports current; a flag refusal lists unmatched_flags and dispositions, and a review "
+               "refusal the review's status and changed. Its draft_markers rows do not refuse: run check-draft "
                "--verify-only first to show them.\nOn success it prints the report fields: datasets, "
-               "dispositions (new: absent from the prior release's manifest), open_caveats, provenance_gaps, "
+               "review (the passed review's kind, recorded_at, and accepted problems, which the released manifest records too), dispositions (new: absent from the prior release's manifest), open_caveats, provenance_gaps, "
                "checkout_only_acquisitions, verify (the local copy), and storage.\nopen_caveats lists the open "
                "caveats the release carries, new or carried forward: the headline and then each bullet of the deck's "
                "Limitations and open caveats and Open questions slides, wherever they stand, as slide, line, "
@@ -4131,7 +5224,8 @@ def cli_release(root: Path, argv: list[str]) -> int:
                "its caveat, as finding, reason, and "
                "represented_in; while one remains, the release is not clean.\nThe release is "
                "deliveries/<investigation>/<package>/released/<n>/; storage holds its copy at "
-               "<location>/<investigation>/<package>/<n>/.\nstorage.status is copied or "
+               "<location>/<investigation>/<package>/<n>/, which storage.path gives in full, absolute for a path "
+               "location, whenever a location is recorded.\nstorage.status is copied or "
                "already copied (empty compare_trees), mismatch or conflict (compare_trees rows), copy failed "
                "(problem), unreachable or unrecorded (instruction), or none chosen (warning).\nExit 1 on "
                "refusal, a verify row, or storage status mismatch, conflict, or copy failed.")

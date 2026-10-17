@@ -1,4 +1,8 @@
 # Kept cases:
+# test_receipt_name_matches_the_installer: the draft helper reads the receipt file the installer writes.
+# test_an_edited_helper_is_drift_that_release_refuses_until_confirmed: with an install receipt, an edited src/packaging/draft.py is a helper_drift row naming it in both check-draft modes, which still pass; release refuses until helper_drift_confirmed lists that file at that hash with a reason, and a later edit needs a new confirmation.
+# test_helper_drift_rows_for_missing_unrecorded_and_unreadable_files: no receipt gives no rows; a missing package format is a row with a null sha256, confirmable as such; a changed file outside src/ and package-format/, or one the receipt does not record, gives none; an unreadable or malformed receipt is a row of its own, and release refuses on it.
+# test_converted_line_endings_are_no_drift: a recorded helper and package format checked out with CRLF line endings give no helper_drift row, while an edit after the conversion still does.
 # test_check_draft_checks_findings_drift: synchronized JSON passes, drift fails with state render in both modes, an old helper gets an upgrade hint, and rows with no findings.json are drift.
 # test_names_cover_project_records: names hold created views, sources without CTEs or table functions, settings dotted paths (not bare nested keys), and result IDs from evidence and state links; plain words, including plain investigation and package names, are left out.
 # test_toml_keys_fall_back_to_tomli_then_key_lines: without tomllib, settings keys parse with tomli (no bare nested keys); without either, table headers and key lines; display.toml then names the missing package.
@@ -6,6 +10,8 @@
 # test_evidence_older_than_scoped_3_is_reported_for_rerun: check-draft and export --result refuse awb-evidence/1 and unscoped /3 with a rerun instruction.
 # test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
 # test_check_draft_reports_outline_and_chart_spec_rows: a headline over 15 words, a chart form outside the seven, a Data column the chart file lacks, and a file column no Data role names fail check-draft with outline and charts rows in both modes, and release refuses on them.
+# test_export_creates_a_missing_draft_folder: export with no draft folder creates it on a write, and not when missing evidence writes nothing; with no findings.md it records no slides; check-draft refuses a missing draft by naming the step that creates it.
+# test_a_headline_preview_is_no_package_file: a file under the draft's top-level .preview/ is not inventoried, and rewriting or removing it leaves the inventory verifying; a .preview/ deeper in the draft is a foreign file.
 # test_check_draft_requires_each_question_in_methodology: export's questions pass once methodology repeats them; a question methodology lacks or rewords, a results entry without a question, and a manifest without results fail check-draft's questions, and release refuses on the check.
 # test_questions_check_reads_methodology_as_it_renders: a question wrapped, emphasized, linked, escaped, in a code span, heading, or list item, or after a comment block on its line matches; one only in a comment, inline or a block, in fenced code, split over two paragraphs, or reworded does not.
 # test_questions_check_matches_a_code_span_as_written: a question holding brackets, a tilde, an edge underscore, an asterisk, a character reference, or a backslash matches when a code span shows it exactly as written.
@@ -23,6 +29,9 @@
 # test_recorded_text_reviewed_probes: every recorded text probed in review records the magnitudes intended, and an extreme or non-finite cell records nothing or itself without crashing.
 # test_check_numbers_skips_a_doi: a DOI, 10. with a four- to nine-digit registrant code, a slash, and a suffix, is skipped whole after doi: or DOI, in a doi.org link, or bare when its suffix holds a letter and a digit, ending at whitespace or a , or ; before a digit; a shorter registrant code, no slash, a bare suffix without a letter or a digit, as in 10.2500/litre, 10.2500/1000, or 10.12345/67.8, and a number glued after a DOI by , or ; are read.
 # test_provenance_gaps_are_unknown_objects_and_unread_requirements: an {"unknown": reason} object and an unread requirements line are gaps; a settings value or column name such as unknown_pickup, or a string starting with unknown, is not.
+# test_check_numbers_reads_ordinary_notation: the issue's probes: 54.8/57.6 traces when both values are recorded, each half traced alone; 18:00 and December 2011 is give no row; an untraced figure still does.
+# test_numbers_rows_name_the_rule_that_applied: each numbers row's problem names why its number did not trace (no recorded value, joined digits, a recorded value on its rounding's upper edge, or a year-like count) and points to allowed_numbers.
+# test_packaging_commit_without_history_is_no_gap: a repository with no commit, or a project without Git, records its packaging commit as unknown with packaging_state's reason, and provenance_gaps lists neither packaging field; another reason, a non-text reason, or a producing commit is still a gap.
 # test_check_numbers_allowed_phrases_and_precision: an allowed phrase covers only the number it is written around, a bare allowed text every occurrence; a row's text copied exactly covers its number after a line wrap or extra spaces; a number traces at every written digit beyond 28 significant digits and not one unit of a further place outside its rounding.
 # test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's or a path's digits add nothing; evidence text and parsed settings content add scaled and scientific values a narrative can write in full, without dates, booleans, or the settings file's size.
 # test_recorded_values_keep_every_json_digit: profile and evidence fractions keep every written digit, so the exact narrative value traces and a value one digit off does not.
@@ -41,11 +50,16 @@
 # test_export_percent_scales_fractions_and_records_them: [percent] columns are scaled by 100 exactly from the saved text before rounding, in charts and datasets, and recorded in the manifest's charts and dataset_selection entries; a top-level list, a non-list, or another key under [percent] is refused.
 # test_per_result_display_names_override_the_global_ones: [results."<id>".columns] and .values name one result's columns and values over the global names, a per-result value table replacing the global one whole; another key under a result, or a percent table of another shape, is refused.
 # test_a_per_result_percent_list_replaces_the_global_one: [results."<id>".percent] lists one result's percent columns in place of [percent], so a column already holding percents in one result is not scaled again; the manifest records each file's list and check-draft reapplies it.
+# test_export_scale_needs_places_when_its_quotient_is_unrounded: a divisor whose quotient shows more than four places needs [round] places, listed with round_stub, and the methodology line states the division before the rounding.
+# test_export_scale_divides_records_and_traces: a [scale] divisor divides a column's number cells before percent scaling and rounding, in charts and datasets, is recorded in their manifest entries and methodology lines, is refused when not { divide = <a positive number> }, and makes a narrative number written in the scaled unit trace, one export rounded half up onto its shown digit included; check-draft refuses an entry whose divisor differs from display.toml.
+# test_export_warns_on_a_fraction_rounded_in_its_query: a [percent] column shown to fewer than two places whose saved fractions have exactly four places is a precision_warnings row, the files still written; full precision, or two places shown, gives none.
+# test_export_warns_on_a_value_code_no_cell_holds: a [values] code no exported saved table holds is a value_warnings row naming the table when a cell differs from it only in case, such as true where pandas saved True, naming that cell, or when no code of its table matches any cell; a shared table's code these results leave out, and codes the tables hold, give none.
+# test_confirmed_columns_silence_their_label_warning: a column under [confirmed] columns gives no label_warnings row, other columns still do, and a malformed [confirmed] is refused.
 # test_export_warns_when_one_name_labels_results_with_different_questions: a global [columns] name labeling files from results with different questions is a label_warnings row, the files still written; the same question or a per-result name gives none.
 # test_chart_selection_grammar_accepts / test_chart_selection_grammar_refuses: accepted and refused rows for --chart RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]], each refusal naming the part that does not fit.
 # test_export_selects_chart_rows_and_records_the_selection: @first=10 writes the first 10 rows and @where the matching rows in table order, the manifest recording each selection; an unknown column, a value no row holds, or too many rows is an error, malformed syntax and a dataset selection exit 2, and nothing is written.
 # test_check_draft_refuses_a_chart_file_that_differs_from_its_selection: a hand-edited value, an extra row, a renamed header, or a changed saved table fails check-draft in both modes and refuses release; a chart file with no charts entry, an entry from an earlier export, which a --result-only export keeps, so its row names the export with every --chart, an entry whose file is missing, and a malformed charts field each give a row.
-# test_check_draft_writes_start_here_before_the_inventory: check-draft writes START-HERE.md's three parts, listing the methodology note and datasets when present, before the inventory lists it; --verify-only writes none and reports an edited one; the prompt is assembly/m365.md's.
+# test_check_draft_writes_start_here_before_the_inventory: check-draft writes START-HERE.md's three parts, listing the methodology note and datasets when present, methodology.md and deck-rules.md once each as for the builder only, and part 3 titled for the audience, before the inventory lists it; --verify-only writes none and reports an edited one; the prompt is assembly/m365.md's.
 # test_check_draft_reports_draft_markers_as_information: draft, working copy, or not a numbered release in the title, subtitle, a heading or headline, or title notes is an informational draft_markers row in both modes; drafted, redraft, working copies, other notes, and bullets are not read as markers.
 # test_export_checks_follow_the_represented_set: a represented result not serialized keeps its entry; a result outside the represented set drops; an export without --chart removes the chart files and records charts none.
 # test_export_names_every_gap_and_blocks_stale_results: every missing display name is listed at once; a changed setting blocks a serializing export with a stop message and writes nothing; --no-datasets records none; --chart without a dataset choice is refused.
@@ -54,8 +68,8 @@
 # test_release_reports_fields_for_the_report: datasets, dispositions marked new against the prior release's manifest (unknown when it is unreadable), open caveats (the Limitations and open caveats slide's headline and bullets, then flags released with their caveat, new or carried forward), provenance gaps, checkout-only acquisitions, and a clean local verify.
 # test_open_caveats_read_the_deck_wherever_its_caveat_slides_stand: the Open questions slide's headline and bullets and a Limitations and open caveats slide moved under ## Appendix are read in deck order, each headline before its bullets, nested items kept with their bullet; a Limitations slide holding only its headline gives that headline's row; finding slides, omitted flags, and unrepresented flags give no row.
 # test_release_manifest_lists_runtime_per_result: export copies each represented result's runtime block into its results entry, unknown when the evidence has none or a null one, as stale reads it, and the release manifest keeps them; each unread requirements line is a provenance gap.
-# test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy at <location>/<investigation>/<package>/<n>/ compared, with no released/ folder there.
-# test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do, naming <location>/<investigation>/<package>/<n>/.
+# test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy at <location>/<investigation>/<package>/<n>/ compared, its full path reported, with no released/ folder there; the headline preview is neither inventoried, released, nor copied.
+# test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do, naming <location>/<investigation>/<package>/<n>/, a URL location's full destination as path.
 # test_check_draft_refuses_causal_wording_above_claim_strength: causal wording on an association finding's slide fails with a row naming the phrase, line, and claim; a causal finding's slide and the Answer slide under a causal represented finding pass; method and caveat slides, code, comments, and hyphenated words are not read; release refuses on the row.
 # test_review_probes_read_markdown_as_it_renders: every reviewer probe of the claim check from rounds 1 to 3, one row each with its claims, headings, and markdown rows: headlines, caveat bullets, fences, comments open, closed, or in a list, declarations hidden, ambiguous, in a code span, in a list or quote, or naming another design, emphasis, links, hard breaks, and other inline markup, commented-out, duplicated, and indented headings, headings continuing a list item, and every form outside the Markdown subset.
 # test_unsupported_markdown_fails_check_draft: a heading continuing a list item fails check-draft and release with its markdown row, and the wording below it is read on the finding slide.
@@ -70,20 +84,28 @@
 # test_numbers_check_and_rendered_view_drop_the_same_comments: across a seeded corpus of 2,000 random narratives, link targets and escaped code spans among their pieces, the words the rendered view drops as comment are exactly those the numbers check's source lines blank, code spans aside, which it blanks by design, and the numbers check reads exactly the view's lines outside fenced code.
 # test_numbers_check_pairs_code_spans_across_the_paragraph: a number after a code span wrapped across lines, a span on a later line after it, is read, as the draft shows it; one inside a wrapped span is skipped; a span on one line keeps its result. A line opening with a span, all code, or ending a wrapped span still leaves a numbered line after it wrapping the paragraph, in a quote too, so its number is read.
 # test_an_allowed_text_quoting_a_code_span_covers_its_number: an allowed text holding a code span matches the line as written and covers its number.
+# test_negated_causal_phrases_are_no_claims: a causal phrase in a negated clause, under the closed grammar _NEGATOR, _CLAUSE_END, and _UNKNOWN declare, is skipped; a negator outside the clause or window (directly before a connective phrase such as due to), in a relative clause, or an intensifier such as not only leaves it a row.
+# test_check_draft_skips_negated_causal_wording: does not test what caused them passes check-draft's claims; drove the increase on the same slide is still a row.
+# test_methodology_note_limitations_section_is_not_read_for_claims: causal wording under the note's ## Limitations, its ### sections included, gives no claims row; the same sentence under another section does.
 # test_methodology_note_is_checked_with_rows_naming_it: a clean methodology-note.md passes and joins the inventory; an internal name, an untraced number, causal wording above the strongest represented claim, and an HTML block in it fail check-draft and release with rows naming the file; without it check-draft reports exactly what it did before.
+# test_note_over_the_recorded_length_is_an_informational_row: a methodology-note.md more than 10% over the brief's `Methods note length: about <n> words`, counted as it renders, is a note_length row in both modes that never fails the check; at 10% over, with no recorded length, no brief, or no note there is none; a length line in another form, or two lengths, is a row naming the brief's line.
 # test_check_draft_counts_main_and_appendix_slides: slides counts the main sequence, title included, and the appendix apart; How we know under ## Appendix passes.
 # test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section; an appendix finding slide is held to its claim strength.
 # test_appendix_how_we_know_and_limitations_wording_is_not_read: with only an association result represented, causal wording on How we know and Limitations under ## Appendix gives no claims row, and the same wording on an appendix finding slide is refused.
-# test_presentation_order_decides_finding_order_when_set: absent or none leaves the ledger order; a non-ledger order the slides follow passes, inline markup read as the heading is; an order missing a finding, listing one twice, naming a heading no slide has, out of the slides' order, not a list, holding a blank entry, or recorded as JSON null fails storyline in both modes.
-# test_export_keeps_presentation_order: export keeps the hand-recorded presentation_order.
+# test_presentation_order_decides_finding_order_when_set: absent or none leaves the ledger order; a non-ledger order of slide slugs the slides follow passes; an order missing a slide's slug, listing one twice, naming a slug no slide has, of headings rather than slugs, out of the slides' order, not a list, holding a blank entry, or recorded as JSON null fails storyline in both modes.
+# test_export_keeps_presentation_order: export keeps the hand-recorded presentation_order, and records and prints each finding slide's slug, heading, and primary result.
+# test_a_reworded_heading_keeps_its_presentation_order_slot: rewording a finding heading in both narratives keeps its slug and its presentation_order slot; check-draft records the new heading under the slug, which the next export keeps, and prints the derived ledger_order.
+# test_a_heading_reworded_in_findings_first_keeps_its_slug: while headings reports a finding heading without its methodology section, check-draft and export keep the recorded slugs, so the slide keeps its slug once methodology.md agrees.
 # test_presentation_order_is_no_provenance_gap: a presentation_order heading that starts with Unknown is no release provenance gap, as allowed_numbers is not.
 # test_storyline_orders_main_and_appendix_findings_each_by_the_ledger: main and appendix finding slides are ranked separately, the appendix numbering on.
 # test_open_questions_follows_how_we_know_when_limitations_is_in_the_appendix: with Limitations under ## Appendix, Open questions passes after How we know and fails before it.
+# test_release_requires_a_current_review_receipt: check-draft reports the review's status and changed in both modes without changing passed; release refuses, creating nothing, with no receipt, a failed one, or a stale one, naming the status and changed inputs; a passed scoped review with an accepted problem releases, and the released manifest alone records its kind, time, and acceptances.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage at <location>/<investigation>/<package>/<n>/; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
 
 import hashlib
 import importlib.util
 import json
+import os
 import random
 import re
 import shutil
@@ -118,7 +140,7 @@ CHART_SPEC = "**Chart 1.** Horizontal bar: late share by region\n- **Data:** cat
 # The fixture's chart file as export records it: r-001's first row, its region labeled and its rate rounded whole.
 CHART_ENTRY = {"path": "charts/chart-1.csv", "result_id": "r-001", "columns": ["region", "late_rate"],
                "selection": {"first": 1}, "headers": ["Region", "Closed late (%)"],
-               "values": {"region": {"W": "West"}}, "percent": [], "round": {"late_rate": 0}}
+               "values": {"region": {"W": "West"}}, "percent": [], "scale": {}, "round": {"late_rate": 0}}
 # The display names and value labels CHART_ENTRY records.
 CHART_DISPLAY = '[columns]\nregion = "Region"\nlate_rate = "Closed late (%)"\n\n[values.region]\nW = "West"\n'
 # The required slides around the finding slides: the title and Answer open the deck, How we know and
@@ -250,6 +272,13 @@ def run(project, capsys, *argv):
     return code, json.loads(capsys.readouterr().out)
 
 
+def reviewed(project):
+    """Record a clean full review of the draft as it stands, which release requires."""
+    draft = load(project / "src/packaging/draft.py", "draft_reviewed")
+    assert draft.start_review(project, "inv", "pkg", "full")["started"]
+    assert draft.record_review(project, "inv", "pkg", "full", "review: clean\n")["passed"]
+
+
 def manifest(project, where="draft"):
     return json.loads((project / "deliveries/inv/pkg" / where / "manifest.json").read_text())
 
@@ -334,7 +363,10 @@ def test_check_draft_reports_outline_and_chart_spec_rows(project, capsys):
     for argv in (("check-draft", "inv", "pkg"), ("check-draft", "inv", "pkg", "--verify-only")):
         code, report = run(project, capsys, *argv)
         assert code == 1 and not report["passed"]
-        assert report["outline"] == [{"slide": long, "line": 12, "problem": "the headline has 16 words; keep it to 15"}]
+        assert report["outline"] == [{"slide": long, "line": 12, "severity": "warning", "headline": long, "accepted": False,
+                                      "problem": "the headline has 16 words, over the 15-word limit; shorten it with "
+                                                 "the user's approval, or record their acceptance in "
+                                                 "accepted_long_headlines"}]
         assert report["charts"] == [
             {"chart": "Chart 1", "problem": "names no chart form (Pie); open the specification with one of: "
                                             "Horizontal bar, Bar with intervals, Line, Column, Stacked bar, Scatter, "
@@ -359,6 +391,43 @@ def set_results(project, results):
 
 NOT_REPEATED = ("methodology.md does not repeat this question verbatim in text that renders, within one paragraph "
                 "or heading")
+
+
+def test_export_creates_a_missing_draft_folder(project, capsys):
+    package = project / "deliveries/inv/pkg"
+    shutil.rmtree(package / "draft")
+    # Missing evidence writes nothing: the folder is created only for a write.
+    code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-404")
+    assert code == 1 and not report["written"] and not (package / "draft").exists()
+    code, report = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,late_rate", "--no-datasets")
+    assert code == 0 and report["written"] and report["created"], report
+    assert (package / "draft/manifest.json").is_file() and (package / "draft/charts/chart-1.csv").is_file()
+    # With no findings.md yet, export records no slides and prints none.
+    assert report["slide_slugs"] == [] and "slide_slugs" not in manifest(project)
+    # check-draft and review-receipt record refuse a missing draft by naming the step that creates it.
+    shutil.rmtree(package / "draft")
+    refusal = "no draft at deliveries/inv/pkg/draft; write findings.md and methodology.md there, then run export"
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["errors"] == [refusal]
+
+
+def test_a_headline_preview_is_no_package_file(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    write(draft, ".preview/headlines.md", "# Order quality\n\n- The west has the most late orders\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"], report
+    paths = [row["path"] for row in manifest(project)["inventory"]]
+    assert not any(path.startswith(".preview") for path in paths) and "findings.md" in paths
+    # Rewriting or removing the preview leaves the recorded inventory verifying.
+    write(draft, ".preview/headlines.md", "# Order quality\n\n- Reordered\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert code == 0 and report["verify"] == [], report
+    shutil.rmtree(draft / ".preview")
+    assert run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")[1]["verify"] == []
+    # Only the draft's own top-level .preview/ is skipped; one deeper is a foreign file, as before.
+    write(draft, "datasets/.preview/headlines.md", "stray\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert [(row["path"], row["kind"]) for row in report["verify"]] == [("datasets/.preview/headlines.md", "extra")]
 
 
 def test_check_draft_requires_each_question_in_methodology(project, capsys):
@@ -618,6 +687,17 @@ TRACED = deck("""### Late orders rose in the west
 """).replace("# Order quality\n", "# Order quality, January to June 2026\n")
 
 
+# The problem a numbers row gives for each rule that leaves its number untraced.
+ALLOW = "or list its text in the manifest's allowed_numbers with the reason"
+NOT_RECORDED = f"no represented result records this number at its written precision; correct it, {ALLOW}"
+YEAR_COUNT = ("read as a count: a year is skipped only after a month name, alone in parentheses, or after a word "
+              f"such as in or since where its period ends; reword it, such as ending the date with a comma, {ALLOW}")
+JOINED = ("digits joined by dots, commas, slashes, or colons read as one number with no single value, so it never "
+          f"traces; write each number apart, {ALLOW}")
+ON_EDGE = ("a recorded value lies exactly on the upper edge of this number's rounding, which rounds half up, as export "
+           f"rounds, to the next digit, so it does not trace; write the number as it rounds half up, {ALLOW}")
+
+
 def test_check_draft_traces_narrative_numbers(project, capsys):
     draft = project / "deliveries/inv/pkg/draft"
     write(project, "investigations/inv/results/r-001.profile.json", json.dumps(
@@ -634,8 +714,8 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
     # A number no represented result produced fails with its file and line, in both modes and at release.
     write(draft, "findings.md", TRACED.replace("21.3%", "23.1%"))
     write(draft, "methodology.md", METHODOLOGY + "\nAbout 40 stores.\n")
-    rows = [{"file": "findings.md", "line": 14, "text": "23.1%"},
-            {"file": "methodology.md", "line": 13, "text": "40"}]
+    rows = [{"file": "findings.md", "line": 14, "text": "23.1%", "problem": NOT_RECORDED},
+            {"file": "methodology.md", "line": 13, "text": "40", "problem": NOT_RECORDED}]
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"] and report["numbers"] == rows
     code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
@@ -653,7 +733,7 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
     code, _ = run(project, capsys, "export", "inv", "pkg", "--result", "r-002")
     assert code == 0 and manifest(project)["allowed_numbers"] == allowed  # export keeps the hand-recorded field
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
-    assert code == 1 and {"file": "findings.md", "line": 14, "text": "2.7%"} in report["numbers"]
+    assert code == 1 and {"file": "findings.md", "line": 14, "text": "2.7%", "problem": NOT_RECORDED} in report["numbers"]
 
 
 def test_check_draft_reports_number_problems(project, capsys):
@@ -682,7 +762,7 @@ def test_check_draft_reports_number_problems(project, capsys):
 
 def test_check_numbers_reads_formats(tmp_path):
     draft = load(ASSETS["src/packaging/draft.py"], "draft_numbers")
-    values = sorted({Decimal(v) for v in ("21.349", "0.105", "0.15", "3", "4213000", "12480", "1240", "0.5")})
+    values = sorted({Decimal(v) for v in ("21.349", "0.1", "0.15", "3", "4213000", "12480", "1240", "0.5")})
     path = tmp_path / "findings.md"
     path.write_text("""# Orders, January to June 2026
 
@@ -694,15 +774,18 @@ def test_check_numbers_reads_formats(tmp_path):
 ```
 44
 ```
-- Untraced: 21.4%, 1,250, 4.3M, 16%, 2, 3/4 of stores, 14:05, and (2025).
-- Skipped: in 2026, Q3 2026, Charts 2 and 3, 9:30am, 9:30 a.m., June 5, June 5-7, 2026, Monday, June 5.
+- Untraced: 21.4%, 1,250, 4.3M, 16%, 2, 3/4 of stores, and 9:30.
+- Skipped: in 2026, Q3 2026, Charts 2 and 3, 9:30am, 9:30 a.m., June 5, June 5-7, 2026, Monday, June 5, 14:05, (2025).
 - Traced: 1.24e3, 4.213e6, 1.5e-1 and 5e-1. Untraced: a hash 12345e6, 1e-5, 1.5e6, June 77 orders, 1950 orders.
 """)
+    rule = {"9:30": JOINED, "1950": YEAR_COUNT}
     assert draft.check_numbers(path, values) == [
-        {"file": "findings.md", "line": 6, "text": "7"},
-        *({"file": "findings.md", "line": 11, "text": t} for t in ("21.4%", "1,250", "4.3M", "16%", "2", "3/4", "14:05", "2025")),
-        *({"file": "findings.md", "line": 13, "text": t} for t in ("12345e6", "1e-5", "1.5e6", "77", "1950"))]
-    assert draft.check_numbers(path, values, allowed={"7", "2", "16%", "1,250", "4.3M", "21.4%", "3/4", "14:05", "(2025)",
+        {"file": "findings.md", "line": 6, "text": "7", "problem": NOT_RECORDED},
+        *({"file": "findings.md", "line": 11, "text": t, "problem": rule.get(t, NOT_RECORDED)}
+          for t in ("21.4%", "1,250", "4.3M", "16%", "2", "4", "9:30")),
+        *({"file": "findings.md", "line": 13, "text": t, "problem": rule.get(t, NOT_RECORDED)}
+          for t in ("12345e6", "1e-5", "1.5e6", "77", "1950"))]
+    assert draft.check_numbers(path, values, allowed={"7", "2", "16%", "1,250", "4.3M", "21.4%", "4", "9:30",
                                                       "12345e6", "1e-5", "1.5e6", "77", "1950"}) == []
 
 
@@ -730,9 +813,9 @@ REVIEWED_PROBES = [
     ("in 2023, 2024 and 2025", []), ("We reviewed 1950 orders and 2,000 stores", ["1950", "2,000"]),
     ("an increase in 2000 orders", ["2000"]), ("between 1950 and 2000 stores were affected", ["1950", "2000"]),
     ("late 2000 orders were found", ["2000"]), ("in 2025 and 2026 orders", ["2025", "2026"]), ("mid-2025.", []),
-    ("In June 2026 orders were lost", ["2026"]), ("Q3 2025 revenue", ["2025"]), ("In Q3 2000 orders were late", ["2000"]),
+    ("In June 2026 orders were lost", []), ("Q3 2025 revenue", ["2025"]), ("In Q3 2000 orders were late", ["2000"]),
     ("Revenue fell in Q3 2025.", []), ("FY 2024 and 2025 orders", ["2024", "2025"]), ("FY 2024 and 2025.", []),
-    ("Late orders (2025) exceeded the target.", ["2025"]),
+    ("Late orders (2025) exceeded the target.", []),
     ("in 2000\norders were lost", ["2000"]),  # a line wrap continues the sentence
     ("Late orders rose 3 points over 2025.", ["3", "2025"]), ("compared with 2024", ["2024"]),
     ("the 2025 baseline", ["2025"]), ("2026 H1", ["2026"]), ("Week 23", ["23"]),
@@ -746,9 +829,9 @@ REVIEWED_PROBES = [
     ("- Orders rose\n  steadily to\n  77. Then fell.", ["77"]), ("- Orders rose to\n77. Then fell.", []),
     ("  1. Orders rose\n  2. Orders fell", []), ("- Orders\n  - rose\n  77. Then fell.", []), ("- Orders\n  1. rose", []),
     ("1. Orders rose\n   steadily\n2. Orders fell", []),
-    ("opened at 9:30am", []), ("opened at 14:05", ["14:05"]), ("a 1:20 ratio", ["1:20"]),
+    ("opened at 9:30am", []), ("opened at 14:05", []), ("a 1:20 ratio", ["1:20"]),
     ("-21.3%", ["21.3%"]), ("10–15 percent", ["10", "15 percent"]),
-    ("values 1,2,3 and 4, 5", ["1,2,3", "4", "5"]), ("21,3%", ["21,3%"]), ("3/4 of stores", ["3/4"]),
+    ("values 1,2,3 and 4, 5", ["1,2,3", "4", "5"]), ("21,3%", ["21,3%"]), ("3/4 of stores", ["3", "4"]),
     ("Total,77 orders were late.", ["77"]), ("Total, 77 orders were late.", ["77"]), ("Total;77", ["77"]),
     ("Total:77", ["77"]), ("(77 orders)", ["77"]), ("Rates: West,21.3%; East,2.7%.", ["21.3%", "2.7%"]),
     ("West/21.3%", ["21.3%"]), ("sentence.5 stores", ["5"]), ("_77 orders_", ["77"]), ("late_77", []),
@@ -781,6 +864,22 @@ REVIEWED_PROBES = [
     ("- Share was 18.2\n  percent.", [], {"values": [], "allowed": {"18.2 percent"}}),
     ("Share was 18.2\npercent this year.", ["18.2 percent"], {"values": [], "allowed": {"18.2"}}),
     ("Ran in Week\n23 of the year.", [], {"values": [], "allowed": {"Week 23"}}),
+    # Ordinary notation (issue #88): two numbers joined by one slash are two numbers, each traced; a 24-hour time;
+    # a year right after a month name, full or three letters, or alone in parentheses.
+    ("Zones 264/265 led.", [], {"values": ["264", "265"]}), ("Zones 264/266 led.", ["266"], {"values": ["264", "265"]}),
+    ("368/53.5% of orders", [], {"values": ["368", "0.535"]}), ("53.5%/368 of orders", ["53.5"], {"values": ["368", "0.535"]}),
+    ("1/2/3 of orders", ["1/2/3"]), ("1,240/1,300 orders", [], {"values": ["1240", "1300"]}),
+    ("at 00:00, 09:15, and 23:59", []), ("at 24:00", ["24:00"]), ("at 18:60", ["18:60"]), ("at 9:30 daily", ["9:30"]),
+    ("3,18:00", ["3,18:00"]), ("a 12:20 ratio", []),  # a ratio written as a 24-hour time reads as one
+    ("Dec 2011 sales", []), ("Dec. 2011 sales", []), ("September 2011 sales", []), ("Sept 2011 sales", ["2011"]),
+    ("december 2011 sales", ["2011"]), ("(2019)", []), ("(Smith, 2019)", ["2019"]), ("(2019 orders)", ["2019"]),
+    ("orders(2019)", ["2019"]), ("Dec 2011/2012 sales", ["2011", "2012"]),
+    # A number traces to the values that round half up to it, as export rounds: its lower edge included, its upper
+    # edge not. 1250 / 1000 shown to one place, and 13 of 80 as a percent, are the review's probes.
+    ("Share was 52.5%.", [], {"values": ["0.5245"]}), ("Share was 52.4%.", ["52.4%"], {"values": ["0.5245"]}),
+    ("Share was 52.5%.", ["52.5%"], {"values": ["0.5255"]}),
+    ("Share was 52.45%.", [], {"values": ["0.5245"]}), ("Share was 52%.", [], {"values": ["0.5245"]}),
+    ("West changed by 1.3 Gt.", [], {"values": ["1.25"]}), ("Share was 16.3%.", [], {"values": ["0.1625"]}),
 ]
 
 
@@ -823,8 +922,8 @@ def test_check_numbers_skips_a_doi(tmp_path):
                     "Cost was 10.2500/1000 litres; ratio 10.12345/67.8 held.\n"
                     "See DOI 10.24432/C5CG6D,478 rows, and 10.24432/C5CG6D;12 more; cell 10.1016/j.cell.2009.01.002.\n")
     assert [(row["line"], row["text"]) for row in draft.check_numbers(path, [])] == [
-        (2, "10.123"), (2, "10.24432"), (2, "1.24432"), (3, "10.2500"), (4, "10.2500/1000"), (4, "10.12345/67.8"),
-        (5, "478"), (5, "12")]
+        (2, "10.123"), (2, "10.24432"), (2, "1.24432"), (3, "10.2500"), (4, "10.2500"), (4, "1000"), (4, "10.12345"),
+        (4, "67.8"), (5, "478"), (5, "12")]
 
 
 def test_provenance_gaps_are_unknown_objects_and_unread_requirements():
@@ -842,6 +941,46 @@ def test_provenance_gaps_are_unknown_objects_and_unread_requirements():
         {"field": "producing_commit", "reason": "not a git repository"},
         {"field": "results[0].runtime.unread_requirements[0]",
          "reason": "requirements not read, packages unrecorded: requirements.txt:2: -e ."}]
+
+
+def test_check_numbers_reads_ordinary_notation(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_notation")
+    path = tmp_path / "findings.md"
+    path.write_text("- Mean fares were 54.8/57.6 at 18:00 and 18:59.\n- December 2011 is the last month; 41 trips.\n")
+    values = sorted(Decimal(v) for v in ("54.8", "57.6"))
+    assert draft.check_numbers(path, values) == [
+        {"file": "findings.md", "line": 2, "text": "41", "problem": NOT_RECORDED}]
+    # Each half is traced alone, so a half no result records is still a row.
+    assert [(row["line"], row["text"]) for row in draft.check_numbers(path, values[:1])] == [(1, "57.6"), (2, "41")]
+
+
+def test_numbers_rows_name_the_rule_that_applied(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_rules")
+    path = tmp_path / "methodology.md"
+    path.write_text("About 40 stores.\nOpened at 9:30 daily.\nShare was 52.5%.\nWe reviewed 1950 orders.\n")
+    assert [(row["text"], row["problem"]) for row in draft.check_numbers(path, [Decimal("0.5255")])] == [
+        ("40", NOT_RECORDED), ("9:30", JOINED), ("52.5%", ON_EDGE), ("1950", YEAR_COUNT)]
+    assert all("allowed_numbers" in problem for problem in draft._UNTRACED.values())
+
+
+def test_packaging_commit_without_history_is_no_gap(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_no_history")
+    # A repository with no commit records the packaging commit as unknown, and lists the untracked sources.
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/awb.py").write_text("")
+    commit, changes = draft.packaging_state(tmp_path)
+    assert commit == {"unknown": "the checkout has no commit yet"} and changes == [{"path": "src/awb.py", "status": "??"}]
+    assert draft.provenance_gaps({"packaging_commit": commit, "packaging_uncommitted_changes": changes}) == []
+    # A project without Git is no gap either; any other unknown packaging state still is.
+    unknown = {"unknown": "the project is not a git repository"}
+    assert draft.provenance_gaps({"packaging_commit": unknown, "packaging_uncommitted_changes": unknown}) == []
+    assert draft.provenance_gaps({"packaging_commit": {"unknown": "git timed out"},
+                                  "packaging_uncommitted_changes": {"unknown": ["the checkout has no commit yet"]},
+                                  "producing_commit": {"unknown": "the checkout has no commit yet"}}) == [
+        {"field": "packaging_commit", "reason": "git timed out"},
+        {"field": "packaging_uncommitted_changes", "reason": ["the checkout has no commit yet"]},
+        {"field": "producing_commit", "reason": "the checkout has no commit yet"}]
 
 
 def test_check_numbers_allowed_phrases_and_precision(tmp_path):
@@ -1098,7 +1237,8 @@ def with_results(project):
 # What export records for --chart r-001:region,late_rate under DISPLAY.
 EXPORTED_CHART = {"path": "charts/chart-1.csv", "result_id": "r-001", "columns": ["region", "late_rate"],
                   "selection": "all", "headers": ["Region", "Closed late (%)"],
-                  "values": {"region": {"W": "West", "E": "East"}}, "percent": [], "round": {"late_rate": 1}}
+                  "values": {"region": {"W": "West", "E": "East"}}, "percent": [], "scale": {},
+                  "round": {"late_rate": 1}}
 
 
 def test_export_writes_charts_datasets_and_manifest(project, capsys):
@@ -1113,7 +1253,7 @@ def test_export_writes_charts_datasets_and_manifest(project, capsys):
     record = manifest(project)
     assert record["charts"] == [EXPORTED_CHART]
     assert record["dataset_selection"] == [{"path": "datasets/late-closures.csv", "result_id": "r-001",
-                                            "columns": ["region", "late_rate", "n"], "percent": [],
+                                            "columns": ["region", "late_rate", "n"], "percent": [], "scale": {},
                                             "round": {"late_rate": 1}}]
     assert [c["result_id"] for c in record["export_checks"]] == ["r-001"]
     assert all(len(c["comparisons"]) == 5 for c in record["export_checks"])
@@ -1271,7 +1411,7 @@ def test_export_percent_scales_fractions_and_records_them(project, capsys):
     assert (record["charts"][0]["percent"], record["charts"][0]["round"]) == (["share"], {"share": 1})
     assert "shares: Share (%) <- r-001.share, times 100, rounded to 1 decimal place" in out["methodology_lines"]
     assert record["dataset_selection"] == [{"path": "datasets/shares.csv", "result_id": "r-001",
-                                            "columns": ["region", "share"], "percent": ["share"],
+                                            "columns": ["region", "share"], "percent": ["share"], "scale": {},
                                             "round": {"share": 1}}]
     # Scaled exactly from the saved text: 0.21349 shows as 21.349, three places, so it needs no [round].
     write(project, "foundation/display.toml", display)
@@ -1290,7 +1430,7 @@ def test_export_percent_scales_fractions_and_records_them(project, capsys):
     code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
     assert code == 1 and out["errors"] == [
         "foundation/display.toml: unknown key 'percents'; the file holds only [columns], [values.<column>], "
-        "[round], [percent], and [results.\"<result>\"]"]
+        "[round], [percent], [scale], [confirmed], and [results.\"<result>\"]"]
 
 
 def test_per_result_display_names_override_the_global_ones(project, capsys):
@@ -1352,8 +1492,141 @@ def test_a_per_result_percent_list_replaces_the_global_one(project, capsys):
     assert (draft / "datasets/fractions.csv").read_text() == "Region,Share of claims (%)\nW,21.35\n"
 
 
-COLLISION = ("results answering different questions share this [columns] name; confirm it fits each, "
-             "or name the column for one result under [results.\"<result>\".columns]")
+COLLISION = ("results answering different questions share this [columns] name; confirm it fits each and list "
+             "the column under [confirmed] columns, or name the column for one result under "
+             "[results.\"<result>\".columns]")
+
+
+def test_export_scale_divides_records_and_traces(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    write(project, "foundation/display.toml", DISPLAY + "\n[scale]\nn = { divide = 4 }\n")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "cases=r-001")
+    assert out["written"], out
+    assert (draft / "charts/chart-1.csv").read_text() == "Region,Cases\nWest,2.5\nEast,2\n"
+    assert (draft / "datasets/cases.csv").read_text() == "Region,Closed late (%),Cases\nWest,21.3,2.5\nEast,2.7,2\n"
+    record = manifest(project)
+    assert record["charts"][0]["scale"] == {"n": 4} and record["dataset_selection"][0]["scale"] == {"n": 4}
+    assert "chart-1: Cases <- r-001.n, divided by 4" in out["methodology_lines"]
+    # A narrative number written in the scaled unit traces to the recorded value divided by the recorded divisor.
+    write(draft, "methodology.md", METHODOLOGY + "\nWest averaged 2.5 cases a week.\n")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    # The fixture's findings.md specifies another chart, so only the manifest rows of charts are compared below.
+    recorded = [row for row in report["charts"] if "manifest" in row["problem"]]
+    assert report["numbers"] == [] and recorded == [], report
+    draft_module = load(ASSETS["src/packaging/draft.py"], "draft_scale")
+    values, problems = draft_module.recorded_values(project, "inv", [{"result_id": "r-001"}], [("r-001", "n", 4)])
+    assert problems == [] and {Decimal("2.5"), Decimal("2")} <= set(values)
+    assert draft_module.recorded_scales(record) == [("r-001", "n", 4)]
+    # A value export rounds half up onto the digit it shows traces to that digit: 10 / 8 = 1.25 is written 1.3.
+    write(project, "foundation/display.toml", DISPLAY + "n = 1\n\n[scale]\nn = { divide = 8 }\n")
+    run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "cases=r-001")
+    assert (draft / "charts/chart-1.csv").read_text().startswith("Region,Cases\nWest,1.3\n")
+    write(draft, "methodology.md", METHODOLOGY + "\nWest averaged 1.3 cases a week.\n")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["numbers"] == [], report
+    write(draft, "methodology.md", METHODOLOGY + "\nWest averaged 2.5 cases a week.\n")
+    # Without the divisor the same number traces to nothing.
+    write(project, "foundation/display.toml", DISPLAY)
+    run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "cases=r-001")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert [row["text"] for row in report["numbers"]] == ["2.5"]
+    # A divisor display.toml no longer gives is refused, as a header or label would be.
+    set_manifest(project, charts=[{**record["charts"][0], "scale": {"n": 5}}])
+    write(draft, "charts/chart-1.csv", "Region,Cases\nWest,2\nEast,1.6\n")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert [row for row in report["charts"] if "manifest" in row["problem"]] == [{
+        "chart": "Chart 1", "problem": "the manifest's charts entry for chart-1.csv records "
+                                 "scale divisors other than foundation/display.toml gives; rerun export, which "
+                                 "records them"}]
+    for scale in ("n = 4", "n = { divide = 0 }", "n = { divide = true }", "n = { divide = -2 }",
+                  "n = { multiply = 4 }", 'n = { divide = "4" }'):
+        write(project, "foundation/display.toml", DISPLAY + f"\n[scale]\n{scale}\n")
+        code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+        assert code == 1 and out["errors"] == [
+            "foundation/display.toml: [scale] n is not { divide = <a positive number> }"], scale
+    write(project, "foundation/display.toml", "scale = 4\n" + DISPLAY)
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    assert code == 1 and out["errors"] == [
+        "foundation/display.toml: [scale] maps each column to { divide = <a positive number> }"]
+
+
+def test_export_scale_needs_places_when_its_quotient_is_unrounded(project, capsys):
+    write(project, "foundation/display.toml", DISPLAY + "\n[scale]\nn = { divide = 3 }\n")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--no-datasets")
+    assert code == 1 and not out["written"] and out["round_stub"] == '"n" = ""'
+    write(project, "foundation/display.toml", DISPLAY.replace("late_rate = 1", "late_rate = 1\nn = 1")
+          + "\n[scale]\nn = { divide = 3 }\n")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--no-datasets")
+    assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_text() == \
+        "Region,Cases\nWest,3.3\nEast,2.7\n"
+    assert "chart-1: Cases <- r-001.n, divided by 3, rounded to 1 decimal place" in out["methodology_lines"]
+
+
+PRECISION = ("its fractions are saved to exactly four decimal places, a sign the query rounded them, and shown as a "
+             "percent rounded to 1 decimal place they are rounded a second time, which can move the last digit; save the result at "
+             "full precision and round only under [round]")
+
+
+def test_export_warns_on_a_fraction_rounded_in_its_query(project, capsys):
+    # The issue's probe: 0.6315 saved by round(x, 4) shows as 63.2%, where the full value may give 63.1%.
+    write(project, "investigations/inv/results/r-001.csv", "region,share\nW,0.6315\nE,0.0268\n")
+    display = '[columns]\nregion = "Region"\nshare = "Share (%)"\n\n[percent]\ncolumns = ["share"]\n'
+    write(project, "foundation/display.toml", display + "\n[round]\nshare = 1\n")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--dataset", "shares=r-001")
+    assert out["written"] and out["precision_warnings"] == [  # a warning: the files are written
+        {"result_id": "r-001", "column": "share", "example": "0.6315", "warning": PRECISION}]
+    assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_text() == "Region,Share (%)\nW,63.2\nE,2.7\n"
+    write(project, "foundation/display.toml", display + "\n[round]\nshare = 0\n")
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    assert out["precision_warnings"][0]["warning"] == PRECISION.replace("1 decimal place", "whole numbers")
+    # Shown to two places nothing is rounded again, and fractions saved at full precision raise nothing.
+    write(project, "foundation/display.toml", display + "\n[round]\nshare = 2\n")
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    assert out["written"] and out["precision_warnings"] == []
+    write(project, "investigations/inv/results/r-001.csv", "region,share\nW,0.63149999\nE,0.02680005\n")
+    write(project, "foundation/display.toml", display + "\n[round]\nshare = 1\n")
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    assert out["written"] and out["precision_warnings"] == []
+
+
+def test_export_warns_on_a_value_code_no_cell_holds(project, capsys):
+    # The issue's probe: pandas saves a boolean as True, so a key true matches nothing.
+    write(project, "investigations/inv/results/r-001.csv", "region,large\nW,True\nE,False\n")
+    display = ('[columns]\nregion = "Region"\nlarge = "Large store"\n\n[values.region]\nW = "West"\nE = "East"\n'
+               'N = "North"\n\n[values.large]\ntrue = "Yes"\nFalse = "No"\n')
+    write(project, "foundation/display.toml", display)
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    unmatched = "no cell of the saved tables it labels holds this code; a code matches the saved text exactly"
+    # A shared table listing a code these results leave out (N) gives no row, so it cannot repeat on every export.
+    assert out["written"] and out["value_warnings"] == [
+        {"table": "[values.large]", "code": "true", "warning": unmatched + "; the table writes 'True'"}]
+    assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_text() == \
+        "Region,Large store\nWest,True\nEast,No\n"
+    # A table none of whose codes matches a cell reports each code.
+    write(project, "foundation/display.toml", display.replace('W = "West"\nE = "East"\n', 'S = "South"\n'))
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    assert [(row["table"], row["code"]) for row in out["value_warnings"]] == [
+        ("[values.region]", "S"), ("[values.region]", "N"), ("[values.large]", "true")]
+    # A code another exported table holds is matched, even when this chart's rows leave it out.
+    write(project, "foundation/display.toml", display.replace("true", '"True"').replace('N = "North"\n', ""))
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001@first=1", "--no-datasets")
+    assert out["written"] and out["value_warnings"] == []
+
+
+def test_confirmed_columns_silence_their_label_warning(project, capsys):
+    with_results(project)
+    write(project, "investigations/inv/results/r-002.csv", "region,n\nW,4\n")
+    write(project, "foundation/display.toml", DISPLAY + '\n[confirmed]\ncolumns = ["region"]\n')
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "counts=r-002")
+    assert out["written"] and out["label_warnings"] == [
+        {"column": "n", "name": "Cases", "results": ["r-001", "r-002"], "warning": COLLISION}]
+    write(project, "foundation/display.toml", DISPLAY + '\n[confirmed]\ncolumns = ["region", "n"]\n')
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "counts=r-002")
+    assert out["written"] and out["label_warnings"] == []
+    write(project, "foundation/display.toml", DISPLAY + '\n[confirmed]\nregion = true\n')
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "counts=r-002")
+    assert code == 1 and out["errors"] == [
+        "foundation/display.toml: [confirmed] holds one key, columns, a list of column names"]
 
 
 def test_export_warns_when_one_name_labels_results_with_different_questions(project, capsys):
@@ -1498,6 +1771,7 @@ def test_check_draft_refuses_a_chart_file_that_differs_from_its_selection(projec
     write(draft, "charts/chart-1.csv", "Region,Closed late (%)\nWest,35\n")
     for edit, part in [({"values": {"region": {"W": "West"}, "late_rate": {"21.349": "35"}}}, "value labels"),
                        ({"percent": ["late_rate"], "round": {"late_rate": 0}}, "percent columns"),
+                       ({"scale": {"late_rate": 10}}, "scale divisors"),
                        ({"headers": ["Region", "Closed late"]}, "headers")]:
         set_manifest(project, charts=[{**entry, **edit}])
         for argv in ((), ("--verify-only",)):
@@ -1510,8 +1784,8 @@ def test_check_draft_refuses_a_chart_file_that_differs_from_its_selection(projec
     set_manifest(project, charts=[{"path": "charts/chart-1.csv", "result_id": "r-001"}])
     _, report = run(project, capsys, "check-draft", "inv", "pkg")
     old_entry = [{"chart": "Chart 1", "problem": "the manifest's charts entry for chart-1.csv records no selection, "
-                  "columns, headers, value labels, percent, or rounding; rerun export with every --chart to record "
-                  "them (a --result-only export keeps this entry)"}]
+                  "columns, headers, value labels, percent, scale, or rounding; rerun export with every --chart to "
+                  "record them (a --result-only export keeps this entry)"}]
     assert report["charts"] == old_entry
     # A --result-only export, as a revision that only adds caveats runs, keeps the entry, so the row names the
     # full export that records it.
@@ -1551,21 +1825,18 @@ In a Microsoft 365 Copilot app chat, add the PowerPoint agent and attach these f
 
 - findings.md
 - charts/chart-1.csv
-- methodology.md
-- deck-rules.md
+- methodology.md, the full account of the analysis, for the builder only
+- deck-rules.md, the rules the deck is built by, for the builder only
 - assembly/m365.md
 
 Then send this prompt:
 
 Build a PowerPoint deck from findings.md and the chart files, following deck-rules.md and m365.md.
 
-3. Internal: keep these, and do not send them
+3. Internal: keep these; do not send them to the audience
 
-- methodology.md, the full account of the analysis
 - manifest.json, the record of what this package holds and what produced it
-- deck-rules.md, the rules the deck is built by
-
-The other files in part 2 are the deck's source; your audience gets the deck instead.
+- the files part 2 attaches, which build the deck; your audience gets the deck instead
 """
 
 
@@ -1580,6 +1851,13 @@ def test_check_draft_writes_start_here_before_the_inventory(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["start_here"] == "deliveries/inv/pkg/draft/START-HERE.md"
     assert note.read_text() == START_HERE.format(audience="")
+    # Each builder file is listed once, as for the builder only, never also as internal.
+    listed = [line for line in note.read_text().splitlines() if line.startswith("- ")]
+    assert [line for line in listed if "methodology.md" in line] == [
+        "- methodology.md, the full account of the analysis, for the builder only"]
+    assert len([line for line in listed if "deck-rules.md" in line]) == 1
+    assert note.read_text().count("methodology.md") == 1
+    assert "3. Internal: keep these; do not send them to the audience" in note.read_text()
     assert "START-HERE.md" in [row["path"] for row in manifest(project)["inventory"]]
     # The audience part lists the methodology note and each dataset the draft holds.
     write(draft, "methodology-note.md", "# How we did it\n\nWe counted orders.\n")
@@ -1707,6 +1985,7 @@ def test_release_reports_fields_for_the_report(project, capsys):
               "text": "Late orders in the west await revalidation", "sub": ["Their dates are being corrected"]}]
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0, report
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["verify"] == [] and report["datasets"] == ["datasets/late.csv"]
     assert report["dispositions"] == [{**FLAG, "represented_in": ["chart 1"],
@@ -1721,6 +2000,10 @@ def test_release_reports_fields_for_the_report(project, capsys):
     assert code == 0 and report["release_number"] == "002" and report["dispositions"][0]["new"] is False
     assert report["open_caveats"] == slide + [{**FLAG, "represented_in": ["chart 1"]}]
     set_flags(project, [{**FLAG, "represented_in": ["chart 1"], "disposition": "omit"}])
+    # Omitting a flag changes what the review judges, so the draft is reviewed again before it releases.
+    assert run(project, capsys, "release", "inv", "pkg")[1]["review"] == {"status": "stale",
+                                                                          "changed": ["revalidation_flags"]}
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     # An omitted flag is no caveat, but the slide's caveats remain open.
     assert code == 0 and report["dispositions"][0]["new"] is True and report["open_caveats"] == slide
@@ -1775,6 +2058,7 @@ def test_release_manifest_lists_runtime_per_result(project, capsys):
     code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
     assert code == 0 and report["written"]
     run(project, capsys, "check-draft", "inv", "pkg")
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["released"] and report["provenance_gaps"] == []
     assert [(r["result_id"], r["runtime"]) for r in manifest(project, "released/001")["results"]] == [
@@ -1783,6 +2067,8 @@ def test_release_manifest_lists_runtime_per_result(project, capsys):
     (evidence / "r-002.json").write_text(json.dumps(second))
     run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
     run(project, capsys, "check-draft", "inv", "pkg")
+    # The rewritten evidence is what the review read, so each rerun is reviewed again before its release.
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["released"] and report["provenance_gaps"] == [
         {"field": "results[1].runtime.unread_requirements[0]",
@@ -1791,6 +2077,7 @@ def test_release_manifest_lists_runtime_per_result(project, capsys):
     (evidence / "r-002.json").write_text(json.dumps(second))
     run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
     run(project, capsys, "check-draft", "inv", "pkg")
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["provenance_gaps"] == [
         {"field": "results[1].runtime", "reason": "evidence lacks runtime"}]
@@ -1805,10 +2092,12 @@ def test_release_numbers_stamps_and_copies_to_storage(project, capsys, tmp_path_
     store = tmp_path_factory.mktemp("store")
     readme = project / "README.md"
     readme.write_text(readme.read_text().replace("not yet recorded", f"`{store}`"))
+    write(project, "deliveries/inv/pkg/draft/.preview/headlines.md", "# Order quality\n\n- Late orders rose\n")
     run(project, capsys, "check-draft", "inv", "pkg")
     for number in ("001", "003"):
         (project / f"deliveries/inv/pkg/released/{number}").mkdir(parents=True)
     (project / "deliveries/inv/pkg/released/notes").mkdir()
+    reviewed(project)
     draft_before = manifest(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["released"] and report["release_number"] == "004"
@@ -1819,9 +2108,15 @@ def test_release_numbers_stamps_and_copies_to_storage(project, capsys, tmp_path_
     assert datetime.fromisoformat(record["released_at"]).utcoffset() is not None
     assert record["inventory"] == draft_before["inventory"] and manifest(project) == draft_before
     # Storage holds <location>/<investigation>/<package>/<n>/, without the checkout's released/ folder.
-    assert report["storage"] == {"status": "copied", "copy": str(store / "inv/pkg/004"), "compare_trees": []}
+    # The report gives the full storage path.
+    assert report["storage"] == {"status": "copied", "copy": str(store / "inv/pkg/004"),
+                                 "path": os.path.abspath(store / "inv/pkg/004") + os.sep, "compare_trees": []}
     assert (store / "inv/pkg/004/findings.md").read_text() == FINDINGS
     assert not (store / "inv/pkg/released").exists()
+    # The headline preview is no package file: neither inventoried, released, nor copied to storage.
+    assert not any(row["path"].startswith(".preview") for row in record["inventory"])
+    assert not (project / "deliveries/inv/pkg/released/004/.preview").exists()
+    assert not (store / "inv/pkg/004/.preview").exists()
 
 
 def test_release_storage_conflict_and_instructions(project, capsys, tmp_path_factory):
@@ -1830,6 +2125,7 @@ def test_release_storage_conflict_and_instructions(project, capsys, tmp_path_fac
     readme = project / "README.md"
     original = readme.read_text()
     run(project, capsys, "check-draft", "inv", "pkg")
+    reviewed(project)
     readme.write_text(original.replace("not yet recorded", str(store)))
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 1 and report["released"] and report["storage"]["status"] == "conflict"
@@ -1851,10 +2147,67 @@ def test_release_storage_conflict_and_instructions(project, capsys, tmp_path_fac
                 "there as <location>/inv/pkg/003/")
     assert report["storage"]["instruction"] == (
         "copy deliveries/inv/pkg/released/004/ to https://example.invalid/sites/team/inv/pkg/004/")
+    assert report["storage"]["path"] == "https://example.invalid/sites/team/inv/pkg/004/"
+
+
+NO_REVIEW = "no passed review of this draft: run the review in awb-package's references/review.md"
+
+
+def test_release_requires_a_current_review_receipt(project, capsys):
+    draft = load(project / "src/packaging/draft.py", "draft_release_review")
+    # check-draft reports the review without counting it: passed stays the mechanical verdict.
+    for argv in (("check-draft", "inv", "pkg"), ("check-draft", "inv", "pkg", "--verify-only")):
+        code, report = run(project, capsys, *argv)
+        assert code == 0 and report["passed"] and report["review"] == {"status": "none", "changed": []}
+    released = project / "deliveries/inv/pkg/released"
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == NO_REVIEW and report["review"] == {"status": "none", "changed": []}
+    assert not released.exists()
+
+    failing = "review: 0 violations (0 error), 1 narrative problems, 0 command problems\n"
+    assert draft.start_review(project, "inv", "pkg", "full")["started"]
+    assert draft.record_review(project, "inv", "pkg", "full", failing)["passed"] is False
+    assert run(project, capsys, "check-draft", "inv", "pkg")[1]["review"]["status"] == "failed"
+    assert run(project, capsys, "release", "inv", "pkg")[1]["review"] == {"status": "failed", "changed": []}
+
+    accepted = ['findings.md:12 "rose": the user accepts the wording for this audience']
+    assert draft.record_review(project, "inv", "pkg", "full", failing, accepted)["passed"]
+    path = project / "deliveries/inv/pkg/draft/findings.md"
+    path.write_text(path.read_text() + "\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["review"] == {"status": "stale", "changed": ["findings.md"]}
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == NO_REVIEW and not released.exists()
+    assert report["review"] == {"status": "stale", "changed": ["findings.md"]}
+
+    # A scoped review that passes completes the release, and its acceptances travel with it.
+    scoped = failing.replace("review:", "review (scoped):")
+    assert draft.start_review(project, "inv", "pkg", "scoped")["started"]
+    assert not draft.record_review(project, "inv", "pkg", "scoped", scoped, now="2026-10-16T12:00:00+00:00")["passed"]
+    assert draft.record_review(project, "inv", "pkg", "scoped", scoped, accepted)["passed"]
+    assert run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")[1]["review"]["status"] == "current"
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    review = {"kind": "scoped", "recorded_at": "2026-10-16T12:00:00+00:00", "accepted": accepted}
+    assert code == 0 and report["released"] and report["review"] == review
+    assert manifest(project, "released/001")["review"] == review and "review" not in manifest(project)
+    # The record sits beside the draft, so the release does not copy it.
+    assert (project / "deliveries/inv/pkg/review/receipt.json").is_file() and not (released / "001/review").exists()
+
+    # A rerun that changes a represented result's evidence, its checks included, makes the review stale, so the
+    # narratives' claims citing that result are reviewed again before the next release.
+    evidence = project / "investigations/inv/evidence/r-001.json"
+    record = json.loads(evidence.read_text())
+    evidence.write_text(json.dumps({**record, "checks": [{"name": "reconciliation", "outcome": "fail",
+                                                          "detail": "Totals differ"}]}, indent=2) + "\n")
+    stale = {"status": "stale", "changed": ["investigations/inv/evidence/r-001.json"]}
+    assert run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")[1]["review"] == stale
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == NO_REVIEW and report["review"] == stale
 
 
 def test_copy_releases_copies_compares_and_never_overwrites(project, capsys, tmp_path_factory):
     run(project, capsys, "check-draft", "inv", "pkg")
+    reviewed(project)
     for _ in range(2):
         code, report = run(project, capsys, "release", "inv", "pkg")
         assert code == 0 and report["storage"]["status"] == "unrecorded"
@@ -1874,6 +2227,97 @@ def test_copy_releases_copies_compares_and_never_overwrites(project, capsys, tmp
     assert (store / "inv/pkg/001/findings.md").read_text() == "changed\n"
     code, report = run(project, capsys, "copy-releases", "inv", "other")
     assert code == 1 and report["errors"] == ["no package at deliveries/inv/other"]
+
+
+DECK_RULES = "# Deck rules\n"
+
+
+def install_receipt(project, extra=()):
+    """The receipt awb-init's installer writes for the fixture's helpers and one package format."""
+    write(project, "package-format/deck-rules.md", DECK_RULES)
+    paths = [*ASSETS, "package-format/deck-rules.md", *extra]
+    write(project, ".awb-receipt.json", json.dumps(
+        {path: hashlib.sha256((project / path).read_bytes()).hexdigest() for path in paths}))
+
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def test_receipt_name_matches_the_installer():
+    installer = load(SKILLS / "awb-init/scripts/install_helpers.py", "installer_receipt")
+    assert load(ASSETS["src/packaging/draft.py"], "draft_receipt").INSTALL_RECEIPT == installer.RECEIPT
+
+
+def test_an_edited_helper_is_drift_that_release_refuses_until_confirmed(project, capsys):
+    install_receipt(project)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["helper_drift"] == []
+    helper = project / "src/packaging/draft.py"
+    helper.write_bytes(helper.read_bytes() + b"\n# adapted to keep a long headline\n")
+    for argv in (("check-draft", "inv", "pkg"), ("check-draft", "inv", "pkg", "--verify-only")):
+        code, report = run(project, capsys, *argv)
+        # Drift does not fail check-draft; it gates release.
+        assert code == 0 and report["passed"]
+        assert report["helper_drift"] == [{"file": "src/packaging/draft.py", "status": "changed", "sha256": sha(helper),
+                                           "recorded": sha(ASSETS["src/packaging/draft.py"]), "confirmed": False}]
+    refusal = "helpers or package formats differ from the install receipt without the user's confirmation"
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == refusal and [r["file"] for r in report["helper_drift"]] == [
+        "src/packaging/draft.py"]
+    # A confirmation matches only that file at that hash, and only with a reason.
+    for entries in ([{"file": "src/packaging/draft.py", "sha256": sha(ASSETS["src/packaging/draft.py"]), "reason": "r"}],
+                    [{"file": "src/packaging/draft.py", "sha256": sha(helper)}],
+                    [{"file": "src/packaging/draft.py", "sha256": sha(helper), "reason": ""}],
+                    [{"file": "src/awb.py", "sha256": sha(helper), "reason": "r"}],
+                    {"file": "src/packaging/draft.py", "sha256": sha(helper), "reason": "r"}):
+        set_manifest(project, helper_drift_confirmed=entries)
+        code, report = run(project, capsys, "release", "inv", "pkg")
+        assert code == 1 and report["refused"] == refusal, entries
+    assert not (project / "deliveries/inv/pkg/released").exists()
+    set_manifest(project, helper_drift_confirmed=[{"file": "src/packaging/draft.py", "sha256": sha(helper),
+                                                   "reason": "The user approved the adapted outline check."}])
+    run(project, capsys, "check-draft", "inv", "pkg")
+    reviewed(project)
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 0 and report["released"], report
+    # A later edit is a new hash, which the earlier confirmation does not cover.
+    helper.write_bytes(helper.read_bytes() + b"# edited again\n")
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == refusal
+
+
+def test_helper_drift_rows_for_missing_unrecorded_and_unreadable_files(project, capsys):
+    draft = load(project / "src/packaging/draft.py", "draft_drift_rows")
+    assert draft.helper_drift(project) == []  # no receipt, no rows
+    install_receipt(project, extra=["investigations/inv/run.py"])
+    (project / "package-format/deck-rules.md").unlink()
+    write(project, "investigations/inv/run.py", "x = 2\n")  # recorded, but no helper or package format
+    write(project, "package-format/findings-template.md", "# unrecorded\n")
+    write(project, "src/extra.py", "# unrecorded\n")
+    assert draft.helper_drift(project) == [{"file": "package-format/deck-rules.md", "status": "missing", "sha256": None,
+                                            "recorded": hashlib.sha256(DECK_RULES.encode()).hexdigest()}]
+    set_manifest(project, helper_drift_confirmed=[{"file": "package-format/deck-rules.md", "sha256": None,
+                                                   "reason": "The user removed the deck rules on purpose."}])
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["helper_drift"][0]["confirmed"] is True
+    for receipt in ("{not json", "[]", '{"src/awb.py": 1}'):
+        write(project, ".awb-receipt.json", receipt)
+        assert draft.helper_drift(project) == [{"file": ".awb-receipt.json", "status": "unreadable",
+                                                "sha256": sha(project / ".awb-receipt.json"), "recorded": None}]
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["helper_drift"][0]["file"] == ".awb-receipt.json"
+
+
+def test_converted_line_endings_are_no_drift(project):
+    draft = load(project / "src/packaging/draft.py", "draft_drift_crlf")
+    install_receipt(project)
+    for path in ("src/awb.py", "package-format/deck-rules.md"):
+        converted = project / path
+        converted.write_bytes(converted.read_bytes().replace(b"\n", b"\r\n"))
+    assert draft.helper_drift(project) == []
+    (project / "src/awb.py").write_bytes((project / "src/awb.py").read_bytes() + b"# edited\r\n")
+    assert [(row["file"], row["status"]) for row in draft.helper_drift(project)] == [("src/awb.py", "changed")]
 
 
 @pytest.mark.parametrize("verify_only", [False, True])
@@ -2004,6 +2448,55 @@ def test_check_draft_refuses_causal_wording_above_claim_strength(project, capsys
     claim_draft(project, DECK_FINDINGS)
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["passed"] and report["claims"] == [] and report["outline"] == []
+
+
+# Sentences on an Answer slide, and the causal phrases the claims check reads in them: a phrase in a negated clause
+# is skipped, under the closed grammar the helper declares above _CLAUSE_END.
+NEGATED_PROBES = [
+    ("The design does not test what caused them.", []), ("Discounts drove the increase.", ["drove"]),
+    ("The effect on repeat rates is unknown.", []), ("The data show patterns, not trends or causes.", []),
+    ("The impact of the change remains unclear.", []), ("The causes of the drop are not established.", []),
+    ("The rise is not due to weather.", []), ("The rise isn't attributable to price.", []),
+    ("We cannot say whether discounts drove sales.", []), ("There is no evidence that discounts drove sales.", []),
+    ("Without testing what caused them, we report shares.", []), ("Neither region drove it.", []),
+    ("The rise was not\ndue to weather.", []),  # a wrapped line continues its clause
+    # Outside the grammar the phrase is still read: another clause, a relative clause, a negator five words back,
+    # an intensifier, a determiner, a noun phrase's relative clause, a verb's predicate, or another bullet.
+    ("The rise was not due to weather, but due to pricing.", ["due to"]),
+    ("The rise was not seasonal; discounts drove it.", ["drove"]),
+    ("Sales did not fall and discounts drove returns.", ["drove"]),
+    ("Customers who did not renew drove the drop.", ["drove"]),
+    ("Stores that never discounted drove the rise.", ["drove"]),
+    ("We did not see that the large western stores drove it.", ["drove"]),
+    ("Not only did discounts drive sales.", ["drive"]), ("Not just price drove it.", ["drove"]),
+    ("Stores with no discount drove the rise.", ["drove"]), ("Stores without a discount drove the rise.", ["drove"]),
+    ("Weather causes delays whose length is unknown.", ["causes"]), ("Discounts drove sales that are unknown.", ["drove"]),
+    ("- Sales did not fall\n- Discounts drove returns", ["drove"]),
+    # A connective phrase is negated only directly after the negator: these may claim the discount kept retention up.
+    ("Retention did not drop due to the loyalty discount.", ["due to"]),
+    ("Revenue did not fall because of the loyalty discount.", ["because of"]),
+    ("Sales did not\nfall due to weather.", ["due to"]),
+]
+
+
+def test_negated_causal_phrases_are_no_claims():
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_negated")
+    found = {}
+    for text, _ in NEGATED_PROBES:
+        view = draft._view("## Answer\n\n" + text + "\n")[0]
+        found[text] = [phrase for _, phrase, _ in draft._phrases(view, "prose", 2)]
+    assert found == dict(NEGATED_PROBES)
+
+
+def test_check_draft_skips_negated_causal_wording(project, capsys):
+    bullet = "- Late orders rose to 21%, a data-driven view."
+    claim_draft(project, DECK_FINDINGS.replace(bullet, "- The scan does not test what caused them."))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["claims"] == [], report
+    claim_draft(project, DECK_FINDINGS.replace(bullet, "- The scan does not test what caused them.\n"
+                                                       "- The new carrier drove the increase."))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and [(row["line"], row["phrase"]) for row in report["claims"]] == [(15, "drove")]
 
 
 CLEAN_FINDINGS = CLAIM_FINDINGS.replace("The new carrier drives the rise", "Late orders rose")
@@ -2461,18 +2954,21 @@ def test_numbers_skip_a_claim_strength_line_the_claims_check_accepts(project, ca
     claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace(
         DISCOUNT_CLAIM, f"**Claim strength:** {HOLDOUT}\nacross 77 stores"))
     report = run(project, capsys, "check-draft", "inv", "pkg")[1]
-    assert report["claims"] == [] and report["numbers"] == [{"file": "methodology.md", "line": 14, "text": "77"}]
+    assert report["claims"] == [] and report["numbers"] == [
+        {"file": "methodology.md", "line": 14, "text": "77", "problem": NOT_RECORDED}]
     # A line the claims check refuses keeps its numbers: another design, or the issue's line, which names no
     # experiment or natural experiment.
     for declared in (HOLDOUT.replace("Q3", "Q4"), "causal (randomized holdout of 2024 Q3, 50/50 split)"):
         claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace(DISCOUNT_CLAIM, f"**Claim strength:** {declared}"))
         code, report = run(project, capsys, "check-draft", "inv", "pkg")
         assert code == 1 and [row["section"] for row in report["claims"]] == [DISCOUNT]
-        assert report["numbers"] == [{"file": "methodology.md", "line": 13, "text": text} for text in ("2024", "50/50")]
+        assert report["numbers"] == [{"file": "methodology.md", "line": 13, "text": text, "problem": problem}
+                                     for text, problem in (("2024", YEAR_COUNT), ("50", NOT_RECORDED),
+                                                           ("50", NOT_RECORDED))]
     # Without the claims check's accepted lines, check_numbers reads every line.
     draft = load(project / "src/packaging/draft.py", "draft_claim_numbers")
     path = project / "deliveries/inv/pkg/draft/methodology.md"
-    assert [row["text"] for row in draft.check_numbers(path, [Decimal(4)])] == ["2024", "50/50"]
+    assert [row["text"] for row in draft.check_numbers(path, [Decimal(4)])] == ["2024", "50", "50"]
     assert draft.check_numbers(path, [Decimal(4)], claim_lines={13}) == []
 
 
@@ -2485,13 +2981,14 @@ def test_numbers_count_lines_as_the_claims_check_does_after_a_comment(project, c
                 .replace(DISCOUNT_CLAIM, f"{DISCOUNT_CLAIM}\nacross 77 stores"))
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and report["claims"] == []
-    assert report["numbers"] == [{"file": "methodology.md", "line": 16, "text": "77"}]
+    assert report["numbers"] == [{"file": "methodology.md", "line": 16, "text": "77", "problem": NOT_RECORDED}]
     write(project, "investigations/inv/state.md", STATE.format(status="supported", reason="").replace(
         "causal (experiment: randomized discount test)", HOLDOUT))
     claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace("## Findings", comment)
                 .replace(DISCOUNT_CLAIM, f"**Claim strength:** {HOLDOUT}\nacross 77 stores"))
     report = run(project, capsys, "check-draft", "inv", "pkg")[1]
-    assert report["claims"] == [] and report["numbers"] == [{"file": "methodology.md", "line": 16, "text": "77"}]
+    assert report["claims"] == [] and report["numbers"] == [
+        {"file": "methodology.md", "line": 16, "text": "77", "problem": NOT_RECORDED}]
 
 
 # Where a <!-- stands around "Renewals fell 37% in Q3.", and the numbers check_numbers reports with no recorded value
@@ -2569,7 +3066,7 @@ def test_check_draft_reads_numbers_after_a_comment_marker_written_as_text(projec
     # The issue's first shape in methodology.md: release's mechanical check reports the untraced number.
     draft = project / "deliveries/inv/pkg/draft"
     write(draft, "methodology.md", METHODOLOGY + f"\nA note opens with `<!--`.\n\n{UNTRACED}\n\nIt closes with `-->`.\n")
-    rows = [{"file": "methodology.md", "line": 15, "text": "37%"}]
+    rows = [{"file": "methodology.md", "line": 15, "text": "37%", "problem": NOT_RECORDED}]
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and report["numbers"] == rows
     code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
@@ -2683,7 +3180,7 @@ def storyline_fixture(project):
     set_manifest(project, charts="none")
     write(draft, "methodology.md", "# Methodology\n\n## Findings\n\n"
           "### Customer rates differ\n\n**Claim strength:** association\n\n[r-002](../../../../investigations/inv/evidence/r-002.json)\n\n"
-          "### Regional rates differ\n\n**Claim strength:** association\n\nResult: r-001\n\n"
+          "### Regional rates differ\n\n**Claim strength:** association\n\nResult: `r-001`\n\n"
           "### Coverage remains limited\n\n**Claim strength:** association\n\nNo recorded answer is claimed here.\n\n"
           "How many claims closed late?\n\nWhich regions close claims late?\n")
     return draft
@@ -2768,7 +3265,8 @@ def test_check_draft_open_questions_rows(project, capsys, required, body, placem
     assert verified["open_questions"] == report["open_questions"]
 
 
-def test_open_questions_includes_parked_and_recheck_without_truncation(project, capsys):
+@pytest.mark.parametrize("promoted", [True, False])
+def test_open_questions_includes_parked_and_recheck_without_truncation(project, capsys, promoted):
     provenance = load(project / "src/provenance.py", "ledger_complete_fixture")
     questions = ["Which regions need review?", "Which period applies?", "Which owner decides?",
                  "Which population matters?", "Which definition applies?", "Which caveat matters?"]
@@ -2779,8 +3277,13 @@ def test_open_questions_includes_parked_and_recheck_without_truncation(project, 
     settings.write_text(settings.read_text().replace('[results.r-001]', '[results.r-001]\nanswers = ["Q-001"]'))
     provenance.answer_question(project, "inv", "Q-001", results=["r-001"])
     provenance.set_question(project, "inv", ["Q-002"], "parked", reason="Waiting on owner")
+    if not promoted:
+        write(project / "investigations/inv", "history.md", "# Investigation history\n")
+        provenance.update_findings(project, "inv", ["r-001"], status="provisional", reason="Not yet checked")
     provenance.flag_findings(project, "inv", [{"result": "r-001", "reason": "Changed input"}])
-    assert provenance.question_tree(project, "inv")[0]["display_status"] == "answered (awaiting recheck)"
+    # A recheck of a never-promoted answer is still required on the slide.
+    assert provenance.question_tree(project, "inv")[0]["display_status"] == (
+        "answered (awaiting recheck)" if promoted else "answered (provisional, awaiting recheck)")
     provenance.edit_question(project, "inv", "Q-001", audience="Which regions need review?")
     draft = project / "deliveries/inv/pkg/draft"
     record = manifest(project)
@@ -2802,12 +3305,16 @@ def test_open_questions_includes_parked_and_recheck_without_truncation(project, 
                for row in report["open_questions"])
 
 
+# A result ID cites only as a whole code span or in an evidence path; the bare ID in prose cites nothing.
 @pytest.mark.parametrize("citation, unlinked", [
-    ("Result: r-001", ["Coverage remains limited"]),
+    ("Result: r-001", ["Regional rates differ", "Coverage remains limited"]),
     ("Result: `r-001`", ["Coverage remains limited"]),
+    ("Result: `` r-001 ``", ["Coverage remains limited"]),
     ("[Evidence](../../../../investigations/inv/evidence/r-001.json)", ["Coverage remains limited"]),
-    ("Result (r-001).", ["Coverage remains limited"]),
-    ("Result: r-001-extra", ["Regional rates differ", "Coverage remains limited"]),
+    ("Evidence: `investigations/inv/evidence/r-001.json`", ["Coverage remains limited"]),
+    ("Result (r-001).", ["Regional rates differ", "Coverage remains limited"]),
+    ("Result: `r-001-extra`", ["Regional rates differ", "Coverage remains limited"]),
+    ("Result: `r-001 and r-002`", ["Regional rates differ", "Coverage remains limited"]),
     ("<!-- Result: r-001 -->", ["Regional rates differ", "Coverage remains limited"]),
     ("The regional result", ["Regional rates differ", "Coverage remains limited"]),
     (None, ["Regional rates differ", "Coverage remains limited"]),
@@ -2821,7 +3328,7 @@ def test_storyline_citation_grammar_reports_unlinked_text(project, capsys, citat
     if citation is None:
         (project / "investigations/inv/evidence/r-001.json").unlink()
     else:
-        path.write_text(path.read_text().replace("Result: r-001", citation))
+        path.write_text(path.read_text().replace("Result: `r-001`", citation))
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert report["unlinked_findings"] == unlinked and report["storyline"] == []
     assert code == 0, report
@@ -2898,7 +3405,7 @@ def test_methodology_note_is_checked_with_rows_naming_it(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"]
     assert report["findings"] == [{"file": "methodology-note.md", "line": first, "kind": "name", "text": "orders_view"}]
-    assert report["numbers"] == [{"file": "methodology-note.md", "line": first + 1, "text": "40"}]
+    assert report["numbers"] == [{"file": "methodology-note.md", "line": first + 1, "text": "40", "problem": NOT_RECORDED}]
     assert report["claims"] == [{
         "file": "methodology-note.md", "line": first + 2, "section": "Method", "phrase": "drive",
         "claim": "association", "results": ["r-001"], "problem": "causal wording above the association claim "
@@ -2911,6 +3418,77 @@ def test_methodology_note_is_checked_with_rows_naming_it(project, capsys):
     (draft / "methodology-note.md").unlink()
     code, after = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and after == before
+
+
+def test_methodology_note_limitations_section_is_not_read_for_claims(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    set_manifest(project, results=[{"result_id": "r-001", "evidence": "investigations/inv/evidence/r-001.json",
+                                    "question": QUESTIONS["r-001"]}])
+    caveats = ("\n## Limitations\n\n- Part of the rise is attributable to holiday volume.\n\n### Coverage\n\n"
+               "- June is short due to a feed outage.\n")
+    write(draft, "methodology-note.md", NOTE + caveats)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["claims"] == [], report
+    # The same sentence under another section is read, and so is a section after Limitations.
+    write(draft, "methodology-note.md", NOTE + caveats.replace("## Limitations", "## Exclusions")
+          + "\n## Limitations\n\n- Holiday weeks are in the period.\n\n## Contacts\n\n- Volume drives staffing.\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and [(row["section"], row["phrase"]) for row in report["claims"]] == [
+        ("Exclusions", "attributable to"), ("Coverage", "due to"), ("Contacts", "drives")]
+
+
+def note_of(words):
+    """A note of `words` rendered words: a three-word title and a bold paragraph, with a comment that renders
+    no words."""
+    body = " ".join(["word"] * (words - 4))
+    return f"# How we counted\n\n<!-- many hidden words here -->\n\n**{body}** and\n"
+
+
+@pytest.mark.parametrize("brief, words, rows", [
+    ("Methods note length: about 100 words\n", 111, [{"words": 111, "recorded": 100}]),
+    ("- Methods note length: about 100 words.\n", 111, [{"words": 111, "recorded": 100}]),
+    ("Methods note length: about 100 words\n", 110, []),  # 10% over is within the length
+    ("The board wants one page.\n", 400, []),  # no recorded length, no row
+    (None, 400, []),  # no brief
+    ("template", 400, []),  # the shipped brief template's guidance records no length
+    ("Methods note length: one page\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+    ("**Methods note length:** about 500 words\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+    ("Methods note length: about 500 words\nMethods note length: about 400 words\n", 30,
+     [{"file": "investigations/inv/brief.md", "line": 6}]),
+    # A numbered list marker is read like a bulleted one (review probes).
+    ("1. Methods note length: about 100 words\n", 111, [{"words": 111, "recorded": 100}]),
+    ("1) Methods note length: about 100 words\n", 111, [{"words": 111, "recorded": 100}]),
+    # Other spellings are reported, never read as no preference.
+    ("> Methods note length: about 100 words\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+    ("| Methods note length | about 100 words |\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+    ("Methodology note length: about 100 words\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+])
+def test_note_over_the_recorded_length_is_an_informational_row(project, capsys, brief, words, rows):
+    if brief == "template":
+        write(project, "investigations/inv/brief.md",
+              (SKILLS / "awb-init/assets/workbench/investigation/brief.md").read_text())
+    elif brief is not None:
+        write(project, "investigations/inv/brief.md", "# Investigation brief\n\n## Audience\n\n" + brief)
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["note_length"] == [] and report["passed"]  # no note, no row
+    write(project / "deliveries/inv/pkg/draft", "methodology-note.md", note_of(words))
+    for argv in ((), ("--verify-only",)):
+        code, report = run(project, capsys, "check-draft", "inv", "pkg", *argv)
+        assert code == 0 and report["passed"], report  # informational: it never fails the check
+        assert [{key: row[key] for key in expected} for row, expected in zip(report["note_length"], rows)] == rows
+        assert len(report["note_length"]) == len(rows)
+    if rows and "words" in rows[0]:
+        assert report["note_length"][0]["file"] == "methodology-note.md"
+        assert "investigations/inv/brief.md:5 records" in report["note_length"][0]["problem"]
+
+
+def test_note_length_skips_a_fence_language_label(project, capsys):
+    # 110 rendered words and a labelled fence stay within about 100 words; the label is fenced code.
+    write(project, "investigations/inv/brief.md", "# Brief\n\nMethods note length: about 100 words\n")
+    write(project / "deliveries/inv/pkg/draft", "methodology-note.md",
+          note_of(110) + "\n```python\nprint(1)\n```\n")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["note_length"] == [], report["note_length"]
 
 
 def test_check_draft_counts_main_and_appendix_slides(project, capsys):
@@ -2968,6 +3546,7 @@ def test_appendix_how_we_know_and_limitations_wording_is_not_read(project, capsy
 
 
 ORDER = ["Regional rates differ", "Coverage remains limited", "Customer rates differ"]
+SLUGS = ["regional-rates-differ", "coverage-remains-limited", "customer-rates-differ"]
 NULL = object()  # presentation_order recorded as JSON null, which is malformed rather than absent
 
 
@@ -2984,34 +3563,40 @@ def ordered_deck(project, headlines, order):
     # Without an order the ledger decides: Customer answers the must root, so it leads.
     (None, [("Customer rates differ", 1, "finding slide is out of place; move it to finding position 1")]),
     ("none", [("Customer rates differ", 1, "finding slide is out of place; move it to finding position 1")]),
-    (ORDER, []),
-    (["Regional rates differ", "Coverage remains limited"],
-     [("Customer rates differ", None, "presentation_order does not list this finding slide; add its heading where "
-                                      "the user placed it")]),
-    (ORDER + ["Regional rates differ"],
-     [("Regional rates differ", None, "presentation_order lists this heading 2 times; keep it once")]),
-    (ORDER + ["West volume is flat"],
-     [("West volume is flat", None, "presentation_order names no finding slide with this heading; give the "
-                                    "slide's current heading or remove it")]),
-    (["Customer rates differ", "Regional rates differ", "Coverage remains limited"],
+    (SLUGS, []),
+    (SLUGS[:2],
+     [("Customer rates differ", None, "presentation_order does not list this finding slide's slug; add it where the "
+                                      "user placed the slide")]),
+    (SLUGS + [SLUGS[0]],
+     [("regional-rates-differ", None, "presentation_order lists this slug 2 times; keep it once")]),
+    (SLUGS + ["west-volume-is-flat"],
+     [("west-volume-is-flat", None, "presentation_order names no finding slide with this slug; give a slug "
+                                    "ledger_order lists, or remove it")]),
+    ([SLUGS[2], SLUGS[0], SLUGS[1]],
      [("Customer rates differ", 1, "finding slide is out of place in presentation_order; move it to finding "
                                    "position 1")]),
-    (["Regional rates differ", "Coverage remains limited", "Customer rates **differ**"], []),
-    ("Regional rates differ",
-     [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
+    # Headings are not slugs: each names no slide, and each slide is unlisted.
+    (ORDER,
+     [(heading, None, "presentation_order names no finding slide with this slug; give a slug ledger_order lists, "
+                      "or remove it") for heading in ORDER] +
+     [(heading, None, "presentation_order does not list this finding slide's slug; add it where the user placed "
+                      "the slide") for heading in ORDER]),
+    ("regional-rates-differ",
+     [(None, None, "presentation_order is not none or a list of finding slide slugs; record the approved order, "
                    "or none")]),
-    ([ORDER[0], ORDER[1], ""],
-     [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
+    ([SLUGS[0], SLUGS[1], ""],
+     [(None, None, "presentation_order is not none or a list of finding slide slugs; record the approved order, "
                    "or none")]),
     (NULL,
-     [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
+     [(None, None, "presentation_order is not none or a list of finding slide slugs; record the approved order, "
                    "or none")]),
-], ids=["absent", "none", "followed", "missing", "repeated", "unknown", "moved", "markup", "not a list", "blank",
+], ids=["absent", "none", "followed", "missing", "repeated", "unknown", "moved", "headings", "not a list", "blank",
         "null"])
 def test_presentation_order_decides_finding_order_when_set(project, capsys, order, rows):
     ordered_deck(project, ORDER, order)
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
-    assert [(row["slide"], row.get("expected_position"), row["problem"]) for row in report["storyline"]] == rows
+    assert [(row["slide"] or row.get("slug"), row.get("expected_position"), row["problem"])
+            for row in report["storyline"]] == rows
     assert report["unlinked_findings"] == ["Coverage remains limited"]
     assert code == (1 if rows else 0) and report["passed"] is (not rows), report
     _, verified = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
@@ -3019,10 +3604,56 @@ def test_presentation_order_decides_finding_order_when_set(project, capsys, orde
 
 
 def test_export_keeps_presentation_order(project, capsys):
-    ordered_deck(project, ORDER, ORDER)
+    ordered_deck(project, ORDER, SLUGS)
     code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
-    assert code == 0 and report["written"] and manifest(project)["presentation_order"] == ORDER
+    assert code == 0 and report["written"] and manifest(project)["presentation_order"] == SLUGS
+    # export records each finding slide's slug with its heading and primary result, and prints the slugs.
+    assert manifest(project)["slide_slugs"] == [
+        {"slug": "regional-rates-differ", "heading": "Regional rates differ", "primary": "r-001"},
+        {"slug": "coverage-remains-limited", "heading": "Coverage remains limited", "primary": "none"},
+        {"slug": "customer-rates-differ", "heading": "Customer rates differ", "primary": "r-002"}]
+    assert [entry["slug"] for entry in report["slide_slugs"]] == SLUGS
 
+
+def test_a_reworded_heading_keeps_its_presentation_order_slot(project, capsys):
+    draft = ordered_deck(project, ORDER, SLUGS)
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    for name in ("findings.md", "methodology.md"):
+        path = draft / name
+        path.write_text(path.read_text().replace("Regional rates differ", "Regions differ in their rates"))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["storyline"] == [] and code == 0, report
+    # check-draft records the new heading under the kept slug, so the next export keeps it too.
+    assert manifest(project)["slide_slugs"][0] == {"slug": "regional-rates-differ",
+                                              "heading": "Regions differ in their rates", "primary": "r-001"}
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    assert manifest(project)["slide_slugs"][0]["slug"] == "regional-rates-differ"
+    # The derived order is printed whatever presentation_order holds: the must root's slide first.
+    assert [(entry["slug"], entry["question"]) for entry in report["ledger_order"]] == [
+        ("customer-rates-differ", "Q-003"), ("regional-rates-differ", "Q-002"), ("coverage-remains-limited", None)]
+
+
+
+def test_a_heading_reworded_in_findings_first_keeps_its_slug(project, capsys):
+    draft = ordered_deck(project, ORDER, SLUGS)
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    recorded = manifest(project)["slide_slugs"]
+
+    def reword(name, old, new):
+        (draft / name).write_text((draft / name).read_text().replace(old, new))
+
+    # Reworded in findings.md only: headings reports it, and neither check-draft nor export records a new slug.
+    reword("findings.md", "Regional rates differ", "Regions differ in their rates")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and [row["heading"] for row in report["headings"]] == ["Regions differ in their rates"]
+    assert manifest(project)["slide_slugs"] == recorded
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    assert manifest(project)["slide_slugs"] == recorded
+    # Once methodology.md agrees, the slide keeps its slug by its primary result, and the order holds.
+    reword("methodology.md", "Regional rates differ", "Regions differ in their rates")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["storyline"] == [] and report["headings"] == [] and code == 0, report
+    assert [entry["slug"] for entry in manifest(project)["slide_slugs"]] == SLUGS
 
 def test_presentation_order_is_no_provenance_gap():
     draft = load(ASSETS["src/packaging/draft.py"], "draft_order_gaps")

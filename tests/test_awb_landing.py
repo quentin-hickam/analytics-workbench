@@ -12,6 +12,7 @@
 # test_retain_copies_and_verifies_then_reports_existing_copy: verified copy succeeds and matches; a second call reports the identical existing copy as matched, not a conflict.
 # test_retain_reports_checksum_discrepancy_without_changing_existing_copy: changed retained copy reports a conflict and a discrepancy, unmatched, without overwriting.
 # test_session_loads_views_in_name_order_without_recursing: session loads two views with the second depending on the first.
+# test_result_session_loads_investigation_views_after_the_foundation_on_one_thread: session(investigation=...) loads investigations/<name>/views/*.sql after the foundation views, in name order, and runs on one thread; other sessions load only the foundation; a missing folder adds nothing; a name with a path separator is refused.
 # test_session_resolves_project_paths_from_another_working_directory: session resolves project-relative paths from another working directory.
 # test_session_names_failing_view_and_closes_connection: regression: failed view loading closes the session connection.
 # test_land_refuses_existing_id_before_fetch: existing completed acquisition is refused before fetching.
@@ -19,6 +20,11 @@
 # test_session_refuses_a_project_root_containing_a_comma: regression: comma-containing project root is rejected before opening a connection.
 # test_cli_sql_prints_first_rows_and_total_and_writes_full_result: sql runs a project-relative query file or SQL text, prints a capped Markdown table and the total, and writes CSV or Parquet.
 # test_cli_sql_reports_failures_on_one_line: SQL errors, failing view files and non-query SQL print one stderr line and return 1; a bad --out extension is a usage error.
+# test_sql_param_values_read_as_settings_values: a --param value is read as a one-line TOML value, so a date, number, boolean, quoted string, or array keeps its type, and other text, a value spanning lines included, is the string as given.
+# test_sql_param_refuses_what_a_query_cannot_name: a --param without =, or whose name is not letters, digits, and _, is a usage error.
+# test_cli_sql_binds_parameters_from_param_and_settings: with and without --read-only, --settings binds an investigation's [parameters] and loads its views/*.sql, and --param wins over them, each statement getting only the names it uses with their types kept, writing nothing; a missing, unreadable, or misnamed settings investigation fails on one line, and a bad --param exits 2.
+# test_cli_sql_plan_failures_name_the_fix_and_keep_read_only: under --read-only, an unbound parameter, an ambiguous column, and another binder error return DuckDB's error on one line with its likely fix and never suggest dropping --read-only; without it, an unbound parameter gets the same fix; profile, which binds none, answers an unbound parameter with a fix it can take.
+# test_cli_sql_and_profile_report_a_missing_query_file: one line ending in .sql, in any case, relative or absolute, that names no file is a missing query file for sql and profile, and whitespace around one that names a file is ignored; SQL text over several lines or not ending in .sql still runs; a table named sql in a schema is the known limit.
 # test_cli_sql_read_only_runs_select_and_refuses_every_write: --read-only prints SELECT results and refuses COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, a setting PRAGMA, CALL, CREATE, and INSERT, and a SELECT calling a table function that writes (enable_profiling, enable_logging, checkpoint), directly or through a view, macro, subquery, or query(), and any call of query, query_table, json_execute_serialized_sql, or a table macro calling one (histogram_values, histogram) as a table function, however named or quoted, before any statement runs, and refuses --out, leaving the project unchanged; profile --read-only does the same; a read-only PRAGMA, SHOW, SUMMARIZE, PIVOT with IN, information_schema, a column or CTE named query, and the histogram() aggregate still run, through sql and profile.
 # test_read_only_sql_refuses_a_plan_that_differs_at_the_run: a query() whose SQL reads range(1) under EXPLAIN and enables profiling at the run is refused before any statement runs; no file is written, the session's profiling stays off, and the session still answers.
 # test_profile_runs_with_a_landing_helper_older_than_read_only: profile without --read-only calls session(root) alone, so a landing helper without the read_only keyword still profiles.
@@ -30,7 +36,7 @@
 # test_read_list_holds_read_xlsx_and_its_plan_passes_without_the_extension: read_xlsx is on the read list as the excel extension's function, so a plan calling it passes the check while another extension's table function is refused; runs without the extension.
 # test_read_only_sql_without_the_excel_extension_says_how_to_install_it: without the excel extension, read_xlsx or FROM 'book.xlsx' in a query, or read_xlsx in a view file, fails on one line saying it is not installed and how to install it once without --read-only, writing nothing; skipped where the extension is installed.
 # test_read_only_sql_reads_a_landed_excel_file_through_a_view: with the excel extension installed, sql and profile --read-only read a landed .xlsx through a view and directly, loading the extension without installing it, also when no view loaded it before the configuration locked, refuse COPY to xlsx, and write nothing; skipped where the extension cannot be loaded.
-# test_cli_land_copies_files_retains_and_writes_ledger_rows: land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
+# test_cli_land_copies_files_retains_and_writes_ledger_rows: (and reports source_status_changed when it sets a candidate source's Status to acquired) land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
 # test_cli_land_skips_unusable_retention_location: unrecorded, none chosen, unreachable and non-filesystem locations skip retention and record this checkout only.
 # test_cli_land_creates_a_missing_ledger_from_the_template: missing sources.md is written from the template with the row, reported as created.
 # test_sources_template_matches_the_installed_register: SOURCES_TEMPLATE is byte-equal to the shipped foundation/sources.md.
@@ -64,7 +70,12 @@
 # test_unreadable_or_missing_parquet_fails_every_declared_check: a file that is not Parquet, or no Parquet file, fails every declared check with ChecksFailed rather than a DuckDB error.
 # test_a_declaration_that_plans_no_check_needs_neither_duckdb_nor_parquet: empty check lists plan nothing, so publish needs no duckdb and no Parquet output.
 # test_cli_publish_records_declared_checks: the publish command records declared checks with its --check outcome, counts them in its output and catalog_row (one check passes, several pass), and prints failed_checks on refusal.
+# test_a_failed_publish_names_the_partial_folder_and_the_next_step: a refused publish prints the partial folder it left with a next_step saying to remove it before publishing again; a retry under the same ID is refused naming that folder, and publishes once it is removed; a refusal that leaves no partial prints no next_step.
+# test_a_line_break_inside_an_inline_table_is_translated: a datasets.toml whose inline table spans lines, or holds a comment, is refused with the subtable to write, named from the table header and the whole dotted key when both are found; a line break inside a string, an array spanning lines, and a missing comma keep the parser's message alone.
+# test_lineage_is_declared_beside_checks: [datasets.<name>] accepts a lineage list beside its checks table, which plans no check; a lineage that is not a list of distinct names is refused.
+# test_retain_says_once_that_an_unvalidated_upstream_cannot_be_checked: the retain that writes an acquisition's row prints upstream_check naming files whose HTTP URL came without an ETag or Last-Modified; an acquisition with a validator, a non-HTTP URL, or no URL gets none, and a later retain of the same acquisition does not repeat it.
 
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -75,7 +86,7 @@ import shutil
 import subprocess
 import sys
 import types
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -398,6 +409,27 @@ def test_session_loads_views_in_name_order_without_recursing(tmp_path):
         assert connection.execute("SELECT doubled FROM derived ORDER BY doubled").fetchall() == [(6,), (10,)]
 
 
+def test_result_session_loads_investigation_views_after_the_foundation_on_one_thread(tmp_path):
+    pytest.importorskip("duckdb")
+    (tmp_path / "foundation/views").mkdir(parents=True)
+    (tmp_path / "foundation/views/01_base.sql").write_text("CREATE VIEW base AS SELECT 3 AS n UNION ALL SELECT 5;")
+    local = tmp_path / "investigations/inv/views"
+    local.mkdir(parents=True)
+    # A name earlier than the foundation file still loads after it, and its own files load in name order.
+    (local / "00_screen.sql").write_text("CREATE VIEW screened AS SELECT n FROM base WHERE n > 3;")
+    (local / "01_top.sql").write_text("CREATE VIEW top AS SELECT max(n) AS n FROM screened;")
+    (local / "notes.md").write_text("not SQL")
+    with landing.session(tmp_path, investigation="inv") as connection:
+        assert connection.execute("SELECT n FROM top").fetchall() == [(5,)]
+        assert connection.execute("SELECT current_setting('threads')").fetchone()[0] == 1
+    with landing.session(tmp_path) as connection:  # other sessions load only the foundation
+        assert not connection.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'top'").fetchall()
+    with landing.session(tmp_path, investigation="absent") as connection:  # no views/ folder loads nothing more
+        assert connection.execute("SELECT count(*) FROM base").fetchone()[0] == 2
+    with pytest.raises(ValueError, match="Invalid directory name"):
+        landing.session(tmp_path, investigation="../inv")
+
+
 def test_session_resolves_project_paths_from_another_working_directory(tmp_path, monkeypatch):
     pytest.importorskip("duckdb")
     root = tmp_path / "project's data"
@@ -515,6 +547,135 @@ def test_cli_sql_reports_failures_on_one_line(tmp_path, capsys):
         landing.cli_sql(tmp_path, ["SELECT 1", "--out", "result.json"])
     assert exit.value.code == 2
     assert not (tmp_path / "result.json").exists()
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("start=2026-01-01", ("start", date(2026, 1, 1))),
+    ("n=5", ("n", 5)),
+    ("rate=0.25", ("rate", 0.25)),
+    ("on=true", ("on", True)),
+    ('code="5"', ("code", "5")),
+    ("regions=['a', 'b']", ("regions", ["a", "b"])),
+    ("region=west", ("region", "west")),  # no TOML value: the text as given
+    ("code=007", ("code", "007")),
+    ("flag=True", ("flag", "True")),
+    ("empty=", ("empty", "")),
+    ("pair=a=b", ("pair", "a=b")),
+    ("two=1\nother = 2", ("two", "1\nother = 2")),  # never read as TOML across lines
+])
+def test_sql_param_values_read_as_settings_values(text, expected):
+    assert landing._parameter(text) == expected
+
+
+@pytest.mark.parametrize("text", ["start", "=5", "the-start=5", "$start=5", "a b=5"])
+def test_sql_param_refuses_what_a_query_cannot_name(text):
+    with pytest.raises(argparse.ArgumentTypeError, match="name=value"):
+        landing._parameter(text)
+
+
+def test_cli_sql_binds_parameters_from_param_and_settings(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    (tmp_path / "investigations/churn").mkdir(parents=True)
+    (tmp_path / "investigations/churn/settings.toml").write_text(
+        "[parameters]\nfirst = 2\nlast = 3\nunused = 2026-01-01\n")
+    (tmp_path / "queries/window.sql").write_text("SELECT id FROM orders WHERE id BETWEEN $first AND $last ORDER BY id;\n")
+    (tmp_path / "investigations/churn/views").mkdir()
+    (tmp_path / "investigations/churn/views/01_screened.sql").write_text(
+        "CREATE VIEW screened AS SELECT id FROM orders WHERE id > 1;\n")
+    before = _files(tmp_path)
+    for read_only in ([], ["--read-only"]):
+        # --settings also loads the investigation's shared views, which a session without it lacks
+        assert landing.cli_sql(tmp_path, read_only + ["--settings", "churn", "SELECT count(*) AS n FROM screened "
+                                                      "WHERE id <= $last"]) == 0
+        assert capsys.readouterr().out == "| n |\n|---|\n| 2 |\n1 of 1 rows shown\n"
+        assert landing.cli_sql(tmp_path, read_only + ["SELECT count(*) FROM screened"]) == 1
+        assert "screened" in capsys.readouterr().err
+        # settings bind every name a statement uses, and --param wins over them
+        assert landing.cli_sql(tmp_path, read_only + ["--settings", "churn", "queries/window.sql"]) == 0
+        assert capsys.readouterr().out == "| id |\n|---|\n| 2 |\n| 3 |\n2 of 2 rows shown\n"
+        assert landing.cli_sql(tmp_path, read_only + ["--settings", "churn", "--param", "last=4",
+                                                      "--param", "first=4", "queries/window.sql"]) == 0
+        assert capsys.readouterr().out == "| id |\n|---|\n| 4 |\n1 of 1 rows shown\n"
+        # each statement gets the names it uses; a date, a number, and a list keep their types
+        assert landing.cli_sql(tmp_path, read_only + [
+            "--param", "n=2", "--param", "day=2026-01-01", "--param", "ids=[1, 3]",
+            "SELECT $n + 1 AS x; SELECT $day + INTERVAL 1 DAY AS d, list_contains($ids, 3) AS has FROM range($n)"]) == 0
+        assert capsys.readouterr().out == ("| d | has |\n|---|---|\n| 2026-01-02 00:00:00 | True |\n"
+                                           "| 2026-01-02 00:00:00 | True |\n2 of 2 rows shown\n")
+    assert _files(tmp_path) == before
+    # a missing or unreadable settings file fails on one line; a bad --param is a usage error
+    assert landing.cli_sql(tmp_path, ["--settings", "absent", "SELECT 1"]) == 1
+    assert "investigations/absent/settings.toml does not exist" in capsys.readouterr().err
+    (tmp_path / "investigations/churn/settings.toml").write_text("[parameters\n")
+    assert landing.cli_sql(tmp_path, ["--read-only", "--settings", "churn", "SELECT 1"]) == 1
+    assert capsys.readouterr().err.startswith("sql: investigations/churn/settings.toml: ")
+    assert landing.cli_sql(tmp_path, ["--settings", "../churn", "SELECT 1"]) == 1
+    assert "needs an investigation name" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as exit:
+        landing.cli_sql(tmp_path, ["--param", "first", "SELECT 1"])
+    assert exit.value.code == 2
+
+
+def test_cli_sql_plan_failures_name_the_fix_and_keep_read_only(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    for query, fix in (("SELECT id FROM orders WHERE id > $cohort_end", "bind each $name with --param name=value"),
+                       ("SELECT id FROM orders a, orders b", "qualify the column"),
+                       ("SELECT absent FROM orders", "fix the statement, or for a PIVOT list its values with IN (...)")):
+        assert landing.cli_sql(tmp_path, ["--read-only", query]) == 1, query
+        error = capsys.readouterr().err
+        assert error.startswith("sql: read-only: refused a statement DuckDB cannot plan (") and fix in error, error
+        assert "without --read-only" not in error and error.count("\n") == 1, error
+    # without --read-only, an unbound parameter gets the same fix
+    assert landing.cli_sql(tmp_path, ["SELECT id FROM orders WHERE id > $cohort_end"]) == 1
+    error = capsys.readouterr().err
+    assert "bind each $name with --param name=value" in error and error.count("\n") == 1
+    # profile binds no parameters, so its fix names what it can do instead, with or without --read-only
+    validate_spec = importlib.util.spec_from_file_location("awb_validate_unbound", ASSET.parent / "awb_validate.py")
+    validate = importlib.util.module_from_spec(validate_spec)
+    validate_spec.loader.exec_module(validate)
+    (tmp_path / "src/preparation").mkdir(parents=True)
+    shutil.copyfile(ASSET, tmp_path / "src/preparation/landing.py")
+    (tmp_path / "queries/window.sql").write_text("SELECT id FROM orders WHERE id > $first")
+    for read_only in (["--read-only"], []):
+        assert validate.cli_profile(tmp_path, read_only + ["queries/window.sql"]) == 1
+        error = capsys.readouterr().err
+        assert error.startswith("profile: ") and error.count("\n") == 1, error
+        assert ("first" in error) == bool(read_only), error  # DuckDB names it only under EXPLAIN
+        assert error.endswith("; profile binds no parameters: write each $name's value into the query, or run it "
+                              "with `python3 src/awb.py sql --param name=value` (over MCP, the read tool's sql "
+                              "with params)\n"), error
+        assert "--settings" not in error and "without --read-only" not in error, error
+
+
+def test_cli_sql_and_profile_report_a_missing_query_file(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    validate_spec = importlib.util.spec_from_file_location("awb_validate_missing", ASSET.parent / "awb_validate.py")
+    validate = importlib.util.module_from_spec(validate_spec)
+    validate_spec.loader.exec_module(validate)
+    (tmp_path / "src/preparation").mkdir(parents=True)
+    shutil.copyfile(ASSET, tmp_path / "src/preparation/landing.py")
+    for path in ("queries/absent.sql", "investigations/x/exploration/topic.SQL", " queries/absent.sql ",
+                 str(tmp_path / "absent.sql")):
+        for read_only in ([], ["--read-only"]):
+            assert landing.cli_sql(tmp_path, read_only + [path]) == 1, path
+            assert capsys.readouterr().err == \
+                f"sql: no query file {' '.join(path.split())}; a relative path is read from the project root\n"
+            assert validate.cli_profile(tmp_path, read_only + [path]) == 1, path
+            assert "no query file" in capsys.readouterr().err
+    # whitespace around a path that names a file is ignored, so the file runs
+    for read_only in ([], ["--read-only"]):
+        assert landing.cli_sql(tmp_path, read_only + [" queries/large.sql "]) == 0
+        assert capsys.readouterr().out.endswith("4 of 4 rows shown\n")
+    # SQL text spanning lines, or not ending in .sql, is still SQL text
+    for query in ("SELECT 1 AS n\n-- from queries/old.sql", "SELECT 'queries/absent.sql' AS n", "SELECT 1 AS sql"):
+        assert landing.cli_sql(tmp_path, ["--read-only", query]) == 0, query
+    capsys.readouterr()
+    # Known limit: one line ending in .sql names a file, so a table named sql in schema s is read as one.
+    assert landing.cli_sql(tmp_path, ["SELECT * FROM s.sql"]) == 1
+    assert "no query file" in capsys.readouterr().err
 def _files(root):
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
@@ -902,7 +1063,8 @@ def test_cli_land_copies_files_retains_and_writes_ledger_rows(tmp_path, capsys):
     assert out == {"landed": "data/raw/orders/r1/", "files": 2, "bytes": 12,
                    "retention": {"destination": str(destination), "copied": True, "conflict": False,
                                  "matched": True, "discrepancies": []},
-                   "ledger": {"row": "added", "source_status": "acquired"}}
+                   "ledger": {"row": "added", "source_status": "acquired",
+                              "source_status_changed": "Sources row orders: Status candidate -> acquired"}}
     assert (acquired / "orders.csv").read_bytes() == b"id\r\n1\r\n2\r\n"
     assert (destination / "pages/1.json").read_bytes() == b"{}"
     provenance = json.loads((acquired / "provenance.json").read_text())
@@ -1613,3 +1775,96 @@ def test_cli_publish_records_declared_checks(tmp_path, capsys):
                       "--sql", "prep/orders.sql")
     assert status == 0
     assert "| 1 declared check in `foundation/datasets.toml` passes; nonzero row count |" in out["catalog_row"]
+
+
+def test_a_failed_publish_names_the_partial_folder_and_the_next_step(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    root = published_project(tmp_path, capsys)
+    declare(root, '[datasets.orders.checks]\nkey = ["amount"]\nrange = { doubled = { max = 30 } }\n')
+    argv = ["orders", "v1", "--from", "data/raw/orders/r1", "--sql", "prep/orders.sql"]
+    status, out = run(capsys, landing.cli_publish, root, *argv)
+    assert status == 1 and out["partial"] == "data/parquet/orders/v1.partial"
+    assert out["next_step"] == ("remove data/parquet/orders/v1.partial/ before publishing again: "
+                                "publish refuses while it exists")
+    declare(root, '[datasets.orders.checks]\nrange = { doubled = { min = 0 } }\n')
+    status, out = run(capsys, landing.cli_publish, root, *argv)
+    assert status == 1 and out["partial"] == "data/parquet/orders/v1.partial" and "next_step" in out
+    assert out["error"].startswith("FileExistsError: ") and out["error"].endswith(
+        "v1.partial is left from an earlier failed publish; remove it before publishing again")
+    shutil.rmtree(root / "data/parquet/orders/v1.partial")
+    status, out = run(capsys, landing.cli_publish, root, *argv)
+    assert status == 0 and out["published"] == "data/parquet/orders/v1/"
+    status, out = run(capsys, landing.cli_publish, root, *argv)
+    assert status == 1 and out["partial"] is None and "next_step" not in out
+
+
+@pytest.mark.parametrize("text, advice", [
+    ('[datasets.trips.checks]\ntypes = { trip_id = "BIGINT",\n  pickup = "TIMESTAMP" }\n', "[datasets.trips.checks.types]"),
+    ('[datasets.trips.checks]\ntypes = {\n  trip_id = "BIGINT" }\n', "[datasets.trips.checks.types]"),
+    ('[datasets.trips.checks]\ntypes = { trip_id = "BIGINT"\n}\n', "[datasets.trips.checks.types]"),
+    ('[datasets.trips.checks]\ntypes = { trip_id = "BIGINT", # the key\n pickup = "DATE" }\n', "[datasets.trips.checks.types]"),
+    ('[datasets.trips.checks]\nrange = { fare = { min = 0,\n max = 500 } }\n', "[datasets.trips.checks.range]"),
+    ('[datasets.trips.checks]\ntypes = { note = "{", trip_id = "BIGINT",\n pickup = "DATE" }\n', "[datasets.trips.checks.types]"),
+    ('types = { trip_id = "BIGINT",\n pickup = "DATE" }\n', "a subtable, such as [datasets.<name>.checks.types],"),
+    ('[datasets.trips]\nchecks.types = { trip_id = "BIGINT",\n pickup = "DATE" }\n', "[datasets.trips.checks.types]"),
+    ('[datasets.trips]\nchecks . "types" = { trip_id = "BIGINT",\n pickup = "DATE" }\n', '[datasets.trips.checks."types"]'),
+    ('[datasets.trips.checks]\ntypes = { trip_id = "BIGINT" pickup = "DATE" }\n', None),
+    ('[datasets.trips.checks]\ncolumns = [\n  "trip_id",, ]\n', None),
+    ('[datasets.trips.checks]\ncolumns = ["{",\n  "trip_id" "x"]\n', None),
+    ('[datasets.trips.checks]\ncolumns = ["a"\n', None),
+])
+def test_a_line_break_inside_an_inline_table_is_translated(tmp_path, text, advice):
+    tomllib = pytest.importorskip("tomllib")
+    with pytest.raises(tomllib.TOMLDecodeError) as parsed:
+        tomllib.loads(text)
+    declare(tmp_path, text)
+    with pytest.raises(ValueError) as error:
+        landing.declared_checks(tmp_path, "trips")
+    message = str(error.value)
+    assert message.startswith("foundation/datasets.toml: ") and str(parsed.value) in message
+    if advice is None:
+        assert message == f"foundation/datasets.toml: {parsed.value}"
+    else:
+        assert "an inline table ({ ... }) must stay on one line in TOML" in message and advice in message
+
+
+def test_lineage_is_declared_beside_checks(tmp_path):
+    pytest.importorskip("tomllib")
+    declare(tmp_path, '[datasets.lines]\nlineage = ["sheet", "sheet_row"]\n\n[datasets.lines.checks]\nnot_null = ["sheet"]\n')
+    assert landing.declared_checks(tmp_path, "lines") == {"not_null": ["sheet"]}
+    declare(tmp_path, '[datasets.lines]\nlineage = ["sheet"]\n')
+    assert landing.declared_checks(tmp_path, "lines") == {}
+    for lineage in ('"sheet"', '[]', '["sheet", "sheet"]', '[""]', '[1]'):
+        declare(tmp_path, f'[datasets.lines]\nlineage = {lineage}\n')
+        with pytest.raises(ValueError, match=r"\[datasets.lines\]: lineage is malformed"):
+            landing.declared_checks(tmp_path, "lines")
+    declare(tmp_path, '[datasets.lines]\nlinage = ["sheet"]\n')
+    with pytest.raises(ValueError, match="holds only a checks table and a lineage list"):
+        landing.declared_checks(tmp_path, "lines")
+
+
+def test_retain_says_once_that_an_unvalidated_upstream_cannot_be_checked(tmp_path, capsys):
+    root = workbench(tmp_path / "project")
+    upstreams = {"r1": {"a.csv": {"url": "https://archive.example.test/a.zip"},
+                        "b.csv": {"url": "https://archive.example.test/b.zip", "etag": '"v1"'}},
+                 "r2": {"c.csv": {"url": "https://archive.example.test/c.zip", "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"}},
+                 "r3": {"d.csv": {"url": "s3://bucket/d.csv"}},
+                 "r4": {}}
+    for acquisition_id, upstream in upstreams.items():
+        names = list(upstream) or ["e.csv"]
+        landing.land(root, "orders", acquisition_id,
+                     lambda output, names=names: [(output / name).write_bytes(b"1") for name in names],
+                     request="fetch", upstream=upstream or None)
+    status, out = run(capsys, landing.cli_retain, root)
+    assert status == 0
+    checks = {report["acquisition"]: report.get("upstream_check") for report in out["acted_on"]}
+    assert checks == {"data/raw/orders/r1/": "not possible for a.csv: the server sent no ETag or Last-Modified, "
+                                             "so a later upstream change cannot be detected; tell the user once",
+                      "data/raw/orders/r2/": None, "data/raw/orders/r3/": None, "data/raw/orders/r4/": None}
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    readme = root / "README.md"
+    readme.write_text(readme.read_text().replace("kept at: not yet recorded", "kept at: ../storage", 1))
+    status, out = run(capsys, landing.cli_retain, root)
+    assert status == 0 and len(out["acted_on"]) == 4
+    assert not any("upstream_check" in report for report in out["acted_on"])

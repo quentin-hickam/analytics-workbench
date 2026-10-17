@@ -11,14 +11,25 @@
 # test_flag_the_draft_does_not_represent_needs_no_disposition: a flag recorded with represented_in "none" needs no disposition and blocks nothing.
 # test_malformed_flag_shape_leaves_counts_unknown: a missing or unknown disposition, empty or non-string places, or the per-place shape is malformed; counts are null.
 # test_malformed_manifest_requests_targeted_fallback: invalid manifests or timestamps name the manifest under uncertainties, with no mtime estimate.
+# test_a_preview_only_draft_reports_the_preview_not_a_missing_manifest: a draft holding only .preview/headlines.md reports draft_stage "headline preview written, not yet exported" and no uncertainty; without the preview, a missing manifest is uncertain again.
 # test_draft_without_manifest_json_is_an_uncertainty: a draft manifest in another format is not read; the draft is named under uncertainties.
 # test_unusable_release_manifest_is_uncertain: an absent, non-JSON, undated, or unreadable release manifest leaves released_at null and records one uncertainty.
 # test_unreadable_draft_manifest_is_unknown: an unreadable draft manifest leaves dates and counts null with an uncertainty.
-# test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
+# test_git_no_commits_dated_state_and_no_index_writes: no-commit wording; a dated state and a change on its day are "saved the same day as the latest change", a later day out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
+# test_results_recorded_before_the_first_commit_are_listed_for_a_rerun: once the repository has a commit, evidence whose producing_commit is uncommitted, unknown, or unreadable is listed under git.uncommitted_evidence (unreadable with an uncertainty), and evidence naming a commit is not; before any commit, or with no evidence folder, nothing is listed.
 # test_ledger_writes_leave_the_state_current: a later questions.json or questions.md change, uncommitted or committed, leaves the state current; a later brief change does not.
+# test_a_state_written_after_the_latest_change_on_the_same_day_is_up_to_date: a timestamped state orders changes by time, a change in its own second not after it, a Z time read as an instant.
+# test_a_state_time_without_its_offset_or_malformed_is_uncertain: a time without its offset, a space separator, fractional seconds, an impossible hour, or prose is an uncertainty and leaves the status unknown.
+# test_committed_changes_are_ordered_by_their_own_times: a commit after the state does not date its changes; a file rewritten after its commit, or deleted, has only the commit's time and leaves the order unknown in plain words; one committed before the state is not after it.
+# test_a_committed_path_git_quotes_is_dated_only_by_its_commit: a committed path Git prints quoted is dated by its commit alone, so a commit after the state leaves the order unknown.
+# test_findings_are_grouped_by_question: each root counts the findings answering it or a question under it by status, with its origin; findings no question names, under a missing parent or without an evidence link, are counted apart.
+# test_unreadable_findings_leave_the_counts_by_question_unknown: an unreadable findings table makes the counts by question and the caveats null, never empty.
+# test_every_findings_caveat_is_reported: every finding with a caveat cell is listed with it, flagged or not, check segments included.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
-# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by one of the two forms foundation/sources.md defines, a link in its stated grammar or a backticked location with its sha256, in plain text outside code, HTML, emphasis, strikethrough, links and brackets; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
+# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed, with a reason, unless a Notes clause opens with reference: directly followed by one of the kept-copy forms foundation/sources.md defines, a link in its stated grammar or a backticked location with its sha256, in plain text outside code, HTML, emphasis, strikethrough, links and brackets; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
+# test_an_access_note_is_a_known_limitation_not_a_missing_reference: a reference: clause giving `read at <URL> on <date>, not kept: <reason>` lists the source under documentation_access_notes and not documentation_without_reference; with a kept-copy form beside it the source is in neither; a malformed note (no date, no reason, no URL scheme, inside code) is listed as without reference.
+# test_reasons_say_why_a_source_lacks_a_reference: no reference: clause, a label followed by none of the forms (as `not yet retained`), a label that opens no plain-text clause, and reading stopped by raw HTML or emphasis each give their reason.
 # test_absent_project_and_unsafe_active_pointer: a missing project is not a workbench; an unsafe pointer is an uncertainty.
 # test_standard_active_state_pointer: link, path, and backticked pointer forms resolve to the investigation.
 # test_other_state_reader_stops_before_conclusions: another investigation's state is read only up to its first section.
@@ -37,6 +48,7 @@
 # test_a_host_that_times_out_is_not_requested_again: after a connect or read timeout, the remaining files at that host and port are unknown without a request, and other hosts, and the same host on another port, are still probed.
 # test_a_redirect_target_that_times_out_is_not_requested_again: through urllib's own redirect processing, the host that timed out after a redirect is the one suppressed, for direct and redirected requests alike, and the redirecting host is still requested.
 # test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
+# test_a_source_without_validators_is_reported_once_as_not_checkable: without the probe, a source whose latest files record an HTTP URL with no ETag or Last-Modified is named once under not_checkable, however many files or acquisitions; a source with validators, or with no URL, is not.
 # test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including any upstream field land() refuses (by land()'s own check: an invalid, hostless, bad-port, or credential-bearing URL among them) and a repeated file path, is named under uncertainties with or without the probe and makes probeable_files null, nothing is requested for it, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
 # test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key, or an upstream with no field set ({} or all null, which land() records as null), is valid and counts as without upstream.
 # test_unreadable_acquisition_inventory_is_unknown_not_zero: an unreadable data/raw or source directory is an uncertainty and makes probeable_files null, never zero.
@@ -88,7 +100,7 @@ def test_collect_standard_records_without_writes_or_other_conclusions(workbench)
     assert result["other_investigations"] == [{"name": "pricing", "last_updated": "2026-08-01"}]
     assert "PRIVATE CONCLUSION" not in json.dumps(result)
     assert result["acquisitions"] == {"count": 0, "without_retained_copy": 0}
-    assert result["sources"] == {"count": 0, "documentation_without_reference": []}
+    assert result["sources"] == {"count": 0, "documentation_without_reference": [], "documentation_access_notes": []}
     assert result["packages"] == []
     assert result["uncertainties"] == []
     assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in workbench.rglob("*") if p.is_file()}
@@ -248,6 +260,22 @@ def test_draft_without_manifest_json_is_an_uncertainty(workbench):
     assert [u["path"] for u in result["uncertainties"]] == ["deliveries/churn/review/draft"]
 
 
+def test_a_preview_only_draft_reports_the_preview_not_a_missing_manifest(workbench):
+    draft = package(workbench, "none")
+    for path in list(draft.iterdir()):
+        shutil.rmtree(path) if path.is_dir() else path.unlink()
+    write(workbench, "deliveries/churn/review/draft/.preview/headlines.md", "# Churn\n\n- West churn is highest\n")
+    result = status.collect(workbench)
+    entry = result["packages"][0]
+    assert entry["draft_stage"] == "headline preview written, not yet exported" and entry["revised_at"] is None
+    assert result["uncertainties"] == []
+    # Once export writes the manifest the draft is past the preview, and a missing manifest is uncertain again.
+    (draft / ".preview/headlines.md").unlink()
+    result = status.collect(workbench)
+    assert result["packages"][0]["draft_stage"] is None
+    assert [u["path"] for u in result["uncertainties"]] == ["deliveries/churn/review/draft"]
+
+
 @pytest.mark.parametrize("change", ["remove", "yaml", "not json", "no date", "unreadable"])
 def test_unusable_release_manifest_is_uncertain(workbench, monkeypatch, change):
     package(workbench, "none")
@@ -284,21 +312,22 @@ def git(root, *args, env=None):
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True, env=env)
 
 
-def test_git_no_commits_dirty_date_precision_and_no_index_writes(workbench):
+def test_git_no_commits_dated_state_and_no_index_writes(workbench):
     git(workbench, "init")
     file = write(workbench, "investigations/churn/query.sql", "select 1")
     epoch = __import__("datetime").datetime(2026, 10, 1, 12).timestamp()
     os.utime(file, (epoch, epoch))
     # Align all active files so their default fixture mtimes do not obscure the scenario.
-    for path in (workbench / "investigations/churn").iterdir():
-        os.utime(path, (epoch, epoch))
+    set_mtimes(workbench, epoch)
     git(workbench, "add", ".")
     index = workbench / ".git/index"
     before = (index.read_bytes(), index.stat().st_mtime_ns)
     result = status.collect(workbench)["git"]
     assert result["has_commits"] is False
     assert result["commit_comparison"] == "no commits yet; all work uncommitted"
-    assert result["state_status"] == "indeterminate at date precision"
+    # A Last updated date without a time cannot be ordered against a change on its day: said in plain words.
+    assert result["state_status"] == "saved the same day as the latest change"
+    assert "days_after_state" not in result
     assert before == (index.read_bytes(), index.stat().st_mtime_ns)
     os.utime(file, (epoch + 2 * 86400, epoch + 2 * 86400))
     result = status.collect(workbench)["git"]
@@ -306,21 +335,47 @@ def test_git_no_commits_dirty_date_precision_and_no_index_writes(workbench):
     assert result["days_after_state"] == 2
 
 
-def test_ledger_writes_leave_the_state_current(workbench):
+def test_results_recorded_before_the_first_commit_are_listed_for_a_rerun(workbench):
     git(workbench, "init")
-    day = lambda d: {**os.environ, "GIT_AUTHOR_DATE": f"2026-10-{d:02}T12:00:00Z", "GIT_COMMITTER_DATE": f"2026-10-{d:02}T12:00:00Z"}
+    evidence = workbench / "investigations/churn/evidence"
+    write(workbench, "investigations/churn/evidence/early.json", json.dumps({"producing_commit": "uncommitted"}))
+    assert "uncommitted_evidence" not in status.collect(workbench)["git"]  # no commit yet: nothing to rerun for
+    git(workbench, "add", ".")
+    git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "first")
+    head = git(workbench, "rev-parse", "HEAD").stdout.strip()
+    write(workbench, "investigations/churn/evidence/late.json", json.dumps({"producing_commit": head}))
+    write(workbench, "investigations/churn/evidence/no-git.json",
+          json.dumps({"producing_commit": {"unknown": "not a git repository"}}))
+    write(workbench, "investigations/churn/evidence/broken.json", "{not json")
+    write(workbench, "investigations/churn/evidence/notes.txt", "not evidence")
+    result = status.collect(workbench)
+    assert result["git"]["uncommitted_evidence"] == ["broken", "early", "no-git"]
+    assert {"path": "investigations/churn/evidence/broken.json",
+            "reason": "Cannot read result evidence; its producing commit is unknown"} in result["uncertainties"]
+    for path in evidence.iterdir():
+        path.unlink()
+    evidence.rmdir()
+    assert status.collect(workbench)["git"]["uncommitted_evidence"] == []
+
+
+def test_ledger_writes_leave_the_state_current(workbench):
+    datetime = __import__("datetime").datetime
+    saved = datetime(2026, 10, 1, 11, 30).astimezone()
+    stamp_state(workbench, saved)
+    set_mtimes(workbench, saved.timestamp() - 1800)
+    git(workbench, "init")
+    day = lambda d: {**os.environ, "GIT_AUTHOR_DATE": f"2026-10-{d:02}T12:00:00", "GIT_COMMITTER_DATE": f"2026-10-{d:02}T12:00:00"}
     commit = lambda d: git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "work", env=day(d))
     git(workbench, "add", ".")
     commit(1)
-    assert status.collect(workbench)["git"]["state_status"] == "indeterminate at date precision"
-    later = __import__("datetime").datetime(2026, 10, 5, 12).timestamp()
+    assert status.collect(workbench)["git"]["state_status"] == "up to date"
+    later = datetime(2026, 10, 5, 11).timestamp()
     for name in ("questions.json", "questions.md"):
         os.utime(write(workbench, f"investigations/churn/{name}", "ledger\n"), (later, later))
-    result = status.collect(workbench)["git"]
-    assert (result["state_status"], result["days_after_state"]) == ("indeterminate at date precision", 0)
+    assert status.collect(workbench)["git"]["state_status"] == "up to date"
     git(workbench, "add", ".")
     commit(5)
-    assert status.collect(workbench)["git"]["state_status"] == "indeterminate at date precision"
+    assert status.collect(workbench)["git"]["state_status"] == "up to date"
     os.utime(write(workbench, "investigations/churn/brief.md", "changed\n"), (later, later))
     result = status.collect(workbench)["git"]
     assert (result["state_status"], result["days_after_state"]) == ("out of date", 4)
@@ -328,8 +383,11 @@ def test_ledger_writes_leave_the_state_current(workbench):
 
 def test_commit_out_of_date_state_and_undated_deletion(workbench):
     git(workbench, "init")
+    # Files written the day after the dated state, then committed.
+    epoch = __import__("datetime").datetime(2026, 10, 2, 11).timestamp()
+    set_mtimes(workbench, epoch)
     git(workbench, "add", ".")
-    env = {**os.environ, "GIT_AUTHOR_DATE": "2026-10-02T12:00:00Z", "GIT_COMMITTER_DATE": "2026-10-02T12:00:00Z"}
+    env = {**os.environ, "GIT_AUTHOR_DATE": "2026-10-02T12:00:00", "GIT_COMMITTER_DATE": "2026-10-02T12:00:00"}
     git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "fixture", env=env)
     result = status.collect(workbench)["git"]
     assert result["state_status"] == "out of date"
@@ -338,6 +396,114 @@ def test_commit_out_of_date_state_and_undated_deletion(workbench):
     result = status.collect(workbench)
     assert result["git"]["undated_changes"] == ["investigations/churn/brief.md"]
     assert any("mtime" in u["reason"] for u in result["uncertainties"])
+
+
+def stamp_state(workbench, when):
+    """Write a state time, as state writers record it, into the fixture's Last updated line."""
+    path = workbench / "investigations/churn/state.md"
+    path.write_text(path.read_text().replace("Last updated: 2026-10-01", f"Last updated: {when.isoformat(timespec='seconds')}"))
+
+
+def set_mtimes(workbench, epoch):
+    for path in (workbench / "investigations/churn").rglob("*"):
+        os.utime(path, (epoch, epoch))
+
+
+def test_a_state_written_after_the_latest_change_on_the_same_day_is_up_to_date(workbench):
+    datetime = __import__("datetime").datetime
+    saved = datetime(2026, 10, 1, 15).astimezone()
+    stamp_state(workbench, saved)
+    git(workbench, "init")
+    file = write(workbench, "investigations/churn/query.sql", "select 1")
+    set_mtimes(workbench, saved.timestamp() - 3600)
+    result = status.collect(workbench)["git"]
+    assert result["state_status"] == "up to date" and "days_after_state" not in result
+    assert result["latest_change"]["source"] in {"investigations/churn/query.sql", "investigations/churn/brief.md"}
+    # A change within the state's own second is not after it: records written with the state share it.
+    os.utime(file, (saved.timestamp() + 0.5, saved.timestamp() + 0.5))
+    assert status.collect(workbench)["git"]["state_status"] == "up to date"
+    os.utime(file, (saved.timestamp() + 1, saved.timestamp() + 1))
+    result = status.collect(workbench)["git"]
+    assert (result["state_status"], result["days_after_state"]) == ("out of date", 0)
+    assert result["latest_change"] == {"date": "2026-10-01", "time": datetime.fromtimestamp(saved.timestamp() + 1)
+                                       .astimezone().isoformat(timespec="seconds"), "source": "investigations/churn/query.sql"}
+    # The state's own Last updated, written with Z or an offset, is read as an instant.
+    utc = saved.astimezone(__import__("datetime").timezone.utc)
+    path = workbench / "investigations/churn/state.md"
+    path.write_text(path.read_text().replace(saved.isoformat(timespec="seconds"), utc.strftime("%Y-%m-%dT%H:%M:%SZ")))
+    assert status.collect(workbench)["git"]["state_status"] == "out of date"
+    os.utime(file, (saved.timestamp() - 1, saved.timestamp() - 1))
+    assert status.collect(workbench)["git"]["state_status"] == "up to date"
+
+
+@pytest.mark.parametrize("value", ["2026-10-01T15:00:00", "2026-10-01 15:00:00+00:00", "2026-10-01T15:00:00.5+00:00",
+                                   "2026-10-01T25:00:00+00:00", "yesterday"])
+def test_a_state_time_without_its_offset_or_malformed_is_uncertain(workbench, value):
+    path = workbench / "investigations/churn/state.md"
+    path.write_text(path.read_text().replace("Last updated: 2026-10-01", f"Last updated: {value}"))
+    git(workbench, "init")
+    result = status.collect(workbench)
+    assert result["git"]["state_status"] == "unknown"
+    assert {"path": "investigations/churn/state.md",
+            "reason": "Last updated is not an ISO date, or a time with its UTC offset"} in result["uncertainties"]
+
+
+def test_committed_changes_are_ordered_by_their_own_times(workbench):
+    datetime = __import__("datetime").datetime
+    saved = datetime(2026, 10, 1, 15).astimezone()
+    stamp_state(workbench, saved)
+    git(workbench, "init")
+    note = write(workbench, "investigations/churn/notes.md", "note\n")
+    set_mtimes(workbench, saved.timestamp() - 3600)
+
+    def commit(epoch):
+        when = datetime.fromtimestamp(epoch).astimezone().isoformat()
+        git(workbench, "add", "-A")
+        git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "work",
+            env={**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
+
+    # Committing after the state is the usual order: the commit is later, the changes it records are not.
+    commit(saved.timestamp() + 60)
+    result = status.collect(workbench)["git"]
+    assert result["uncommitted_paths"] == 0 and result["state_status"] == "up to date"
+    # A checkout rewrites a file after its commit, so only the commit's time is known, an upper bound.
+    os.utime(note, (saved.timestamp() + 600, saved.timestamp() + 600))
+    result = status.collect(workbench)["git"]
+    assert result["state_status"] == "saved before a later commit, which does not record when its changes were made"
+    assert result["latest_change"]["source"] == "investigations/churn/notes.md"
+    # A file changed after the state and committed later is out of date by its own time.
+    write(workbench, "investigations/churn/notes.md", "edited\n")
+    os.utime(note, (saved.timestamp() + 30, saved.timestamp() + 30))
+    commit(saved.timestamp() + 90)
+    result = status.collect(workbench)["git"]
+    assert (result["state_status"], result["latest_change"]["source"]) == ("out of date", "investigations/churn/notes.md")
+    # A deleted file has only its commit's time; one committed before the state is not after it.
+    note.unlink()
+    commit(saved.timestamp() + 120)
+    assert status.collect(workbench)["git"]["state_status"].startswith("saved before a later commit")
+    stamp = (workbench / "investigations/churn/state.md")
+    stamp.write_text(stamp.read_text().replace(saved.isoformat(timespec="seconds"),
+                                               datetime.fromtimestamp(saved.timestamp() + 300).astimezone().isoformat(timespec="seconds")))
+    os.utime(workbench / "investigations/churn/brief.md", (saved.timestamp() + 900, saved.timestamp() + 900))
+    commit(saved.timestamp() + 200)
+    assert status.collect(workbench)["git"]["state_status"] == "up to date"
+
+
+def test_a_committed_path_git_quotes_is_dated_only_by_its_commit(workbench):
+    datetime = __import__("datetime").datetime
+    saved = datetime(2026, 10, 1, 15).astimezone()
+    stamp_state(workbench, saved)
+    git(workbench, "init")
+    write(workbench, 'investigations/churn/a"b.sql', "select 1")
+    set_mtimes(workbench, saved.timestamp() - 3600)
+    when = datetime.fromtimestamp(saved.timestamp() + 60).astimezone().isoformat()
+    git(workbench, "add", "-A")
+    git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "work",
+        env={**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
+    # Its own mtime would place it before the state, but the quoted name is never read back, so the order is unknown.
+    result = status.collect(workbench)["git"]
+    assert result["state_status"] == "saved before a later commit, which does not record when its changes were made"
+    assert result["latest_change"]["source"].startswith('"')
 
 
 def test_acquisitions_and_storage_risks(workbench):
@@ -467,15 +633,62 @@ def test_sources_assessed_from_documentation_need_a_reference(workbench):
         "| loose | Loose | x | y | z | not from documentation; from landed records | candidate | |"])
     path.write_text(path.read_text().replace("| --- | --- | --- | --- | --- | --- | --- | --- |\n", "| --- | --- | --- | --- | --- | --- | --- | --- |\n" + rows + "\n", 1))
     result = status.collect(workbench)
-    listed = result["sources"]["documentation_without_reference"]
+    listed = [entry["source"] for entry in result["sources"]["documentation_without_reference"]]
     assert [(source, source not in listed, origin) for source, _, _, origin in REFERENCE_PROBES] == [(source, counted, origin) for source, _, counted, origin in REFERENCE_PROBES]
-    assert result["sources"] == {"count": len(REFERENCE_PROBES) + 6, "documentation_without_reference": [source for source, _, counted, _ in REFERENCE_PROBES if not counted] + ["hr"]}
+    assert listed == [source for source, _, counted, _ in REFERENCE_PROBES if not counted] + ["hr"]
+    assert result["sources"]["count"] == len(REFERENCE_PROBES) + 6 and result["sources"]["documentation_access_notes"] == []
+    assert all(entry["reason"] for entry in result["sources"]["documentation_without_reference"])
     assert result["acquisitions"] == {"count": 0, "without_retained_copy": 0}
     assert result["uncertainties"] == [{"path": "foundation/sources.md", "reason": "Source loose: Relevance and fitness does not begin with its basis"}]
     path.write_text(path.read_text().replace("| Relevance and fitness |", "| Fitness |", 1))
     result = status.collect(workbench)
     assert result["sources"] is None
     assert [u["path"] for u in result["uncertainties"]] == ["foundation/sources.md"]
+
+
+def sources_with(root, notes):
+    """Write one from-documentation Sources row per (source, notes) pair."""
+    path = root / "foundation/sources.md"
+    rows = "\n".join(f"| {source} | X | x | y | z | from documentation: fit | candidate | {cell} |" for source, cell in notes)
+    path.write_text(path.read_text().replace("| --- | --- | --- | --- | --- | --- | --- | --- |\n", "| --- | --- | --- | --- | --- | --- | --- | --- |\n" + rows + "\n", 1))
+    return status.collect(root)["sources"]
+
+
+def test_an_access_note_is_a_known_limitation_not_a_missing_reference(workbench):
+    note = "reference: read at https://example.org/tlc/dictionary.pdf on 2026-10-16, not kept: the server refused downloads (HTTP 403)"
+    sources = sources_with(workbench, [
+        ("tlc", note),
+        ("angled", "Owner TLC; reference: read at <https://example.org/a b.pdf> on 2026-10-16, not kept: HTTP 403"),
+        ("angled-url", "reference: Read at <https://example.org/dictionary.pdf> on 2026-10-16, Not kept: HTTP 403"),
+        ("revised", note + "; dictionary revised 2024, after the 2019 data"),
+        ("both", note + "; reference: [codebook](references/both/codebook.pdf)"),
+        ("kept-first", f"reference: [codebook](references/kept-first/codebook.pdf); {note}"),
+        ("no-date", "reference: read at https://example.org/d.pdf, not kept: HTTP 403"),
+        ("no-reason", "reference: read at https://example.org/d.pdf on 2026-10-16, not kept:"),
+        ("no-scheme", "reference: read at example.org/d.pdf on 2026-10-16, not kept: HTTP 403"),
+        ("in-code", f"`{note}`"),
+        ("unlabelled", "read at https://example.org/d.pdf on 2026-10-16, not kept: HTTP 403"),
+    ])
+    assert sources["documentation_access_notes"] == ["tlc", "angled-url", "revised"]
+    listed = [entry["source"] for entry in sources["documentation_without_reference"]]
+    assert listed == ["angled", "no-date", "no-reason", "no-scheme", "in-code", "unlabelled"]
+
+
+def test_reasons_say_why_a_source_lacks_a_reference(workbench):
+    sources = sources_with(workbench, [
+        ("none", "owner confirmed"),
+        ("pending", "reference: not yet retained"),
+        ("negated", "no reference: vendor publishes none"),
+        ("html", "<b>Owner</b>; reference: [manual](references/html/manual.pdf)"),
+        ("emphasis", "**Owner**; reference: [manual](references/emphasis/manual.pdf). **Checked**"),
+    ])
+    assert {entry["source"]: entry["reason"] for entry in sources["documentation_without_reference"]} == {
+        "none": "Notes hold no reference: clause",
+        "pending": "what follows reference: is in none of the forms",
+        "negated": "reference: does not open a clause in plain text",
+        "html": "reading stopped at raw HTML before a reference in one of the forms",
+        "emphasis": "reading stopped at emphasis or strikethrough before a reference in one of the forms",
+    }
 
 
 def test_absent_project_and_unsafe_active_pointer(tmp_path, workbench):
@@ -578,7 +791,8 @@ def test_nested_repository_status_scopes_changes_and_preserves_index(workbench, 
     assert result["available"] is True
     assert result["uncommitted_paths"] == 1
     assert result["latest_commit_date"] == "2026-09-29"
-    assert result["latest_change"] == {"date": "2026-10-03", "source": "investigations/churn/query.sql"}
+    assert result["latest_change"] == {"date": "2026-10-03", "source": "investigations/churn/query.sql",
+                                       "time": __import__("datetime").datetime.fromtimestamp(epoch).astimezone().isoformat()}
     assert result["days_after_state"] == 2
     assert before == (index.read_bytes(), index.stat().st_mtime_ns)
 
@@ -909,6 +1123,16 @@ def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench
     assert status.collect(workbench)["upstream"] == {"probeable_files": 1}
 
 
+def test_a_source_without_validators_is_reported_once_as_not_checkable(workbench, monkeypatch):
+    monkeypatch.setattr(status, "head_opener", refuse_network)
+    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://archive.example.test/a.zip"},
+                                              "b.csv": {"url": "https://archive.example.test/b.zip"}}, source="uci")
+    land_with_upstream(workbench, "batch-2", {"c.csv": {"url": "http://archive.example.test/c.zip"}}, source="uci")
+    land_with_upstream(workbench, "batch-1", {"d.csv": {"url": "https://example.test/d", "etag": '"v1"'}})
+    land_with_upstream(workbench, "batch-1", {"e.csv": {"url": "s3://bucket/e", "version_id": "1"}}, source="lake")
+    assert status.collect(workbench)["upstream"] == {"probeable_files": 1, "not_checkable": ["uci"]}
+
+
 @pytest.mark.parametrize("text, reason", [
     ("[1, 2]", "Malformed acquisition provenance: not a JSON object"),
     ("{", "Cannot read acquisition provenance: JSONDecodeError"),
@@ -1186,6 +1410,70 @@ def test_root_and_must_questions_are_counted_apart_from_the_totals(workbench):
     assert output["roots"] == {"answered": 5}
     assert output["must_subquestions"] == {"answered": 2, "open": 1}
     assert output["counts"] == {"answered": 12, "open": 4, "superseded": 1}
+
+
+def test_findings_are_grouped_by_question(workbench):
+    # Nine findings beside five questions told the user nothing: each root lists the findings that
+    # answer it or any question under it, and the findings no question names are counted apart.
+    write(workbench, "investigations/churn/state.md", """# State
+Last updated: 2026-10-01
+
+## Current findings
+| Finding | Evidence | Status | Claim | Revalidation reason or caveat |
+| --- | --- | --- | --- | --- |
+| Lag by region | [r1](evidence/r1.json) | supported | association | |
+| Lag by plan | [r2](evidence/r2.json) | provisional | association | |
+| Seasonal dip | [r3](evidence/r3.json) | revalidation-needed (was supported) | descriptive | DQ-001 correction |
+| Both questions | [r4](evidence/r4.json) | supported | descriptive | |
+| Side result | [r5](evidence/r5.json) | provisional | descriptive | |
+| No evidence link | none | provisional | descriptive | |
+""")
+
+    def question(qid, parent, results, origin="scope"):
+        return dict(id=qid, text=f"Question {qid}?", answerer="data", status="answered" if results else "open",
+                    results=results, kind="analytical", answer="", by="", parent=parent, priority="should",
+                    unblocks="", origin=origin, reason="", updated="2026-10-01")
+
+    questions = [question("Q-001", "", ["r1", "r4"]), question("Q-002", "Q-001", ["r2"]),
+                 question("Q-003", "Q-002", ["r3"]), question("Q-004", "", ["r4"]),
+                 question("Q-005", "", [], origin="eda"), question("Q-006", "Q-404", ["r5"])]
+    write(workbench, "investigations/churn/questions.json", json.dumps({"schema": "awb-questions/1", "questions": questions}))
+    output = status.collect(workbench)["active"]["questions"]
+    assert output["by_question"] == [
+        {"id": "Q-001", "text": "Question Q-001?", "status": "answered", "origin": "scope",
+         "findings": {"supported": 2, "provisional": 1, "revalidation-needed": 1}},
+        {"id": "Q-004", "text": "Question Q-004?", "status": "answered", "origin": "scope", "findings": {"supported": 1}},
+        # A root the agent added keeps its origin, so the report can label it.
+        {"id": "Q-005", "text": "Question Q-005?", "status": "open", "origin": "eda", "findings": {}}]
+    # Under a missing parent, or with no evidence link, a finding answers none of the user's questions.
+    assert output["findings_without_question"] == {"provisional": 2}
+
+
+def test_unreadable_findings_leave_the_counts_by_question_unknown(workbench):
+    path = workbench / "investigations/churn/state.md"
+    path.write_text(path.read_text().replace("| Pricing | evidence.json | supported | causal (experiment: randomized price test) | |", "| Pricing | too few |"))
+    write(workbench, "investigations/churn/questions.json", json.dumps({"schema": "awb-questions/1", "questions": [
+        {"id": "Q-001", "text": "Which regions?", "status": "open", "answerer": "data", "kind": "analytical",
+         "answer": "", "by": "", "results": [], "parent": "", "priority": "must", "origin": "scope",
+         "reason": "", "unblocks": "", "updated": "2026-10-01"}]}))
+    active = status.collect(workbench)["active"]
+    assert active["questions"]["by_question"][0]["findings"] is None
+    assert active["questions"]["findings_without_question"] is None
+    assert active["caveats"] is None
+
+
+def test_every_findings_caveat_is_reported(workbench):
+    # A status that listed only flagged findings' caveats said "none open" with caveats on unflagged ones.
+    path = workbench / "investigations/churn/state.md"
+    path.write_text(path.read_text().replace(
+        "| supported | causal (experiment: randomized price test) | |",
+        "| supported | causal (experiment: randomized price test) | Excludes December 2011 |\n"
+        "| Steady base | [r3](evidence/r3.json) | provisional | descriptive | not assessed: joins |\n"
+        "| Plain | [r4](evidence/r4.json) | provisional | descriptive | |"))
+    assert status.collect(workbench)["active"]["caveats"] == [
+        {"finding": "Renewal lag", "status": "revalidation-needed", "caveat": "Q-004 correction"},
+        {"finding": "Pricing", "status": "supported", "caveat": "Excludes December 2011"},
+        {"finding": "Steady base", "status": "provisional", "caveat": "not assessed: joins"}]
 
 
 @pytest.mark.parametrize("field", ["parent", "priority"])

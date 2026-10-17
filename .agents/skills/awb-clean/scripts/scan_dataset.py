@@ -3,10 +3,14 @@
 
 Run with Python 3.10+ and the duckdb package from the project's environment:
     scan_dataset.py PROJECT_ROOT DATASET [--key COLS] [--ref COL=TARGET.COL] [--range COL=MIN:MAX]
-                    [--columns COLS] [--name NAME] [--rescan]
+                    [--columns COLS] [--lineage COLS] [--name NAME] [--rescan]
 DATASET is a canonical view, a dataset under data/parquet/ (its newest publication), a publication
 or acquisition directory, or a data file. Views load through the project's session() in
 src/preparation/landing.py. Landed CSV is read as text so parse failures stay visible.
+Lineage columns, such as the sheet, file, or row a conversion records, are left out of the
+duplicate-rows match, so a copy of the same rows in two sheets or files counts as a duplicate.
+They are --lineage, else every column in the target that foundation/datasets.toml lists under
+any dataset's lineage key.
 
 The complete scan goes to foundation/scans/<name>.json, which stays local to the checkout.
 Stdout is compact JSON: counts, a few examples, and the scan path.
@@ -248,6 +252,9 @@ class Scan:
         unknown = sorted(set(chosen) - set(names))
         if unknown:
             raise ValueError(f"unknown columns: {', '.join(unknown)}")
+        unknown = sorted(set(self.options["explicit_lineage"]) - set(names))
+        if unknown:
+            raise ValueError(f"--lineage names unknown columns: {', '.join(unknown)}")
         index = {name: i for i, name in enumerate(names)}
         kinds = {name: _kind(sql_type) for name, sql_type in columns}
         text = [name for name in chosen if kinds[name] == "text"]
@@ -526,16 +533,25 @@ class Scan:
                              {"low_fence": round(low, 6), "high_fence": round(high, 6)})
 
     def duplicates(self, names, chosen, kinds, info, index, rows):
-        everything = ", ".join(q(n) for n in names)
+        lineage = [n for n in self.options["lineage"] if n in names]
+        compared = [n for n in names if n not in lineage]
+        if self.options["lineage"] and not compared:
+            raise ValueError("--lineage names every column; leave at least one column to compare")
+        everything = ", ".join(q(n) for n in compared)
         extra, groups = self.one(f"SELECT coalesce(sum(n - 1), 0), count(*) FROM (SELECT count(*) AS n "
                                  f"FROM __awb_scan GROUP BY {everything} HAVING count(*) > 1)")
         if extra:
-            sample = self.db.execute(f"SELECT {everything}, count(*) AS __awb_n FROM __awb_scan "
+            # Each lineage column's values in a repeated group show which sheets or files hold the copies.
+            spread = "".join(f", list(DISTINCT {q(n)} ORDER BY {q(n)})[1:5]" for n in lineage)
+            sample = self.db.execute(f"SELECT {everything}, count(*) AS __awb_n{spread} FROM __awb_scan "
                                      f"GROUP BY {everything} HAVING count(*) > 1 "
-                                     f"ORDER BY __awb_n DESC LIMIT 5").fetchall()
+                                     f"ORDER BY __awb_n DESC, {everything} LIMIT 5").fetchall()
+            width = len(compared)
+            but = f" in every column but {', '.join(lineage)}" if lineage else " exactly"
             self.add("duplicate-rows", None, None, extra, rows,
-                     f"{extra} extra rows repeating another row exactly ({groups} distinct repeated rows)",
-                     [{"value": _plain(dict(zip(names, row[:-1]))), "count": row[-1]} for row in sample])
+                     f"{extra} extra rows repeating another row{but} ({groups} distinct repeated rows)",
+                     [{"value": _plain({**dict(zip(lineage, row[width + 1:])), **dict(zip(compared, row[:width]))}),
+                       "count": row[width]} for row in sample], {"lineage": lineage} if lineage else None)
         keys = [[c.strip() for c in spec.split(",") if c.strip()] for spec in self.options["keys"]]
         explicit = bool(keys)
         if not explicit:
@@ -694,8 +710,26 @@ def _delta(baseline, row_count, columns, issues):
             "issues": changes, "null_rates": null_rates, "types": types}
 
 
-def scan(project_root, dataset, *, keys=(), refs=(), ranges=(), columns=None, name=None, rescan=False,
-         today=None):
+def declared_lineage(root):
+    """Every column foundation/datasets.toml lists under a dataset's lineage key; the landing helper
+    validates the file, so an unreadable one, or Python 3.10 without tomli, declares none here."""
+    try:
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+        datasets = tomllib.loads((root / "foundation/datasets.toml").read_text(encoding="utf-8")).get("datasets")
+    except (ImportError, OSError, ValueError):
+        return []
+    found = []
+    for entry in (datasets.values() if isinstance(datasets, dict) else []):
+        lineage = entry.get("lineage") if isinstance(entry, dict) else None
+        found += [c for c in (lineage if isinstance(lineage, list) else []) if isinstance(c, str) and c not in found]
+    return found
+
+
+def scan(project_root, dataset, *, keys=(), refs=(), ranges=(), columns=None, lineage=None, name=None,
+         rescan=False, today=None):
     """Scan DATASET, write the complete scan file, and return (scan record, its path)."""
     root = Path(project_root).resolve()
     connection = _connect(root, need_views=not (root / dataset).exists() and not Path(dataset).is_absolute())
@@ -710,8 +744,14 @@ def scan(project_root, dataset, *, keys=(), refs=(), ranges=(), columns=None, na
         options = {"keys": list(keys) or old.get("keys", []), "refs": list(refs) or old.get("refs", []),
                    "ranges": list(ranges) or old.get("ranges", []),
                    "columns": list(columns or []) or old.get("columns", [])}
+        if lineage:
+            options["lineage"] = list(lineage)
+        elif previous:
+            options["lineage"] = old.get("lineage", [])
+        else:
+            options["lineage"] = declared_lineage(root)
         today = (today or date.today()).isoformat()
-        worker = Scan(connection, target, {**options, "root": root}, today)
+        worker = Scan(connection, target, {**options, "root": root, "explicit_lineage": list(lineage or [])}, today)
         row_count, info, candidate_keys, null_patterns = worker.run()
     finally:
         connection.close()
@@ -757,7 +797,7 @@ def _compact(issue):
             "examples": [f"{json.dumps(e['value'], ensure_ascii=False)[:60]} ({e['count']})"
                          for e in issue["examples"][:3]]}
     detail = issue.get("detail") or {}
-    for field in ("formats", "note", "low_fence", "high_fence", "similarity"):
+    for field in ("formats", "note", "low_fence", "high_fence", "similarity", "lineage"):
         if detail.get(field):
             item[field] = detail[field]
     return item
@@ -806,6 +846,9 @@ def main(argv=None):
     parser.add_argument("--range", action="append", default=[], dest="ranges",
                         help="COLUMN=MIN:MAX valid range, numbers or ISO dates, one side may be empty; repeatable")
     parser.add_argument("--columns", help="limit per-column checks to these comma-separated columns")
+    parser.add_argument("--lineage", help="comma-separated lineage columns, such as the sheet, file, or source row "
+                                          "a conversion records, left out of the duplicate-rows match (default: "
+                                          "those foundation/datasets.toml declares under lineage)")
     parser.add_argument("--name", help="scan name (default: view name, <dataset>@<publication>, or file stem)")
     parser.add_argument("--rescan", action="store_true",
                         help="compare with the baseline of this scan's earlier file")
@@ -814,6 +857,7 @@ def main(argv=None):
     try:
         record, path = scan(root, args.dataset, keys=args.key, refs=args.ref, ranges=args.ranges,
                             columns=[c.strip() for c in args.columns.split(",")] if args.columns else None,
+                            lineage=[c.strip() for c in args.lineage.split(",") if c.strip()] if args.lineage else None,
                             name=args.name, rescan=args.rescan)
     except Exception as error:  # report any failure compactly; the scan changes nothing on failure
         print(json.dumps({"error": f"{type(error).__name__}: {error}"}), file=sys.stderr)

@@ -87,12 +87,17 @@ def _roles(pairs, role):
     return [header for name, header in pairs if name == role]
 
 
+def _columns(headers):
+    """Each file header's index by its text as a **Data:** line naming it reads (deck-rules.md, Chart forms)."""
+    return {draft._header_text(header): index for index, header in enumerate(headers)}
+
+
 def category_data(chart, headers, rows):
     """(categories, [(series name, values)]) for a category form: every row in the file's order, or with a
     series column, each category and series in the order it first appears."""
     pairs, _ = draft.chart_data(chart)
     where = f"Chart {chart['number']}"
-    column = {header: index for index, header in enumerate(headers)}
+    column = _columns(headers)
     category = column[_roles(pairs, "category")[0]]
     values = _roles(pairs, "value")
     if _roles(pairs, "series"):
@@ -106,13 +111,13 @@ def category_data(chart, headers, rows):
             cells[row[category], row[series]] = _number(row[value], where)
         names = list(dict.fromkeys(row[series] for row in rows))
         return categories, [(name, [cells.get((c, name)) for c in categories]) for name in names]
-    return [row[category] for row in rows], [(name, [_number(row[column[name]], where) for row in rows])
+    return [row[category] for row in rows], [(headers[column[name]], [_number(row[column[name]], where) for row in rows])
                                              for name in values]
 
 
 def _error_bars(chart, pairs, headers, rows, where):
     """Custom error bars from the file's lower and upper columns, on the one bar series."""
-    column = {header: index for index, header in enumerate(headers)}
+    column = _columns(headers)
     value, lower, upper = (column[_roles(pairs, role)[0]] for role in ("value", "lower", "upper"))
     plus = [_required(row[upper], where) - _required(row[value], where) for row in rows]
     minus = [_required(row[value], where) - _required(row[lower], where) for row in rows]
@@ -144,7 +149,7 @@ def _place_chart(slide, chart, draft_dir):
     pairs, _ = draft.chart_data(chart)
     where, form = f"Chart {chart['number']}", chart["form"]
     if form == "Table":
-        columns = [headers.index(header) for header in _roles(pairs, "column")]
+        columns = [_columns(headers)[header] for header in _roles(pairs, "column")]
         frame = slide.shapes.add_table(len(rows) + 1, len(columns), *_CHART_BOX)
         for position, index in enumerate(columns):
             frame.table.cell(0, position).text = headers[index]
@@ -152,7 +157,7 @@ def _place_chart(slide, chart, draft_dir):
                 frame.table.cell(number, position).text = row[index]
         return frame
     if form == "Scatter":
-        column = {header: index for index, header in enumerate(headers)}
+        column = _columns(headers)
         x, y = column[_roles(pairs, "x")[0]], column[_roles(pairs, "y")[0]]
         data = XyChartData()
         points = data.add_series(headers[y])
@@ -176,7 +181,7 @@ def _place_chart(slide, chart, draft_dir):
         raise ContractError([{"chart": where, "problem": f"value {min(plotted):g} is below zero, which a Stacked bar "
                                                          "cannot show as a part of a whole"}])
     if form == "Bar with intervals":
-        column = {header: index for index, header in enumerate(headers)}
+        column = _columns(headers)
         plotted += [number for role in ("lower", "upper") for row in rows
                     if (number := _number(row[column[_roles(pairs, role)[0]]], where)) is not None]
     data = CategoryChartData()

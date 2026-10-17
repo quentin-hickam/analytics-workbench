@@ -13,6 +13,10 @@
 # test_label_must_be_a_simple_name_and_an_empty_one_cannot_overwrite_the_unlabelled_scan: --label "" and other names outside the rule exit 2 before anything is written; "x." is accepted.
 # test_comma_separated_key_is_one_declared_key_from_option_or_settings: --key "a, b" and settings key "a,b" or ["a,b"] give the columns of one key, as awb-clean's composite grain; a repeated --key or an empty --key exits 2; an absent option column reports key-missing; a settings key with an absent column or none is skipped. Runs without duckdb.
 # test_template_settings_take_the_period_from_parameters_and_name_unset_choices: [parameters] start/end scope the period; unset scope, measure, and dimensions print the options to pass.
+# test_eda_where_reads_settings_parameters: [eda] where with $start reads the [parameters] date as a typed literal, and with $region a quoted string; the scan records the substituted predicate and counts those parameters as read; --where reads them too; an unset name or a value no literal writes exits 2 naming it before anything is written.
+# test_parameter_literals_follow_each_value_type: strings are quoted with ' doubled, numbers written as TOML parsed them and parenthesized when negative, -0.0 included, dates and date-times typed (TIMESTAMPTZ when they carry an offset); booleans, times, lists, tables, and non-finite floats have no literal.
+# test_an_integer_year_column_is_the_date_column: --date-column year --start 1850 --end 2024 on an INTEGER column filters as integers, reports coverage by year with an empty run of years as a gap, and gives the measure's trend and per-year counts by year; a date bound for it, or a column of integers outside 1 to 9999, exits 2 naming the fix; a date bound in settings is skipped as not applied.
+# test_a_single_missing_year_is_reported_as_a_gap: an integer year column missing one year scans without error and reports that year as a one-year gap.
 # test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one: --show walks keys and named list items without rescanning; a miss exits 2 listing what is there.
 
 from datetime import date
@@ -401,6 +405,55 @@ def test_template_settings_take_the_period_from_parameters_and_name_unset_choice
     assert "not set: measure" not in out and "not set: dimensions" not in out
 
 
+def test_eda_where_reads_settings_parameters(shifts, capsys):
+    write(shifts, "investigations/overtime/settings.toml", """[parameters]
+start = 2025-07-01
+region = "US"
+unused = 3
+
+[eda]
+where = ["shift_date >= $start", "region = $region"]
+""")
+    status, out, _ = run(shifts, "shifts", capsys=capsys)
+    assert status == 0, out
+    scan = json.loads((shifts / "investigations/overtime/exploration/eda/shifts.json").read_text())
+    assert scan["scope"]["applied"] == [{"sql": "shift_date >= DATE '2025-07-01'", "source": "eda.where"},
+                                        {"sql": "region = 'US'", "source": "eda.where"}]
+    assert scan["rows"] == 3 * sum(1 for n in range(152, 336) if n % 4)
+    assert scan["scope"]["settings_unused"] == ["parameters.unused"]
+    status, _, _ = run(shifts, "shifts", "--where", "region <> $region", "--label", "other", capsys=capsys)
+    assert status == 0
+    scan = json.loads((shifts / "investigations/overtime/exploration/eda/shifts-other.json").read_text())
+    assert scan["scope"]["applied"] == [{"sql": "region <> 'US'", "source": "option"}]
+    before = {p for p in shifts.rglob("*") if p.is_file()}
+    for where, named in (("shift_date >= $begin", "$begin, which [parameters] does not set"),
+                         ("n > $1", "$1, which [parameters] does not set"),
+                         ("flag = $flag", "$flag, whose value True is not a string")):
+        write(shifts, "investigations/overtime/settings.toml",
+              f'[parameters]\nflag = true\n\n[eda]\nwhere = "{where}"\n')
+        status, out, err = run(shifts, "shifts", capsys=capsys)
+        assert (status, out) == (2, "") and named in err and "eda.where" in err, err
+    assert {p for p in shifts.rglob("*") if p.is_file()} - before == set()
+
+
+def test_parameter_literals_follow_each_value_type():
+    from datetime import datetime, time, timedelta, timezone
+    assert eda.sql_literal("O'Hare") == "'O''Hare'"
+    assert [eda.sql_literal(v) for v in (5, -5, 2.5, -0.5, 1e-05, -0.0, 0.0)] == [
+        "5", "(-5)", "2.5", "(-0.5)", "1e-05", "(-0.0)", "0.0"]  # -0.0 too, so `x -$n` is no comment
+    # A negative value after a minus stays a subtraction, never a -- comment.
+    assert eda.with_parameters("x - $n", "eda.where", {"n": -5}, set()) == "x - (-5)"
+    assert eda.sql_literal(date(2025, 7, 1)) == "DATE '2025-07-01'"
+    assert eda.sql_literal(datetime(2025, 7, 1, 8, 30)) == "TIMESTAMP '2025-07-01T08:30:00'"
+    assert eda.sql_literal(datetime(2025, 7, 1, tzinfo=timezone(timedelta(hours=-5)))) == \
+        "TIMESTAMPTZ '2025-07-01T00:00:00-05:00'"
+    for value in (True, time(8, 30), [1], {"a": 1}, float("inf"), float("nan")):
+        assert eda.sql_literal(value) is None, value
+    read = set()
+    assert eda.with_parameters("a = $a AND b = $a_b", "option", {"a": 1, "a_b": "x"}, read) == "a = 1 AND b = 'x'"
+    assert read == {"a", "a_b"}
+
+
 def test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one(shifts, capsys):
     status, _, err = run(shifts, "shifts", "--show", "columns", capsys=capsys)
     assert status == 2 and "no saved scan at investigations/overtime/exploration/eda/shifts.json" in err
@@ -420,3 +473,68 @@ def test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one(shifts,
     assert status == 2 and "no nope under columns; there:" in err and "shift_id" in err
     status, _, err = run(shifts, "shifts", "--show", "grain.nope", capsys=capsys)
     assert status == 2 and "duplicate_rows" in err
+
+
+PANEL = """
+COPY (
+    SELECT country, CAST(y AS INTEGER) AS year,
+           CASE WHEN country = 'B' AND y < 1900 THEN NULL ELSE y * 0.1 END AS co2
+    FROM (VALUES ('A'), ('B')) c(country), range(1840, 2026) r(y)
+    WHERE y NOT BETWEEN 1950 AND 1952)
+TO '{path}' (FORMAT parquet)
+"""
+
+
+def test_an_integer_year_column_is_the_date_column(tmp_path, capsys):
+    duckdb = pytest.importorskip("duckdb")
+    root = project(tmp_path, settings="")
+    publication = root / "data/parquet/co2/p1"
+    publication.mkdir(parents=True)
+    duckdb.connect().execute(PANEL.format(path=publication / "co2.parquet"))
+    status, out, err = run(root, "data/parquet/co2/p1", "--date-column", "year", "--start", "1850", "--end", "2024",
+                           "--measure", "co2", capsys=capsys)
+    assert status == 0, err
+    scan = json.loads((root / "investigations/overtime/exploration/eda/co2-p1.json").read_text())
+    assert [f["sql"] for f in scan["scope"]["applied"]] == ['"year" >= 1850', '"year" <= 2024']
+    assert scan["rows"] == 2 * (2024 - 1850 + 1 - 3)
+    assert scan["date_column"] == {"name": "year", "source": "option", "period": "year", "integer_years": True}
+    year = next(c for c in scan["columns"] if c["name"] == "year")
+    coverage = year["temporal"]["coverage"]
+    assert (year["temporal"]["min"], year["temporal"]["max"], year["temporal"]["integer_years"]) == (1850, 2024, True)
+    assert coverage["period"] == "year" and coverage["periods"] == 175
+    assert coverage["gaps"] == [{"from": 1950, "to": 1952, "periods": 3}]
+    assert coverage["series"][0] == {"period": 1850, "rows": 2}
+    over_time = scan["measure"]["over_time"]["series"]
+    assert over_time[0]["period"] == 1850 and over_time[0]["n"] == 1 and over_time[-1] == {
+        "period": 2024, "rows": 2, "n": 2, "mean": pytest.approx(202.4), "sum": pytest.approx(404.8)}
+    assert ("period-gaps", "year") in {(a["kind"], a["column"]) for a in scan["anomalies"]}
+    assert "years 1850 to 2024; 175 years, gaps 1" in out and "date column: year (option), by year" in out
+    for argv, message in ((["--start", "1850-01-01"], "--start 1850-01-01: year holds integer years, so give a year"),
+                          (["--end", "2024-12-31"], "--end 2024-12-31: year holds integer years")):
+        status, out, err = run(root, "data/parquet/co2/p1", "--date-column", "year", *argv, capsys=capsys)
+        assert status == 2 and message in err
+    duckdb.connect().execute(f"COPY (SELECT 1 AS id, 20240101 AS stamp) TO '{publication / 'co2.parquet'}' (FORMAT parquet)")
+    status, out, err = run(root, "data/parquet/co2/p1", "--date-column", "stamp", capsys=capsys)
+    assert status == 2 and "--date-column stamp holds integers from 20240101 to 20240101, not years from 1 to 9999" in err
+    duckdb.connect().execute(PANEL.format(path=publication / "co2.parquet"))
+    write(root, "investigations/overtime/settings.toml", "[eda]\ndate_column = \"year\"\nperiod_start = 1850-01-01\nperiod_end = 2024\n")
+    status, out, err = run(root, "data/parquet/co2/p1", capsys=capsys)
+    assert status == 0, err
+    assert "not applied: eda.period_start: year holds integer years; 1850-01-01 is not a year" in out
+    assert '`"year" <= 2024` (eda.period_end)' in out
+
+
+def test_a_single_missing_year_is_reported_as_a_gap(tmp_path, capsys):
+    duckdb = pytest.importorskip("duckdb")
+    root = project(tmp_path, settings="")
+    publication = root / "data/parquet/co2/p1"
+    publication.mkdir(parents=True)
+    duckdb.connect().execute(PANEL.replace("BETWEEN 1950 AND 1952", "BETWEEN 1960 AND 1960")
+                             .format(path=publication / "co2.parquet"))
+    status, out, err = run(root, "data/parquet/co2/p1", "--date-column", "year", "--start", "1850", "--end", "2024",
+                           capsys=capsys)
+    assert status == 0, err
+    scan = json.loads((root / "investigations/overtime/exploration/eda/co2-p1.json").read_text())
+    year = next(c for c in scan["columns"] if c["name"] == "year")
+    assert year["temporal"]["coverage"]["gaps"] == [{"from": 1960, "to": 1960, "periods": 1}]
+    assert any(a["kind"] == "period-gaps" and a["detail"].endswith("empty years: 1, 1960") for a in scan["anomalies"])

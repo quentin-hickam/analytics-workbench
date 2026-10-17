@@ -8,6 +8,9 @@
 # test_check_charts_spec_continuing_a_block: a specification directly under a bullet or paragraph line renders inside that block; the row says to leave a blank line.
 # test_check_charts_without_directory: specifications with no charts directory each report it; no specifications and no directory is clean.
 # test_charts_without_pandas: the module loads, writes, and checks charts when pandas cannot be imported.
+# test_check_charts_compares_headers_as_the_data_line_renders: a header holding CO₂ matches a **Data:** role naming CO₂, both NFKC-normalized as the line renders; a header no role names, or a role no header holds, is still a row.
+# test_a_blank_line_inside_a_chart_spec_names_the_chart: field-named bullets after a blank line ended a chart's fields count as slide bullets, each but Caveat is an outline row naming the chart, and the bullet-count row counts them; the same fields kept together give no row.
+# test_a_blank_line_inside_a_short_slide_spec_names_the_chart: on a slide within five bullets, each field-named bullet but Caveat after a blank line ended the fields is still a row naming the chart.
 
 import importlib.util
 import sys
@@ -123,3 +126,70 @@ def test_charts_without_pandas(tmp_path, monkeypatch):
     spec.loader.exec_module(bare)
     bare.write_charts(tmp_path / "charts", [LATE])
     assert bare.check_charts(findings(tmp_path, 1), tmp_path / "charts") == []
+
+
+def test_check_charts_compares_headers_as_the_data_line_renders(tmp_path):
+    # The issue's probe: "CO₂" in the file never matched, since only the **Data:** line was NFKC-normalized.
+    charts.write_charts(tmp_path / "charts", [(["Country", "Change in CO₂ (Mt)"], [["China", "12.5"]])])
+    path = tmp_path / "findings.md"
+    path.write_text("### H\n\n**Chart 1.** Horizontal bar: change by country\n"
+                    "- **Data:** category: Country; value: Change in CO₂ (Mt)\n", encoding="utf-8")
+    assert charts.check_charts(path, tmp_path / "charts") == []
+    path.write_text("### H\n\n**Chart 1.** Horizontal bar: change by country\n"
+                    "- **Data:** category: Country; value: Change in CO2 (Mt)\n", encoding="utf-8")
+    assert charts.check_charts(path, tmp_path / "charts") == []  # CO₂ renders as CO2, so the plain spelling matches
+    path.write_text("### H\n\n**Chart 1.** Horizontal bar: change by country\n"
+                    "- **Data:** category: Country; value: Change in CH₄ (Mt)\n", encoding="utf-8")
+    assert charts.check_charts(path, tmp_path / "charts") == [
+        {"chart": "Chart 1", "problem": "chart-1.csv has no column 'Change in CH4 (Mt)', which **Data:** names"},
+        {"chart": "Chart 1", "problem": "chart-1.csv column 'Change in CO₂ (Mt)' is named by no **Data:** role; "
+                                        "name it by a role a Horizontal bar takes (category, value, series), or "
+                                        "export the chart without it; if it holds interval bounds, a Horizontal bar "
+                                        "draws none, so use a Bar with intervals"}]
+
+
+FIELDS = ("- **Highlight:** West\n- **Axis:** percent, zero baseline\n- **Source:** claims extract, 2026\n"
+          "- **Caveat:** none\n- **Alt text:** West closes most claims late.\n")
+
+
+def test_a_blank_line_inside_a_chart_spec_names_the_chart(tmp_path):
+    path = tmp_path / "findings.md"
+    slide = ("# Claims\n\nOperations leads\n\n## Findings\n\n### West closes most claims late\n\n- West led.\n\n"
+             "**Chart 1.** Horizontal bar: late share by region\n- **Data:** category: Region; value: Closed late (%)\n"
+             "{gap}" + FIELDS + "\n**Notes:** West leads.\n")
+    path.write_text(slide.format(gap="\n"), encoding="utf-8")
+    rows = [row for row in charts.outline_problems(path) if "bullets" in row["problem"]]
+    assert rows == [{"slide": "West closes most claims late", "line": 18, "problem": (
+        "6 bullets; keep it to 5 and move the rest to another slide or into the notes; 4 of them open with a chart "
+        "field name after Chart 1's fields ended, so they count as slide bullets: keep its fields together, with "
+        "no blank line between them"), "severity": "error"}]
+    assert [(row["line"], row["problem"]) for row in charts.outline_problems(path) if "Chart 1" in row["problem"]
+            and "bullets" not in row["problem"]] == [(line, stray(field)) for line, field in (
+                (14, "Highlight"), (15, "Axis"), (16, "Source"), (18, "Alt text"))]
+    path.write_text(slide.format(gap=""), encoding="utf-8")
+    assert [row for row in charts.outline_problems(path) if "Chart" in row["problem"]] == []
+    assert charts.read_outline(path)["slides"][0]["field_bullets"] == []
+
+
+def stray(field):
+    return (f"this bullet opens with the chart field name {field} after Chart 1's fields ended at a blank line or a "
+            "repeated field, so it is a slide bullet and the chart loses the field: keep the chart's fields "
+            "together, with no blank line between them")
+
+
+def test_a_blank_line_inside_a_short_slide_spec_names_the_chart(tmp_path):
+    # The review's probe: within five bullets, each field after the gap but Caveat is still a row naming the chart.
+    path = tmp_path / "findings.md"
+    slide = ("# Claims\n\nOperations leads\n\n## Findings\n\n### West closes most claims late\n\n- West led.\n\n"
+             "**Chart 1.** Horizontal bar: late share by region\n- **Data:** category: Region; value: Closed late (%)\n"
+             "- **Highlight:** West\n{gap}- **Source:** claims extract\n{caveat}- **Caveat:** none\n"
+             "- **Alt text:** West closes most claims late.\n\n**Notes:** West leads.\n")
+    path.write_text(slide.format(gap="\n", caveat=""), encoding="utf-8")
+    assert [(row["line"], row["problem"]) for row in charts.outline_problems(path) if "Chart 1" in row["problem"]] \
+        == [(15, stray("Source")), (17, stray("Alt text"))]
+    # A Caveat: bullet after the gap may be the slide's own, so it gives no row; the field after it still does.
+    path.write_text(slide.format(gap="", caveat="\n"), encoding="utf-8")
+    assert [(row["line"], row["problem"]) for row in charts.outline_problems(path) if "Chart 1" in row["problem"]] \
+        == [(17, stray("Alt text"))]
+    assert [entry["field"] for entry in charts.read_outline(path)["slides"][0]["field_bullets"]] == \
+        ["Caveat", "Alt text"]

@@ -291,16 +291,22 @@ def _planned(spec):
 
 
 def _validated(name, entry):
-    """[datasets.<name>]'s checks table, else ValueError naming the key at fault."""
+    """[datasets.<name>]'s checks table, else ValueError naming the key at fault. Its lineage list,
+    the columns a conversion adds to say which sheet, file, or row a record came from, is read by
+    awb-clean's scan alone."""
     where = f"{DATASETS} [datasets.{_toml_key(name)}]"
-    if not isinstance(entry, dict) or set(entry) - {"checks"} or not isinstance(entry.get("checks", {}), dict):
+    if (not isinstance(entry, dict) or set(entry) - {"checks", "lineage"}
+            or not isinstance(entry.get("checks", {}), dict)):
         nested = _nested_checks({key: value for key, value in entry.items() if key != "checks"}) \
             if isinstance(entry, dict) else None
         if nested:  # [datasets.orders.v1.checks] nests v1 under orders; it declares nothing for orders.v1
             dotted = ".".join((name,) + nested)
             raise ValueError(f"{where} holds only a checks table; to declare checks for the dataset {dotted}, "
                              f"quote its name: [datasets.{json.dumps(dotted)}.checks]")
-        raise ValueError(f"{where} holds only a checks table")
+        raise ValueError(f"{where} holds only a checks table and a lineage list")
+    lineage = entry.get("lineage")
+    if lineage is not None and not (_names(lineage) and lineage and len(set(lineage)) == len(lineage)):
+        raise ValueError(f"{where}: lineage is malformed; list each lineage column's name once")
     spec = entry.get("checks", {})
     for key, value in spec.items():
         if key not in SHAPES:
@@ -320,6 +326,54 @@ def _validated(name, entry):
     return spec
 
 
+def _inline_table_advice(text, message):
+    """The parser's message, led by advice when it stops at a line break or comment inside an
+    inline table, which TOML 1.0 forbids. The advice is added only when the scan below finds the
+    stopping point inside an unclosed `{` outside strings and comments; otherwise the message is
+    returned as it is."""
+    found = re.search(r"\(at line (\d+), column (\d+)\)", message)
+    if not found:
+        return message
+    lines = text.split("\n")
+    line, column = int(found[1]), int(found[2])
+    offset = sum(len(item) + 1 for item in lines[:line - 1]) + column - 1
+    if line > len(lines) or text[offset:offset + 1] not in ("\n", "\r", "#", ""):
+        return message
+    opened, index, quote = [], 0, None
+    while index < offset:
+        char = text[index]
+        if quote:
+            if char == "\\" and quote in ('"', '"""'):
+                index += 2
+                continue
+            if text.startswith(quote, index):
+                index += len(quote)
+                quote = None
+                continue
+        elif char == "#":
+            index = text.find("\n", index) if "\n" in text[index:] else len(text)
+            continue
+        elif char in "\"'":
+            quote = text[index:index + 3] if text[index:index + 3] in ('"""', "'''") else char
+            index += len(quote)
+            continue
+        elif char == "{":
+            opened.append(index)
+        elif char == "}" and opened:
+            opened.pop()
+        index += 1
+    if not opened or quote:
+        return message
+    start = text.rfind("\n", 0, opened[0]) + 1
+    part = r'(?:[A-Za-z0-9_-]+|"[^"\n]*")'  # a dotted key, such as checks.types, names every part
+    key = re.fullmatch(rf"\s*({part}(?:\s*\.\s*{part})*)\s*=\s*", text[start:opened[0]])
+    headers = re.findall(r"^\s*\[([^\[\]\n]+)\]\s*(?:#.*)?$", text[:start], re.M)
+    table = (f"the subtable [{headers[-1].strip()}.{'.'.join(re.findall(part, key[1]))}]" if key and headers
+             else "a subtable, such as [datasets.<name>.checks.types],")
+    return (f"line {line}: an inline table ({{ ... }}) must stay on one line in TOML; write it on one "
+            f"line, or as {table} with one key = value per line under it ({message})")
+
+
 def declared_checks(project_root: str | Path, dataset: str) -> dict:
     """Return [datasets.<dataset>.checks] from foundation/datasets.toml, {} when none are declared.
 
@@ -332,10 +386,11 @@ def declared_checks(project_root: str | Path, dataset: str) -> dict:
         tomllib = _toml()
     except ImportError as error:
         raise ImportError(f"reading {DATASETS} needs Python 3.11 or the tomli package") from error
+    text = path.read_text(encoding="utf-8")
     try:
-        document = tomllib.loads(path.read_text(encoding="utf-8"))
+        document = tomllib.loads(text)
     except ValueError as error:
-        raise ValueError(f"{DATASETS}: {error}") from error
+        raise ValueError(f"{DATASETS}: {_inline_table_advice(text, str(error))}") from error
     if set(document) - {"datasets"}:  # such as [dataset.<name>.checks], which would declare nothing
         raise ValueError(f"{DATASETS}: unknown table {', '.join(sorted(set(document) - {'datasets'}))}; "
                          "declare checks under [datasets.<name>.checks]")
@@ -569,7 +624,9 @@ def publish(project_root: str | Path, dataset: str, publication_id: str,
         })
     final = root / "data/parquet" / dataset / publication_id
     partial = final.with_name(final.name + ".partial")
-    _refuse_existing(final, partial)
+    _refuse_existing(final)
+    if partial.exists() or partial.is_symlink():
+        raise FileExistsError(f"{partial} is left from an earlier failed publish; remove it before publishing again")
     partial.mkdir(parents=True)
     convert(partial)
     checks = _run_checks(partial, spec) if _planned(spec) else []
@@ -666,12 +723,13 @@ Status is one of:
 - `acquired`: at least one acquisition has completed and the source has not been rejected.
 - `rejected`: assessed as irrelevant or unfit; give the reason under Relevance and fitness and stop preparing it.
 
-Begin Relevance and fitness with the assessment's basis: `from documentation` when documentation or a schema settled it, otherwise `from landed records`. In Notes, record each reference it relied on as a clause in plain text, not inside code, HTML, emphasis, strikethrough, a link or brackets, that opens the cell or follows `;`, `,`, `.` or `<br>`, and that begins `reference:` followed directly by one of two forms:
+Begin Relevance and fitness with the assessment's basis: `from documentation` when documentation or a schema settled it, otherwise `from landed records`. In Notes, record each reference it relied on as a plain-text clause that opens the cell or follows `;`, beginning `reference:` followed directly by one of three forms:
 
-- A link to the copy, `[text](destination)`, such as `reference: [codebook](references/<source-id>/codebook.pdf)`. The text is not empty and has no `[`, `]`, `\\`, `<` or backtick. The destination is either in angle brackets with no `<`, `>` or `\\` inside, which allows spaces, such as `[codebook](<references/hr/data dictionary.pdf>)`, or bare, with no spaces, `<` or `\\`, and with its parentheses balanced.
-- For material kept out of Git, the retained location in single backticks, a comma, and `sha256` with the full 64-digit checksum and no letter, digit, `_`, `\\` or `&` directly after it, such as ``reference: `/secure/<source-id>/manual.pdf`, sha256 <checksum>``. `SHA-256` and `sha256:` are also read.
+- A link to the kept copy: `reference: [codebook](references/<source-id>/codebook.pdf)`.
+- For material kept out of Git, its retained location in backticks and its SHA-256: ``reference: `/secure/<source-id>/manual.pdf`, sha256 <64-digit checksum>``.
+- For documentation read but not kept, an access note giving its URL, the date it was read, and why it was not kept: `reference: read at https://example.org/dictionary.pdf on 2026-10-16, not kept: the server refused downloads (HTTP 403)`. Status reports it as a known limitation.
 
-`awb-status` reads exactly these two forms, ignoring letter case, and lists every other spelling as no reference, including Markdown that renders as a link, such as a link with a title or with brackets in its text. It also stops reading a cell at a link with a title or with a destination neither form allows, at any raw HTML other than `<br>`, at an autolink containing a backtick, bracket or `<`, and at a `*`, `_` or `~` that opens emphasis or strikethrough when a backtick, bracket, `<` or an opening `*`, `_` or `~` of another kind comes before the cell's last `*`, `_` or `~` of that kind that could close it, so put reference clauses before them. To fix a listed entry, rewrite it in one of the forms: drop brackets and backslashes from the link text, write paths with `/`, and put a path with spaces or unbalanced parentheses in angle brackets. An entry such as `reference: not yet retained` counts as no reference.
+When a document's revision postdates the data, say so after its reference, such as `; dictionary revised 2024, after the 2019 data`. `awb-status` lists any other spelling as no reference, with the reason, and an entry such as `reference: not yet retained` counts as none; the `awb-init` skill's `references/landing.md` (**Source references**) gives the exact grammar it reads.
 
 Note failed acquisition attempts in the source's Notes. Use stable source IDs in the catalog, quality record, and investigation records.
 
@@ -748,10 +806,10 @@ def _acquisition_rows(project_root):
 
 
 def _mark_source_acquired(lines, source):
-    """Set the source's Status from candidate to acquired; return its status or `missing`."""
+    """Set the source's Status from candidate to acquired; return (its status or `missing`, whether it changed)."""
     table = _table(lines, "Sources", "Source ID")
     if table is None:
-        return "missing"
+        return "missing", False
     columns, first, end = table
     for index in range(first, end):
         cells = _split_row(lines[index])
@@ -762,9 +820,9 @@ def _mark_source_acquired(lines, source):
         if _plain(status) == "candidate":
             cells[columns.index("Status")] = status.replace("candidate", "acquired")
             lines[index] = _join_row(cells)
-            return "acquired"
-        return _plain(status) or "unrecorded"
-    return "missing"
+            return "acquired", True
+        return _plain(status) or "unrecorded", False
+    return "missing", False
 
 
 def record_acquisition(project_root: str | Path, acquisition_dir: str | Path,
@@ -776,7 +834,8 @@ def record_acquisition(project_root: str | Path, acquisition_dir: str | Path,
     fills a Retained copy cell that is empty or `this checkout only`. A Sources row with
     status `candidate` becomes `acquired`. A missing foundation/sources.md is written from
     SOURCES_TEMPLATE with the row. Returns {"row": "added" | "updated" | "unchanged",
-    "source_status": <status> | "missing"}, plus "created": True when the file was written
+    "source_status": <status> | "missing"}, plus "source_status_changed" naming the edit when
+    it set a Sources row's Status to acquired, and "created": True when the file was written
     from the template; raises LookupError when an existing file has no Acquisitions table.
     """
     root = Path(project_root)
@@ -827,12 +886,14 @@ def record_acquisition(project_root: str | Path, acquisition_dir: str | Path,
             "Notes": _cell(notes) if isinstance(notes, str) else "",
         }
         lines.insert(end, _join_row([values.get(column, "") for column in columns]))
-    status = _mark_source_acquired(lines, source)
+    status, changed = _mark_source_acquired(lines, source)
     if created:
         path.parent.mkdir(parents=True, exist_ok=True)
     if created or "\n".join(lines) != text:
         path.write_text("\n".join(lines), encoding="utf-8")
-    return {"row": outcome, "source_status": status, **({"created": True} if created else {})}
+    return {"row": outcome, "source_status": status,
+            **({"source_status_changed": f"Sources row {source}: Status candidate -> acquired"} if changed else {}),
+            **({"created": True} if created else {})}
 
 
 # Command-line entry points, run as `python3 src/awb.py land|retain|publish ...`. Each prints
@@ -905,6 +966,17 @@ def _settle(root, directory, location, skipped):
     except (LookupError, ValueError, OSError) as error:
         report["ledger"] = {"row": "not written", "error": str(error)}
         succeeded = False
+    # Said once, with the acquisition's new row: awb-status's probe compares these validators.
+    unchecked = []
+    for file in _complete_provenance(directory)["files"] if report["ledger"].get("row") == "added" else []:
+        upstream = file.get("upstream") or {}
+        if (urllib.parse.urlsplit(upstream.get("url") or "").scheme in ("http", "https")
+                and not (upstream.get("etag") or upstream.get("last_modified"))):
+            unchecked.append(file["path"])
+    if unchecked:
+        report["upstream_check"] = (f"not possible for {', '.join(unchecked[:3])}{' and others' if len(unchecked) > 3 else ''}: "
+                                    "the server sent no ETag or Last-Modified, so a later upstream change "
+                                    "cannot be detected; tell the user once")
     return report, succeeded
 
 
@@ -920,7 +992,8 @@ def cli_land(root: Path, argv: list[str]) -> int:
                "absent, and sets a candidate source to acquired; fill its Restrictions yourself. Prints "
                "one JSON line: landed, files, bytes, retention (the retained copy's destination, copied, "
                "conflict, matched, and discrepancies, or skipped with a warning to act on), and ledger "
-               "(row, source_status, and created when sources.md was created; missing means the source "
+               "(row, source_status, source_status_changed when it set the Sources row's Status to acquired, "
+               "and created when sources.md was created; missing means the source "
                "still needs its Sources row). Exit 1 means the files landed but retention or the "
                "row failed; exit 2 means unusable arguments, with nothing landed.")
     parser.add_argument("source", help="source directory name under data/raw/ (one name, not ending "
@@ -985,7 +1058,8 @@ def cli_retain(root: Path, argv: list[str]) -> int:
                "missing rows. Copies never overwrite. Prints one JSON line: location (or the skip "
                "reason), acted_on (each acquisition's retention result, with matched when the destination "
                "holds an identical copy, and its ledger row outcome, with created when sources.md was "
-               "created), already_retained, and still_this_checkout_only. Report every conflict and "
+               "created, and upstream_check when a file's recorded URL came with no ETag or Last-Modified), "
+               "already_retained, and still_this_checkout_only. Report every conflict and "
                "discrepancy. Exit 1 when a retention or row failed.").parse_args(argv)
     location, skipped = _landed_location(root)
     rows = _acquisition_rows(root) or {}
@@ -1029,8 +1103,9 @@ def cli_publish(root: Path, argv: list[str]) -> int:
                "recorded, all passed), view_sql, a canonical view definition for foundation/views/, and "
                "catalog_row, a foundation/catalog.md row to complete with grain and availability. On "
                "refusal (exit 1): published false, error, failed_checks with each failing declared "
-               "check's name and detail, or failing_rows with up to 20 under first, and the partial "
-               "directory left behind. A select returning no rows is refused. Needs duckdb.")
+               "check's name and detail, or failing_rows with up to 20 under first, the partial "
+               "directory left behind, and next_step, which says to remove it before publishing again. "
+               "A select returning no rows is refused. Needs duckdb.")
     parser.add_argument("dataset", help="dataset directory name under data/parquet/")
     parser.add_argument("publication_id", metavar="publication-id",
                         help="new publication directory name under data/parquet/<dataset>/")
@@ -1115,8 +1190,10 @@ def cli_publish(root: Path, argv: list[str]) -> int:
             failures["failed_checks"] = [{"name": check["name"], "detail": check["detail"]}
                                          for check in error.checks if check["outcome"] == "fail"]
         partial = root / "data/parquet" / args.dataset / f"{args.publication_id}.partial"
-        _print({"published": False, "error": f"{type(error).__name__}: {error}", **failures,
-                "partial": _relative(root, partial) if partial.is_dir() else None})
+        left = _relative(root, partial) if partial.is_dir() else None
+        _print({"published": False, "error": f"{type(error).__name__}: {error}", **failures, "partial": left,
+                **({"next_step": f"remove {left}/ before publishing again: publish refuses while it exists"}
+                   if left else {})})
         return 1
     finally:
         connection.close()
@@ -1155,13 +1232,18 @@ def cli_publish(root: Path, argv: list[str]) -> int:
 
 def session(project_root: str | Path, *,
             views_dir: str | Path = "foundation/views",
-            read_only: bool = False) -> "duckdb.DuckDBPyConnection":
+            read_only: bool = False, investigation: str | None = None) -> "duckdb.DuckDBPyConnection":
     """Open an in-memory DuckDB session and load view files in name order.
 
     Project-relative paths in views, such as data/parquet/..., resolve against
     the project root from any working directory. A view that reads another view
     must sort after it; use numeric prefixes, for example 01_base.sql and
     02_derived.sql.
+
+    investigation opens a result session, as run.py does: after the views_dir files it loads
+    investigations/<investigation>/views/*.sql in name order, the investigation's shared SQL, and
+    pins DuckDB to one thread, so a rerun adds floating-point values in the same order and saves
+    the same table.
 
     read_only=True opens a session that writes nothing: no extension installs (one already
     installed loads when a statement needs it), no persistent secrets, spill files in a
@@ -1180,9 +1262,12 @@ def session(project_root: str | Path, *,
     if "," in str(root):
         # file_search_path is a comma-separated list with no escape for a comma.
         raise ValueError(f"session() cannot use a project root containing a comma: {root}")
-    directory = _under(root, views_dir)
+    directories = [_under(root, views_dir)]
+    if investigation is not None:
+        _check_name(investigation)
+        directories.append(root / "investigations" / investigation / "views")
     views = []
-    for path in sorted(directory.glob("*.sql")):
+    for path in (path for directory in directories for path in sorted(directory.glob("*.sql"))):
         if path.is_file():
             try:
                 text = path.read_text(encoding="utf-8")
@@ -1202,6 +1287,8 @@ def session(project_root: str | Path, *,
         "temp_directory": str(Path(spill) / "spill")}) if read_only else duckdb.connect()
     try:
         connection.execute("SET file_search_path = ?", [str(root)])
+        if investigation is not None:
+            connection.execute("SET threads = 1")
         for path, text, statements in views:
             try:
                 if read_only:  # what runs is the parsed statement whose kind, calls and plan were checked
@@ -1260,30 +1347,59 @@ READ_TABLE_FUNCTIONS = frozenset("""
 EXTENSION_READ_FUNCTIONS = {"read_xlsx": "excel"}
 
 
-def read_only_sql(connection, text):
+def read_only_sql(connection, text, parameters=None):
     """Run SQL text in a read-only session(): only SELECT statements, refusing COPY, ATTACH, INSTALL,
     LOAD, EXPORT, SET, a PRAGMA that sets, CALL, CREATE, and every other kind, and a SELECT whose plan
     calls a table function outside READ_TABLE_FUNCTIONS or that calls dynamic SQL (_refuse_dynamic_sql),
-    before any statement runs. Returns the last statement's relation, as connection.sql() does."""
+    before any statement runs. Each statement is checked and run with the `parameters` it names as $name
+    (_bound). Returns the last statement's relation, as connection.sql() does."""
     import duckdb
     statements = duckdb.extract_statements(text)  # parsed once, so what runs is what was checked
     _refuse_statements(statements, ("SELECT",), "(only SELECT runs here, and a PIVOT is one only with an IN "
                        "(...) list of its values)")
     for statement in statements:
-        _refuse_writing_plan(connection, statement)
+        _refuse_writing_plan(connection, statement, parameters)
     for statement in statements[:-1]:
-        connection.execute(statement.query)
-    return connection.sql(statements[-1].query) if statements else None
+        connection.execute(statement.query, _bound(statement.query, parameters))
+    return connection.sql(statements[-1].query, params=_bound(statements[-1].query, parameters)) \
+        if statements else None
 
 
-def _refuse_writing_plan(connection, statement):
+def _bound(sql, parameters):
+    """The entries of parameters that sql names as $name, as run.py binds a result's query; None for none."""
+    names = set(re.findall(r"\$(\w+)", sql))
+    return {name: value for name, value in (parameters or {}).items() if name in names} or None
+
+
+# DuckDB's errors for a $name left unbound: EXPLAIN's or a prepared statement's, and sql()'s.
+UNBOUND_PARAMETERS = ("prepared statement parameters", "Unexpected prepared parameter")
+# _sql_fix's advice for them, which awb.py profile, binding no parameters, replaces with its own.
+BIND_FIX = ("bind each $name with --param name=value, or --settings <investigation> for that "
+            "investigation's settings [parameters] (over MCP, the read tool's params or settings)")
+
+
+def _sql_fix(message):
+    """The likely fix for a DuckDB error a statement raises: bind its parameters, qualify its column, or
+    else fix the statement; a PIVOT, whose expansion a read-only session can plan only with its values
+    listed, is named, since its text after DuckDB's expansion no longer says PIVOT."""
+    if any(text in message for text in UNBOUND_PARAMETERS):
+        return BIND_FIX
+    if "Ambiguous reference to column" in message:
+        return "qualify the column with its table's name or alias"
+    return "fix the statement, or for a PIVOT list its values with IN (...)"
+
+
+def _refuse_writing_plan(connection, statement, parameters=None):
     """Raise unless one parsed statement calls no dynamic SQL (_refuse_dynamic_sql) and the plan DuckDB
-    would run for it calls only READ_TABLE_FUNCTIONS. EXPLAIN binds the statement, expanding views and macros,
-    without running it; the name check runs again after it, since binding can load an extension's macros."""
+    would run for it, bound with the parameters it names, calls only READ_TABLE_FUNCTIONS. EXPLAIN binds the
+    statement, expanding views and macros, without running it; the name check runs again after it, since
+    binding can load an extension's macros. A statement EXPLAIN cannot bind is refused with DuckDB's error
+    and its likely fix (_sql_fix), never with advice to drop read-only, which binds it no better."""
     _refuse_dynamic_sql(connection, statement)
     text = statement.query
     try:
-        plan = json.loads(connection.execute("EXPLAIN (FORMAT json) " + text).fetchall()[0][1])
+        plan = json.loads(connection.execute("EXPLAIN (FORMAT json) " + text,
+                                             _bound(text, parameters)).fetchall()[0][1])
     except Exception as error:  # a PIVOT without IN, SQL that does not bind, or an extension not installed
         called, message = _called_names(text), str(error)
         for name, extension in sorted(EXTENSION_READ_FUNCTIONS.items()):
@@ -1297,8 +1413,9 @@ def _refuse_writing_plan(connection, statement):
                     f"read-only session installs none; install it once without --read-only, "
                     f'python3 src/awb.py sql "INSTALL {extension}; SELECT 1" (over MCP, the data tool\'s sql), '
                     "then run this again") from error
-        raise ValueError(f"read-only: refused a statement whose plan cannot be checked ({error}); "
-                         "run it without --read-only") from error
+        # from None: the message carries DuckDB's error, which _fail would otherwise print twice
+        raise ValueError(f"read-only: refused a statement DuckDB cannot plan ({error}); {_sql_fix(str(error))}") \
+            from None
     table_functions = {name for (name,) in connection.execute(
         "SELECT upper(function_name) FROM duckdb_functions() WHERE function_type = 'table'").fetchall()}
     nodes = list(plan)
@@ -1488,13 +1605,48 @@ def _refuse_statements(statements, allowed, where):
 
 
 def _sql_argument(root, argument):
-    """Return the text of the query file argument names, else argument itself as SQL text."""
+    """Return the text of the query file argument names, whitespace around it ignored, else argument
+    itself as SQL text. One line ending in .sql, in any case, names a file: when none exists there, this
+    raises rather than run it."""
     try:
-        path = _under(root, argument)
+        path = _under(root, argument.strip())
         is_file = path.is_file()
     except (OSError, ValueError):  # SQL text can be too long, or hold a NUL, for a path
         is_file = False
+    if not is_file and "\n" not in argument and argument.strip().lower().endswith(".sql"):
+        raise ValueError(f"no query file {argument.strip()}; a relative path is read from the project root")
     return path.read_text(encoding="utf-8") if is_file else argument
+
+
+def _parameter(text):
+    """(name, value) from --param's name=value. The name is letters, digits, and _, as a query names it
+    with $name. The value is read as a one-line TOML value, as settings [parameters] are, so 2026-01-01 is
+    a date, 5 an integer, true a boolean, and "5" a string; text that is no TOML value is a string as given."""
+    name, separator, value = text.partition("=")
+    if not separator or not re.fullmatch(r"\w+", name):
+        raise argparse.ArgumentTypeError(f"expected name=value, the name in letters, digits, and _: {text!r}")
+    if "\n" in value or "\r" in value:
+        return name, value
+    try:
+        return name, _toml().loads(f"value = {value}")["value"]
+    except ValueError:  # TOMLDecodeError
+        return name, value
+
+
+def _settings_parameters(root, investigation):
+    """The [parameters] table of investigations/<investigation>/settings.toml."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", investigation):
+        raise ValueError(f"--settings needs an investigation name: {investigation!r}")
+    path = Path(root) / "investigations" / investigation / "settings.toml"
+    if not path.is_file():
+        raise ValueError(f"investigations/{investigation}/settings.toml does not exist")
+    try:
+        parameters = _toml().loads(path.read_text(encoding="utf-8")).get("parameters", {})
+    except ValueError as error:
+        raise ValueError(f"investigations/{investigation}/settings.toml: {error}") from error
+    if not isinstance(parameters, dict):
+        raise ValueError(f"investigations/{investigation}/settings.toml: parameters is not a table")
+    return parameters
 
 
 def _table_cell(value, width=80):
@@ -1507,6 +1659,16 @@ def _markdown_table(header, rows):
     lines = ["| " + " | ".join(map(_table_cell, header)) + " |", "|" + "---|" * len(header)]
     lines += ["| " + " | ".join(map(_table_cell, row)) + " |" for row in rows]
     return "\n".join(lines)
+
+
+def _bound_sql(connection, text, parameters):
+    """connection.sql(text), each statement bound with the parameters it names as $name (_bound)."""
+    import duckdb
+    statements = duckdb.extract_statements(text)
+    for statement in statements[:-1]:
+        connection.execute(statement.query, _bound(statement.query, parameters))
+    return connection.sql(statements[-1].query, params=_bound(statements[-1].query, parameters)) \
+        if statements else None
 
 
 def _fail(command, error):
@@ -1524,6 +1686,12 @@ def cli_sql(root: Path, argv: list[str]) -> int:
     parser.add_argument("query", help="query file (absolute or project-relative) or SQL text")
     parser.add_argument("--limit", type=int, default=20, help="rows to print (default 20)")
     parser.add_argument("--out", help="write the full result to this project-relative .csv or .parquet file")
+    parser.add_argument("--param", action="append", default=[], type=_parameter, metavar="NAME=VALUE",
+                        help="bind $NAME to VALUE, read as a TOML value as settings are (2026-01-01 is a date, "
+                             "5 an integer, other text a string); repeat for each; wins over --settings")
+    parser.add_argument("--settings", metavar="INVESTIGATION",
+                        help="bind the [parameters] of investigations/INVESTIGATION/settings.toml and load its "
+                             "views/*.sql after the foundation views, as a result session does")
     parser.add_argument("--read-only", action="store_true",
                         help="write nothing: run only SELECT statements whose table functions read files or the "
                              "catalog and build no SQL from a string (query, query_table, the histogram table "
@@ -1540,10 +1708,16 @@ def cli_sql(root: Path, argv: list[str]) -> int:
     if out is not None and out.suffix.lower() not in {".csv", ".parquet"}:
         parser.error("--out must end in .csv or .parquet")
     try:
-        with session(root, read_only=args.read_only) as connection:
+        parameters = {**(_settings_parameters(root, args.settings) if args.settings else {}), **dict(args.param)}
+        with session(root, read_only=args.read_only, investigation=args.settings) as connection:
             # sql() runs every statement and returns the last one's result, or None.
             text = _sql_argument(root, args.query)
-            relation = read_only_sql(connection, text) if args.read_only else connection.sql(text)
+            if args.read_only:
+                relation = read_only_sql(connection, text, parameters)
+            elif parameters:
+                relation = _bound_sql(connection, text, parameters)
+            else:
+                relation = connection.sql(text)
             if relation is None:
                 raise ValueError("the SQL returns no rows; end it with a query")
             if out is not None:
@@ -1556,6 +1730,8 @@ def cli_sql(root: Path, argv: list[str]) -> int:
             header, rows = relation.columns, relation.limit(args.limit).fetchall()
             total = relation.aggregate("count(*)").fetchone()[0]
     except Exception as error:
+        if not args.read_only and any(text in str(error) for text in UNBOUND_PARAMETERS):
+            error = ValueError(f"{error}; {_sql_fix(str(error))}")
         return _fail("sql", error)
     print(_markdown_table(header, rows))
     print(f"{len(rows)} of {total} rows shown" + (f"; full result in {args.out}" if out else ""))

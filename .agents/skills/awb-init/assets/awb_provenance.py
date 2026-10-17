@@ -26,8 +26,10 @@ that table and the [parameters] entries the producer received, those the result 
 left out of producing_paths, so other parameters, other results' tables, and other top-level tables
 never make this result stale. Producing paths are an allow list: the
 investigation's run.py, the result's own queries, its producer module producers/<result-id>.py
-(producer_path()), the code its table declares, and src/ except the helpers that only dispatch,
-record, or package (awb.py, provenance.py, packaging/), so a repair replacing those stales nothing.
+(producer_path()), the code its table declares, the investigation's views/*.sql, which every result
+session loads (investigation_views(); one added later stales every result), and src/ except the
+helpers that only dispatch, record, or package (awb.py, provenance.py, packaging/), so a repair
+replacing those stales nothing.
 Prose, notes, and every other file in the investigation never count, nor do other results' queries
 and producers. compare_evidence reads only awb-evidence/3 files whose settings name their result;
 any other file fails every comparison, so its result must be rerun. It compares the parameters the
@@ -188,6 +190,19 @@ def views_read(project_root, sql_paths: Iterable[str | os.PathLike], *,
                 found.add(path)
                 pending.append(view_text)
     return sorted(found)
+
+
+def investigation_views(project_root, investigation: str) -> list[str]:
+    """The investigation's shared SQL: investigations/<name>/views/*.sql, project-relative and sorted.
+
+    A result session loads these after the foundation views, as session(investigation=...) does, so each
+    counts as producing code for every result of the investigation, and one added later stales them all.
+    """
+    if not isinstance(investigation, str) or not _ID.fullmatch(investigation):
+        raise ValueError(f"investigation {investigation!r} is not a simple identifier")
+    root = Path(project_root).resolve()
+    folder = root / "investigations" / investigation / "views"
+    return sorted(_relative(root, path) for path in folder.glob("*.sql") if path.is_file())
 
 
 def _input_record(root, path, filename, keys):
@@ -634,11 +649,13 @@ def result_problems(result_id: str, table, questions: dict[str, str] | None = No
                     folder=None) -> list[str]:
     """What a result's ID and [results.<id>] table lack: an ID that names its files, one letter or digit
     then letters, digits, '.', '_', or '-'; a one-line question; inputs, when given, as a list of names;
-    answers, when given, as a list of ledger question IDs; code, when given, as a list of paths; and
-    parameters, when given, as a list of [parameters] names, each letters, digits, '_', or '-'. With
-    `questions`, ledger_answerers()'s mapping, each answers ID must be in the ledger with answerer data:
-    a person answers the others. With `folder`, the investigation's folder, each code path must name a
-    file in the project; a directory is refused, since a file added to it later would not be recorded.
+    answers, when given, as a list of ledger question IDs; code, when given, as a list of paths; views,
+    when given, as a list of project-relative view files; and parameters, when given, as a list of
+    [parameters] names, each letters, digits, '_', or '-'. With `questions`, ledger_answerers()'s
+    mapping, each answers ID must be in the ledger with answerer data: a person answers the others. With
+    `folder`, the investigation's folder, each code path must name a file in the project; a directory is
+    refused, since a file added to it later would not be recorded; and each views entry must name a .sql
+    file directly under foundation/views/ or the investigation's views/, the files a result session loads.
 
     record_evidence refuses a table with problems, checking answers against the ledger and code against
     the files; run.py checks every wanted result, both included, before running any, since a rerun
@@ -677,6 +694,18 @@ def result_problems(result_id: str, table, questions: dict[str, str] | None = No
                                 "reads, since a file added to a directory later would not count")
             elif not target.is_file():
                 problems.append(f"{where} code names {path}, which does not exist under {prefix}")
+    views = table.get("views", [])
+    if not isinstance(views, list) or not all(isinstance(path, str) and path.strip() for path in views):
+        problems.append(f'{where} views must be a list of view files, as views = ["foundation/views/orders.sql"]')
+    elif folder is not None:
+        folder = Path(folder).absolute()
+        root, local = folder.parents[1], f"investigations/{folder.name}/views"
+        for path in views:
+            # Only a .sql file directly under either folder is one a result session loads.
+            if (posixpath.dirname(posixpath.normpath(path)) not in ("foundation/views", local)
+                    or not path.endswith(".sql") or not (root / path).is_file()):
+                problems.append(f"{where} views names {path}, which is not a view file under foundation/views/ or "
+                                f"{local}/; list view files by project-relative path")
     parameters = table.get("parameters", [])
     if not isinstance(parameters, list) or not all(isinstance(n, str) and _NAME.fullmatch(n) for n in parameters):
         problems.append(f'{where} parameters must be a list of [parameters] names, as parameters = ["start"]')
@@ -706,10 +735,10 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
 
     The settings file must hold the result's [results.<id>] table, whose question and inputs the
     evidence copies. Producing code is an allow list: the investigation's run.py, the table's
-    `queries` (default queries/<id>.sql), the result's producer module (producer_path()), and the
-    table's `code`, each relative to the investigation, plus src/ except the helpers that only
-    dispatch, record, or package. A declared code path must name a file. code_paths adds further producing
-    files or directories, relative to the project. `parameters` is the mapping the producer received,
+    `queries` (default queries/<id>.sql), the result's producer module (producer_path()), the
+    table's `code`, each relative to the investigation, and its shared SQL (investigation_views()),
+    plus src/ except the helpers that only dispatch, record, or package. A declared code path must
+    name a file. code_paths adds further producing files or directories, relative to the project. `parameters` is the mapping the producer received,
     result_parameters() in run.py, and settings record only those [parameters] entries; without it,
     as an older run.py calls this, every entry is recorded, since its producer may read any. Omitted
     publications are those the views read; omitted acquisitions are the inputs recorded in those
@@ -740,6 +769,7 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
     own = ["run.py", *_queries(result_id, table), producer_path(result_id), *declared]
     code = [p for p in _expand(root, ["src"] if (root / "src").is_dir() else []) if not p.startswith(_NOT_PRODUCING)]
     code += _expand(root, [prefix + path for path in own] + list(code_paths or []))
+    code += investigation_views(root, investigation)  # every result session loads them
     if parameters is not None:  # Only the parameters the producer received can change the result.
         settings["content"] = _scoped(settings["content"], result_id, set(parameters))
     view_entries = [{**e, "publications": _view_publications(root, e["path"])}
@@ -871,6 +901,10 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
                         # untracked once created, which the diff leaves out.
                         created = _git(root, "ls-files", "--others", "-z", "--", *paths)
                         mismatches += [f"{p}: created after the producing commit" for p in created.split("\0") if p]
+                # A view file added to the investigation's views/ since recording loads in the result's session.
+                recorded = set(_known(evidence["producing_paths"]))
+                mismatches += [f"{p}: added after the result was recorded" for p in
+                               investigation_views(root, _known(evidence["investigation"])) if p not in recorded]
             elif name == "uncommitted-code":
                 paths = [e["path"] for e in _known(evidence["producing_uncommitted_changes"], deep=False)]
                 for entry in evidence["producing_uncommitted_changes"]:
@@ -1088,7 +1122,7 @@ class _State(_Record):
         updated = [i for i, line in enumerate(self.lines) if line.startswith("Last updated:")]
         if len(updated) != 1:
             raise StateError(f"{self.label}: {'no' if not updated else 'repeated'} 'Last updated:' line")
-        self.updated = updated[0]
+        self.updated, self.touched = updated[0], False
         self.locate(strict)
 
     def locate(self, strict=True):
@@ -1124,9 +1158,14 @@ class _State(_Record):
         index = self.linked.get(result_id)
         return None if index is None else (index, _cells(self.lines[index]))
 
-    def touch(self, today):
+    def touch(self):
+        """Set Last updated; _commit stamps it again just before writing this record, after the records written with it."""
+        self.touched = True
+        self.stamp()
+
+    def stamp(self):
         line = self.lines[self.updated]
-        self.lines[self.updated] = f"Last updated: {today}" + line[len(_bare(line)):]
+        self.lines[self.updated] = f"Last updated: {_stamp()}" + line[len(_bare(line)):]
 
     def items(self, title):
         """A list section's items as (first line, end line, text), continuation lines included."""
@@ -1148,6 +1187,11 @@ class _State(_Record):
 
 def _today():
     return datetime.now().date().isoformat()
+
+
+def _stamp():
+    """The local time to the second with its UTC offset, which status orders against later file changes."""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 @contextmanager
@@ -1176,15 +1220,20 @@ def _signals_deferred():
 
 
 def _commit(records, *, replaced=None, prior_rows=()):
-    """Prepare all temporary files, then replace records in order with signals deferred."""
+    """Prepare all temporary files, then replace records in order with signals deferred.
+
+    A touched state's temporary file is written last and stamped just before, so no record written
+    with it is newer than its Last updated (a temporary file's mtime survives the replace).
+    """
     replaced = [] if replaced is None else replaced
-    temporaries, current = [], records[0]
+    temporaries = [record.path.with_name(f".{record.path.name}.{os.getpid()}.tmp") for record in records]
+    current = records[0]
     try:
-        for record in records:
-            current = record
-            temporary = record.path.with_name(f".{record.path.name}.{os.getpid()}.tmp")
-            temporaries.append(temporary)
-            with open(temporary, "w", encoding="utf-8", newline="") as stream:
+        for index in sorted(range(len(records)), key=lambda i: getattr(records[i], "touched", False)):
+            current = record = records[index]
+            if getattr(record, "touched", False):
+                record.stamp()
+            with open(temporaries[index], "w", encoding="utf-8", newline="") as stream:
                 stream.write("".join(record.lines))
         with _signals_deferred():
             for record, temporary in zip(records, temporaries):
@@ -1357,6 +1406,7 @@ def render_findings(project_root, investigation) -> dict:
     def mutate(findings):
         discarded = [r["disk"] for r in findings.drift() if r["disk"] is not None]
         findings.changed = True
+        findings.state.touch()
         return {"discarded": discarded}
     return _write_findings(Path(project_root).resolve(), investigation, mutate, render=True)
 
@@ -1366,7 +1416,7 @@ def _has_reason(flag_reason, reason):
     return f"; {reason}; " in f"; {flag_reason}; "
 
 
-def flag_findings(project_root, investigation, flags, *, check=False, today=None) -> dict:
+def flag_findings(project_root, investigation, flags, *, check=False) -> dict:
     """Validate a whole batch, then flag findings without a history entry."""
     if not isinstance(flags, list) or any(not isinstance(f, dict) or set(f) != {"result", "reason"}
             or not all(isinstance(f[k], str) and f[k].strip() for k in f) for f in flags):
@@ -1392,7 +1442,7 @@ def flag_findings(project_root, investigation, flags, *, check=False, today=None
             rows.append(_row(_finding_cells(entry)))
         if changed:
             findings.changed = True
-            findings.state.touch(today or _today())
+            findings.state.touch()
         return {"flags": changed, "unchanged": unchanged, "rows": rows}
     return _write_findings(Path(project_root).resolve(), investigation, mutate, check=check)
 
@@ -1531,7 +1581,7 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
                     today, result_id, old, _finding_cells(entry), exact, flag_reason, prior["citation"]))
         findings.history, findings.changed = history, True
         findings.prior_rows = [_row(old)] if old else []
-        findings.state.touch(today)
+        findings.state.touch()
         return {"action": action, "status": entry["status"], "claim": entry["claim"], "history": history is not None}
 
     try:
@@ -1583,13 +1633,14 @@ def _notes(caveat):
 
 
 # Wording that asserts a reconciliation or a completed check, matched case-insensitively as whole words,
-# in two kinds: a reconciliation, sum(s|med|ming) to, add(s|ed|ing) up to, or
+# in three kinds: a sum, sum(s|med|ming) to or add(s|ed|ing) up to; a reconciliation,
 # reconcile(s|d)/reconciling/reconciliation; and a completed check, checked or verified every, each, or
 # all. A passing check whose name or detail uses wording of the same kind records it, so a scope judgment
-# "Checked all date filters" never backs "sums to".
+# "Checked all date filters" never backs "sums to", nor a reconcile() row count "regions sum to the total".
 _ASSERTS_KINDS = (
-    re.compile(r"(?<![\w-])(?:(?:sums?|summed|summing)\s+to|(?:adds?|added|adding)\s+up\s+to"
-               r"|reconcil(?:e|es|ed|ing|iation))(?![\w-])", re.IGNORECASE),
+    re.compile(r"(?<![\w-])(?:(?:sums?|summed|summing)\s+to|(?:adds?|added|adding)\s+up\s+to)(?![\w-])",
+               re.IGNORECASE),
+    re.compile(r"(?<![\w-])reconcil(?:e|es|ed|ing|iation)(?![\w-])", re.IGNORECASE),
     re.compile(r"(?<![\w-])(?:checked|verified)\s+(?:every|each|all)(?![\w-])", re.IGNORECASE),
 )
 
@@ -1649,9 +1700,9 @@ def _finding_warnings(root, investigation, result_id, text, evidence_path):
         if not asserted or any(kind.search(check) for check in passing):
             continue
         warnings.append(f'warning: {result_id}: "{asserted.group(0)}" asserts a reconciliation or a completed '
-                        "check that no passing check in its evidence records; state the check, with its "
-                        "tolerance, in the detail of a passing values or metrics judgment in "
-                        f"[results.{result_id}.validation] and rerun, or reword")
+                        "check that no passing check in its evidence records; state the check, with any "
+                        "tolerance the brief or the result's settings record, in the detail of a passing values or "
+                        f"metrics judgment in [results.{result_id}.validation] and rerun, or reword")
     return warnings
 
 
@@ -1781,7 +1832,7 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
                 entry["notes_checks"] = entry["checks_caveat"]
             if claim is not None:
                 entry["claim"], entry["claim_basis"] = claim, basis
-        state.touch(today)
+        state.touch()
         findings.history, findings.changed = history, True
         findings.prior_rows = [_row(old) for _, _, old, _, _ in changes]
         return {"rows": [_row(cells) for *_, cells, _ in changes], "unchanged": unchanged, "warnings": warnings,
@@ -1789,8 +1840,7 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
     return _write_findings(root, investigation, mutate)
 
 
-def edit_list(project_root, investigation: str, which: str, *, add: list[str] = (), drop: list[str] = (),
-              today: str | None = None) -> dict:
+def edit_list(project_root, investigation: str, which: str, *, add: list[str] = (), drop: list[str] = ()) -> dict:
     """Add and drop Unresolved issues (`issues`) or Next steps (`next`) items in one write.
 
     A drop is the item's number in the list or a case-sensitive substring of exactly one item,
@@ -1837,7 +1887,7 @@ def edit_list(project_root, investigation: str, which: str, *, add: list[str] = 
             del state.lines[position:value]
         else:
             state.insert(position, value)
-    state.touch(today or _today())
+    state.touch()
     _commit([state])
     return {"added": added, "dropped": [item[2] for item in chosen]}
 
@@ -1852,7 +1902,7 @@ _ORIGINS = ("scope", "brainstorm", "eda", "analysis")
 _PRIORITIES = ("must", "should", "could")
 _QSTATUSES = ("open", "answered", "parked", "declined", "superseded")
 _QUESTION_KEYS = {"id", "text", "kind", "answerer", "unblocks", "origin", "status", "answer", "by", "results",
-                  "reason", "updated", "parent", "priority", "audience"}
+                  "reason", "updated", "parent", "priority", "audience", "show"}
 _LEDGER_HEADER = [
     "# Question ledger", "",
     "Every question this investigation has raised, answered or not. Rendered from `questions.json`: change it "
@@ -1860,7 +1910,8 @@ _LEDGER_HEADER = [
     "A data question is answered only by a recorded result: its settings table declares `answers = [\"Q-NNN\"]` "
     "and `run.py` links it here. `python3 src/awb.py questions list` shows each linked finding's current status.",
     ""]
-_LEDGER_COLUMNS = ["ID", "Question", "Kind", "Answerer", "Unblocks", "Status", "Answer or reason", "Parent", "Priority", "Audience"]
+_LEDGER_COLUMNS = ["ID", "Question", "Kind", "Answerer", "Unblocks", "Status", "Answer or reason", "Parent", "Priority", "Audience",
+                   "Show"]
 
 
 class _Ledger:
@@ -1973,8 +2024,10 @@ def _question_problem(entry):
         return f"needs exactly the keys {', '.join(sorted(_QUESTION_KEYS))}"
     if not isinstance(entry["id"], str) or not _QID.fullmatch(entry["id"]):
         return "id must be Q-NNN"
-    if not all(isinstance(entry[k], str) for k in _QUESTION_KEYS - {"results"}):
-        return "every field but results must be a string"
+    if not all(isinstance(entry[k], str) for k in _QUESTION_KEYS - {"results", "show"}):
+        return "every field but results and show must be a string"
+    if not isinstance(entry["show"], bool):
+        return "show must be true or false"
     if not entry["text"].strip():
         return "text is empty"
     for key, allowed in (("kind", _KINDS), ("answerer", _ANSWERERS), ("origin", _ORIGINS), ("status", _QSTATUSES), ("priority", _PRIORITIES)):
@@ -2005,7 +2058,8 @@ def _question_cells(entry, status=None, depth=0):
             parts.append(f"{entry['answer']} ({entry['by']})")
         answer = entry["reason"] + (f"; was answered: {'; '.join(parts)}" if parts else "")
     return [entry["id"], "&nbsp;&nbsp;" * depth + _cell(entry["text"]), entry["kind"], entry["answerer"],
-            _cell(entry["unblocks"]), status or entry["status"], _cell(answer), entry["parent"], entry["priority"], _cell(entry["audience"])]
+            _cell(entry["unblocks"]), status or entry["status"], _cell(answer), entry["parent"], entry["priority"], _cell(entry["audience"]),
+            "yes" if entry["show"] else ""]
 
 
 def ledger_answerers(project_root, investigation: str) -> dict[str, str]:
@@ -2086,21 +2140,29 @@ def _status_map(entries):
     return {e["result"]: _finding_cells(e)[2] for e in entries}
 
 
-# The derived display status of an answered data question resting on a flagged or superseded finding.
+# The derived display statuses of an answered data question: resting on a flagged or superseded finding,
+# on findings none of which is promoted yet, or both.
 AWAITING_RECHECK = "answered (awaiting recheck)"
+PROVISIONAL_ANSWER = "answered (provisional)"
+PROVISIONAL_RECHECK = "answered (provisional, awaiting recheck)"
 
 
 def question_status(entry, findings):
-    """Display only: any flagged or superseded answering finding needs recheck, even with settled peers.
+    """Display only: any flagged or superseded answering finding needs recheck, even with settled peers; the
+    answer is provisional while no answering finding is supported or was supported before its flag.
 
     Statuses come from the closed _finding_statuses reading. Missing findings are reported by the evidence checks;
-    they do not assert a flag. A person's answer and non-answered questions keep stored status.
+    they do not assert a flag, and a missing row counts as not promoted. Known limit: a superseded finding
+    records no prior status, so it never counts as promoted. A person's answer and non-answered questions keep
+    stored status.
     """
+    if entry["status"] != "answered" or entry["answerer"] != "data":
+        return entry["status"]
     unsettled = {"superseded", _FLAGGED, *(f"{_FLAGGED} (was {s})" for s in _STATUSES)}
-    if entry["status"] == "answered" and entry["answerer"] == "data" and any(
-            findings.get(r) in unsettled for r in entry["results"]):
-        return AWAITING_RECHECK
-    return entry["status"]
+    promoted = any(findings.get(r) in ("supported", f"{_FLAGGED} (was supported)") for r in entry["results"])
+    if any(findings.get(r) in unsettled for r in entry["results"]):
+        return AWAITING_RECHECK if promoted else PROVISIONAL_RECHECK
+    return entry["status"] if promoted else PROVISIONAL_ANSWER
 
 
 def add_question(project_root, investigation: str, text: str, *, kind: str, answerer: str, origin: str,
@@ -2127,7 +2189,7 @@ def add_question(project_root, investigation: str, text: str, *, kind: str, answ
     entry = {"id": f"Q-{number:03d}", "text": text, "kind": kind, "answerer": answerer,
              "unblocks": " ".join((unblocks or "").split()), "origin": origin, "status": status, "answer": "",
              "by": "", "results": [], "reason": reason, "updated": today or _today(),
-             "parent": parent, "priority": priority, "audience": " ".join(audience.split())}
+             "parent": parent, "priority": priority, "audience": " ".join(audience.split()), "show": False}
     ledger.entries.append(entry)
     ledger.check_parent(entry["id"], parent)
     ledger.write()
@@ -2218,9 +2280,10 @@ def set_question(project_root, investigation: str, question_ids: list[str], stat
 def edit_question(project_root, investigation: str, question_id: str, *, text: str | None = None,
                   kind: str | None = None, answerer: str | None = None, unblocks: str | None = None,
                   parent: str | None = None, priority: str | None = None, audience: str | None = None,
-                  today: str | None = None) -> bool:
-    """Reword or reclassify an open or parked question; edit parent, priority or audience in any status.
-    A data question keeps answerer data. Returns whether it changed."""
+                  show: bool | None = None, today: str | None = None) -> bool:
+    """Reword or reclassify an open or parked question; edit parent, priority, audience, or show in any status.
+    show puts an unanswered question on the Open questions slide whatever its priority. A data question keeps
+    answerer data. Returns whether it changed."""
     root = Path(project_root).resolve()
     if text is not None and not text.strip():
         raise ValueError("the question text is empty")
@@ -2243,6 +2306,8 @@ def edit_question(project_root, investigation: str, question_id: str, *, text: s
         ledger.check_parent(question_id, parent)
     if priority is not None and priority not in _PRIORITIES:
         raise ValueError(f"priority must be one of {', '.join(_PRIORITIES)}")
+    if show is not None:
+        new["show"] = bool(show)
     if all(entry[k] == v for k, v in new.items()):
         return False
     entry.update(new, updated=today or _today())
@@ -2296,7 +2361,8 @@ def question_lines(project_root, investigation: str, statuses=("open",), *, show
         if not listed:
             continue
         line = "  " * indent + f"{entry['id']} {displayed} [{entry['answerer']}, {entry['kind']}, " \
-            f"{entry['priority']}; parent: {entry['parent'] or 'root'}] {entry['text']}"
+            f"{entry['priority']}{', shown' if entry['show'] else ''}; parent: {entry['parent'] or 'root'}] " \
+            f"{entry['text']}"
         answer = "; ".join([f"{r} ({findings.get(r, 'no findings row')})" for r in entry["results"]]
                            + ([f"{entry['answer']} ({entry['by']})"] if entry["answer"] else []))
         if entry["status"] == "answered":
@@ -2321,7 +2387,8 @@ def cli_questions(root: Path, argv: list[str]) -> int:
         "add": "append the next numbered question",
         "answer": "record a person's answer, or link recorded results that declare the question",
         "status": "park, decline, supersede, or reopen questions",
-        "edit": "reword or reclassify an open or parked question; edit parent, priority or audience in any status",
+        "edit": "reword or reclassify an open or parked question; edit parent, priority, audience or show in any "
+                "status",
         "render": "restore questions.md from questions.json, discarding hand edits; with neither file, "
                   "write an empty ledger",
     }
@@ -2372,6 +2439,9 @@ def cli_questions(root: Path, argv: list[str]) -> int:
         parser.add_argument("--kind", choices=_KINDS)
         parser.add_argument("--answerer", choices=_ANSWERERS)
         parser.add_argument("--unblocks")
+        parser.add_argument("--show", action=argparse.BooleanOptionalAction, default=None,
+                            help="--show lists it on the Open questions slide while it is unanswered, whatever its "
+                                 "priority; --no-show clears that")
     if action in ("add", "edit"):
         parser.add_argument("--audience", default="" if action == "add" else None,
                             help="audience wording for Open questions; empty clears it; whitespace is collapsed")
@@ -2409,7 +2479,8 @@ def cli_questions(root: Path, argv: list[str]) -> int:
             print(f"{args.status}: {', '.join(changed) or 'none changed'}")
         elif action == "edit":
             changed = edit_question(root, name, args.question_id, text=args.text, kind=args.kind,
-                                    answerer=args.answerer, unblocks=args.unblocks, parent=args.parent, priority=args.priority, audience=args.audience)
+                                    answerer=args.answerer, unblocks=args.unblocks, parent=args.parent, priority=args.priority, audience=args.audience,
+                                    show=args.show)
             print(("edited: " if changed else "unchanged: ") + args.question_id)
         else:
             ledger = _Ledger(root, name)
@@ -2457,7 +2528,7 @@ def _readme_pointer(root):
 
 def state_view(project_root, investigation: str) -> str:
     """The resume view: brief.md and state.md verbatim, the question each row's evidence records, the
-    ledger's open questions and answers awaiting recheck, then a warning
+    ledger's open questions, answers awaiting recheck, and provisional answers, then a warning
     per row with missing evidence."""
     root = Path(project_root).resolve()
     base = root / "investigations" / investigation
@@ -2487,7 +2558,8 @@ def state_view(project_root, investigation: str) -> str:
         out.append("==> questions the findings answer, by result <==\n" + "\n".join(questions) + "\n")
     try:
         ledger = question_lines(root, investigation, show_audience=False) + question_lines(
-            root, investigation, (AWAITING_RECHECK,), show_audience=False)
+            root, investigation, (AWAITING_RECHECK, PROVISIONAL_ANSWER, PROVISIONAL_RECHECK),
+            show_audience=False)
     except StateError as error:
         ledger = [f"warning: {error}"]
     if ledger:
@@ -2548,8 +2620,8 @@ def cli_state(root: Path, argv: list[str]) -> int:
                    "reconciliation or a completed check (sum, sums, summed, or summing to; add, adds, added, or "
                    "adding up to; reconcile, reconciles, reconciled, reconciling, or reconciliation; checked or "
                    "verified every, each, or all; any case, as whole words) that no passing check's name or "
-                   "detail records with wording of the same kind: reconciliation wording for a reconciliation, "
-                   "checked or verified wording for a completed check. A values or metrics judgment in [results.<id>.validation] whose detail states "
+                   "detail records with wording of the same kind: sum wording for a sum, reconciliation wording for a "
+                   "reconciliation, checked or verified wording for a completed check. A values or metrics judgment in [results.<id>.validation] whose detail states "
                    "the check records it. Warnings print first.\n",
         "render": "Prints discarded disk rows; without findings.json the table renders empty.\n",
         "flag": "Validates every flag before writing. --check writes nothing. Only a rerun clears a flag.\n",
@@ -2565,7 +2637,7 @@ def cli_state(root: Path, argv: list[str]) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=actions[action] if action else
         "Show an investigation for resuming: brief.md and state.md verbatim, the question each finding's "
-        "evidence records, the question ledger's open questions and answers awaiting recheck, "
+        "evidence records, the question ledger's open questions, answers awaiting recheck, and provisional answers, "
         "and a warning for each finding whose evidence file is missing. Changes nothing. Uses README's Active investigation line unless "
         "--investigation is given; with no active investigation it lists the investigations.",
         epilog=epilog[action] + _STATE_EXIT)

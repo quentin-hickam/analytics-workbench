@@ -3,12 +3,18 @@
 # test_unknown_methods_fail_at_once: server/discover and any other unknown request get -32601 at once; a bad line gets -32700, a non-2.0 message, one with an id and neither method nor result, or one whose id is not a string, number, or null -32600, an unknown tool or a non-string tool name -32602; the server keeps serving.
 # test_setup_installs_into_a_folder_without_helpers: setup round trip: check writes nothing, then install writes src/awb.py and the receipt; a folder without workbench markers exits 1 with the installer's hint.
 # test_setup_runs_under_awb_python_over_a_recorded_interpreter: with AWB_PYTHON set, setup runs under it while README records another interpreter, reports the line overridden, and leaves it as written.
+# test_setup_records_nothing_for_an_outside_interpreter_without_the_packages: on a fresh project with no recorded interpreter and no venv, setup under a server interpreter outside the project that lacks duckdb, or passed one as interpreter, fails, with or without check, naming the missing packages and the interpreter argument, and writes nothing.
+# test_setup_runs_under_and_records_the_interpreter_it_is_given: setup with interpreter runs the installer under it and records it, project-relative inside the project, so later calls find it; a relative, absent, or empty interpreter is refused.
 # test_read_commands_round_trip_and_write_nothing: every read command without DuckDB (state, questions, stale, review-rules, check-draft, status, help) runs its helper and leaves the project, .git included, unchanged.
-# test_records_round_trip: records adds a question, edits next steps, adds a review rule and one with --scope, flags through stdin, and runs clean-record, each writing its record.
-# test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit; read returns both changes while keeping its answer, and attempts to change answered question content or replace its answer are refused.
+# test_read_check_draft_reports_helper_drift: read check-draft reports no helper_drift on a fresh setup, and a helper_drift row naming src/packaging/draft.py once it is edited.
+# test_records_round_trip: records adds a question, edits next steps, refuses a review rule without --confirmed, adds one with it and one with --scope and --package, flags through stdin, and runs clean-record, each writing its record.
+# test_review_receipt_round_trip: read review-receipt shows none, package review-receipt refuses a record with no start, starts a review, and records a report passed on stdin, and read then shows it stale with the diff and the prior report after an edit, writing nothing; its help topic resolves, and read requires the package.
+# test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit, and sets and clears an open question's show flag; read returns each change while keeping its answer, and attempts to change answered question content or replace its answer are refused.
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
-# test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, records words it and returns state finding's warning on a number the result does not record, read shows sql, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
+# test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, records words it and returns state finding's warning on a number the result does not record, read shows sql, sql binding $name from params and settings, with params winning, and an unbound one's fix, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
+# test_shared_views_parameters_and_pre_commit_results_over_mcp: with DuckDB, run loads the investigation's views/*.sql into the result session, eda-scan reads a $name in [eda] where from [parameters], and read status lists a result run before the first commit once the repository has one, until run records it again.
 # test_package_export_passes_the_chart_selection_through: with DuckDB, the package tool passes export's --chart row selection to the helper unchanged: @first=1 writes one row and the manifest records it, and a malformed selection comes back as the helper's refusal with exit status 2.
+# test_package_export_returns_display_warnings: with DuckDB, the package tool's export shapes a file through display.toml's [scale] and returns value_warnings and precision_warnings, a [values] code no cell holds named, as the helper reports them.
 # test_read_sql_refuses_writes: read sql and profile refuse COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, CREATE, a SELECT calling enable_profiling with save_location or enable_logging with file storage, and a query() whose SQL differs between the plan check and the run, and write no file; read refuses arguments outside its command and help topics outside the helpers.
 # test_read_runs_the_histogram_aggregate_and_refuses_the_histogram_macro: read sql and profile run the histogram() aggregate, directly and from a view file, and refuse FROM histogram(...), the table macro that calls query_table, writing nothing.
 # test_read_queries_a_landed_excel_file_through_a_view: with the excel extension installed, read sql and profile query a landed .xlsx through a view and write nothing; skipped where the extension cannot be loaded.
@@ -20,6 +26,7 @@
 # test_read_writes_no_bytecode_and_reads_no_shared_cache: a read subprocess runs with bytecode writes off and no PYTHONPYCACHEPREFIX, even one the server inherits, so it reads no bytecode from a cache directory; a write subprocess keeps Python's cache settings.
 # test_root_uris_are_unquoted_once: a root URI's percent escapes are decoded once.
 # test_clean_record_passes_new_issues: records clean-record passes a decisions `new` list through stdin, writing an analyst-authored quality row with the next DQ- ID, its evidence, and no scan link; the records description names `new`.
+# test_lineage_year_and_amend_options_reach_their_helpers: with DuckDB, data clean-scan passes --lineage (a copy across two sheets is a duplicate-rows issue), data eda-scan passes an integer year --date-column with year bounds, and records clean-record passes an amend through stdin, each through the existing tools.
 # test_subprocess_interpreter_follows_the_project: AWB_PYTHON wins, then README's Project interpreter line, then .venv or venv, then the server's own interpreter, as src/awb.py resolves it.
 
 import importlib.util
@@ -48,12 +55,12 @@ needs_duckdb = pytest.mark.skipif(not HAS_DUCKDB, reason="needs duckdb and panda
 class Client:
     """A stdio MCP client: one server process, answering its roots/list requests from `roots`."""
 
-    def __init__(self, cwd, log, roots=None, env=None):
+    def __init__(self, cwd, log, roots=None, env=None, python=None):
         self.roots = roots
         self.roots_asked = 0
         self.log = open(log, "ab")
         self.process = subprocess.Popen(
-            [sys.executable, str(SERVER)], cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            [python or sys.executable, str(SERVER)], cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=self.log, env={**os.environ, "AWB_PYTHON": sys.executable, **(env or {})})
         self.lines = queue.Queue()
         self.raw = []
@@ -111,8 +118,8 @@ class Client:
 def connect(tmp_path):
     clients = []
 
-    def start(cwd=None, roots=None, env=None, initialize=True):
-        client = Client(cwd or tmp_path, tmp_path / "server.log", roots, env)
+    def start(cwd=None, roots=None, env=None, initialize=True, python=None):
+        client = Client(cwd or tmp_path, tmp_path / "server.log", roots, env, python)
         clients.append(client)
         if initialize:
             client.initialize()
@@ -250,6 +257,53 @@ def test_setup_runs_under_awb_python_over_a_recorded_interpreter(tmp_path, conne
     assert readme.read_bytes() == before and (root / "src/awb.py").is_file()
 
 
+def bare_venv(path):
+    """A virtual environment with no packages, not even pip, and its interpreter."""
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(path)], check=True, capture_output=True)
+    return next(candidate for candidate in (path / "bin/python", path / "Scripts/python.exe") if candidate.is_file())
+
+
+def test_setup_records_nothing_for_an_outside_interpreter_without_the_packages(tmp_path, connect):
+    root = scaffold(tmp_path / "wb")
+    server_python = bare_venv(tmp_path / "server-venv")  # outside the project, lacking duckdb and pandas
+    before = snapshot(root)
+    # A fresh project with no README interpreter and no venv: setup would run under the server's own.
+    client = connect(cwd=root, env={"AWB_PYTHON": ""}, python=str(server_python))
+    for check in (True, False):
+        text, error = client.call("setup", check=check)
+        result = json.loads(text.split("\n\n")[0])
+        assert error and text.endswith("exit status 1"), text
+        assert "cannot import duckdb, pandas" in result["error"] and "nothing was written" in result["error"]
+        assert "interpreter" in result["error"] and result["packages"]["duckdb"] == "missing"
+        assert result["interpreter"]["in_project"] is False and str(server_python) in result["interpreter"]["line"]
+        assert snapshot(root) == before
+    # Passed as interpreter, it is refused the same way.
+    text, error = connect(cwd=root, env={"AWB_PYTHON": ""}).call("setup", interpreter=str(server_python))
+    assert error and "cannot import duckdb, pandas" in text and snapshot(root) == before
+
+
+def test_setup_runs_under_and_records_the_interpreter_it_is_given(tmp_path, connect):
+    root = scaffold(tmp_path / "wb")
+    python = bare_venv(root / "env")  # a folder awb.py would not find on its own
+    client = connect(cwd=root, env={"AWB_PYTHON": ""})
+    text, error = client.call("setup", interpreter=str(python))
+    assert not error and text.endswith("exit status 0"), text
+    result = json.loads(text.split("\n\n")[0])
+    recorded = python.relative_to(root).as_posix()
+    assert result["interpreter"] == {"line": f"Project interpreter: {recorded}", "in_project": True,
+                                     "status": "written"}
+    assert result["python"]["executable"] == str(python) and result["packages"]["duckdb"] == "missing"
+    assert f"\nProject interpreter: {recorded}\n" in (root / "README.md").read_text()
+    # Later calls run under the recorded interpreter without the argument.
+    text, error = client.call("setup", check=True)
+    assert not error and json.loads(text.split("\n\n")[0])["interpreter"]["status"] == "current", text
+    for interpreter, expected in (("env/bin/python", "absolute path of an existing file"),
+                                  (str(root / "absent/python"), "absolute path of an existing file"),
+                                  ("", "interpreter must be a non-empty string")):
+        text, error = client.call("setup", interpreter=interpreter)
+        assert error and expected in text, interpreter
+
+
 def test_read_commands_round_trip_and_write_nothing(workbench, connect):
     client = connect(cwd=workbench)
     before = snapshot(workbench)
@@ -265,12 +319,25 @@ def test_read_commands_round_trip_and_write_nothing(workbench, connect):
     text, error = client.call("read", command="check-draft", investigation="churn", package="pkg")
     assert error and '"passed": false' in text
     text, error = client.call("read", command="status")
-    assert not error and json.loads(text.split("\n\n")[0])["active"]["name"] == "churn"
+    active = json.loads(text.split("\n\n")[0])["active"]
+    assert not error and active["name"] == "churn"
+    # Every caveat and the state's freshness reach the read tool with the rest of the collector's facts.
+    assert active["caveats"] == [] and "state_status" in json.loads(text.split("\n\n")[0])["git"]
     for topic, expected in ((None, "usage: python3 src/awb.py"), ("questions add", "--answerer"),
                             ("state finding", "--claim"), ("eda-scan", "--show"), ("install", "--upgrade")):
         text, error = client.call("read", command="help", **({"topic": topic} if topic else {}))
         assert not error and expected in text, topic
     assert snapshot(workbench) == before
+
+
+def test_read_check_draft_reports_helper_drift(workbench, connect):
+    client = connect(cwd=workbench)
+    text, _ = client.call("read", command="check-draft", investigation="churn", package="pkg")
+    assert '"helper_drift": []' in text
+    helper = workbench / "src/packaging/draft.py"
+    helper.write_bytes(helper.read_bytes() + b"\n# adapted\n")
+    text, _ = client.call("read", command="check-draft", investigation="churn", package="pkg")
+    assert json.loads(text.split("\n\n")[0])["helper_drift"][0]["file"] == "src/packaging/draft.py"
 
 
 def test_records_round_trip(workbench, connect):
@@ -281,19 +348,53 @@ def test_records_round_trip(workbench, connect):
     assert "Q-001" in client.call("read", command="questions")[0]
     text, error = client.call("records", command="state", args=["next", "--add", "Rerun by-region"])
     assert not error and "Rerun by-region" in (workbench / INV / "state.md").read_text()
-    text, error = client.call("records", command="review-rules", args=[
-        "add", "--area", "periods", "--severity", "error", "--rule", "Name the period.", "--fix", "Add it."])
+    rule = ["add", "--area", "periods", "--severity", "error", "--rule", "Name the period.", "--fix", "Add it."]
+    text, error = client.call("records", command="review-rules", args=rule)
+    assert error and "--confirmed" in text and not (workbench / "foundation/review-rules.md").exists()
+    text, error = client.call("records", command="review-rules", args=rule + ["--confirmed"])
     assert not error and (workbench / "foundation/review-rules.md").is_file()
+    (workbench / "deliveries/churn/pkg/draft").mkdir(parents=True)
     text, error = client.call("records", command="review-rules", args=[
         "add", "--area", "wording", "--severity", "warning", "--rule", "Say customers.", "--fix", "Rename.",
-        "--pattern", "users", "--scope", "document"])
+        "--pattern", "users", "--scope", "document", "--package", "churn/pkg", "--confirmed"])
     assert not error and '"R-wording-001"' in text
-    assert "- Pattern: `users`\n- Scope: document\n" in (workbench / "foundation/review-rules.md").read_text()
+    assert "- Pattern: `users`\n- Scope: document\n- Package: churn/pkg\n" in \
+        (workbench / "foundation/review-rules.md").read_text()
     text, error = client.call("records", command="state", args=["flag", "--check"], stdin="[]")
     assert not error and text.startswith("{")
     text, error = client.call("records", command="clean-record", args=["absent", "--dry-run"], stdin="{}")
     assert error and "absent" in text
-    assert client.roots_asked == 7
+    assert client.roots_asked == 8
+
+
+def test_review_receipt_round_trip(workbench, connect):
+    client = connect(cwd=workbench)
+    draft = workbench / "deliveries/churn/pkg/draft"
+    draft.mkdir(parents=True)
+    (draft / "findings.md").write_text("# Churn\n\n- West leads.\n")
+    (draft / "methodology.md").write_text("# Methodology\n")
+    before = snapshot(workbench)
+    text, error = client.call("read", command="review-receipt", investigation="churn", package="pkg")
+    assert not error and json.loads(text.split("\n\n")[0])["status"] == "none"
+    assert snapshot(workbench) == before
+    record = ["record", "churn", "pkg", "--kind", "full", "--report", "-"]
+    text, error = client.call("package", command="review-receipt", stdin="R-x-001 pass\nreview: clean\n", args=record)
+    assert error and "no full review started" in text, text
+    text, error = client.call("package", command="review-receipt", args=["start", "churn", "pkg", "--kind", "full"])
+    assert not error and json.loads(text.split("\n\n")[0]) == {"started": True, "kind": "full"}, text
+    text, error = client.call("package", command="review-receipt", stdin="R-x-001 pass\nreview: clean\n", args=record)
+    assert not error and json.loads(text.split("\n\n")[0])["passed"] is True, text
+    (draft / "findings.md").write_text("# Churn\n\n- East leads.\n")
+    before = snapshot(workbench)
+    text, error = client.call("read", command="review-receipt", investigation="churn", package="pkg")
+    shown = json.loads(text.split("\n\n")[0])
+    assert not error and shown["status"] == "stale" and shown["changed"] == ["findings.md"]
+    assert "+- East leads." in shown["diff"] and shown["report"] == "R-x-001 pass\nreview: clean\n"
+    assert snapshot(workbench) == before
+    text, error = client.call("read", command="help", topic="review-receipt record")
+    assert not error and "--accept" in text
+    text, error = client.call("read", command="review-receipt", investigation="churn")
+    assert error and "package is required" in text
 
 
 def test_question_tree_metadata_round_trip(workbench, connect):
@@ -321,6 +422,14 @@ def test_question_tree_metadata_round_trip(workbench, connect):
     assert ("  Q-003 answered [user, context, could; parent: Q-001] "
             "Which period should the plan cover? -> The next quarter (user) "
             "[audience: Which period matters for the decision?]") in text
+    # The show flag, separate from priority, puts a question on the Open questions slide; --no-show clears it.
+    text, error = client.call("records", command="questions", args=["edit", "Q-001", "--show"])
+    assert not error, text
+    assert "Q-001 open [user, decision, should, shown; parent: root]" in client.call("read", command="questions")[0]
+    text, error = client.call("records", command="questions", args=["edit", "Q-001", "--no-show"])
+    assert not error, text
+    text, error = client.call("read", command="questions", all=True)
+    assert not error and "Q-001 open [user, decision, should; parent: root]" in text, text
     for flag, value in (("--text", "A different question?"), ("--kind", "analytical"),
                         ("--answerer", "stakeholder"), ("--unblocks", "Another decision")):
         refusal, error = client.call("records", command="questions", args=[
@@ -371,6 +480,21 @@ def test_data_run_package_release_round_trip(workbench, connect):
     assert not error and "| west | 2 |" in text
     text, error = client.call("read", command="sql", query="-- leading comment\nSELECT 1 AS one")
     assert not error and "| 1 |" in text
+    # $name parameters bind from params, from an investigation's settings, or both, params winning
+    settings = workbench / INV / "settings.toml"
+    kept = settings.read_bytes()
+    settings.write_text(kept.decode().replace("[parameters]\n", '[parameters]\nregion = "east"\n'))
+    query = "SELECT count(*) AS n FROM orders WHERE region = $region AND id >= $first"
+    text, error = client.call("read", command="sql", query=query, params={"region": "west", "first": "3"})
+    assert not error and text.startswith("| n |\n|---|\n| 1 |"), text
+    text, error = client.call("read", command="sql", query=query, settings="churn", params={"first": "1"})
+    assert not error and text.startswith("| n |\n|---|\n| 1 |"), text
+    text, error = client.call("read", command="sql", query=query, settings="churn",
+                              params={"region": "west", "first": "1"})
+    assert not error and text.startswith("| n |\n|---|\n| 2 |"), text
+    text, error = client.call("read", command="sql", query=query, params={"first": "1"})
+    assert error and "region" in text and "params or settings" in text and "without --read-only" not in text
+    settings.write_bytes(kept)
     text, error = client.call("read", command="profile", query="orders", max_rows=10)
     assert not error and text.startswith("rows: 3")
     text, error = client.call("read", command="eda-show", dataset="orders", section="rows")
@@ -379,6 +503,37 @@ def test_data_run_package_release_round_trip(workbench, connect):
     assert not error and '"checked": 1, "stale": 0' in text
     assert "by-region" in client.call("read", command="state")[0]
     assert snapshot(workbench) == before
+
+
+@needs_duckdb
+def test_shared_views_parameters_and_pre_commit_results_over_mcp(tmp_path, connect):
+    root = scaffold(tmp_path / "wb")
+    client = connect(cwd=root)
+    text, error = client.call("setup")
+    assert not error, text
+    git(root, "init", "-q")
+    (root / INV / "views").mkdir()
+    (root / INV / "views/01_west.sql").write_text("CREATE VIEW west_orders AS SELECT * FROM orders WHERE region = 'west';\n")
+    (root / INV / "settings.toml").write_text(
+        '[parameters]\nregion = "west"\n\n[eda]\nwhere = "region = $region"\n\n'
+        '[results.by-region]\nquestion = "How many orders does each region take?"\n')
+    (root / INV / "queries/by-region.sql").write_text(
+        "SELECT region, count(*) AS orders FROM west_orders GROUP BY region ORDER BY region\n")
+    text, error = client.call("run", investigation="churn", results=["by-region"])
+    assert not error, text
+    assert (root / INV / "results/by-region.csv").read_text() == "region,orders\nwest,2\n"
+    text, error = client.call("data", command="eda-scan", args=["orders"])
+    assert not error, text
+    scan = json.loads((root / INV / "exploration/eda/orders.json").read_text())
+    assert scan["scope"]["applied"] == [{"sql": "region = 'west'", "source": "eda.where"}] and scan["rows"] == 2
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "first")
+    text, error = client.call("read", command="status")
+    assert not error and json.loads(text.split("\n")[0])["git"]["uncommitted_evidence"] == ["by-region"], text
+    text, error = client.call("run", investigation="churn", results=["by-region"])
+    assert not error, text
+    text, error = client.call("read", command="status")
+    assert not error and json.loads(text.split("\n")[0])["git"]["uncommitted_evidence"] == [], text
 
 
 @needs_duckdb
@@ -398,6 +553,23 @@ def test_package_export_passes_the_chart_selection_through(workbench, connect):
                               args=["churn", "pkg", "--chart", "by-region@last=1", "--no-datasets"])
     assert error and "the row selection is not @first=<n>" in text and "exit status 2" in text
     assert (draft / "charts/chart-1.csv").read_text() == "Region,Orders\neast,1\n"
+
+
+@needs_duckdb
+def test_package_export_returns_display_warnings(workbench, connect):
+    client = connect(cwd=workbench)
+    text, error = client.call("run", investigation="churn", results=["by-region"])
+    assert not error, text
+    draft = workbench / "deliveries/churn/pkg/draft"
+    draft.mkdir(parents=True)
+    (workbench / "foundation/display.toml").write_text(
+        '[columns]\nregion = "Region"\norders = "Orders (tens)"\n\n[values.region]\nnorth = "North"\n\n'
+        '[scale]\norders = { divide = 10 }\n')
+    text, error = client.call("package", command="export", args=["churn", "pkg", "--chart", "by-region", "--no-datasets"])
+    assert (draft / "charts/chart-1.csv").read_text() == "Region,Orders (tens)\neast,0.1\nwest,0.2\n", text
+    report = json.loads(text[text.index("{"):text.rindex("}") + 1])
+    assert report["value_warnings"][0]["code"] == "north" and report["precision_warnings"] == []
+    assert json.loads((draft / "manifest.json").read_text())["charts"][0]["scale"] == {"orders": 10}
 
 
 @needs_duckdb
@@ -483,6 +655,11 @@ def test_read_refuses_what_it_does_not_run(workbench, connect):
             ({"command": "review-rules", "investigation": "--all", "package": "p"}, "simple name"),
             ({"command": "sql"}, "query is required"),
             ({"command": "sql", "query": "SELECT 1", "limit": -1}, "limit must be"),
+            ({"command": "sql", "query": "SELECT 1", "params": {"n": 1}}, "params must be an object of strings"),
+            ({"command": "sql", "query": "SELECT 1", "params": ["n=1"]}, "params must be an object of strings"),
+            ({"command": "sql", "query": "SELECT 1", "params": {"a-b": "1"}}, "params names must be"),
+            ({"command": "sql", "query": "SELECT 1", "settings": "../x"}, "simple name"),
+            ({"command": "profile", "query": "orders", "params": {"n": "1"}}, "unknown arguments: params"),
             ({"command": "write"}, "unknown read command")):
         text, error = client.call("read", **arguments)
         assert error and expected in text, arguments
@@ -622,6 +799,29 @@ def test_clean_record_passes_new_issues(workbench, connect):
     assert (f"| DQ-001 | view `orders` | March has no orders from the west region; evidence `{INV}/exploration/march-gap.sql` | "
             "Understates March | None in the foundation; investigations decide | open |") in quality
     assert not (workbench / "foundation/quality.json").exists()
+
+
+@needs_duckdb
+def test_lineage_year_and_amend_options_reach_their_helpers(workbench, connect):
+    (workbench / "foundation/views/02_lines.sql").write_text(
+        "CREATE VIEW lines AS SELECT * FROM (VALUES ('A', 1, 100, 1990), ('A', 2, 101, 1991), "
+        "('B', 1, 101, 1991)) t(sheet, sheet_row, invoice, year);\n")
+    client = connect(cwd=workbench)
+    text, error = client.call("data", command="clean-scan", args=["lines", "--lineage", "sheet,sheet_row"])
+    assert not error, text
+    issue = next(i for i in json.loads(text.split("\n\n")[0])["issues"] if i["key"] == "duplicate-rows")
+    assert issue["count"] == 1 and issue["lineage"] == ["sheet", "sheet_row"]
+    text, error = client.call("data", command="eda-scan", args=["lines", "--date-column", "year", "--start", "1990",
+                                                                "--end", "1991"])
+    assert not error and "date column: year (option), by year" in text, text
+    decisions = {"issues": {"S1": {"impact": "Double counts", "treatment": "Open", "status": "open"}}}
+    text, error = client.call("records", command="clean-record", args=["lines"], stdin=json.dumps(decisions))
+    assert not error, text
+    decisions = {"issues": {"DQ-001": {"amend": {"observation": "Sheet B repeats sheet A's 1991 line",
+                                                 "reason": "the copy is across sheets"}}}}
+    text, error = client.call("records", command="clean-record", args=["lines"], stdin=json.dumps(decisions))
+    assert not error and json.loads(text.split("\n\n")[0])["amended"] == ["DQ-001"], text
+    assert ("| Sheet B repeats sheet A's 1991 line; amended " in (workbench / "foundation/quality.md").read_text())
 
 
 def test_subprocess_interpreter_follows_the_project(tmp_path, monkeypatch):

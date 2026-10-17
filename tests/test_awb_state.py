@@ -18,18 +18,23 @@
 # test_lists_above_the_table_leave_it_intact: issues and next steps placed before Current findings are edited without touching the table, and later findings writes keep it whole.
 # test_render_recovers_malformed_and_stray_rows: render replaces an unescaped pipe, a duplicate row, and a row cut off below the table, which writers refuse as drift.
 # test_flags_validate_and_are_idempotent: batches validate before writes, check migrates only in memory, duplicate reasons keep all records byte-identical, and a rerun keeps notes, drops the flag reason, and names only the reason in history.
-# test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helpers write.
+# test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helpers write, and finds the state they leave up to date.
+# test_last_updated_is_stamped_after_the_records_written_with_it: a state write stamps Last updated, a local time with its offset, after writing the findings and history files it replaces with it.
+# test_a_kept_rerun_leaves_the_state_up_to_date: a kept rerun's table, profile, and evidence, written after the state, leave it up to date; a table edited after its evidence, or without evidence, dates it.
+# test_render_stamps_the_state: state render stamps Last updated, so the findings.json it rewrites leaves the state up to date.
 # test_claim_strength_is_recorded_and_guarded: a new row is association; --claim causal needs an experiment or natural-experiment basis and a reason; a claim change writes history; a rerun keeps the claim; a flagged finding's claim can only be lowered.
 # test_absent_claim_strength_is_refused: a findings.json entry without a valid claim strength makes every writer and the drift check refuse, writing nothing.
 # test_finding_text_warns_on_numbers_its_result_does_not_record: with src/packaging/draft.py, --text or --status supported warns on each number the result's table, profile, checks, and settings do not record, still writing; a recorded number at another precision traces; without draft.py nothing is read; a draft.py that does not load is named.
-# test_finding_text_warns_on_reconciliation_no_check_records: "sums to", "reconciles", "checked every", or "verified each" wording warns, naming a values or metrics judgment as the place to record the check, unless a passing check's name or detail uses wording of the same kind (sum, add up, or reconcile wording backs only such wording; checked or verified wording backs only such wording), so an unrelated "Checked all date filters" scope judgment does not back "sums to"; a failing check does not back it; the row is still written.
+# test_finding_text_warns_on_reconciliation_no_check_records: "sums to", "reconciles", "checked every", or "verified each" wording warns, naming a values or metrics judgment as the place to record the check, unless a passing check's name or detail uses wording of the same kind (sum or add up wording backs only such wording, reconcile wording only reconcile wording, checked or verified wording only such wording), so an unrelated "Checked all date filters" scope judgment does not back "sums to", nor does a reconcile() row count's "reconciled:" detail; a failing check does not back it; the row is still written.
 # test_finding_text_with_unreadable_evidence_warns_and_writes: --text on a row whose evidence is not JSON, or not a JSON object, warns that nothing was checked and still writes.
 # test_caveat_splits_notes_outside_brackets: --caveat splits at each ; outside parentheses and square brackets, either closer closes the innermost open bracket, a closer with no opener and an unclosed bracket with no ; after it are text, a ; after an unclosed bracket is refused writing nothing, and --help says so.
+# test_package_promotion_command_runs: the promotion command awb-package's headline checkpoint gives, filled in, promotes a provisional finding; without --reason it is refused.
 
 from datetime import date
 import importlib.util
 import json
 import re
+import shlex
 import os
 from pathlib import Path
 import shutil
@@ -182,7 +187,7 @@ def test_show_prints_each_findings_question(project, capsys):
 def test_run_rows_are_added_kept_and_refreshed(project):
     assert produce(project, "r1") == {"action": "added", "status": "provisional", "claim": "association", "history": False}
     row = "| <state the finding from r1> | [r1](evidence/r1.json) | provisional | association | |"
-    assert row in text(project, STATE) and f"Last updated: {TODAY}" in text(project, STATE)
+    assert row in text(project, STATE) and re.search(rf"\nLast updated: {TODAY}T\d\d:\d\d:\d\d[+-]\d\d:\d\d\n", text(project, STATE))
     assert produce(project, "r2", checks=GAPS)["action"] == "added"
     assert "| provisional | association | failed checks: columns; not assessed: joins |" in text(project, STATE)
 
@@ -373,7 +378,7 @@ def test_issues_and_next_edit_lists_in_one_call(project, capsys):
     assert text(project, STATE).endswith("Keep this a short list.\n- Profile tenure\n")
     assert run(project, capsys, "next", "--drop", "1")[0] == 0
     assert run(project, capsys, "issues", "--drop", "Q3", "--drop", "Tenure")[0] == 0
-    assert text(project, STATE) == original.replace("2026-09-01", TODAY)
+    assert re.sub(r"(?m)^Last updated: \S+$", "Last updated: 2026-09-01", text(project, STATE)) == original
 
     (project / STATE).write_text(original.replace("Keep this a short list.\n\n## Next",
                                                   "Keep this a short list.\n\n1. First\n   continued\n\n## Next"))
@@ -429,7 +434,8 @@ def test_malformed_records_write_nothing(project, capsys, record, old, new):
         path.unlink()
         commands = [["finding", "r1", "--status", "superseded", "--reason", "x"]]
     else:
-        old, new = old.replace("2026-09-01", TODAY), new.replace("2026-09-01\n", f"{TODAY}\n", 1)
+        stamp = re.search(r"(?m)^Last updated: (\S+)$", text(project, STATE))[1]
+        old, new = old.replace("2026-09-01", stamp), new.replace("2026-09-01\n", f"{stamp}\n", 1)
         assert old in path.read_text()
         path.write_text(path.read_text().replace(old, new, 1))
         lists = [["issues", "--add", "x"]] if "Unresolved" in old else [["next", "--add", "x"]]
@@ -454,7 +460,9 @@ def test_parsers_read_written_files(project, capsys):
     result = status.collect(project)
     assert not [u for u in result["uncertainties"] if u["path"] == STATE]
     active = result["active"]
-    assert active["last_updated"] == TODAY
+    assert re.fullmatch(rf"{TODAY}T\d\d:\d\d:\d\d[+-]\d\d:\d\d", active["last_updated"])
+    # Every record these writes left uncommitted predates the state's Last updated.
+    assert result["git"]["state_status"] == "up to date"
     assert active["counts"] == {"supported": 1, "provisional": 2}
     assert {"finding": r"Churn \| rose", "status": "supported", "claim": "association", "reason": ""} in active["findings"]
     assert "- Q3 coverage gap" in active["unresolved_issues"] and "- Explore shifts" in active["next_steps"]
@@ -462,6 +470,58 @@ def test_parsers_read_written_files(project, capsys):
     assert sorted(found) == ["r1", "r2", "r3"] and all(len(rows) == 1 for rows in found.values())
     assert found["r2"] == ["| <state the finding from r2> | [r2](evidence/r2.json) | provisional | association | "
                            "failed checks: columns; not assessed: joins |"]
+
+
+def test_last_updated_is_stamped_after_the_records_written_with_it(project, capsys, monkeypatch):
+    # findings.json and history.md are written with state.md; a stamp taken before them would make the
+    # state look older than its own write.
+    produce(project, "r1")
+    stamps, stamp = [], provenance._stamp
+    monkeypatch.setattr(provenance, "_stamp", lambda: stamps.append(__import__("time").time()) or stamp())
+    assert run(project, capsys, "finding", "r1", "--text", "Churn rose", "--status", "supported",
+               "--reason", "Checked.")[0] == 0
+    assert stamps and all((project / INV / name).stat().st_mtime <= stamps[-1] for name in ("findings.json", "history.md"))
+    assert f"Last updated: {stamp()[:10]}T" in text(project, STATE)
+
+
+def backdate_state(project, seconds=10):
+    """Stamp the state `seconds` ago, with every investigation file a second older, as an earlier write leaves them."""
+    when = __import__("time").time() - seconds
+    state = project / STATE
+    state.write_text(re.sub(r"Last updated: \S+", "Last updated: " + __import__("datetime").datetime.fromtimestamp(when)
+                            .astimezone().isoformat(timespec="seconds"), state.read_text()))
+    for path in (project / INV).rglob("*"):
+        if path.is_file():
+            os.utime(path, (when - 1, when - 1))
+    return when
+
+
+def test_a_kept_rerun_leaves_the_state_up_to_date(project):
+    # run.py rewrites a kept result's table and evidence after the last state write, and writes no state.
+    produce(project, "r1")
+    produce(project, "r2")
+    (project / INV / "results/r2.profile.json").write_text("{}\n")
+    backdate_state(project)
+    assert produce(project, "r2")["action"] == "kept"
+    assert status.collect(project)["git"]["state_status"] == "up to date"
+    # A table edited after its evidence, or left without evidence by a failed finding write, still dates the state.
+    when = __import__("time").time() + 5
+    os.utime(project / INV / "results/r2.csv", (when, when))
+    result = status.collect(project)["git"]
+    assert (result["state_status"], result["latest_change"]["source"]) == ("out of date", f"{INV}/results/r2.csv")
+    os.utime(project / INV / "results/r2.csv", (when - 5, when - 5))
+    (project / INV / "evidence/r2.json").unlink()
+    result = status.collect(project)["git"]
+    assert (result["state_status"], result["latest_change"]["source"]) == ("out of date", f"{INV}/results/r2.csv")
+
+
+def test_render_stamps_the_state(project):
+    produce(project, "r1")
+    backdate_state(project)
+    before = text(project, STATE)
+    provenance.render_findings(project, "churn")
+    # Without the stamp, the findings.json render rewrites would postdate the state.
+    assert text(project, STATE) != before and status.collect(project)["git"]["state_status"] == "up to date"
 
 
 @pytest.mark.parametrize("writer", ["record", "update", "flag", "prior"])
@@ -510,7 +570,9 @@ def test_render_restores_rows(project, capsys):
     with pytest.raises(provenance.StateError, match="findings drift"):  # no findings.json: the table renders empty
         provenance.update_findings(project, "churn", ["r9"], text="x")
     code, out, _ = run(project, capsys, "render")
-    assert code == 0 and out == "discarded: " + hand + "\n" and text(project, STATE) == template
+    # Render stamps Last updated, and keeps the rest of the state.
+    unstamped = lambda value: re.sub(r"Last updated: \S+", "Last updated:", value)
+    assert code == 0 and out == "discarded: " + hand + "\n" and unstamped(text(project, STATE)) == unstamped(template)
     produce(project, "r1")
     original = text(project, STATE)
     (project / STATE).write_text(original.replace("<state the finding from r1>", "Hand edit")
@@ -521,7 +583,7 @@ def test_render_restores_rows(project, capsys):
     json_before = text(project, f"{INV}/findings.json")
     code, out, _ = run(project, capsys, "render")
     assert code == 0 and out == "discarded: " + drift[0]["disk"] + "\n"
-    assert text(project, STATE) == original.replace("## Next steps", "A handwritten note.\n\n## Next steps")
+    assert unstamped(text(project, STATE)) == unstamped(original.replace("## Next steps", "A handwritten note.\n\n## Next steps"))
     assert text(project, f"{INV}/findings.json") == json_before
     assert provenance.findings_drift(project, "churn") == []
 
@@ -540,7 +602,7 @@ def test_flags_validate_and_are_idempotent(project, capsys, monkeypatch):
     assert snapshot(project) == before
     provenance.flag_findings(project, "churn", flags)
     before = snapshot(project)
-    assert provenance.flag_findings(project, "churn", flags, today="2099-01-01") == {
+    assert provenance.flag_findings(project, "churn", flags) == {
         "flags": [], "unchanged": ["r1"], "rows": []}
     assert snapshot(project) == before
     provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-005"}])
@@ -720,6 +782,8 @@ def test_finding_text_warns_on_numbers_its_result_does_not_record(project, capsy
 
 SUMS = [{"name": "values", "outcome": "pass", "detail": "Country rows plus aggregates sum to World within 0.1%."}]
 SCOPE = [{"name": "scope", "outcome": "pass", "detail": "Checked all date filters are explicit."}]
+RECONCILED = [{"name": "row_counts", "outcome": "pass", "detail": "Steps checked: 1; last 5 -> 3 rows; reconciled: "
+               "order filter 5 = 3 kept + 2 excluded (cancelled 2)."}]
 
 
 def test_finding_text_warns_on_reconciliation_no_check_records(project, capsys):
@@ -727,13 +791,15 @@ def test_finding_text_warns_on_reconciliation_no_check_records(project, capsys):
     produce(project, "r2", checks=OK + SUMS)
     produce(project, "r3", checks=[{**SUMS[0], "outcome": "fail"}])
     produce(project, "r4", checks=OK + SCOPE)
+    produce(project, "r5", checks=OK + RECONCILED)
     wording = "Countries plus regions sums to World"
-    for result_id, warned in (("r1", True), ("r2", False), ("r3", True), ("r4", True)):
+    for result_id, warned in (("r1", True), ("r2", False), ("r3", True), ("r4", True), ("r5", True)):
         code, out, _ = run(project, capsys, "finding", result_id, "--text", wording)
         assert code == 0 and f"| {wording} | [{result_id}]" in out, result_id
         warning = (f'warning: {result_id}: "sums to" asserts a reconciliation or a completed check that no passing '
-                   "check in its evidence records; state the check, with its tolerance, in the detail of a passing "
-                   f"values or metrics judgment in [results.{result_id}.validation] and rerun, or reword")
+                   "check in its evidence records; state the check, with any tolerance the brief or the "
+                   "result's settings record, in the detail of a passing values or metrics judgment in "
+                   f"[results.{result_id}.validation] and rerun, or reword")
         assert (out.splitlines()[0] == warning) is warned, (result_id, out)
     for phrase, found in (("The totals reconciled with finance", "reconciled"),
                           ("We checked every region", "checked every"), ("Parts ADD UP TO the total", "ADD UP TO"),
@@ -744,6 +810,11 @@ def test_finding_text_warns_on_reconciliation_no_check_records(project, capsys):
     assert code == 0 and not out.startswith("warning"), out
     code, out, _ = run(project, capsys, "finding", "r2", "--text", "We checked every region")
     assert out.startswith('warning: r2: "checked every" asserts'), out
+    # A filter's reconciled row count backs reconcile wording only; a sum judgment never backs it.
+    code, out, _ = run(project, capsys, "finding", "r5", "--text", "The order filter reconciles")
+    assert code == 0 and not out.startswith("warning"), out
+    code, out, _ = run(project, capsys, "finding", "r2", "--text", "The order filter reconciles")
+    assert out.startswith('warning: r2: "reconciles" asserts'), out
     for phrase in ("Summary of totals", "A check-in rate of half", "Sums of orders rose"):
         code, out, _ = run(project, capsys, "finding", "r1", "--text", phrase)
         assert not out.startswith("warning"), phrase
@@ -783,3 +854,17 @@ def test_caveat_splits_notes_outside_brackets(project, capsys, caveat, notes):
         assert json.loads(text(project, f"{INV}/findings.json"))["findings"][0]["notes"] == notes
     code, out, _ = run(project, capsys, "finding", "--help")
     assert code == 0 and "';' outside parentheses and square brackets separates notes" in " ".join(out.split())
+
+
+def test_package_promotion_command_runs(project, capsys):
+    produce(project, "r1")
+    skill = " ".join((ROOT / ".agents/skills/awb-package/SKILL.md").read_text(encoding="utf-8").split())
+    command = re.search(r"behind an approved headline with `python3 src/awb\.py state ([^`]+)`", skill)[1]
+    argv = [{"<result-id>": "r1", "<why>": "The user approved its headline."}.get(word, word)
+            for word in shlex.split(command)]
+    code, out, _ = run(project, capsys, *argv)
+    assert code == 0 and "| supported |" in out
+    produce(project, "r2")
+    bare = [{"r1": "r2"}.get(word, word) for word in argv if word not in ("--reason", "The user approved its headline.")]
+    code, _, err = run(project, capsys, *bare)
+    assert code == 2 and "--reason is required" in err

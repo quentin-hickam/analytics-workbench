@@ -5,7 +5,8 @@ It measures without interpreting.
 
 validate() returns the validation record: a list of checks {name, outcome, detail}, one per name in
 CHECK_NAMES and in that order, with outcome one of OUTCOMES and every value a str. Store the list
-verbatim with the result's evidence. profile() reports the counts and values to inspect.
+verbatim with the result's evidence. reconcile() builds a row_counts step that accounts for every
+excluded row; profile() reports the counts and values to inspect.
 src/awb.py runs cli_profile() as `python3 src/awb.py profile`; it also needs DuckDB and the
 project's src/preparation/landing.py for its session.
 """
@@ -97,10 +98,20 @@ def _row_counts(frame, steps):
     # A count read back from a query result is often a numpy integer; a bool is not a count.
     if isinstance(steps, numbers.Integral) and not isinstance(steps, bool):
         steps = [{"step": "result", "before": int(steps), "after": len(frame)}]
-    failures = []
+    failures, reconciled = [], []
     for step in steps:
         before, after = step["before"], step["after"]
         counts = f"{step['step']}: {before} -> {after} rows"
+        if "excluded" in step:  # input = kept + excluded, by rule, as reconcile() records it
+            excluded = _excluded(step["excluded"])
+            total = after + sum(excluded.values())
+            rules = ", ".join(f"{rule} {rows}" for rule, rows in excluded.items())
+            accounted = f"{after} kept + {total - after} excluded ({rules or 'no rule'})"
+            if before != total:
+                failures.append(f"{step['step']}: {before} rows in, but {accounted} make {total}; "
+                                "the counts do not reconcile.")
+            else:
+                reconciled.append(f"{step['step']} {before} = {accounted}")
         if before == 0:
             if after != 0:  # no ratio exists; an empty input must stay empty
                 failures.append(f"{counts} from an empty input, which must stay empty.")
@@ -117,10 +128,45 @@ def _row_counts(frame, steps):
     if not steps:
         return failures, "Steps checked: 0."
     last = steps[-1]
-    return failures, f"Steps checked: {len(steps)}; last {last['before']} -> {last['after']} rows."
+    detail = f"Steps checked: {len(steps)}; last {last['before']} -> {last['after']} rows"
+    return failures, detail + (f"; reconciled: {'; '.join(reconciled)}." if reconciled else ".")
+
+
+def _count(name, value):
+    # A count read back from a query result is often a numpy integer; a bool is not a count.
+    if not isinstance(value, numbers.Integral) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{name} must be a row count, a whole number 0 or more, not {value!r}")
+    return int(value)
+
+
+def _excluded(excluded):
+    if not isinstance(excluded, dict) or not all(isinstance(rule, str) and rule.strip() for rule in excluded):
+        raise ValueError("excluded must map each exclusion rule's name to the rows it removed")
+    return {rule: _count(f"excluded[{rule!r}]", rows) for rule, rows in excluded.items()}
+
+
+def reconcile(step: str, before, after, excluded: dict, *, min_ratio=None, max_ratio=None) -> dict:
+    """Return one row_counts step for a filter: its input rows, the rows it kept, and the rows each
+    exclusion rule removed, as {rule: rows}. validate() fails the row_counts check, naming the counts,
+    unless before equals after plus every excluded row, and its pass detail records the reconciliation.
+    A producer returns it in its measured entries, as {"row_counts": [reconcile(...)]}; the optional
+    ratio bounds are the step's min_ratio and max_ratio."""
+    if not isinstance(step, str) or not step.strip():
+        raise ValueError("step must name the filter, as a non-empty string")
+    entry = {"step": step, "before": _count("before", before), "after": _count("after", after),
+             "excluded": _excluded(excluded)}
+    entry.update({key: value for key, value in (("min_ratio", min_ratio), ("max_ratio", max_ratio))
+                  if value is not None})
+    return entry
 
 
 def _joins(frame, join):
+    if not isinstance(join, dict):
+        raise ValueError("joins must be a table: { keys = [...], left_rows = N }")
+    missing = [key for key in ("keys", "left_rows") if key not in join]
+    if missing:
+        raise ValueError(f"joins has no {' or '.join(missing)}: set keys in the result's validation table, and "
+                         "left_rows, the row count before the join, there or from its producer as joins.left_rows")
     keys, left_rows = join["keys"], join["left_rows"]
     failures = []
     if len(frame) > left_rows:  # row multiplication is reported before key duplication
@@ -228,7 +274,7 @@ def cli_profile(root: Path, argv: list[str]) -> int:
         parser.error("--max-rows must be 1 or more")
     if args.read_only and args.out:
         parser.error("--read-only refuses --out")
-    out = None
+    out = landing = None
     try:
         landing = _landing(root)
         out = landing._under(root, args.out) if args.out else None
@@ -259,6 +305,11 @@ def cli_profile(root: Path, argv: list[str]) -> int:
             out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     except Exception as error:
         message = f"{error}: {error.__cause__}" if error.__cause__ else str(error)
+        if any(text in message for text in getattr(landing, "UNBOUND_PARAMETERS", ())):
+            # landing's fix binds with sql's --param or --settings, which profile does not take.
+            message = (message.split(f"; {landing.BIND_FIX}")[0] + "; profile binds no parameters: write "
+                       "each $name's value into the query, or run it with `python3 src/awb.py sql --param "
+                       "name=value` (over MCP, the read tool's sql with params)")
         print(f"profile: {' '.join(message.split())}", file=sys.stderr)
         return 1
     if "sampled_from" in result:
