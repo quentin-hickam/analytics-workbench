@@ -16,11 +16,11 @@
 # test_unusable_release_manifest_is_uncertain: an absent, non-JSON, undated, or unreadable release manifest leaves released_at null and records one uncertainty.
 # test_unreadable_draft_manifest_is_unknown: an unreadable draft manifest leaves dates and counts null with an uncertainty.
 # test_git_no_commits_dated_state_and_no_index_writes: no-commit wording; a dated state and a change on its day are "saved the same day as the latest change", a later day out of date; the index is untouched.
+# test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
+# test_ledger_writes_leave_the_state_current: a later questions.json or questions.md change, uncommitted or committed, leaves the state current; a later brief change does not.
 # test_a_state_written_after_the_latest_change_on_the_same_day_is_up_to_date: a timestamped state orders changes by time, a change in its own second not after it, a Z time read as an instant.
 # test_a_state_time_without_its_offset_or_malformed_is_uncertain: a time without its offset, a space separator, fractional seconds, an impossible hour, or prose is an uncertainty and leaves the status unknown.
 # test_committed_changes_are_ordered_by_their_own_times: a commit after the state does not date its changes; a file rewritten after its commit, or deleted, has only the commit's time and leaves the order unknown in plain words; one committed before the state is not after it.
-# test_commit_out_of_date_state_and_undated_deletion: a file changed after the dated state and committed makes it out of date; a deleted file is an undated change.
-# test_ledger_writes_leave_the_state_current: a later questions.json or questions.md change, uncommitted or committed, leaves the state current; a later brief change does not.
 # test_findings_are_grouped_by_question: each root counts the findings answering it or a question under it by status, with its origin; findings no question names, under a missing parent or without an evidence link, are counted apart.
 # test_unreadable_findings_leave_the_counts_by_question_unknown: an unreadable findings table makes the counts by question and the caveats null, never empty.
 # test_every_findings_caveat_is_reported: every finding with a caveat cell is listed with it, flagged or not, check segments included.
@@ -307,17 +307,6 @@ def git(root, *args, env=None):
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True, env=env)
 
 
-def stamp_state(workbench, when):
-    """Write a state time, as state writers record it, into the fixture's Last updated line."""
-    path = workbench / "investigations/churn/state.md"
-    path.write_text(path.read_text().replace("Last updated: 2026-10-01", f"Last updated: {when.isoformat(timespec='seconds')}"))
-
-
-def set_mtimes(workbench, epoch):
-    for path in (workbench / "investigations/churn").rglob("*"):
-        os.utime(path, (epoch, epoch))
-
-
 def test_git_no_commits_dated_state_and_no_index_writes(workbench):
     git(workbench, "init")
     file = write(workbench, "investigations/churn/query.sql", "select 1")
@@ -339,6 +328,57 @@ def test_git_no_commits_dated_state_and_no_index_writes(workbench):
     result = status.collect(workbench)["git"]
     assert result["state_status"] == "out of date"
     assert result["days_after_state"] == 2
+
+
+def test_ledger_writes_leave_the_state_current(workbench):
+    datetime = __import__("datetime").datetime
+    saved = datetime(2026, 10, 1, 11, 30).astimezone()
+    stamp_state(workbench, saved)
+    set_mtimes(workbench, saved.timestamp() - 1800)
+    git(workbench, "init")
+    day = lambda d: {**os.environ, "GIT_AUTHOR_DATE": f"2026-10-{d:02}T12:00:00", "GIT_COMMITTER_DATE": f"2026-10-{d:02}T12:00:00"}
+    commit = lambda d: git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "work", env=day(d))
+    git(workbench, "add", ".")
+    commit(1)
+    assert status.collect(workbench)["git"]["state_status"] == "up to date"
+    later = datetime(2026, 10, 5, 11).timestamp()
+    for name in ("questions.json", "questions.md"):
+        os.utime(write(workbench, f"investigations/churn/{name}", "ledger\n"), (later, later))
+    assert status.collect(workbench)["git"]["state_status"] == "up to date"
+    git(workbench, "add", ".")
+    commit(5)
+    assert status.collect(workbench)["git"]["state_status"] == "up to date"
+    os.utime(write(workbench, "investigations/churn/brief.md", "changed\n"), (later, later))
+    result = status.collect(workbench)["git"]
+    assert (result["state_status"], result["days_after_state"]) == ("out of date", 4)
+
+
+def test_commit_out_of_date_state_and_undated_deletion(workbench):
+    git(workbench, "init")
+    # Files written the day after the dated state, then committed.
+    epoch = __import__("datetime").datetime(2026, 10, 2, 11).timestamp()
+    set_mtimes(workbench, epoch)
+    git(workbench, "add", ".")
+    env = {**os.environ, "GIT_AUTHOR_DATE": "2026-10-02T12:00:00", "GIT_COMMITTER_DATE": "2026-10-02T12:00:00"}
+    git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "fixture", env=env)
+    result = status.collect(workbench)["git"]
+    assert result["state_status"] == "out of date"
+    assert result["days_after_state"] == 1
+    (workbench / "investigations/churn/brief.md").unlink()
+    result = status.collect(workbench)
+    assert result["git"]["undated_changes"] == ["investigations/churn/brief.md"]
+    assert any("mtime" in u["reason"] for u in result["uncertainties"])
+
+
+def stamp_state(workbench, when):
+    """Write a state time, as state writers record it, into the fixture's Last updated line."""
+    path = workbench / "investigations/churn/state.md"
+    path.write_text(path.read_text().replace("Last updated: 2026-10-01", f"Last updated: {when.isoformat(timespec='seconds')}"))
+
+
+def set_mtimes(workbench, epoch):
+    for path in (workbench / "investigations/churn").rglob("*"):
+        os.utime(path, (epoch, epoch))
 
 
 def test_a_state_written_after_the_latest_change_on_the_same_day_is_up_to_date(workbench):
@@ -419,46 +459,6 @@ def test_committed_changes_are_ordered_by_their_own_times(workbench):
     os.utime(workbench / "investigations/churn/brief.md", (saved.timestamp() + 900, saved.timestamp() + 900))
     commit(saved.timestamp() + 200)
     assert status.collect(workbench)["git"]["state_status"] == "up to date"
-
-
-def test_ledger_writes_leave_the_state_current(workbench):
-    datetime = __import__("datetime").datetime
-    saved = datetime(2026, 10, 1, 11, 30).astimezone()
-    stamp_state(workbench, saved)
-    set_mtimes(workbench, saved.timestamp() - 1800)
-    git(workbench, "init")
-    day = lambda d: {**os.environ, "GIT_AUTHOR_DATE": f"2026-10-{d:02}T12:00:00", "GIT_COMMITTER_DATE": f"2026-10-{d:02}T12:00:00"}
-    commit = lambda d: git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "work", env=day(d))
-    git(workbench, "add", ".")
-    commit(1)
-    assert status.collect(workbench)["git"]["state_status"] == "up to date"
-    later = datetime(2026, 10, 5, 11).timestamp()
-    for name in ("questions.json", "questions.md"):
-        os.utime(write(workbench, f"investigations/churn/{name}", "ledger\n"), (later, later))
-    assert status.collect(workbench)["git"]["state_status"] == "up to date"
-    git(workbench, "add", ".")
-    commit(5)
-    assert status.collect(workbench)["git"]["state_status"] == "up to date"
-    os.utime(write(workbench, "investigations/churn/brief.md", "changed\n"), (later, later))
-    result = status.collect(workbench)["git"]
-    assert (result["state_status"], result["days_after_state"]) == ("out of date", 4)
-
-
-def test_commit_out_of_date_state_and_undated_deletion(workbench):
-    git(workbench, "init")
-    # Files written the day after the dated state, then committed.
-    epoch = __import__("datetime").datetime(2026, 10, 2, 11).timestamp()
-    set_mtimes(workbench, epoch)
-    git(workbench, "add", ".")
-    env = {**os.environ, "GIT_AUTHOR_DATE": "2026-10-02T12:00:00", "GIT_COMMITTER_DATE": "2026-10-02T12:00:00"}
-    git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "fixture", env=env)
-    result = status.collect(workbench)["git"]
-    assert result["state_status"] == "out of date"
-    assert result["days_after_state"] == 1
-    (workbench / "investigations/churn/brief.md").unlink()
-    result = status.collect(workbench)
-    assert result["git"]["undated_changes"] == ["investigations/churn/brief.md"]
-    assert any("mtime" in u["reason"] for u in result["uncertainties"])
 
 
 def test_acquisitions_and_storage_risks(workbench):
