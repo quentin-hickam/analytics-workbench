@@ -603,7 +603,7 @@ def anomalies(scan, today):
             add("sentinel-dates", name, f"earliest value {temporal['min']} looks like a placeholder", "awb-clean")
         cov = temporal.get("coverage") or {}
         if cov.get("gaps"):
-            spans = ", ".join(f"{g['from']}..{g['to']}" if g["from"] != g["to"] else g["from"]
+            spans = ", ".join(f"{g['from']}..{g['to']}" if g["from"] != g["to"] else str(g["from"])
                               for g in cov["gaps"][:3])
             add("period-gaps", name, f"empty {cov['period']}s: {sum(g['periods'] for g in cov['gaps'])}, "
                 f"{spans}{' …' if len(cov['gaps']) > 3 else ''}", "investigation")

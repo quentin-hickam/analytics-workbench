@@ -365,9 +365,10 @@ def _inline_table_advice(text, message):
     if not opened or quote:
         return message
     start = text.rfind("\n", 0, opened[0]) + 1
-    key = re.search(r'([A-Za-z0-9_-]+|"[^"\n]*")\s*=\s*$', text[start:opened[0]])
+    part = r'(?:[A-Za-z0-9_-]+|"[^"\n]*")'  # a dotted key, such as checks.types, names every part
+    key = re.fullmatch(rf"\s*({part}(?:\s*\.\s*{part})*)\s*=\s*", text[start:opened[0]])
     headers = re.findall(r"^\s*\[([^\[\]\n]+)\]\s*(?:#.*)?$", text[:start], re.M)
-    table = (f"the subtable [{headers[-1].strip()}.{key[1]}]" if key and headers
+    table = (f"the subtable [{headers[-1].strip()}.{'.'.join(re.findall(part, key[1]))}]" if key and headers
              else "a subtable, such as [datasets.<name>.checks.types],")
     return (f"line {line}: an inline table ({{ ... }}) must stay on one line in TOML; write it on one "
             f"line, or as {table} with one key = value per line under it ({message})")

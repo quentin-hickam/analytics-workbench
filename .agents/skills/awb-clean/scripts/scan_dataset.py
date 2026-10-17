@@ -712,9 +712,12 @@ def _delta(baseline, row_count, columns, issues):
 
 def declared_lineage(root):
     """Every column foundation/datasets.toml lists under a dataset's lineage key; the landing helper
-    validates the file, so an unreadable one, or Python without tomllib, declares none here."""
+    validates the file, so an unreadable one, or Python 3.10 without tomli, declares none here."""
     try:
-        import tomllib
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
         datasets = tomllib.loads((root / "foundation/datasets.toml").read_text(encoding="utf-8")).get("datasets")
     except (ImportError, OSError, ValueError):
         return []

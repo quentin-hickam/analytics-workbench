@@ -21,7 +21,7 @@ it becomes the issue's quality ID. A recorded quality ID, such as DQ-004, also w
 revises only judgment cells, keeps the observation and link, and its correction carries no rescan
 suffix. An amend on a recorded row, by either key, replaces its observation with the new text
 followed by `; amended <date>: <reason>; was: <the observation it replaces>`, so the withdrawn text
-and its scan marker stay in the row; the same amendment again changes nothing. New rows' IDs continue the prefix and numbering the Active table already uses, DQ-001 in a
+and its scan marker stay in the row; the same amendment again, on any day, changes nothing. New rows' IDs continue the prefix and numbering the Active table already uses, DQ-001 in a
 record without IDs. A check names a publication directory, data/parquet/<dataset>/<publication-id>/
 relative to PROJECT_ROOT or absolute inside it, and one of the checks its publication.json records;
 the citation, with the check's outcome and the root-relative path, is appended to the row's Current
@@ -468,9 +468,10 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                 raise RecordError(f"{issue_id}: amend changes a recorded row's observation; this issue has no row yet")
             plain = lambda text: _cell(text).replace("\\|", "|")  # set() escapes again
             current = _cells(quality[line_index])[observation_at].replace("\\|", "|")
-            lead = f"{plain(fill(amend['observation']))}; amended {day}: {plain(fill(amend['reason']))}; was: "
-            if not current.startswith(lead):
-                values[active.columns[observation_at]] = lead + current
+            text, reason = plain(fill(amend["observation"])), plain(fill(amend["reason"]))
+            # The same amendment recorded on any day is already there; only a new one chains.
+            if not re.match(re.escape(f"{text}; amended ") + "[^:]*" + re.escape(f": {reason}; was: "), current):
+                values[active.columns[observation_at]] = f"{text}; amended {day}: {reason}; was: {current}"
                 amended.append(qid)
         if issue_id in found:  # a new entry: its row, else a new one without a scan marker or link
             line_index, obj, observation = found[issue_id]

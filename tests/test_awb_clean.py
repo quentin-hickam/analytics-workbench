@@ -3,7 +3,7 @@
 # test_scan_reads_views_through_session_and_changes_no_data: a view loads through the project's session(); landed and view files keep their bytes and only the scan file is written.
 # test_text_dates_and_codes_are_typed_conservatively: a day-first text date column is typed by its one covering format, an all-ambiguous one is reported, and leading-zero codes stay text.
 # test_rescan_reports_delta_with_stable_ids_and_inherited_options: a rescan after a correction view reports before and after counts by issue, keeps ids, and reuses the baseline's options.
-# test_duplicate_rows_leave_lineage_columns_out_of_the_match: two sheets holding the same rows under their own sheet and sheet_row values give no duplicate-rows issue matched on every column, and one counting every copy when --lineage names those columns, its examples listing each lineage column's values first; the lineage declared in foundation/datasets.toml is the default, --lineage replaces it, and a rescan keeps the baseline's; an unknown --lineage column, or one naming every column, refuses.
+# test_duplicate_rows_leave_lineage_columns_out_of_the_match: two sheets holding the same rows under their own sheet and sheet_row values give no duplicate-rows issue matched on every column, and one counting every copy when --lineage names those columns, its examples listing each lineage column's values first; the lineage declared in foundation/datasets.toml is the default, read through tomli where tomllib is missing, --lineage replaces it, and a rescan keeps the baseline's; an unknown --lineage column, or one naming every column, refuses.
 # test_removed_targets_and_options_are_rejected: a saved .sql query is not a scan target; --rescan takes no scan name; --typed-threshold and --max-categories are gone.
 # test_recorded_markers_mark_issues_as_recorded: issues whose `<scan>#<key>` marker is in the quality record are reported as recorded with their quality ID and recorded count beside the current count.
 # test_record_sets_the_view_row_when_a_publication_shares_its_name: a publication row named like its canonical view leaves the view row the one record sets; two non-view rows with one name still refuse.
@@ -18,7 +18,7 @@
 # test_recorded_status_follows_header_and_count_follows_json: Markdown status is read by header; JSON alone owns the recorded count.
 # test_record_failure_reports_phases_and_retries_once: B or C failure reports completed phases and replaced files; retry appends one correction and keeps flags idempotent.
 # test_record_revises_a_row_by_quality_id: a Q- or DQ- key revises its row's judgment cells and keeps the observation, appends a correction row without a rescan suffix, accepts an unmarked row, and resolves {Q-004}; a dry run writes nothing.
-# test_record_amends_an_observation_and_keeps_the_original: an amend on a recorded row, by quality ID or by a recorded scan issue's ID, replaces the observation with the new text, the date and reason, and the replaced text after `was:`, marker and counts included, so the scan still reads it as recorded; a second amend chains after the first; the same call again changes nothing; an amend on an issue without a row, a malformed amend, or one on a `new` entry refuses and writes nothing.
+# test_record_amends_an_observation_and_keeps_the_original: an amend on a recorded row, by quality ID or by a recorded scan issue's ID, replaces the observation with the new text, the date and reason, and the replaced text after `was:`, marker and counts included, so the scan still reads it as recorded; a second amend chains after the first; the same call again, on any day, changes nothing; an amend on an issue without a row, a malformed amend, or one on a `new` entry refuses and writes nothing.
 # test_record_rejects_bad_quality_id_keys: a foreign scan's marker, two keys naming one row, and an unknown key are rejected and write nothing.
 # test_quality_id_revision_keeps_link_and_placeholder_rules: a quality-ID revision keeps the link's original counts and date, works with reordered Markdown columns, and keeps known-prefix placeholder refusals.
 # test_record_ignores_unvalidated_recorded_placeholders: saved scan metadata cannot supply a placeholder ID when no row carries the issue's marker; the refusal writes nothing.
@@ -50,6 +50,7 @@ import io
 import json
 import re
 import shutil
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -232,6 +233,13 @@ def test_duplicate_rows_leave_lineage_columns_out_of_the_match(tmp_path, capsys)
     write(tmp_path, "foundation/datasets.toml", '[datasets.lines]\nlineage = ["sheet", "sheet_row", "file"]\n')
     record, _ = scanner.scan(tmp_path, "data/lines.csv", today=TODAY)
     assert keys(record)["duplicate-rows"]["count"] == 3 and keys(record)["duplicate-rows"]["detail"] == {"lineage": ["sheet", "sheet_row"]}
+    tomllib = pytest.importorskip("tomllib")
+    with pytest.MonkeyPatch.context() as patch:  # As on Python 3.10 with tomli installed.
+        patch.setitem(sys.modules, "tomllib", None)
+        patch.setitem(sys.modules, "tomli", tomllib)
+        assert scanner.declared_lineage(tmp_path) == ["sheet", "sheet_row", "file"]
+        patch.setitem(sys.modules, "tomli", None)
+        assert scanner.declared_lineage(tmp_path) == []
     record, _ = scanner.scan(tmp_path, "data/lines.csv", lineage=["sheet"], today=TODAY)
     assert "duplicate-rows" not in keys(record)  # every copy keeps its own sheet_row
     for lineage, message in ((["shet"], "--lineage names unknown columns: shet"),
@@ -476,8 +484,10 @@ def test_record_amends_an_observation_and_keeps_the_original(tmp_path):
                f"was: {original}")
     text = path.read_text()
     assert f"| Q-004 | view `orders`, column `amount` | {amended} | Skews totals | Nulled in the view | corrected |" in text
-    # The same call again changes nothing.
+    # The same call again, that day or a later one, changes nothing.
     result = recorder.record(tmp_path, "orders", decision, today=TODAY)
+    assert "amended" not in result and result["updated"] == [] and path.read_text() == text
+    result = recorder.record(tmp_path, "orders", decision, today=date(2026, 10, 11))
     assert "amended" not in result and result["updated"] == [] and path.read_text() == text
     # A second amendment chains after the first; a recorded scan issue's ID amends its row too.
     decision = {"issues": {"Q-004": {"amend": {"observation": "-999 in amount marks test and demo orders",

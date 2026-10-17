@@ -14,6 +14,7 @@
 # test_comma_separated_key_is_one_declared_key_from_option_or_settings: --key "a, b" and settings key "a,b" or ["a,b"] give the columns of one key, as awb-clean's composite grain; a repeated --key or an empty --key exits 2; an absent option column reports key-missing; a settings key with an absent column or none is skipped. Runs without duckdb.
 # test_template_settings_take_the_period_from_parameters_and_name_unset_choices: [parameters] start/end scope the period; unset scope, measure, and dimensions print the options to pass.
 # test_an_integer_year_column_is_the_date_column: --date-column year --start 1850 --end 2024 on an INTEGER column filters as integers, reports coverage by year with an empty run of years as a gap, and gives the measure's trend and per-year counts by year; a date bound for it, or a column of integers outside 1 to 9999, exits 2 naming the fix; a date bound in settings is skipped as not applied.
+# test_a_single_missing_year_is_reported_as_a_gap: an integer year column missing one year scans without error and reports that year as a one-year gap.
 # test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one: --show walks keys and named list items without rescanning; a miss exits 2 listing what is there.
 
 from datetime import date
@@ -470,3 +471,19 @@ def test_an_integer_year_column_is_the_date_column(tmp_path, capsys):
     assert status == 0, err
     assert "not applied: eda.period_start: year holds integer years; 1850-01-01 is not a year" in out
     assert '`"year" <= 2024` (eda.period_end)' in out
+
+
+def test_a_single_missing_year_is_reported_as_a_gap(tmp_path, capsys):
+    duckdb = pytest.importorskip("duckdb")
+    root = project(tmp_path, settings="")
+    publication = root / "data/parquet/co2/p1"
+    publication.mkdir(parents=True)
+    duckdb.connect().execute(PANEL.replace("BETWEEN 1950 AND 1952", "BETWEEN 1960 AND 1960")
+                             .format(path=publication / "co2.parquet"))
+    status, out, err = run(root, "data/parquet/co2/p1", "--date-column", "year", "--start", "1850", "--end", "2024",
+                           capsys=capsys)
+    assert status == 0, err
+    scan = json.loads((root / "investigations/overtime/exploration/eda/co2-p1.json").read_text())
+    year = next(c for c in scan["columns"] if c["name"] == "year")
+    assert year["temporal"]["coverage"]["gaps"] == [{"from": 1960, "to": 1960, "periods": 1}]
+    assert any(a["kind"] == "period-gaps" and a["detail"].endswith("empty years: 1, 1960") for a in scan["anomalies"])

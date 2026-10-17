@@ -65,7 +65,7 @@
 # test_a_declaration_that_plans_no_check_needs_neither_duckdb_nor_parquet: empty check lists plan nothing, so publish needs no duckdb and no Parquet output.
 # test_cli_publish_records_declared_checks: the publish command records declared checks with its --check outcome, counts them in its output and catalog_row (one check passes, several pass), and prints failed_checks on refusal.
 # test_a_failed_publish_names_the_partial_folder_and_the_next_step: a refused publish prints the partial folder it left with a next_step saying to remove it before publishing again; a retry under the same ID is refused naming that folder, and publishes once it is removed; a refusal that leaves no partial prints no next_step.
-# test_a_line_break_inside_an_inline_table_is_translated: a datasets.toml whose inline table spans lines, or holds a comment, is refused with the subtable to write, named from the table header and key when both are found; a line break inside a string, an array spanning lines, and a missing comma keep the parser's message alone.
+# test_a_line_break_inside_an_inline_table_is_translated: a datasets.toml whose inline table spans lines, or holds a comment, is refused with the subtable to write, named from the table header and the whole dotted key when both are found; a line break inside a string, an array spanning lines, and a missing comma keep the parser's message alone.
 # test_lineage_is_declared_beside_checks: [datasets.<name>] accepts a lineage list beside its checks table, which plans no check; a lineage that is not a list of distinct names is refused.
 # test_retain_says_once_that_an_unvalidated_upstream_cannot_be_checked: the retain that writes an acquisition's row prints upstream_check naming files whose HTTP URL came without an ETag or Last-Modified; an acquisition with a validator, a non-HTTP URL, or no URL gets none, and a later retain of the same acquisition does not repeat it.
 
@@ -1649,6 +1649,8 @@ def test_a_failed_publish_names_the_partial_folder_and_the_next_step(tmp_path, c
     ('[datasets.trips.checks]\nrange = { fare = { min = 0,\n max = 500 } }\n', "[datasets.trips.checks.range]"),
     ('[datasets.trips.checks]\ntypes = { note = "{", trip_id = "BIGINT",\n pickup = "DATE" }\n', "[datasets.trips.checks.types]"),
     ('types = { trip_id = "BIGINT",\n pickup = "DATE" }\n', "a subtable, such as [datasets.<name>.checks.types],"),
+    ('[datasets.trips]\nchecks.types = { trip_id = "BIGINT",\n pickup = "DATE" }\n', "[datasets.trips.checks.types]"),
+    ('[datasets.trips]\nchecks . "types" = { trip_id = "BIGINT",\n pickup = "DATE" }\n', '[datasets.trips.checks."types"]'),
     ('[datasets.trips.checks]\ntypes = { trip_id = "BIGINT" pickup = "DATE" }\n', None),
     ('[datasets.trips.checks]\ncolumns = [\n  "trip_id",, ]\n', None),
     ('[datasets.trips.checks]\ncolumns = ["{",\n  "trip_id" "x"]\n', None),
