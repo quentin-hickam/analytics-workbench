@@ -831,12 +831,17 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     # The user may accept a narrative problem with a reason, as a warning; the rounds are capped.
     assert ('the user accepted, with a reason, every `warning` violation and narrative problem it reports') in review
     assert '--accept "<file>:<line> <quote>: <the user\'s reason>"' in review
-    assert ('When a second review in one request still reports problems, stop repairing and start no third review '
-            'in that request unless the user asks') in review
-    # A problem on an unchanged line is marked and goes to the user rather than restarting the loop.
-    assert '(unchanged since the prior review)' in review and 'why the earlier pass missed it' in review
-    assert ('Take a problem marked `(unchanged since the prior review)`, or a conflict between two rules, to the '
-            'user rather than repairing it') in review
+    assert ('When a second review in one request still reports problems, start no third review unless the user '
+            'asks') in review
+    # Routine repairs are reported at the cap; decisions and rule conflicts still go to the user.
+    assert '(unchanged since the prior review)' not in review and 'why the earlier pass missed it' not in review
+    assert 'Take a conflict between two rules to the user rather than repairing it' in review
+    assert ('Make repairs changing no number, no finding beyond narrowing to its evidence, and no user-written '
+            'or approved wording') in review
+    assert ("list them in one plain note saying the next request's scoped review checks them") in review
+    assert 'Show each other problem in plain words with a recommended repair' in review
+    assert ('If any need the user, make small repairs with their answer, after recording any acceptances with '
+            '`--accept`; otherwise make them now') in review
     # Package is done on a passed review of the final files, full or scoped.
     assert 'its `review` row is `current`' in package
     assert 'the last review before the final `check-draft` is a full one' not in package
@@ -891,7 +896,7 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
     assert 'the brief\'s **Audience** does not record the audience as using it' in step3
     # Rule precedence, and a conflict goes to the user.
     assert 'the `error` rule wins and the line passes the `warning` one' in steps
-    assert 'or a conflict between two rules, to the user rather than repairing it' in review
+    assert 'Take a conflict between two rules to the user rather than repairing it' in review
 
     # No template example puts a tolerance on a slide or in the note.
     for path in ('awb-package/assets/package-format/findings-template.md',
@@ -1259,6 +1264,9 @@ def test_readme_says_what_the_analyst_gets_and_is_asked():
     assert 'which a **Supporting datasets** slide then describes' in what
     assert 'released/001/' in what and "reports the copy's full path" in what
     assert 'each later one reads only what changed since' in quick and 'When a second review' in quick
+    assert 'line unchanged since the last review' not in quick
+    assert 'makes small repairs that change no number' in quick and 'lists them in one note' in quick
+    assert 'any acceptances are recorded before repairs' in quick
     assert 'The draft is stable once' in quick
     assert 'about 500 to a page' in quick and 'more than 10% over it' in quick
     assert quick.count('unless you say to release without seeing them') == 2
