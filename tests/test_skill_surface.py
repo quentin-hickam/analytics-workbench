@@ -1231,9 +1231,26 @@ def test_readme_says_what_the_analyst_gets_and_is_asked():
     assert 'by hand' in what and 'only for the Copilot route' in what
     quick = ' '.join(section(text, '## Quick-start for analysts').split())
     assert 'Python 3.10 or later' in quick
-    for term in ('Canonical view', 'Question ledger', 'Receipt', 'Disposition', 'Review rule'):
+    for term in ('Finding', 'Provisional', 'Question ledger', 'Review rule', 'Release'):
         assert f'**{term}**' in quick, term
-    assert 'asked for a disposition only when a finding the draft shows is flagged' in quick
+    # Terms an analyst never needs stay out of the glossary; when a flagged finding is asked about is said once.
+    for term in ('Canonical view', 'Receipt', 'Disposition'):
+        assert f'**{term}**' not in quick, term
+    assert 'You are asked about a flagged finding only when the draft shows it' in quick
+    # The expectations users missed: headline length, the datasets slide, review rounds, note length, release
+    # waiver, URL data, commits, and a status request carrying other requests.
+    assert 'at most 15 words' in what and 'your reason is recorded' in quick
+    assert 'which a **Supporting datasets** slide then describes' in what
+    assert 'released/001/' in what and "reports the copy's full path" in what
+    assert 'each later one reads only what changed since' in quick and 'When a second review' in quick
+    assert 'The draft is stable once' in quick
+    assert 'about 500 to a page' in quick and 'more than 10% over it' in quick
+    assert quick.count('unless you say to release without seeing them') == 2
+    assert 'Setup and the scoping round bring no data in' in quick
+    assert 'A commit saves' in quick
+    assert 'are carried out after it' in quick
+    # Clean and explore are one optional step, and the agent may fold them into others.
+    assert '**Clean and explore, both optional.**' in quick and 'may fold these checks' in quick
     for mode in ('preview-and-wait', 'draft-then-review'):
         assert mode in quick
     # The requests come in the order an investigation usually takes them.
