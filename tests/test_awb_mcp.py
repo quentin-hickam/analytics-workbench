@@ -15,6 +15,7 @@
 # test_shared_views_parameters_and_pre_commit_results_over_mcp: with DuckDB, run loads the investigation's views/*.sql into the result session, eda-scan reads a $name in [eda] where from [parameters], and read status lists a result run before the first commit once the repository has one, until run records it again.
 # test_package_export_passes_the_chart_selection_through: with DuckDB, the package tool passes export's --chart row selection to the helper unchanged: @first=1 writes one row and the manifest records it, and a malformed selection comes back as the helper's refusal with exit status 2.
 # test_package_export_returns_display_warnings: with DuckDB, the package tool's export shapes a file through display.toml's [scale] and returns value_warnings and precision_warnings, a [values] code no cell holds named, as the helper reports them.
+# test_package_export_prose_scale_matches_cli: with DuckDB, files = false keeps chart and dataset cells unchanged and records the same prose_scale manifest entries through MCP and the CLI.
 # test_read_sql_refuses_writes: read sql and profile refuse COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, CREATE, a SELECT calling enable_profiling with save_location or enable_logging with file storage, and a query() whose SQL differs between the plan check and the run, and write no file; read refuses arguments outside its command and help topics outside the helpers.
 # test_read_runs_the_histogram_aggregate_and_refuses_the_histogram_macro: read sql and profile run the histogram() aggregate, directly and from a view file, and refuse FROM histogram(...), the table macro that calls query_table, writing nothing.
 # test_read_queries_a_landed_excel_file_through_a_view: with the excel extension installed, read sql and profile query a landed .xlsx through a view and write nothing; skipped where the extension cannot be loaded.
@@ -570,6 +571,31 @@ def test_package_export_returns_display_warnings(workbench, connect):
     report = json.loads(text[text.index("{"):text.rindex("}") + 1])
     assert report["value_warnings"][0]["code"] == "north" and report["precision_warnings"] == []
     assert json.loads((draft / "manifest.json").read_text())["charts"][0]["scale"] == {"orders": 10}
+
+
+@needs_duckdb
+def test_package_export_prose_scale_matches_cli(workbench, connect):
+    client = connect(cwd=workbench)
+    text, error = client.call("run", investigation="churn", results=["by-region"])
+    assert not error, text
+    (workbench / "foundation/display.toml").write_text(
+        '[columns]\nregion = "Region"\norders = "Orders"\n\n'
+        '[scale]\norders = { divide = 10, files = false }\n')
+    args = ["churn", "pkg", "--chart", "by-region", "--dataset", "orders=by-region"]
+    text, error = client.call("package", command="export", args=args)
+    assert not error, text
+    draft = workbench / "deliveries/churn/pkg/draft"
+    for file in ("charts/chart-1.csv", "datasets/orders.csv"):
+        assert (draft / file).read_text() == "Region,Orders\neast,1\nwest,2\n"
+    mcp_manifest = json.loads((draft / "manifest.json").read_text())
+    for field in ("charts", "dataset_selection"):
+        assert mcp_manifest[field][0]["scale"] == {} and mcp_manifest[field][0]["prose_scale"] == {"orders": 10}
+    result = subprocess.run([sys.executable, "src/awb.py", "export", *args], cwd=workbench,
+                            check=True, capture_output=True, text=True)
+    assert json.loads(result.stdout)["written"]
+    cli_manifest = json.loads((draft / "manifest.json").read_text())
+    for field in ("charts", "dataset_selection"):
+        assert mcp_manifest[field] == cli_manifest[field]
 
 
 @needs_duckdb

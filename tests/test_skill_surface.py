@@ -253,6 +253,32 @@ def test_headline_checkpoint_states_the_word_limit_and_asks_before_trimming():
     assert 'a long-headline `warning` row is asked about as the headline checkpoint says, never trimmed unasked' in check
 
 
+def test_package_records_and_previews_audience_number_formats_and_prose_approximations():
+    brief = (ROOT / '.agents/skills/awb-init/assets/workbench/investigation/brief.md').read_text()
+    assert "Once the audience is named, always record precision and clock format: the user's choices, otherwise audience defaults." in brief
+    assert ('Unless the audience is recorded as technical, use whole numbers for large values, one decimal '
+            "for shares and rates, and the audience's usual clock format.") in brief
+    assert 'when the user states them' not in brief
+    package = (ROOT / '.agents/skills/awb-package/SKILL.md').read_text()
+    establish = skill_section('.agents/skills/awb-package/SKILL.md', '## 1. Establish')
+    assert ("Record precision and clock format, using the [brief template](../awb-init/assets/workbench/investigation/"
+            "brief.md)'s audience defaults when unspecified") in establish
+    checkpoint = skill_section('.agents/skills/awb-package/SKILL.md', '### The headline checkpoint')
+    assert "With the headlines" in checkpoint and "state the brief's precision and clock format" in checkpoint
+    helpers = (ROOT / '.agents/skills/awb-package/references/helpers.md').read_text()
+    for text in (package, helpers):
+        assert "the places the brief's precision gives" in text
+        assert "the places the slide's number format shows" not in text
+        assert 'files = false' in text
+    assert 'prose-only divisors as `prose_scale`' in helpers
+    check = skill_section('.agents/skills/awb-package/SKILL.md', '## 6. Check')
+    assert 'use a scale word: "22.5 thousand" traces to 22,523' in check
+    assert 'It is computed from results that none records: only separately authorized analysis records it' in check
+    template = (ROOT / '.agents/skills/awb-package/assets/package-format/findings-template.md').read_text()
+    assert ("where rounded start and end values do not subtract to the shown change, the slide's **Notes:** "
+            'say changes were computed before rounding') in template
+
+
 def test_release_asks_the_user_to_confirm_helper_drift():
     release = skill_section('.agents/skills/awb-release/SKILL.md', '## 3. Release')
     assert '`helper_drift`' in release and 'ask the user' in release and '`helper_drift_confirmed`' in release
