@@ -18,7 +18,7 @@
 # test_project_interpreter_inside_the_project_is_recorded_relative: a virtual environment's interpreter inside the project is recorded by its project-relative path and reported in_project.
 # test_recorded_interpreter_is_kept_or_replaced: a README naming another existing interpreter, or repeating the line, refuses with exit 1 and writes nothing, with or without --check; a recorded interpreter that no longer exists is replaced and named under was; a link to this interpreter outside any virtual environment is this interpreter.
 # test_a_venv_made_after_a_recorded_interpreter_gets_the_readme_edit: a project .venv run while README records another interpreter is refused, with or without --check, by an error spelling the README line that switches to it, and writing nothing; with that line it is current.
-# test_an_outside_interpreter_without_the_packages_is_not_recorded: an interpreter outside the project that cannot import a required package is refused, with or without --check, over a not-yet-recorded line or one naming no file, with its packages and install command and nothing written; one already recorded, or one inside the project, is kept or recorded with its install command; without README nothing is refused.
+# test_an_outside_interpreter_without_the_packages_is_not_recorded: an interpreter outside the project that cannot import a required package is refused, with or without --check, over a not-yet-recorded line or one naming no file, with its packages and install command, no status, and nothing written; one already recorded, or one inside the project, is kept or recorded with its install command; without README nothing is refused.
 # test_project_venv_is_kept_while_readme_records_none: a project with its own .venv or venv interpreter, run under another while README records none, refuses with exit 1 and writes nothing, with or without --check; README naming this interpreter lets it run.
 # test_hardlinked_interpreter_in_another_prefix_is_refused: outside a virtual environment, a hard link to this interpreter's binary in another directory is another interpreter: README naming it refuses, and so does a project .venv that is such a link while README records none; nothing is written.
 # test_awb_python_naming_this_interpreter_leaves_the_readme_line: with AWB_PYTHON naming this interpreter, by path or by name on PATH, the line is reported overridden and neither refused nor written, over another recorded interpreter or a project venv; AWB_PYTHON naming another interpreter changes nothing.
@@ -455,7 +455,9 @@ def test_an_outside_interpreter_without_the_packages_is_not_recorded(project, tm
         assert result["error"].startswith(f"this interpreter, {sys.executable}, is outside the project and cannot "
                                           "import duckdb, so recording it would leave workbench commands failing; "
                                           "nothing was written.")
-        assert "interpreter" in result and result["packages"]["duckdb"] == "missing"
+        # nothing was recorded, so the report carries no status, as the other refusals' do not
+        assert result["interpreter"] == {"line": f"Project interpreter: {sys.executable}", "in_project": False}
+        assert result["packages"]["duckdb"] == "missing"
         assert result["install"] == f"{installer._pip_install(sys.executable, sys.prefix)} duckdb"
         assert snapshot(project) == before
     completed = subprocess.run([sys.executable, str(SCRIPT), str(project)], capture_output=True, text=True,

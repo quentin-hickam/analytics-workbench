@@ -22,8 +22,8 @@
 # test_sql_param_values_read_as_settings_values: a --param value is read as a one-line TOML value, so a date, number, boolean, quoted string, or array keeps its type, and other text, a value spanning lines included, is the string as given.
 # test_sql_param_refuses_what_a_query_cannot_name: a --param without =, or whose name is not letters, digits, and _, is a usage error.
 # test_cli_sql_binds_parameters_from_param_and_settings: with and without --read-only, --settings binds an investigation's [parameters] and --param wins over them, each statement getting only the names it uses with their types kept, writing nothing; a missing, unreadable, or misnamed settings investigation fails on one line, and a bad --param exits 2.
-# test_cli_sql_plan_failures_name_the_fix_and_keep_read_only: under --read-only, an unbound parameter, an ambiguous column, and another binder error return DuckDB's error on one line with its likely fix and never suggest dropping --read-only; without it, an unbound parameter gets the same fix.
-# test_cli_sql_and_profile_report_a_missing_query_file: one line ending in .sql, in any case, relative or absolute, that names no file is a missing query file for sql and profile; SQL text over several lines or not ending in .sql still runs; a table named sql in a schema is the known limit.
+# test_cli_sql_plan_failures_name_the_fix_and_keep_read_only: under --read-only, an unbound parameter, an ambiguous column, and another binder error return DuckDB's error on one line with its likely fix and never suggest dropping --read-only; without it, an unbound parameter gets the same fix; profile, which binds none, answers an unbound parameter with a fix it can take.
+# test_cli_sql_and_profile_report_a_missing_query_file: one line ending in .sql, in any case, relative or absolute, that names no file is a missing query file for sql and profile, and whitespace around one that names a file is ignored; SQL text over several lines or not ending in .sql still runs; a table named sql in a schema is the known limit.
 # test_cli_sql_read_only_runs_select_and_refuses_every_write: --read-only prints SELECT results and refuses COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, a setting PRAGMA, CALL, CREATE, and INSERT, and a SELECT calling a table function that writes (enable_profiling, enable_logging, checkpoint), directly or through a view, macro, subquery, or query(), and any call of query, query_table, json_execute_serialized_sql, or a table macro calling one (histogram_values, histogram) as a table function, however named or quoted, before any statement runs, and refuses --out, leaving the project unchanged; profile --read-only does the same; a read-only PRAGMA, SHOW, SUMMARIZE, PIVOT with IN, information_schema, a column or CTE named query, and the histogram() aggregate still run, through sql and profile.
 # test_read_only_sql_refuses_a_plan_that_differs_at_the_run: a query() whose SQL reads range(1) under EXPLAIN and enables profiling at the run is refused before any statement runs; no file is written, the session's profiling stays off, and the session still answers.
 # test_profile_runs_with_a_landing_helper_older_than_read_only: profile without --read-only calls session(root) alone, so a landing helper without the read_only keyword still profiles.
@@ -596,6 +596,22 @@ def test_cli_sql_plan_failures_name_the_fix_and_keep_read_only(tmp_path, capsys)
     assert landing.cli_sql(tmp_path, ["SELECT id FROM orders WHERE id > $cohort_end"]) == 1
     error = capsys.readouterr().err
     assert "bind each $name with --param name=value" in error and error.count("\n") == 1
+    # profile binds no parameters, so its fix names what it can do instead, with or without --read-only
+    validate_spec = importlib.util.spec_from_file_location("awb_validate_unbound", ASSET.parent / "awb_validate.py")
+    validate = importlib.util.module_from_spec(validate_spec)
+    validate_spec.loader.exec_module(validate)
+    (tmp_path / "src/preparation").mkdir(parents=True)
+    shutil.copyfile(ASSET, tmp_path / "src/preparation/landing.py")
+    (tmp_path / "queries/window.sql").write_text("SELECT id FROM orders WHERE id > $first")
+    for read_only in (["--read-only"], []):
+        assert validate.cli_profile(tmp_path, read_only + ["queries/window.sql"]) == 1
+        error = capsys.readouterr().err
+        assert error.startswith("profile: ") and error.count("\n") == 1, error
+        assert ("first" in error) == bool(read_only), error  # DuckDB names it only under EXPLAIN
+        assert error.endswith("; profile binds no parameters: write each $name's value into the query, or run it "
+                              "with `python3 src/awb.py sql --param name=value` (over MCP, the read tool's sql "
+                              "with params)\n"), error
+        assert "--settings" not in error and "without --read-only" not in error, error
 
 
 def test_cli_sql_and_profile_report_a_missing_query_file(tmp_path, capsys):
@@ -614,6 +630,10 @@ def test_cli_sql_and_profile_report_a_missing_query_file(tmp_path, capsys):
                 f"sql: no query file {' '.join(path.split())}; a relative path is read from the project root\n"
             assert validate.cli_profile(tmp_path, read_only + [path]) == 1, path
             assert "no query file" in capsys.readouterr().err
+    # whitespace around a path that names a file is ignored, so the file runs
+    for read_only in ([], ["--read-only"]):
+        assert landing.cli_sql(tmp_path, read_only + [" queries/large.sql "]) == 0
+        assert capsys.readouterr().out.endswith("4 of 4 rows shown\n")
     # SQL text spanning lines, or not ending in .sql, is still SQL text
     for query in ("SELECT 1 AS n\n-- from queries/old.sql", "SELECT 'queries/absent.sql' AS n", "SELECT 1 AS sql"):
         assert landing.cli_sql(tmp_path, ["--read-only", query]) == 0, query

@@ -1286,6 +1286,9 @@ def _bound(sql, parameters):
 
 # DuckDB's errors for a $name left unbound: EXPLAIN's or a prepared statement's, and sql()'s.
 UNBOUND_PARAMETERS = ("prepared statement parameters", "Unexpected prepared parameter")
+# _sql_fix's advice for them, which awb.py profile, binding no parameters, replaces with its own.
+BIND_FIX = ("bind each $name with --param name=value, or --settings <investigation> for that "
+            "investigation's settings [parameters] (over MCP, the read tool's params or settings)")
 
 
 def _sql_fix(message):
@@ -1293,8 +1296,7 @@ def _sql_fix(message):
     else fix the statement; a PIVOT, whose expansion a read-only session can plan only with its values
     listed, is named, since its text after DuckDB's expansion no longer says PIVOT."""
     if any(text in message for text in UNBOUND_PARAMETERS):
-        return ("bind each $name with --param name=value, or --settings <investigation> for that "
-                "investigation's settings [parameters] (over MCP, the read tool's params or settings)")
+        return BIND_FIX
     if "Ambiguous reference to column" in message:
         return "qualify the column with its table's name or alias"
     return "fix the statement, or for a PIVOT list its values with IN (...)"
@@ -1516,10 +1518,11 @@ def _refuse_statements(statements, allowed, where):
 
 
 def _sql_argument(root, argument):
-    """Return the text of the query file argument names, else argument itself as SQL text. One line
-    ending in .sql, in any case, names a file: when none exists there, this raises rather than run it."""
+    """Return the text of the query file argument names, whitespace around it ignored, else argument
+    itself as SQL text. One line ending in .sql, in any case, names a file: when none exists there, this
+    raises rather than run it."""
     try:
-        path = _under(root, argument)
+        path = _under(root, argument.strip())
         is_file = path.is_file()
     except (OSError, ValueError):  # SQL text can be too long, or hold a NUL, for a path
         is_file = False

@@ -331,6 +331,8 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
         # Recording an interpreter that cannot run the helpers, such as the MCP server's own, would leave
         # every workbench command failing until README is edited by hand.
         command = f"{_pip_install(sys.executable, sys.prefix)} {' '.join(absent)}"
+        # The report keeps no status, as the other interpreter refusals do: nothing was written.
+        interpreter = {key: value for key, value in interpreter.items() if key not in ("status", "was")}
         return {"project": str(root), "workbench": True, "interpreter": interpreter, "packages": packages,
                 "install": command,
                 "error": f"this interpreter, {sys.executable}, is outside the project and cannot import "
