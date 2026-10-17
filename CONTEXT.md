@@ -62,7 +62,10 @@ A finding whose result evidence no longer matches the current producing code, vi
 A collection of audience-facing outputs, with an internal methodology reference, representing an investigation at a particular point, with provenance identifying the code, inputs, and analytical parameters that produced it. Its audience-facing outputs are the deck outline, the chart files, any selected datasets, and an optional methodology note. Its start-here note sorts its files into what goes to the audience, what builds the deck, and what stays internal.
 
 **Package format**:
-The shared conventions for package structure and presentation, including the single writing-rule list used by writer and reviewer, the audience-facing findings document written as a deck outline with its required slides and an optional appendix, the internal methodology reference, the methodology note template, the chart files, the deck rules any builder follows to build the deck from the outline, and the assembly file for each builder, such as Microsoft 365 Copilot's PowerPoint agent. It is independent of an investigation's scope, narrative, and results.
+The shared conventions for package structure and presentation, including the single writing-rule list used by writer and reviewer, the audience number format, the audience-facing findings document written as a deck outline with its required slides and an optional appendix, the internal methodology reference, the methodology note template, the chart files, the deck rules any builder follows to build the deck from the outline, and the assembly file for each builder, such as Microsoft 365 Copilot's PowerPoint agent. It is independent of an investigation's scope, narrative, and results.
+
+**Audience number format**:
+The precision and clock format recorded for a package's audience: the user's choices, or audience defaults when unstated. An audience not recorded as technical defaults to whole large values, one decimal for shares and rates, and its usual clock format.
 
 **Methodology note**:
 The optional audience-facing account of a package's method, sources, definitions, exclusions, and limitations, written in the audience's terms and delivered beside the deck. The methodology reference stays internal; the note states nothing the reference does not support.

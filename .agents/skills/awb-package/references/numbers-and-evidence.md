@@ -18,7 +18,7 @@
 - A cell that is a number whole is that number; any other cell, check detail, or settings text is
   read the way a narrative line is, adding each number it states and, with a scale, the scaled value
   too, so `$4.2M` records 4,200,000 and an ID such as `ORD-123` records nothing.
-- A column a manifest `charts` or `dataset_selection` entry records with a `scale` divisor also
+- A column a manifest `charts` or `dataset_selection` entry records with a `scale` or `prose_scale` divisor also
   records each of its number cells divided by it.
 
 ### Tracing
