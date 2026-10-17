@@ -1977,7 +1977,8 @@ def _slide(heading, first, lines):
             if block["depth"] == 1 or not slide["bullets"]:
                 slide["bullets"].append({"line": block["line"], "text": text, "sub": []})
                 if ended is not None:
-                    slide["field_bullets"].append({"line": block["line"], "chart": ended["number"]})
+                    slide["field_bullets"].append({"line": block["line"], "chart": ended["number"],
+                                                   "field": _CHART_FIELD.match(text)[1]})
             else:
                 slide["bullets"][-1]["sub"].append(text)
         elif block["kind"] == "paragraph" and (match := _HEADLINE.match(text)):
@@ -2009,7 +2010,7 @@ def parse_outline(text: str) -> dict:
     title slide and the slides before ## Appendix, and the slides under it, without the divider a builder
     adds. The remaining slide keys keep what the checks report: every **Headline:** and **Notes:**
     paragraph, the first block after the notes, every chart, text that is none of these, and in field_bullets
-    each bullet opening with a chart field name right after that chart's fields ended, as {"line", "chart"}.
+    each bullet opening with a chart field name right after that chart's fields ended, as {"line", "chart", "field"}.
     """
     return _outline(_view(text)[0])
 
@@ -2132,8 +2133,15 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
                 row(name, line, "the headline is empty; state the slide's point with its key number")
             elif words > HEADLINE_WORDS:
                 row(name, line, f"the headline has {words} words; keep it to {HEADLINE_WORDS}")
+        # A field-named bullet after a chart's fields ended renders as a slide bullet, its field dropped from the
+        # chart, whatever the bullet count. **Caveat:** alone is also a slide bullet of its own (deck-rules.md).
+        strays = [entry for entry in slide["field_bullets"] if entry["field"] != "Caveat"]
+        for entry in strays:
+            row(name, entry["line"], f"this bullet opens with the chart field name {entry['field']} after Chart "
+                f"{entry['chart']}'s fields ended at a blank line or a repeated field, so it is a slide bullet and "
+                "the chart loses the field: keep the chart's fields together, with no blank line between them")
         if len(slide["bullets"]) > SLIDE_BULLETS and (slide["finding"] or name != "Open questions"):
-            fields = Counter(entry["chart"] for entry in slide["field_bullets"])
+            fields = Counter(entry["chart"] for entry in strays)
             row(name, slide["bullets"][SLIDE_BULLETS]["line"],
                 f"{len(slide['bullets'])} bullets; keep it to {SLIDE_BULLETS} and move the rest to another slide "
                 "or into the notes" + "".join(
@@ -2930,8 +2938,9 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "outline lists, as slide, line, and problem, each break of the slide "
                "rules: a missing # title or subtitle, text outside every slide, a ### finding outside ## Findings "
                "and ## Appendix, "
-               "a missing, repeated, empty, or over-15-word headline, more than five bullets except on Open questions "
-               "(naming the chart when some open with a chart field name after its fields ended), more than one chart, "
+               "a missing, repeated, empty, or over-15-word headline, a bullet opening with a chart field name other "
+               "than Caveat: after that chart's fields ended (naming the chart), more than five bullets except on "
+               "Open questions (naming the chart when some are such bullets), more than one chart, "
                "text that is no headline, bullet, chart, or notes, and a missing, repeated, or non-final **Notes:** "
                "paragraph; a missing, repeated, or misplaced required slide (Answer first after the title, a finding "
                "slide in the main sequence, then How we know and Limitations and open caveats, either of which may "

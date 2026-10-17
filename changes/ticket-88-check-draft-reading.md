@@ -9,7 +9,7 @@
 - `check-draft`'s `numbers` rows carry a `problem` naming the rule that left the number untraced and pointing to `allowed_numbers`.
 - The `numbers` check reads two numbers joined by one slash, such as `54.8/57.6`, as two numbers, each traced; skips 24-hour times such as `18:00`, a year directly after an English month name, full or in three letters (`December 2011 is`), and a year alone in parentheses (`(2025)`); and no longer traces a number to a recorded value lying exactly on the edge of its rounding, as 0.5245 does for `52.5%`.
 - The `claims` check skips a causal phrase in a negated clause, under a closed grammar the helpers reference states, so "does not test what caused them" passes, and no longer reads the methodology note's `## Limitations` section, as it already skipped the deck's Limitations slide.
-- The findings template says a chart's fields take no blank line between them and one after the last, and the outline's bullet-count row names the chart when field-named bullets after a blank line are counted as slide bullets.
+- The findings template says a chart's fields take no blank line between them and one after the last, and the `outline` check gives a row naming the chart for each bullet that opens with a chart field name other than **Caveat:** after that chart's fields ended, and its bullet-count row names the chart too.
 - `awb-package` never tells the user a rewritten sentence is in their wording unless it is word for word theirs.
 
 ### Fixed
