@@ -46,7 +46,7 @@
 # test_export_scale_needs_places_when_its_quotient_is_unrounded: a divisor whose quotient shows more than four places needs [round] places, listed with round_stub, and the methodology line states the division before the rounding.
 # test_export_scale_divides_records_and_traces: a [scale] divisor divides a column's number cells before percent scaling and rounding, in charts and datasets, is recorded in their manifest entries and methodology lines, is refused when not { divide = <a positive number> }, and makes a narrative number written in the scaled unit trace; check-draft refuses an entry whose divisor differs from display.toml.
 # test_export_warns_on_a_fraction_rounded_in_its_query: a [percent] column shown to fewer than two places whose saved fractions have exactly four places is a precision_warnings row, the files still written; full precision, or two places shown, gives none.
-# test_export_warns_on_a_value_code_no_cell_holds: a [values] code no exported saved table holds, such as true where pandas saved True, is a value_warnings row naming the table, with the near cell when only case differs; codes the tables hold give none.
+# test_export_warns_on_a_value_code_no_cell_holds: a [values] code no exported saved table holds is a value_warnings row naming the table when a cell differs from it only in case, such as true where pandas saved True, naming that cell, or when no code of its table matches any cell; a shared table's code these results leave out, and codes the tables hold, give none.
 # test_confirmed_columns_silence_their_label_warning: a column under [confirmed] columns gives no label_warnings row, other columns still do, and a malformed [confirmed] is refused.
 # test_export_warns_when_one_name_labels_results_with_different_questions: a global [columns] name labeling files from results with different questions is a label_warnings row, the files still written; the same question or a per-result name gives none.
 # test_chart_selection_grammar_accepts / test_chart_selection_grammar_refuses: accepted and refused rows for --chart RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]], each refusal naming the part that does not fit.
@@ -1504,11 +1504,16 @@ def test_export_warns_on_a_value_code_no_cell_holds(project, capsys):
     write(project, "foundation/display.toml", display)
     code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
     unmatched = "no cell of the saved tables it labels holds this code; a code matches the saved text exactly"
+    # A shared table listing a code these results leave out (N) gives no row, so it cannot repeat on every export.
     assert out["written"] and out["value_warnings"] == [
-        {"table": "[values.region]", "code": "N", "warning": unmatched},
         {"table": "[values.large]", "code": "true", "warning": unmatched + "; the table writes 'True'"}]
     assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_text() == \
         "Region,Large store\nWest,True\nEast,No\n"
+    # A table none of whose codes matches a cell reports each code.
+    write(project, "foundation/display.toml", display.replace('W = "West"\nE = "East"\n', 'S = "South"\n'))
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    assert [(row["table"], row["code"]) for row in out["value_warnings"]] == [
+        ("[values.region]", "S"), ("[values.region]", "N"), ("[values.large]", "true")]
     # A code another exported table holds is matched, even when this chart's rows leave it out.
     write(project, "foundation/display.toml", display.replace("true", '"True"').replace('N = "North"\n', ""))
     _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001@first=1", "--no-datasets")

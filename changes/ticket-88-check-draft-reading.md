@@ -2,7 +2,7 @@
 
 - `foundation/display.toml` takes a `[scale]` table, such as `change_mt = { divide = 1000 }`, that divides a column's values for display. `export` writes the divided values and records each divisor as `scale` in the manifest's `charts` and `dataset_selection` entries, and `check-draft`'s `numbers` check traces a narrative number to that column's recorded values divided by it, so a figure written in another unit no longer needs a new saved column and a rerun.
 - `foundation/display.toml` takes a `[confirmed]` list, `columns = [...]`, of shared column names whose `label_warnings` row then stops repeating on every export.
-- `export` reports `value_warnings`, each `[values]` code that no cell of the saved tables it labels holds, such as `true` where pandas saved `True`, and `precision_warnings`, each percent column shown to fewer than two places whose fractions were saved at exactly four, a sign the query rounded them and the display rounds them again.
+- `export` reports `value_warnings`, each `[values]` code that no cell of the saved tables it labels holds when a cell differs from it only in case, such as `true` where pandas saved `True`, or when no code of its table matches any cell, and `precision_warnings`, each percent column shown to fewer than two places whose fractions were saved at exactly four, a sign the query rounded them and the display rounds them again.
 
 ### Changed
 

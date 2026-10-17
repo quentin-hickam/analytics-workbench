@@ -3475,17 +3475,19 @@ def label_collisions(display, files, questions) -> list[dict]:
 
 
 def value_warnings(codes) -> list[dict]:
-    """Each code of a value table that no cell of the saved tables it labels in this export holds: {table, code,
-    warning}. `codes` maps each table, as display.toml names it, to (its codes, the cells it was read against).
-    A code matches the saved text exactly, so a boolean pandas saved as True takes the key "True", not true."""
+    """Each code of a value table that looks mistyped against the saved tables it labels in this export: {table,
+    code, warning}. `codes` maps each table, as display.toml names it, to (its codes, the cells it was read
+    against). A code matches the saved text exactly, so a boolean pandas saved as True takes the key "True", not
+    true. A code no cell holds is reported when a cell differs from it only in case, or when no code of its
+    table matches any cell; a shared table listing codes these results leave out gives no row."""
     rows = []
     for table, (labels, cells) in codes.items():
+        none = not any(code in cells for code in labels)
         for code in labels:
-            if code in cells:
-                continue
             near = sorted(cell for cell in cells if cell.casefold() == code.casefold())
-            rows.append({"table": table, "code": code,
-                         "warning": _UNMATCHED + (f"; the table writes {near[0]!r}" if near else "")})
+            if code not in cells and (near or none):
+                rows.append({"table": table, "code": code,
+                             "warning": _UNMATCHED + (f"; the table writes {near[0]!r}" if near else "")})
     return rows
 
 
@@ -3694,7 +3696,8 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "with the places the slide's number format shows, unquoted, such as \"share\" = 1.\nlabel_warnings "
                "lists each column whose [columns] name labels files from results with different questions "
                "and no [results.\"<result>\".columns] name, unless [confirmed] lists it; value_warnings lists each "
-               "value code no cell of the saved tables it labels holds; precision_warnings lists each percent "
+               "value code no cell of the saved tables it labels holds, when a cell differs from it only in case "
+               "or no code of its table matches any cell; precision_warnings lists each percent "
                "column shown to fewer than two places whose fractions include one saved to exactly four, a sign "
                "the query rounded them. Each is a warning, and the files are written.\n"
                "The manifest's charts entries record each chart's result, columns, selection, headers, value "
