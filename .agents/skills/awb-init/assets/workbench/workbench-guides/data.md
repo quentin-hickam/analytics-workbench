@@ -2,13 +2,13 @@
 
 Paths below that begin with `references/` or `assets/` are in the `awb-init` skill folder: `~/.claude/skills/awb-init/` (Claude Code) or `~/.agents/skills/awb-init/` (VS Code Copilot and Codex).
 
-Existing project layouts remain authoritative. Read `references/landing.md` only to write a `fetch` callable for `land()` or a `convert` callable for `publish()`, to land an archive or publish a spreadsheet, or when `sql --read-only` or the `read` tool refuses a function or needs an extension.
+Existing project layouts remain authoritative. Read `references/landing.md` only to write a `fetch` callable for `land()` or a `convert` callable for `publish()`, to land an archive or publish a spreadsheet or a multi-part extract, to fix a source reference `awb-status` lists, or when `sql --read-only` or the `read` tool refuses a function or needs an extension.
 
 ## Assess and acquire
 
 Assess a candidate from its documentation or schema when that settles relevance and fitness; inspect records only from landed copies, landing only what the assessment needs. Record the assessment, its basis, and its references in `foundation/sources.md` under its rules.
 
-Keep each data dictionary, manual, codebook, or schema export that an assessment or catalog row relies on under `foundation/references/<source-id>/`; commit it when README's `Commits:` line says `as I go`, otherwise suggest committing it, unless you already suggested a commit this session. While README's `Code history:` line says `none`, do neither. Material whose license or confidentiality bars committing it stays out of Git, as a landed original does: keep it at a retained location outside the checkout and record that location and its SHA-256 as the source's reference, in the form `foundation/sources.md` gives. Link a reference from the catalog rows that rely on it as `foundation/catalog.md` describes.
+Keep each data dictionary, manual, codebook, or schema export that an assessment or catalog row relies on under `foundation/references/<source-id>/`; commit it when README's `Commits:` line says `as I go`, otherwise suggest committing it, unless you already suggested a commit this session. While README's `Code history:` line says `none`, do neither. Material whose license or confidentiality bars committing it stays out of Git, as a landed original does: keep it at a retained location outside the checkout and record that location and its SHA-256 as the source's reference, in the form `foundation/sources.md` gives. Documentation you could read but not keep, such as a download the server refuses, gets an access note instead, in the form given there. Link a reference from the catalog rows that rely on it as `foundation/catalog.md` describes.
 
 Land user-supplied or already-downloaded files:
 
@@ -16,7 +16,7 @@ Land user-supplied or already-downloaded files:
 python3 src/awb.py land <source> <acquisition-id> <file-or-directory>... [--request TEXT] [--records NAME=COUNT] [--notes TEXT]
 ```
 
-Land an archive, such as a `.zip`, as received, with the members a conversion reads extracted beside it in the same `land` call, and record in `--notes` that the archive is the original; a workbook is published through DuckDB's `read_xlsx`, with Excel serial dates and times converted explicitly. `references/landing.md` (**Archives and spreadsheets**) gives both.
+Land an archive, such as a `.zip`, as received, with the members a conversion reads extracted beside it in the same `land` call, and record in `--notes` that the archive is the original; a workbook is published through DuckDB's `read_xlsx`, with Excel serial dates and times converted explicitly. A conversion combining several sheets or files records lineage columns and checks the parts for overlap. `references/landing.md` (**Archives, spreadsheets and multi-part extracts**) gives all three.
 
 For an API or other fetched source, save the fetch as `src/preparation/fetch_<source>.py`, taking the acquisition ID as its argument and calling `land()` from `src/preparation/landing.py` with a `fetch` callable and the upstream URL, without credentials, and validators it receives; run it by path with a new acquisition ID, then run `python3 src/awb.py retain`. Land a changed upstream again under a new acquisition ID, only on request; rerunning analysis never re-lands.
 
@@ -36,7 +36,7 @@ Save the conversion as `src/preparation/<dataset>.sql`, one SELECT reading lande
 python3 src/awb.py publish <dataset> <publication-id> --from <acquisition-dir> --sql <select.sql> [--check <check.sql>]
 ```
 
-`--from` names exactly the acquisition directories the select reads. `publish` runs the declared checks on every publication of the dataset and records each outcome in `publication.json`; a failing check refuses publication, and `failed_checks` names it. Each canonical view in `foundation/views/` names its publication. Start the view from the printed `view_sql`. In `foundation/catalog.md`, record the publication from the printed `catalog_row`, completing its grain and availability, and give the view its own row (Kind `canonical view`) with the view's grain and the publication it reads under `Inputs`. `awb-clean` reads the grain from the view's row and records corrections there. Switching publications is a deliberate preparation change. Remove a superseded publication, and its catalog row, once no reader needs it.
+`--from` names exactly the acquisition directories the select reads. `publish` runs the declared checks on every publication of the dataset and records each outcome in `publication.json`; a failing check refuses publication, and `failed_checks` names it. A refused publish leaves the partial folder it names, and a retry is refused while it exists: remove it before publishing again. Each canonical view in `foundation/views/` names its publication. Start the view from the printed `view_sql`. In `foundation/catalog.md`, record the publication from the printed `catalog_row`, completing its grain and availability, and give the view its own row (Kind `canonical view`) with the view's grain and the publication it reads under `Inputs`. `awb-clean` reads the grain from the view's row and records corrections there. Switching publications is a deliberate preparation change. Remove a superseded publication, and its catalog row, once no reader needs it.
 
 Sessions load `foundation/views/*.sql` in filename order, so a dependent view's file sorts after its inputs; result sessions then load the investigation's `views/*.sql` the same way.
 

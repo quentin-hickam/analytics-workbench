@@ -267,17 +267,20 @@ def collect(root, *, probe_upstream=False):
             uncertain(sources_path, f"Source {row['Source ID']}: Relevance and fitness does not begin with its basis")
         return basis is not None and basis.group(1).lower() == "documentation"
 
-    # The two reference forms foundation/sources.md defines, exactly as it states them; any other
-    # spelling, valid Markdown or not, counts as no reference. Form 1 is `[text](destination)`: non-empty
+    # The reference forms foundation/sources.md defines, exactly as awb-init's references/landing.md
+    # states them; any other spelling, valid Markdown or not, counts as no reference. Form 1 is `[text](destination)`: non-empty
     # text without `[`, `]`, `\`, `<` or a backtick, then a destination in angle brackets without `<`, `>`,
     # `\` or a line break, or a bare one without whitespace, control characters, `<` or `\` whose
     # parentheses balance at any depth. Form 2 is a location in single backticks, a comma, then
     # `sha256` (also `SHA-256`, `sha256:`) and exactly 64 hex digits with no letter, digit, `_`, `\` or `&`
-    # after, which an escape or entity could render as one.
+    # after, which an escape or entity could render as one. Form 3, an access note for documentation
+    # read but not kept, is `read at <URL> on YYYY-MM-DD, not kept: <reason>`, the URL http(s), bare or
+    # in angle brackets; it is a known limitation, listed apart, unless the cell also holds form 1 or 2.
     link_text = re.compile(r"\[[^\[\]\\<`]+\]\(")
     angle_destination = re.compile(r"<[^<>\\\n]+>\)")
     retained = re.compile(r"`[^`\n]*[^`\s][^`\n]*`,\s*sha-?256:?\s*[0-9a-f]{64}(?![\w\\&])", re.I)
     label = re.compile(r"\s*reference:\s*", re.I)
+    access = re.compile(r"read at\s+(?:<https?://[^<>\s]+>|https?://[^<>\s]+)\s+on\s+\d{4}-\d{2}-\d{2},\s*not kept:\s*\S", re.I)
     line_break = re.compile(r"<br\s*/?>", re.I)
     entity = re.compile(r"&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
     # Raw HTML and autolinks, which CommonMark reads before code spans and links. These patterns are
@@ -331,7 +334,8 @@ def collect(root, *, probe_upstream=False):
         return opened and destination(notes, opened.end())
 
     def referenced(notes):
-        """Whether a Notes clause in plain text opens with `reference:` directly followed by one of the two forms."""
+        """("kept" or "access", None) when a Notes clause in plain text opens with `reference:` directly
+        followed by a form, "kept" for form 1 or 2 anywhere in the cell; else (None, why not)."""
         # Read left to right as CommonMark does. A clause opens the cell or follows `;`, `,`, `.` or a
         # `<br>`, outside code spans, raw HTML, autolinks, emphasis, strikethrough, links and brackets;
         # only what directly follows the label counts, so `reference: pending. See [x](y)` records no
@@ -340,7 +344,10 @@ def collect(root, *, probe_upstream=False):
         # delimiter character) or the reading is uncertain (a backtick, bracket or `<` inside an
         # autolink, or a link whose destination this does not read), the rest of the cell counts as
         # no reference.
-        position, clause, brackets = 0, True, 0
+        position, clause, brackets, labelled_once, noted = 0, True, 0, False, None
+
+        def stopped(why):
+            return ("access", None) if noted else (None, f"reading stopped at {why} before a reference in one of the forms")
         # A backslash escapes the punctuation after it, read left to right as the loop below reads it,
         # and an escaped delimiter is literal, so only the unescaped rest of a run opens or closes.
         escaped = {found.end() - 1 for found in re.finditer(rf"\\[{re.escape(string.punctuation)}]", notes)}
@@ -350,7 +357,10 @@ def collect(root, *, probe_upstream=False):
         while position < len(notes):
             labelled = clause and not brackets and label.match(notes, position)
             if labelled and (retained.match(notes, labelled.end()) or link(notes, labelled.end())):
-                return True
+                return "kept", None
+            if labelled and access.match(notes, labelled.end()):
+                noted = "access"
+            labelled_once = labelled_once or bool(labelled)
             clause = False
             char = notes[position]
             if char == "\\" and notes[position + 1:position + 2] in tuple(string.punctuation):
@@ -362,11 +372,11 @@ def collect(root, *, probe_upstream=False):
             elif char == "<":
                 broken = line_break.match(notes, position)
                 if not broken and any(pattern.match(notes, position) for pattern in html):
-                    return False  # Where the element ends, and so whether a clause is inside it, is not read.
+                    return stopped("raw HTML")  # Where the element ends, and so whether a clause is inside it, is not read.
                 linked = autolink.match(notes, position)
                 end = broken.end() if broken else linked and linked.end()
                 if end and any(inner in "`[]<" for inner in notes[position + 1:end]):
-                    return False  # Renderers may split this construct differently.
+                    return stopped("an autolink holding a backtick, bracket or <")  # Renderers may split it differently.
                 position = end or position + 1
                 clause = bool(broken)
             elif char in "*_~":
@@ -378,7 +388,7 @@ def collect(root, *, probe_upstream=False):
                 if closer_start >= end and can_open(notes, position, end):
                     if any(inner in "`[]<" for inner in notes[position:closer_end]) or any(
                             end <= start < closer_start and notes[start] != char and can_open(notes, start, stop) for start, stop in runs):
-                        return False
+                        return stopped("emphasis or strikethrough")
                     end = closer_end
                 position = end
             elif char == "[":
@@ -390,7 +400,7 @@ def collect(root, *, probe_upstream=False):
                 if notes.startswith("(", position + 1):
                     closed = destination(notes, position + 2)
                     if closed is None:
-                        return False
+                        return stopped("a link destination neither form allows")
                     position = closed
                 else:
                     position += 1
@@ -399,11 +409,20 @@ def collect(root, *, probe_upstream=False):
             else:
                 clause = char in ";,."
                 position += 1
-        return False
+        if noted:
+            return noted, None
+        if labelled_once:
+            return None, "what follows reference: is in none of the forms"
+        if re.search(r"reference", notes, re.I):
+            return None, "reference: does not open a clause in plain text"
+        return None, "Notes hold no reference: clause"
 
     # foundation/sources.md states the basis and reference forms these read.
-    result["sources"] = None if registered is None else {"count": len(registered), "documentation_without_reference": [
-        row["Source ID"] for row in registered if documentation_basis(row) and not referenced(row["Notes"])]}
+    assessed = [(row["Source ID"], referenced(row["Notes"])) for row in registered or [] if documentation_basis(row)]
+    result["sources"] = None if registered is None else {
+        "count": len(registered),
+        "documentation_without_reference": [{"source": source, "reason": why} for source, (kind, why) in assessed if not kind],
+        "documentation_access_notes": [source for source, (kind, _) in assessed if kind == "access"]}
     result["landed_data_storage"] = storage(field(readme, "Landed data is kept at", readme_path, optional=True))
     release_line = field(readme, "Released packages are kept at", readme_path, optional=True)
     result["release_storage"] = storage(release_line)
@@ -555,7 +574,8 @@ def upstream(root, probe, uncertain, entries):
     Only the latest acquisition of a source to record a URL is checked, by completed_at and then,
     for acquisitions completed in the same second, by the greater acquisition ID: a file of an
     earlier acquisition of the same source and URL counts as superseded, since landing again is how
-    a changed upstream is taken up. probeable_files is null when an acquisition directory or
+    a changed upstream is taken up. not_checkable names, once each, the sources with a latest file
+    whose HTTP URL was recorded without an ETag or Last-Modified. probeable_files is null when an acquisition directory or
     provenance.json could not be read; an uncertainty names each one, and the files that were read
     are still counted and probed. entries is collect()'s directory listing, None when unreadable.
     """
@@ -600,6 +620,10 @@ def upstream(root, probe, uncertain, entries):
         else:
             probeable.append((entry, recorded))
     report = {"probeable_files": len(probeable) if complete else None}
+    # A server that sent neither validator leaves its source uncheckable, a known limitation named once per source.
+    unvalidated = sorted({entry["source"] for entry in not_probeable if entry["reason"] == "no ETag or Last-Modified recorded"})
+    if unvalidated:
+        report["not_checkable"] = unvalidated
     if probe:
         # One timeout per host and port bounds the run when a host is unreachable (VPN off, firewall).
         opener, unresponsive = head_opener(), set()
