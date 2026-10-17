@@ -1157,6 +1157,25 @@ _CAUSAL = re.compile(r"(?<![\w-])(?:" + "|".join([
 # Slides that describe method, data, and caveats rather than state findings.
 _UNCHECKED = {"How we know", "Limitations and open caveats", "Open questions", "What changed since the last version",
               "Supporting datasets"}
+# The methodology note's section that states limitations, as methodology-note-template.md heads it.
+_NOTE_UNCHECKED = "Limitations"
+# A negated clause, a closed grammar: a phrase is skipped when a negator stands at most four words before it
+# in its clause (directly before it, for a _CONNECTIVE phrase), or, for a noun phrase (effect on, impact, drivers of, causes), when the clause states it
+# unknown within four words after it. A clause ends at a paragraph or item break, at . ; : , ! ? ( ) [ ] or a
+# dash, and at but, and, while, whereas, although, though, or however. A relative word (who, whom, whose,
+# which, that, where) before the negator in its clause, or between the noun phrase and its predicate, makes
+# the negation another clause's ("stores that did not discount drove the rise"), so nothing is skipped.
+_CLAUSE_END = re.compile(r"[.;:,!?()\[\]–—]|\s-\s|\b(?:but|and|while|whereas|although|though|however)\b",
+                         re.IGNORECASE)
+_RELATIVE = re.compile(r"\b(?:who|whom|whose|which|that|where)\b", re.IGNORECASE)
+_NEGATOR = re.compile(r"\b(?:not(?!\s+(?:only|just|merely|simply)\b)|never|cannot|neither|nor|\w+n['’]t"
+                      r"|no\s+(?:evidence|sign|indication|proof|support|test)|without\s+\w+ing)\b", re.IGNORECASE)
+_NOUN_PHRASE = re.compile(r"effects?\s+(?:of|on)|impacts?|drivers?\s+of|causes", re.IGNORECASE)
+# A connective phrase is negated only directly after its negator ("not due to weather"): in "did not fall due to
+# weather" the negator takes the verb, and the sentence may still claim that weather kept sales up.
+_CONNECTIVE = re.compile(r"because\s+of|due\s+to|as\s+a\s+result\s+of|attributable\s+to", re.IGNORECASE)
+_UNKNOWN = re.compile(r"(?:is|are|was|were|remains?|stays?)\s+(?:still\s+)?(?:unknown|unclear|untested"
+                      r"|not\s+(?:known|established|tested))\b", re.IGNORECASE)
 
 
 def _level(cell):
@@ -1230,11 +1249,38 @@ def _declaration_problem(section, cited, ceiling, claims):
     return None
 
 
+def _negated(body, match, breaks):
+    """Whether a causal phrase stands in a negated clause, under the grammar above _CLAUSE_END. `breaks` are
+    the offsets in body where a line of another paragraph, item, or heading starts."""
+    start = max([0, *(at for at in breaks if at <= match.start())])
+    end = min([len(body), *(at for at in breaks if at > match.end())])
+    before, after = body[start:match.start()], body[match.end():end]
+    if ends := list(_CLAUSE_END.finditer(before)):
+        before = before[ends[-1].end():]
+    if cut := _CLAUSE_END.search(after):
+        after = after[:cut.start()]
+    negators = list(_NEGATOR.finditer(before))
+    window = 0 if _CONNECTIVE.fullmatch(" ".join(match.group(0).split())) else 4
+    if negators and len(before[negators[-1].end():].split()) <= window \
+            and not _RELATIVE.search(before[:negators[-1].start()]):
+        return True
+    unknown = _UNKNOWN.search(after) if _NOUN_PHRASE.fullmatch(" ".join(match.group(0).split())) else None
+    return bool(unknown) and len(after[:unknown.start()].split()) <= 4 \
+        and not _RELATIVE.search(after[:unknown.start()])
+
+
 def _phrases(lines, field, level):
-    """Each causal phrase in a region's `field` text: (line offset, phrase, whether in a ### headline)."""
-    body = "\n".join(getattr(line, field) for line in lines)
+    """Each causal phrase in a region's `field` text outside a negated clause: (line offset, phrase, whether in
+    a ### headline)."""
+    texts = [getattr(line, field) for line in lines]
+    body, breaks, offset = "\n".join(texts), [], 0
+    for index, line in enumerate(lines):
+        if index and (line.start or line.group != lines[index - 1].group):
+            breaks.append(offset)
+        offset += len(texts[index]) + 1
     return [(body.count("\n", 0, match.start()), " ".join(match.group(0).split()),
-             level == 3 and match.start() < len(getattr(lines[0], field))) for match in _CAUSAL.finditer(body)]
+             level == 3 and match.start() < len(texts[0])) for match in _CAUSAL.finditer(body)
+            if not _negated(body, match, breaks)]
 
 
 def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
@@ -1246,8 +1292,9 @@ def claim_problems(draft, represented: list[str], claims: dict) -> list[dict]:
     that states conclusions, to the strongest represented claim. A slide the template names keeps its rule
     under ## Appendix, and an appendix finding slide is held like any other. Each finding's methodology
     section states its strength on one `**Claim strength:**` line, a causal one as its results' Claim cell.
-    methodology-note.md, when the draft holds it, is read whole at the strongest represented claim, its
-    rows carrying `file`. Every file is read as it renders (`_view`).
+    methodology-note.md, when the draft holds it, is read at the strongest represented claim but for its
+    ## Limitations section, its rows carrying `file`. Every file is read as it renders (`_view`), and a phrase
+    in a negated clause (`_negated`) is no claim.
     """
     return _claim_review(draft, represented, claims)[0]
 
@@ -1292,7 +1339,11 @@ def _claim_review(draft, represented, claims):
             cited, ceiling = list(represented), deck
         rows += _wording(lines, first, 0 if named else level, ceiling, cited, heading or "title")
     if METHODOLOGY_NOTE in _narratives(draft):
+        part = None
         for level, heading, first, lines in _regions(_read_view(draft / METHODOLOGY_NOTE)[0]):
+            part = heading if level in (1, 2) else part
+            if part == _NOTE_UNCHECKED and level >= 2:
+                continue  # ## Limitations, its ### sections included, states caveats as the deck's slide does
             rows += [{"file": METHODOLOGY_NOTE, **row}
                      for row in _wording(lines, first, 0, deck, list(represented), heading)]
     return rows, accepted
@@ -1340,14 +1391,19 @@ _DATE_ENDS = rf"(?:{_ENDS}|(?=\s+(?:to|through|until|till|and|or|[-–—])\s+{_
 # A year after one of these words, a month name, or a quarter or half, where the period ends.
 _IN = (rf"(?:(?i:\b(?:in|from|since|during|until|till|through|before|after|between|year|FY|CY|fiscal|calendar)\s+"
        rf"|\b(?:early|mid|late)[\s-]+)|{_MONTH}\s+|\b[QH][1-4]\s+)")
+# An English month name, full or in three letters, which a year directly after names whatever follows it.
+_MONTH_NAME = (r"\b(?:January|February|March|April|May|June|July|August|September|October|November|December"
+               r"|(?:Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\.?)")
 _NOT_QUANTITY = re.compile(
     rf"(?<![\w.])(?:{_YEAR}-(?:1[0-2]|0?[1-9])(?:-{_DAY})?(?:T[0-9:.]+(?:Z|[+-][0-9:]+)?)?{_ALONE}"
     rf"|[0-9]{{1,2}}/[0-9]{{1,2}}/{_YEAR}{_ALONE}"
     r"|[0-9]{1,2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]+)?)?\s?(?i:[ap]\.?m\.?|UTC|GMT)(?!\w)"
     rf"|[0-9]{{1,2}}:[0-9]{{2}}:[0-9]{{2}}{_ALONE}"
+    rf"|(?<![0-9][,/:])(?:[01][0-9]|2[0-3]):[0-5][0-9]{_ALONE}"
     rf"|{_MONTH}\s+{_DAYS}(?:,?\s+{_YEAR}{_ALONE}{_DATE_ENDS}|{_ALONE}{_DATE_ENDS})"
     rf"|{_DAYS}\s+{_MONTH}(?:,?\s+{_YEAR}{_ALONE})?{_DATE_ENDS}"
     rf"|{_IN}{_YEAR}(?:{_listed(_YEAR)})?{_ALONE}{_ENDS}"
+    rf"|{_MONTH_NAME}\s+{_YEAR}{_ALONE}|\({_YEAR}\)"
     rf"|[Cc]harts\s+[0-9]+{_listed('[0-9]+')}{_ALONE}{_ENDS}|[Cc]harts?\s+[0-9]+{_ALONE})"
     r"|^[ \t]*#{1,6}[ \t]+[0-9]+[.)](?=\s)|\[\^[^\]\n]*\]", re.MULTILINE)
 _LIST_MARKER = re.compile(r"[ \t]*([0-9]{1,9})[.)](?=\s|$)")
@@ -1393,8 +1449,9 @@ def _blank_names(text):
 # A number not glued to a word or a path, with its unit. A word unit or % may stand after any whitespace,
 # a line wrap included; a letter scale (k, M, b) or x is written against its number. Letters written against
 # a number are shown with it (5GB, 30d, 95th). Digits joined by dots, commas, slashes, colons, or spaces between
-# three-digit groups are read as one number: a version or address (3.12.1, 10.0.0.1) is no quantity, and any
-# other join but thousands grouping or one decimal point never traces (1,2,3, 21,3, 3/4, 14:05, 1.234.567, 1 000).
+# three-digit groups are read as one number: a version or address (3.12.1, 10.0.0.1) is no quantity, two numbers
+# joined by one slash (54.8/57.6) are two numbers, and any other join but thousands grouping or one decimal point
+# never traces (1,2,3, 21,3, 1/2/3, 9:30, 1.234.567, 1 000).
 _NUMBER = re.compile(
     r"(?<![^\W_])(?<![^\W_]_)(?<![0-9][.,/:])"
     r"((?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)[eE][-+]?[0-9]+|[0-9]{1,3}(?:[ \u00a0\u202f][0-9]{3})+(?:\.[0-9]+)?"
@@ -1406,6 +1463,7 @@ _NUMBER = re.compile(
 _GROUPED = re.compile(r"[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?|[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?"
                       r"|[0-9]+\.[eE][-+]?[0-9]+")
 _VERSION = re.compile(r"[0-9]+(?:\.[0-9]+){2,}")
+_PAIR = re.compile(r"([0-9]+(?:[.,][0-9]+)*)/([0-9]+(?:[.,][0-9]+)*)")
 _RANGE = re.compile(r"\s*(?:[-–—]|to|and)\s*")
 _SCALES = {"k": 3, "thousand": 3, "m": 6, "mn": 6, "million": 6, "b": 9, "bn": 9, "billion": 9,
            "tn": 12, "trillion": 12}
@@ -1437,13 +1495,19 @@ def _quantities(line, before="", after="", *, marker=True, code=True):
         if not unit and not letters and index + 1 < len(matches) and _RANGE.fullmatch(
                 text[match.end():matches[index + 1].start()]):
             unit = matches[index + 1].group(2) or ""  # 10-15%: the lower bound takes the upper's unit
-        if re.fullmatch(r"0[0-9]+", body) or _VERSION.fullmatch(body) and not re.fullmatch(
-                r"[0-9]{1,3}(?:\.[0-9]{3})+", body):
-            continue  # a zero-padded code such as release 002, or a version; 1.234.567 is read
-        if letters and not letters.isalpha():
-            body += letters  # 5½ has no one value
-        yield (" ".join(match.group(0).split()), body, " ".join(unit.lower().split()), match.start() - offset,
-               match.end() - offset)
+        # Two numbers joined by one slash, such as 54.8/57.6 or 368/53.5%, are two numbers, the unit the second's.
+        pair = _PAIR.fullmatch(body)
+        parts = [(pair[1], "", "", match.start(), match.start() + len(pair[1])),
+                 (pair[2], unit, letters, match.start() + len(pair[1]) + 1, match.end())] if pair else [
+                     (body, unit, letters, match.start(), match.end())]
+        for body, unit, letters, start, end in parts:
+            if re.fullmatch(r"0[0-9]+", body) or _VERSION.fullmatch(body) and not re.fullmatch(
+                    r"[0-9]{1,3}(?:\.[0-9]{3})+", body):
+                continue  # a zero-padded code such as release 002, or a version; 1.234.567 is read
+            if letters and not letters.isalpha():
+                body += letters  # 5½ has no one value
+            yield (" ".join(text[start:end].split()), body, " ".join(unit.lower().split()), start - offset,
+                   end - offset)
 
 
 # Arithmetic on written numbers never rounds: every digit a narrative or a record writes is kept.
@@ -1516,11 +1580,26 @@ def _read_exact_json(path):
     return record
 
 
-def recorded_values(root, investigation, results) -> tuple[list, list[str]]:
+def recorded_scales(record: dict) -> list[tuple]:
+    """The [scale] divisors the manifest's charts and dataset_selection entries record, as (result_id, column,
+    divisor); a malformed entry records none, and the charts check reports it."""
+    found = []
+    for field in ("charts", "dataset_selection"):
+        entries = record.get(field)
+        for entry in entries if isinstance(entries, list) else ():
+            scale = entry.get("scale") if isinstance(entry, dict) else None
+            if isinstance(scale, dict) and isinstance(entry.get("result_id"), str):
+                found += [(entry["result_id"], column, divide) for column, divide in scale.items() if _divisor(divide)]
+    return list(dict.fromkeys(found))
+
+
+def recorded_values(root, investigation, results, scales=()) -> tuple[list, list[str]]:
     """Return the sorted magnitudes the manifest's represented results record, and the problems.
 
     Each result contributes every cell of results/<id>.csv, the numbers in results/<id>.profile.json,
     and the numbers in its evidence's check details and settings. JSON numbers are read exactly as written.
+    Each (result_id, column, divisor) of `scales` (`recorded_scales`) whose result is represented adds that
+    column's number cells divided by the divisor, the values its chart or dataset file shows before rounding.
     """
     if not isinstance(results, list) or not all(
             isinstance(entry, dict) and isinstance(entry.get("result_id"), str)
@@ -1552,6 +1631,13 @@ def recorded_values(root, investigation, results) -> tuple[list, list[str]]:
                 _magnitudes(record, values, text=False)  # dtype names such as float64 are not values
             else:
                 _magnitudes(_evidence_numbers(record), values)
+        divisors = [(column, divide) for scaled, column, divide in scales if scaled == result_id]
+        try:
+            rows = _read_table(table)[1] if divisors else []
+        except (OSError, UnicodeError, csv.Error):
+            rows = []  # the table's own problem is already listed
+        for column, divide in divisors:
+            values.update(_scaled(row[column], divide).copy_abs() for row in rows if _number(row.get(column) or ""))
     return sorted(values), problems
 
 
@@ -1573,14 +1659,35 @@ def allowed_numbers(record: dict) -> tuple[set, list[str]]:
 
 
 def _within(values, low, high):
+    """Whether a value lies on low or above it and strictly below high: what rounds half up into the window."""
     index = bisect.bisect_left(values, low)
-    return index < len(values) and values[index] <= high
+    return index < len(values) and values[index] < high
 
 
-def _traces(body, unit, values):
-    # Written to d places, the number stands for any value within half a unit of its last place.
+# Why a numbers row's number traces to nothing, so the row names the rule that applied.
+_ALLOW = "or list its text in the manifest's allowed_numbers with the reason"
+_UNTRACED = {
+    "joined": "digits joined by dots, commas, slashes, or colons read as one number with no single value, so it "
+              f"never traces; write each number apart, {_ALLOW}",
+    "edge": "a recorded value lies exactly on the upper edge of this number's rounding, which rounds half up, as "
+            f"export rounds, to the next digit, so it does not trace; write the number as it rounds half up, {_ALLOW}",
+    "year": "read as a count: a year is skipped only after a month name, alone in parentheses, or after a word "
+            "such as in or since where its period ends; reword it, such as ending the date with a comma, "
+            + _ALLOW,
+    "value": f"no represented result records this number at its written precision; correct it, {_ALLOW}",
+}
+
+
+def _untraced(body, unit, values):
+    """None when a number traces to a recorded value, else the _UNTRACED key naming why it does not.
+
+    Written to d places, the number stands for any value that rounds half up to it, as export rounds (magnitudes,
+    so away from zero): from half a unit below its last place, that edge included, to strictly below half a unit
+    above. A value exactly on the upper edge rounds to the next digit, so it does not trace and gives "edge". A
+    value a query rounded to the lower edge does trace; export's precision_warnings reports that case.
+    """
     if not _GROUPED.fullmatch(body):
-        return False  # 1,2,3, the decimal comma 21,3, 3/4, 14:05, and 1.234.567 have no one value
+        return "joined"  # 1,2,3, the decimal comma 21,3, 1/2/3, 9:30, and 1.234.567 have no one value
     try:
         number, half = _value(body)
         with localcontext(_EXACT):
@@ -1591,8 +1698,14 @@ def _traces(body, unit, values):
             elif unit in _SCALES:
                 windows.append((low.scaleb(_SCALES[unit]), high.scaleb(_SCALES[unit])))
     except (ValueError, ArithmeticError):
-        return False  # an exponent too large to hold traces to nothing
-    return any(_within(values, low, high) for low, high in windows)
+        return "value"  # an exponent too large to hold traces to nothing
+    if any(_within(values, low, high) for low, high in windows):
+        return None
+    if any((index := bisect.bisect_left(values, high)) < len(values) and values[index] == high
+           for _, high in windows):
+        return "edge"
+    return "year" if not unit and re.fullmatch(_YEAR, body) else "value"
+
 
 
 # A line that opens a block (a heading, a bullet, a quote, a table row, or a fence) starts no wrap.
@@ -1626,7 +1739,8 @@ def _continues(previous, line):
 
 
 def check_numbers(path: str | os.PathLike, values, *, allowed=(), claim_lines=()) -> list[dict]:
-    """List each number in a narrative file that no recorded value rounds to and `allowed` does not cover.
+    """List each number in a narrative file that no recorded value rounds to and `allowed` does not cover:
+    {"file", "line", "text", "problem"}, the problem naming the rule that left it untraced (`_UNTRACED`).
 
     `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
     text is written around it, matched on the text the number is read from, so any whitespace or a line
@@ -1655,8 +1769,8 @@ def check_numbers(path: str | os.PathLike, values, *, allowed=(), claim_lines=()
         spans = [found.span() for pattern in patterns for found in pattern.finditer(joined)]
         for text, body, unit, start, end in _quantities(reads[1], reads[0], reads[2], marker=marker, code=False):
             covered = any(low <= offset + start and offset + end <= high for low, high in spans)
-            if not covered and not _traces(body, unit, values):
-                rows.append({"file": Path(path).name, "line": number, "text": text})
+            if not covered and (why := _untraced(body, unit, values)):
+                rows.append({"file": Path(path).name, "line": number, "text": text, "problem": _UNTRACED[why]})
     return rows
 
 
@@ -1843,8 +1957,9 @@ def _slide(heading, first, lines):
     """One region read as a slide: headline, bullets, chart specifications, notes, and anything else."""
     blocks = _blocks(lines)
     slide = {"line": first, "heading": heading, "opening": blocks[0]["line"] if blocks else None, "headlines": [],
-             "bullets": [], "notes": [], "after_notes": None, "charts": [], "extra": []}
+             "bullets": [], "notes": [], "after_notes": None, "charts": [], "extra": [], "field_bullets": []}
     chart = depth = None  # depth: the open chart's field depth, set by its first field
+    ended = None  # the chart whose fields the field-named bullets right after them would have continued
     for block in blocks:
         if slide["notes"] and slide["after_notes"] is None:
             slide["after_notes"] = block["line"]
@@ -1864,6 +1979,8 @@ def _slide(heading, first, lines):
                                     for line in block.get("paragraphs", [])]
                 depth = block["depth"]
                 continue
+        # A field-named bullet after a chart's fields ended, at a blank line or a repeated field, is the slide's.
+        ended = chart or ended if block["kind"] == "item" and _CHART_FIELD.match(text) else None
         chart = depth = None
         if block["kind"] != "heading" and _CHART_SPEC.match(block["first"]):
             chart = _chart(block)
@@ -1871,6 +1988,9 @@ def _slide(heading, first, lines):
         elif block["kind"] == "item":
             if block["depth"] == 1 or not slide["bullets"]:
                 slide["bullets"].append({"line": block["line"], "text": text, "sub": []})
+                if ended is not None:
+                    slide["field_bullets"].append({"line": block["line"], "chart": ended["number"],
+                                                   "field": _CHART_FIELD.match(text)[1]})
             else:
                 slide["bullets"][-1]["sub"].append(text)
         elif block["kind"] == "paragraph" and (match := _HEADLINE.match(text)):
@@ -1901,7 +2021,8 @@ def parse_outline(text: str) -> dict:
     as {"line", "slides"}, slides counting the `###` slides under it. counts is {"main", "appendix"}: the
     title slide and the slides before ## Appendix, and the slides under it, without the divider a builder
     adds. The remaining slide keys keep what the checks report: every **Headline:** and **Notes:**
-    paragraph, the first block after the notes, every chart, and text that is none of these.
+    paragraph, the first block after the notes, every chart, text that is none of these, and in field_bullets
+    each bullet opening with a chart field name right after that chart's fields ended, as {"line", "chart", "field"}.
     """
     return _outline(_view(text)[0])
 
@@ -2028,10 +2149,21 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
                 row(name, line, f"the headline has {words} words, over the {HEADLINE_WORDS}-word limit; shorten it "
                                 "with the user's approval, or record their acceptance in accepted_long_headlines",
                     "warning", headline=slide["headline"])
+        # A field-named bullet after a chart's fields ended renders as a slide bullet, its field dropped from the
+        # chart, whatever the bullet count. **Caveat:** alone is also a slide bullet of its own (deck-rules.md).
+        strays = [entry for entry in slide["field_bullets"] if entry["field"] != "Caveat"]
+        for entry in strays:
+            row(name, entry["line"], f"this bullet opens with the chart field name {entry['field']} after Chart "
+                f"{entry['chart']}'s fields ended at a blank line or a repeated field, so it is a slide bullet and "
+                "the chart loses the field: keep the chart's fields together, with no blank line between them")
         if len(slide["bullets"]) > SLIDE_BULLETS and (slide["finding"] or name != "Open questions"):
+            fields = Counter(entry["chart"] for entry in strays)
             row(name, slide["bullets"][SLIDE_BULLETS]["line"],
                 f"{len(slide['bullets'])} bullets; keep it to {SLIDE_BULLETS} and move the rest to another slide "
-                "or into the notes")
+                "or into the notes" + "".join(
+                    f"; {count} of them open with a chart field name after Chart {number}'s fields ended, so they "
+                    "count as slide bullets: keep its fields together, with no blank line between them"
+                    for number, count in fields.items()))
         if len(slide["charts"]) > 1:
             row(name, slide["charts"][1]["line"], f"{len(slide['charts'])} charts; a slide carries at most one")
         for extra in slide["extra"]:
@@ -2134,6 +2266,12 @@ _CHART_FILE = re.compile(r"chart-([1-9]\d*)\.csv")
 _IDENTIFIER = re.compile(r"[A-Za-z0-9]_[A-Za-z0-9]|[A-Za-z]\.[A-Za-z]")
 
 
+def _header_text(header):
+    """A chart file's header as a **Data:** line naming it renders: NFKC-normalized, zero-width characters
+    dropped, as `_rendered` reads the line."""
+    return unicodedata.normalize("NFKC", _visible(header))
+
+
 def _check_chart(number, headers, rows):
     if not rows:
         raise ValueError(f"Chart {number} has no rows")
@@ -2217,14 +2355,17 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
         pairs, problems = chart_data(chart)
         rows += [{"chart": label, "problem": problem} for problem in problems]
         if chart["number"] in headers:
+            # The **Data:** line is read as it renders, NFKC-normalized, so a header is compared the same way:
+            # CO₂ in the file matches CO₂ on the line, which renders as CO2.
             named = dict.fromkeys(header for _, header in pairs)
+            shown = {_header_text(header) for header in headers[chart["number"]]}
             for header in named:
-                if header not in headers[chart["number"]]:
+                if header not in shown:
                     rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv has no column "
                                                             f"{header!r}, which **Data:** names"})
             # A column no role names would be drawn by one builder and dropped by another.
             for header in headers[chart["number"]] if pairs else []:
-                if header not in named:
+                if _header_text(header) not in named:
                     rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv column {header!r} is "
                                  f"named by no **Data:** role; name it{_by_role(chart['form'])}, or export the "
                                  "chart without it" + _intervals_note(chart["form"], column=True)})
@@ -2270,6 +2411,7 @@ def _chart_entry(entry):
             and all(isinstance(codes, dict) and all(isinstance(label, str) for label in codes.values())
                     for codes in entry["values"].values())
             and isinstance(entry.get("percent"), list) and all(isinstance(c, str) for c in entry["percent"])
+            and isinstance(entry.get("scale"), dict) and all(_divisor(d) for d in entry["scale"].values())
             and isinstance(entry.get("round"), dict)
             and all(type(p) is int and 0 <= p <= _ROUND_LIMIT for p in entry["round"].values()))
 
@@ -2284,8 +2426,9 @@ def _chart_difference(actual, expected):
 
 
 def _display_difference(entry, saved, display):
-    """Which of an entry's headers, value labels, or percent columns differ from what display.toml now gives
-    for its result and selected rows, or None. Its places can come from --round, so they are not compared."""
+    """Which of an entry's headers, value labels, percent columns, or [scale] divisors differ from what
+    display.toml now gives for its result and selected rows, or None. Its places can come from --round, so they
+    are not compared."""
     names, values, _ = _labels(display, entry["result_id"])
     own_percent = display["results"].get(entry["result_id"], {}).get("percent")
     percent = display["percent"] if own_percent is None else own_percent
@@ -2301,6 +2444,9 @@ def _display_difference(entry, saved, display):
         return "value labels"
     if entry["percent"] != [column for column in entry["columns"] if column in percent]:
         return "percent columns"
+    if entry["scale"] != {column: display["scale"][column] for column in entry["columns"]
+                          if column in display["scale"]}:
+        return "scale divisors"
     return None
 
 
@@ -2308,7 +2454,8 @@ def chart_file_problems(root, investigation, draft, record) -> list[dict]:
     """Match each chart file with the manifest's charts entry export recorded for it, the entry's headers,
     value labels, and percent columns with what foundation/display.toml gives, and the file with its result's
     saved table under that entry's selection, value labels, percent columns, and rounding: {"chart",
-    "problem"}. The numbers check is separate: every plotted value is still a recorded value."""
+    "problem"}. The numbers check is separate: every plotted value is still a recorded value, or one divided by
+    its recorded [scale] divisor, which recorded_values adds."""
     charts = record.get("charts")
     entries = [] if charts is None or charts == "none" else charts
     if not isinstance(entries, list) or not all(isinstance(e, dict) and isinstance(e.get("path"), str)
@@ -2336,8 +2483,8 @@ def chart_file_problems(root, investigation, draft, record) -> list[dict]:
         file = present[name].name
         if not _chart_entry(entry):
             rows.append({"chart": label, "problem": f"the manifest's charts entry for {file} records no selection, "
-                                                    "columns, headers, value labels, percent, or rounding; rerun "
-                                                    "export with every --chart to record them (a --result-only "
+                                                    "columns, headers, value labels, percent, scale, or rounding; "
+                                                    "rerun export with every --chart to record them (a --result-only "
                                                     "export keeps this entry)"})
             continue
         table = Path(root) / "investigations" / investigation / "results" / f"{entry['result_id']}.csv"
@@ -2833,7 +2980,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     # strength line the claims check accepts repeats state.md and is skipped.
     if record is not None:
         allowed, problems = allowed_numbers(record)
-        values, more = recorded_values(root, investigation, record.get("results"))
+        values, more = recorded_values(root, investigation, record.get("results"), recorded_scales(record))
         report["numbers_problems"], report["numbers"] = problems + more, []
         for name in _narratives(draft):
             try:
@@ -2879,7 +3026,9 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "outline lists, as slide, line, and problem, each break of the slide "
                "rules: a missing # title or subtitle, text outside every slide, a ### finding outside ## Findings "
                "and ## Appendix, "
-               "a missing, repeated, empty, or over-15-word headline, more than five bullets except on Open questions, more than one chart, "
+               "a missing, repeated, empty, or over-15-word headline, a bullet opening with a chart field name other "
+               "than Caveat: after that chart's fields ended (naming the chart), more than five bullets except on "
+               "Open questions (naming the chart when some are such bullets), more than one chart, "
                "text that is no headline, bullet, chart, or notes, and a missing, repeated, or non-final **Notes:** "
                "paragraph; a missing, repeated, or misplaced required slide (Answer first after the title, a finding "
                "slide in the main sequence, then How we know and Limitations and open caveats, either of which may "
@@ -2900,18 +3049,21 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "charts lists, as chart and problem, a specification numbered out of order, without "
                "a file, or without a form from deck-rules.md; a **Data:** line missing, malformed, or not naming "
                "its form's roles; a column it names that the file lacks, and a column of the file that it names by "
-               "no role; an item nested under a field or a second paragraph in one; and a chart file without a "
+               "no role, headers compared NFKC-normalized as the line renders; an item nested under a field or a second paragraph in one; and a chart file without a "
                "specification or data rows, or a foreign file. It also lists each chart file the manifest's "
                "charts does not record, an entry whose file is missing or that records no selection, columns, "
-               "headers, value labels, percent, or rounding, an entry whose headers, value labels, or percent "
-               "columns differ from what foundation/display.toml gives, and a file that differs from its result's saved "
-               "table under that entry's selection, labels, percent columns, and rounding (export writes every "
+               "headers, value labels, percent, scale, or rounding, an entry whose headers, value labels, percent "
+               "columns, or scale divisors differ from what foundation/display.toml gives, and a file that differs "
+               "from its result's saved table under that entry's selection, labels, scale, percent columns, and "
+               "rounding (export writes every "
                "chart file; rows are selected with --chart, never by editing the file).\nclaims lists each causal phrase (line, section, phrase, claim, results) "
                "in a findings.md slide, heading included, above its claim strength: a ### finding slide is held to the weakest "
                "Claim in state.md among the results its methodology.md section cites (all represented results "
                "when it cites none), and the title and other slides that state conclusions to the strongest; "
                "How we know, Limitations and open caveats, Open questions, What changed since the last version, and Supporting "
-               "datasets are not read, under ## Appendix too; methodology-note.md is held to the strongest. It also lists a represented result without a recognized Claim, and a "
+               "datasets are not read, under ## Appendix too; methodology-note.md is held to the strongest, its ## "
+               "Limitations section not read; a phrase in a negated clause, under the grammar helpers.md states, "
+               "is no claim. It also lists a represented result without a recognized Claim, and a "
                "finding whose methodology.md section is missing or whose **Claim strength:** line is missing, "
                "repeated, unrecognized, or differs from state.md, a causal design included.\nheadings lists a ### "
                "finding heading without exactly one methodology.md section or repeated in findings.md.\nmarkdown "
@@ -2920,9 +3072,10 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "an indented fence or comment; a setext heading; indented code; an HTML block or inline tag; a link "
                "reference definition; an unclosed fence or comment. Every check but numbers reads the narratives "
                "as they render."
-               "\nnumbers lists, as file, line, and text, each number in findings.md, methodology.md, or "
-               "methodology-note.md that no represented result's table, profile, check details, or settings round "
-               "to and the manifest's allowed_numbers does not cover by its text or a phrase around it, reading "
+               "\nnumbers lists, as file, line, text, and problem (the rule that left it untraced, pointing to "
+               "allowed_numbers), each number in findings.md, methodology.md, or "
+               "methodology-note.md that no represented result's table, profile, check details, settings, or "
+               "recorded [scale] column divided by its divisor rounds half up to, and the manifest's allowed_numbers does not cover by its text or a phrase around it, reading "
                "source lines without the comments and fenced code the rendered reading drops, so a <!-- in a code "
                "span, fenced code, or a link's target, or escaped, hides nothing, and skipping a methodology.md "
                "**Claim strength:** line the claims check accepts, whose numbers repeat state.md's Claim cell; "
@@ -3050,7 +3203,7 @@ def _load_provenance(root):
 # ---------------------------------------------------------------- export
 
 _DISPLAY = "foundation/display.toml"
-_DISPLAY_KEYS = ("columns", "values", "round", "percent", "results")
+_DISPLAY_KEYS = ("columns", "values", "round", "percent", "scale", "confirmed", "results")
 # A number cell: an optional sign, digits with an optional decimal point, and an optional exponent, as a CSV
 # writer writes a number. Other text, a thousands separator, NaN, and infinity included, is shown as written.
 _NUMBER_CELL = re.compile(r"[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?")
@@ -3058,8 +3211,13 @@ _NUMBER_CELL = re.compile(r"[-+]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][-+]?[0-
 UNROUNDED_PLACES = 4
 _ROUND_LIMIT = 20
 _CHART_FORM = "RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]]"
-_COLLISION = ("results answering different questions share this [columns] name; confirm it fits each, "
-              "or name the column for one result under [results.\"<result>\".columns]")
+_COLLISION = ("results answering different questions share this [columns] name; confirm it fits each and list "
+              "the column under [confirmed] columns, or name the column for one result under "
+              "[results.\"<result>\".columns]")
+_PRECISION = ("its fractions are saved to exactly four decimal places, a sign the query rounded them, and shown as "
+              "a percent rounded to {places} they are rounded a second time, which can move the last digit; save "
+              "the result at full precision and round only under [round]")
+_UNMATCHED = "no cell of the saved tables it labels holds this code; a code matches the saved text exactly"
 
 
 def _table(value, problem):
@@ -3079,20 +3237,38 @@ def _labels_from(record, where):
     return columns, values
 
 
-def _percent_from(value, where):
-    """A [percent] table's columns list, as `where` names the table in the file."""
+def _percent_from(value, where, table="percent"):
+    """A [percent] or [confirmed] table's columns list, as `where` names the table in the file."""
     if not (isinstance(value, dict) and set(value) == {"columns"} and isinstance(value["columns"], list)
             and all(isinstance(column, str) and column for column in value["columns"])):
-        raise ValueError(f"{_DISPLAY}: {where}percent] holds one key, columns, a list of column names")
+        raise ValueError(f"{_DISPLAY}: {where}{table}] holds one key, columns, a list of column names")
     return list(value["columns"])
 
 
+def _divisor(value):
+    """Whether a [scale] divisor is a positive finite number, as TOML or JSON writes one."""
+    return type(value) in (int, float) and math.isfinite(value) and value > 0
+
+
+def _scale_from(value):
+    """The [scale] table: each column's divisor, from column = { divide = <a positive number> }."""
+    table = _table(value, "[scale] maps each column to { divide = <a positive number> }")
+    for column, entry in table.items():
+        if not (isinstance(entry, dict) and set(entry) == {"divide"} and _divisor(entry["divide"])):
+            raise ValueError(f"{_DISPLAY}: [scale] {column} is not {{ divide = <a positive number> }}")
+        table[column] = entry["divide"]
+    return table
+
+
 def display_names(root) -> dict:
-    """Return {columns, values, round, percent, results} from foundation/display.toml, empty when it is absent.
+    """Return {columns, values, round, percent, scale, confirmed, results} from foundation/display.toml, empty
+    when it is absent.
 
     The file holds only [columns] (column: display name), [values.<column>] (coded value: label), [round]
     (column: decimal places), [percent] with one key, columns = [...] (columns whose fractions show 100 times
-    larger), and [results."<result>"] tables holding columns, values, and percent tables, which replace the
+    larger), [scale] (column = { divide = <a positive number> }, its values shown divided), [confirmed] with one
+    key, columns = [...] (shared names confirmed to fit every result they label, which label_collisions then
+    leaves out), and [results."<result>"] tables holding columns, values, and percent tables, which replace the
     global ones for that result's files, a values table for its whole column and a percent table for every
     column. A result without a percent table has None there. Anything else raises ValueError. A name or a
     number of places is checked where a column is exported.
@@ -3105,7 +3281,7 @@ def display_names(root) -> dict:
     for key in record:
         if key not in _DISPLAY_KEYS:
             raise ValueError(f"{_DISPLAY}: unknown key {key!r}; the file holds only [columns], [values.<column>], "
-                             "[round], [percent], and [results.\"<result>\"]")
+                             "[round], [percent], [scale], [confirmed], and [results.\"<result>\"]")
     columns, values = _labels_from(record, "[")
     percent = _percent_from(record.get("percent", {"columns": []}), "[")
     results = {}
@@ -3120,7 +3296,9 @@ def display_names(root) -> dict:
                               "percent": _percent_from(entry["percent"], where + ".") if "percent" in entry else None}
     return {"columns": columns, "values": values,
             "round": _table(record.get("round", {}), "[round] maps each column to its decimal places"),
-            "percent": percent, "results": results}
+            "percent": percent, "scale": _scale_from(record.get("scale", {})),
+            "confirmed": _percent_from(record.get("confirmed", {"columns": []}), "[", "confirmed"),
+            "results": results}
 
 
 def parse_chart(text: str) -> tuple:
@@ -3181,27 +3359,44 @@ def _number(text):
     return True
 
 
-def _unrounded(text, percent=False) -> bool:
+def _scaled(text, divide):
+    """A number cell's value divided by its [scale] divisor: exact whenever the quotient has at most 40 more
+    significant digits than the cell's text, as dividing by a power of ten always does."""
+    number = Decimal(text)
+    if divide is None:
+        return number
+    with localcontext(Context(prec=len(text) + 40, Emax=MAX_EMAX, Emin=MIN_EMIN)):
+        return number / Decimal(str(divide))
+
+
+def _places(text, divide=None):
+    """The decimal places a number cell's value shows once divided by its [scale] divisor, trailing zeros
+    dropped and any exponent applied."""
+    return -_scaled(text, divide).normalize(_EXACT).as_tuple().exponent
+
+
+def _unrounded(text, percent=False, divide=None) -> bool:
     """Whether a cell shows more than UNROUNDED_PLACES decimal places: a finite number cell whose saved text,
-    the file's text unless rounded, has more once trailing zeros are dropped, any exponent applied, and a
-    percent column's 100-fold scaling applied, so a percent column's saved fraction may carry two more. So
-    366.89000039169395 and 1e-05 are unrounded, and 21.3500, which is 21.35, is not; digits beyond a float's
-    precision count, since the file shows them."""
+    the file's text unless rounded, has more once trailing zeros are dropped, any exponent applied, its [scale]
+    divisor applied, and a percent column's 100-fold scaling applied, so a percent column's saved fraction may
+    carry two more. So 366.89000039169395 and 1e-05 are unrounded, and 21.3500, which is 21.35, is not; digits
+    beyond a float's precision count, since the file shows them."""
     if not _number(text):
         return False
-    places = -Decimal(text).normalize(_EXACT).as_tuple().exponent
-    return places - (2 if percent else 0) > UNROUNDED_PLACES
+    return _places(text, divide) - (2 if percent else 0) > UNROUNDED_PLACES
 
 
-def _display_cell(text, labels, percent, places):
-    """A saved cell as a file shows it: its value label; else, for a number cell, scaled exactly by 100 in a
-    percent column and rounded half up to its places, as a reader would; else as written."""
+def _display_cell(text, labels, percent, places, divide=None):
+    """A saved cell as a file shows it: its value label; else, for a number cell, divided by its [scale]
+    divisor, scaled exactly by 100 in a percent column, and rounded half up to its places, as a reader would;
+    else as written."""
     if text in labels:
         return labels[text]
-    if not _number(text) or not percent and places is None:
+    if not _number(text) or not percent and places is None and divide is None:
         return text
+    number = _scaled(text, divide)
     with localcontext(_EXACT):
-        number = Decimal(text).scaleb(2) if percent else Decimal(text)
+        number = number.scaleb(2) if percent else number
         if places is not None:
             number = number.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
         return format(number, "f")
@@ -3220,7 +3415,7 @@ def _select(rows, selection):
 def _apply(rows, entry):
     """A file's data rows from a saved table's rows, as an entry export records shapes them."""
     return [[_display_cell(row[column], entry["values"].get(column, {}), column in entry["percent"],
-                           entry["round"].get(column)) for column in entry["columns"]]
+                           entry["round"].get(column), entry["scale"].get(column)) for column in entry["columns"]]
             for row in _select(rows, entry["selection"])]
 
 
@@ -3251,14 +3446,15 @@ def _toml_key(name):
     return '"' + re.sub(r"[\x00-\x1f\x7f]", lambda match: f"\\u{ord(match.group()):04X}", escaped) + '"'
 
 
-def _shape(root, investigation, result_id, columns, selection, display, rounding, gaps, round_gaps):
+def _shape(root, investigation, result_id, columns, selection, display, rounding, gaps, round_gaps, notes):
     """Shape a saved result table for the audience: (entry, rows, sources, problems).
 
     entry records the shaping, which check-draft reapplies (`_apply`): the result, its columns, the row
-    selection, the headers, the value labels the selected rows use, and the columns shown as percents and
-    rounded. sources states it as methodology lines (`_sources`). A column without a display name is
-    appended to `gaps`, and an unrounded one without places to `round_gaps`; only the cells the file holds
-    count.
+    selection, the headers, the value labels the selected rows use, the columns shown as percents, their
+    [scale] divisors, and their places. sources states it as methodology lines (`_sources`). A column without a
+    display name is appended to `gaps`, and an unrounded one without places to `round_gaps`; only the cells the
+    file holds count. `notes` gathers what the warnings read: {"precision": rows, "codes": {table: (codes,
+    cells)}}, each value table's codes with the cells of every saved table it labels (`value_warnings`).
     """
     path = Path(root) / "investigations" / investigation / "results" / f"{result_id}.csv"
     if not path.is_file():
@@ -3291,6 +3487,12 @@ def _shape(root, investigation, result_id, columns, selection, display, rounding
     # A result's own percent list replaces the global one, so a column already holding percents there is kept.
     own_percent = display["results"].get(result_id, {}).get("percent")
     percent = [c for c in chosen if c in (display["percent"] if own_percent is None else own_percent)]
+    scale = {c: display["scale"][c] for c in chosen if c in display["scale"]}
+    own_values = display["results"].get(result_id, {}).get("values", {})
+    for column in chosen:
+        if column in values:
+            where = f'[results."{result_id}".values.{column}]' if column in own_values else f"[values.{column}]"
+            notes["codes"].setdefault(where, (values[column], set()))[1].update(row[column] for row in table)
     places = {}
     for column in chosen:
         if column in rounding:
@@ -3302,7 +3504,7 @@ def _shape(root, investigation, result_id, columns, selection, display, rounding
                 places[column] = value
             continue
         example = next((row[column] for row in selected if row[column] not in values.get(column, {})
-                        and _unrounded(row[column], column in percent)), None)
+                        and _unrounded(row[column], column in percent, scale.get(column))), None)
         if example is not None:
             problems.append(f"{result_id}: column {column!r} has values with more than {UNROUNDED_PLACES} decimal "
                             f"places{' shown as a percent' if column in percent else ''}, trailing zeros aside, "
@@ -3310,6 +3512,15 @@ def _shape(root, investigation, result_id, columns, selection, display, rounding
             round_gaps.append(column)
     if problems:
         return None, None, None, problems
+    # A fraction saved at exactly four places was likely rounded in its query; a percent shown to fewer than two
+    # places rounds it again, so 0.6315 shows as 63.2% where the full value may give 63.1%.
+    for column in percent:
+        if places.get(column) is not None and places[column] < 2:
+            example = next((row[column] for row in selected if row[column] not in values.get(column, {})
+                            and _number(row[column]) and _places(row[column], scale.get(column)) == 4), None)
+            if example is not None:
+                notes["precision"].append({"result_id": result_id, "column": column, "example": example,
+                                           "warning": _PRECISION.format(places=_rounded_to(places[column]))})
     used = {}
     for column in chosen:
         codes = values.get(column, {})
@@ -3317,7 +3528,8 @@ def _shape(root, investigation, result_id, columns, selection, display, rounding
         if labeled:
             used[column] = labeled
     entry = {"result_id": result_id, "columns": chosen, "selection": selection,
-             "headers": [names[c] for c in chosen], "values": used, "percent": percent, "round": places}
+             "headers": [names[c] for c in chosen], "values": used, "percent": percent, "scale": scale,
+             "round": places}
     return entry, _apply(table, entry), _sources(entry), []
 
 
@@ -3332,17 +3544,22 @@ def _sources(entry):
         listed = values[0] if len(values) == 1 else f"{', '.join(values[:-1])} or {values[-1]}"
         lines.append(f"rows <- the rows of {result_id} whose {where['column']} is {listed}")
     for header, column in zip(entry["headers"], entry["columns"]):
-        places = entry["round"].get(column)
-        shaping = ([", times 100"] if column in entry["percent"] else []) + (
-            [] if places is None else [", rounded to whole numbers" if places == 0
-                                       else f", rounded to {places} decimal place{'s' if places != 1 else ''}"])
+        places, divide = entry["round"].get(column), entry["scale"].get(column)
+        shaping = ([] if divide is None else [f", divided by {format(Decimal(str(divide)).normalize(), 'f')}"]) + (
+            [", times 100"] if column in entry["percent"] else []) + (
+            [] if places is None else [f", rounded to {_rounded_to(places)}"])
         lines.append(f"{header} <- {result_id}.{column}{''.join(shaping)}")
     return lines
 
 
+def _rounded_to(places):
+    return "whole numbers" if places == 0 else f"{places} decimal place{'s' if places != 1 else ''}"
+
+
 def label_collisions(display, files, questions) -> list[dict]:
     """Each column whose global [columns] name labels files from results answering different questions, no
-    such result naming the column under its own [results."<id>".columns]: {column, name, results, warning}.
+    such result naming the column under its own [results."<id>".columns] and [confirmed] not listing it:
+    {column, name, results, warning}.
 
     files is [(result_id, [columns])], one per exported file; questions maps each result to its question.
     """
@@ -3350,11 +3567,28 @@ def label_collisions(display, files, questions) -> list[dict]:
     for result_id, columns in files:
         own = display["results"].get(result_id, {}).get("columns", {})
         for column in columns:
-            if column in display["columns"] and column not in own:
+            if column in display["columns"] and column not in own and column not in display["confirmed"]:
                 groups.setdefault(column, {})[result_id] = None
     return [{"column": column, "name": display["columns"][column], "results": list(results), "warning": _COLLISION}
             for column, results in groups.items()
             if len({json.dumps(questions.get(r), sort_keys=True) for r in results}) > 1]
+
+
+def value_warnings(codes) -> list[dict]:
+    """Each code of a value table that looks mistyped against the saved tables it labels in this export: {table,
+    code, warning}. `codes` maps each table, as display.toml names it, to (its codes, the cells it was read
+    against). A code matches the saved text exactly, so a boolean pandas saved as True takes the key "True", not
+    true. A code no cell holds is reported when a cell differs from it only in case, or when no code of its
+    table matches any cell; a shared table listing codes these results leave out gives no row."""
+    rows = []
+    for table, (labels, cells) in codes.items():
+        none = not any(code in cells for code in labels)
+        for code in labels:
+            near = sorted(cell for cell in cells if cell.casefold() == code.casefold())
+            if code not in cells and (near or none):
+                rows.append({"table": table, "code": code,
+                             "warning": _UNMATCHED + (f"; the table writes {near[0]!r}" if near else "")})
+    return rows
 
 
 def export(root, investigation, package, charts=(), datasets=(), results=(), *, no_datasets=False,
@@ -3383,7 +3617,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
         report["errors"].append(str(error))
         return report
 
-    shaped, sources, gaps, round_gaps = [], [], [], []
+    shaped, sources, gaps, round_gaps, notes = [], [], [], [], {"precision": [], "codes": {}}
     if full:
         rounding = {**display["round"], **(rounding or {})}
         for kind, label, (result_id, columns, *selection) in (
@@ -3391,7 +3625,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
                 + [("dataset", n, spec) for n, spec in datasets]):
             entry, rows, lines, problems = _shape(root, investigation, result_id, columns,
                                                   selection[0] if selection else "all", display, rounding,
-                                                  gaps, round_gaps)
+                                                  gaps, round_gaps, notes)
             report["errors"] += problems
             if not problems:
                 shaped.append((kind, label, entry, rows))
@@ -3430,6 +3664,9 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     if full:
         report["label_warnings"] = label_collisions(
             display, [(entry["result_id"], entry["columns"]) for _, _, entry, _ in shaped], questions)
+        report["precision_warnings"] = list({(row["result_id"], row["column"]): row
+                                             for row in notes["precision"]}.values())
+        report["value_warnings"] = value_warnings(notes["codes"])
 
     checks = {}
     if serialized:
@@ -3480,7 +3717,8 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
                 writer.writerows(rows)
             report["datasets"].append({"path": _rel(draft, dataset), "result_id": entry["result_id"]})
             selection.append({"path": _rel(draft, dataset), "result_id": entry["result_id"],
-                              "columns": entry["columns"], "percent": entry["percent"], "round": entry["round"]})
+                              "columns": entry["columns"], "percent": entry["percent"], "scale": entry["scale"],
+                              "round": entry["round"]})
         if directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()
         record["dataset_selection"] = selection or "none"
@@ -3540,27 +3778,34 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "of the table, a value no row holds, or more rows than the table has is an error, and nothing "
                "is written. A --dataset takes no row selection.\n"
                "foundation/display.toml holds [columns] (column = display name), [values.<column>] (coded "
-               "value = label), [round] (column = decimal places, 0 to 20), [percent] with columns = [...] "
-               "(fractions shown 100 times larger, scaled exactly before rounding), and [results.\"<result>\"] "
+               "value = label, matching the saved text exactly, so True, not true), [round] (column = decimal places, 0 to 20), [percent] with columns = [...] "
+               "(fractions shown 100 times larger, scaled exactly before rounding), [scale] (column = { divide = "
+               "<a positive number> }, values divided before percent scaling and rounding), [confirmed] with "
+               "columns = [...] (shared names confirmed to fit every result), and [results.\"<result>\"] "
                "with columns, values, and percent tables that replace the global ones for that result, a values "
                "table for its whole column and a percent table for every column, so a column that already holds "
                "percents in one result is not scaled again; any other key is an error.\nEvery exported column "
                "needs a non-blank display name; gaps are listed together with display_stub, lines for absent "
                "names to fill in under [columns] (a blank name is fixed in place), and nothing is written. A "
                "number cell a file holds "
-               f"is unrounded when its saved text, with trailing zeros dropped, any exponent applied, and a "
+               f"is unrounded when its saved text, with trailing zeros dropped, any exponent and divisor applied, and a "
                f"percent column's 100-fold scaling applied, has more than {UNROUNDED_PLACES} decimal places, so "
                f"a percent column's saved fraction may carry {UNROUNDED_PLACES + 2} (366.89000039169395 and "
                "1e-05 are; 21.3500, which is 21.35, is not); a column holding one needs places under [round] "
                "or --round, listed with round_stub, lines to paste under [round] once each \"\" is replaced "
                "with the places the slide's number format shows, unquoted, such as \"share\" = 1.\nlabel_warnings "
                "lists each column whose [columns] name labels files from results with different questions "
-               "and no [results.\"<result>\".columns] name; it is a warning, and the files are written.\n"
+               "and no [results.\"<result>\".columns] name, unless [confirmed] lists it; value_warnings lists each "
+               "value code no cell of the saved tables it labels holds, when a cell differs from it only in case "
+               "or no code of its table matches any cell; precision_warnings lists each percent "
+               "column shown to fewer than two places whose fractions include one saved to exactly four, a sign "
+               "the query rounded them. Each is a warning, and the files are written.\n"
                "The manifest's charts entries record each chart's result, columns, selection, headers, value "
-               "labels used, percent columns, and places, which check-draft reapplies to verify the file; "
-               "dataset_selection entries record each dataset's result, columns, percent columns, and places.\n"
+               "labels used, percent columns, scale divisors, and places, which check-draft reapplies to verify "
+               "the file; dataset_selection entries record each dataset's result, columns, percent columns, scale "
+               "divisors, and places.\n"
                "methodology_lines states each file's shaping for methodology.md: the rows a chart selects, then "
-               "each header's source column with any percent scaling and rounding.\n"
+               "each header's source column with any division, percent scaling, and rounding.\n"
                "Writes nothing when an evidence file is "
                "missing or any comparison fails (exports_blocked).\nEach write sets revalidation_flags from "
                "state.md's flags (none when it flags nothing), keeping an entry whose finding and reason match "

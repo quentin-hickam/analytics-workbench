@@ -77,12 +77,12 @@ Once the narratives and flags are complete, run the review in [references/review
 
 ## 6. Check
 
-Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it; a long-headline `warning` row is asked about as the headline checkpoint says, never trimmed unasked.
+Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it; a long-headline `warning` row is asked about as the headline checkpoint says, never trimmed unasked. When a repair rewrites a sentence the user wrote, show them the new wording, and never tell the user a rewritten sentence is in their wording unless it is word for word theirs.
 
-A `numbers` row is a number no represented result records. A `numbers` row on a `methodology.md` **Claim strength:** line that the `claims` check refuses clears once that `claims` row is repaired, so repair that row first and never list its numbers in `allowed_numbers`. Repair any other `numbers` row by the first of these that fits:
+A `numbers` row is a number no represented result records; its `problem` names the rule that applied. A `numbers` row on a `methodology.md` **Claim strength:** line that the `claims` check refuses clears once that `claims` row is repaired, so repair that row first and never list its numbers in `allowed_numbers`. Repair any other `numbers` row by the first of these that fits:
 
 1. It comes from a recorded result the draft relies on but `export` was not given: rerun `export` as step 4 says, passing that result too. `allowed_numbers` never stands in for representing a result.
-2. A represented result records it at another value or precision: rewrite it from the recorded value.
+2. A represented result records it at another value or precision: rewrite it from the recorded value. Written in another unit than a chart or dataset column records, such as gigatonnes for a megatonne column, it traces once that column has a `[scale]` divisor in `foundation/display.toml` and `export` reruns.
 3. It is not a quantity, such as a date, a comparison year, a chart number, a tool version, or a week number: the check reports any number whose context leaves it in doubt, so reword where a context [helpers](references/helpers.md) lists would mark it, such as a comma after a date or year; otherwise, or when the records support it from elsewhere, such as a figure from an earlier release, a fact the user supplied that `history.md` records, or a number inside a result's question that `methodology.md` must repeat, list it in the manifest's `allowed_numbers` as `package-format/manifest-template.md` describes.
 4. It is computed from results that none records: only separately authorized analysis records it; until then, leave it out.
 

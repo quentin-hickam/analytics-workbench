@@ -6,7 +6,7 @@ The note is optional. It is a short, plain-language account of how the answer wa
 
 Write it under the translation rule in `findings-template.md`: the glossary's business terms, a source by its owner, content, and period, a filter or choice by its effect, and a coded value by its display name. Keep it to a page or two. It states nothing `methodology.md` does not support, and gives the same numbers, qualifications, and caveats; the draft review checks that.
 
-`check-draft` reads the whole note as it reads `findings.md`: it reports internal names, numbers no represented result records, Markdown outside the subset its checks read, and causal wording above the strongest claim strength the package represents. Describe a data problem by what happened, not by a cause ("the extract stopped for six days in June", not "June is short due to an outage").
+`check-draft` reads the whole note as it reads `findings.md`: it reports internal names, numbers no represented result records, Markdown outside the subset its checks read, and causal wording above the strongest claim strength the package represents, outside **Limitations**. Describe a data problem by what happened, not by a cause ("the extract stopped for six days in June", not "June is short due to an outage").
 
 # <What the note covers, in the audience's words, such as How we measured late claims>
 
