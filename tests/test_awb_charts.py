@@ -162,7 +162,7 @@ def test_a_blank_line_inside_a_chart_spec_names_the_chart(tmp_path):
     assert rows == [{"slide": "West closes most claims late", "line": 18, "problem": (
         "6 bullets; keep it to 5 and move the rest to another slide or into the notes; 4 of them open with a chart "
         "field name after Chart 1's fields ended, so they count as slide bullets: keep its fields together, with "
-        "no blank line between them")}]
+        "no blank line between them"), "severity": "error"}]
     assert [(row["line"], row["problem"]) for row in charts.outline_problems(path) if "Chart 1" in row["problem"]
             and "bullets" not in row["problem"]] == [(line, stray(field)) for line, field in (
                 (14, "Highlight"), (15, "Axis"), (16, "Source"), (18, "Alt text"))]
