@@ -13,7 +13,7 @@ Packaging **serializes** recorded results: it reuses recorded evidence, exports,
 
 1. **Establish** the investigation, package name, dataset selection, and Audience.
 2. **Gather** the record on the read path the change needs.
-3. **Write** a first pass of `findings.md` under the contract’s **Writing rules**, with chart specifications, `methodology.md`, and any `methodology-note.md`, passing the headline checkpoint.
+3. **Write** a first pass of `findings.md` under the contract's **Writing rules**, with chart specifications, `methodology.md`, and any `methodology-note.md`, passing the headline checkpoint.
 4. **Export the files and provenance** with `export` on every revision, which creates the draft folder; then fill in the display names and paste the `methodology_lines`, in that order, and review the flags.
 5. **Review** the narratives with a read-only reviewer against every review rule.
 6. **Check** last with `check-draft`, until done.
@@ -76,7 +76,7 @@ Write the draft at the contract's paths, or revise the same files: a first pass,
 
 ## 5. Review
 
-Run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against the brief’s definitions and questions, every rule in `foundation/review-rules.md`, and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it, right after `review-receipt start`. Record and act on its report as that file's **After the review** says; the first review of a draft is full, and later ones are scoped against the recorded one.
+Run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against the brief's definitions and questions, every rule in `foundation/review-rules.md`, and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it, right after `review-receipt start`. Record and act on its report as that file's **After the review** says; the first review of a draft is full, and later ones are scoped against the recorded one.
 
 ## 6. Check
 

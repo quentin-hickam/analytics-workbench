@@ -839,10 +839,10 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     # Routine repairs are reported at the cap; decisions and rule conflicts still go to the user.
     assert '(unchanged since the prior review)' not in review and 'why the earlier pass missed it' not in review
     assert 'Take a conflict between two rules to the user rather than repairing it' in review
-    assert ('Make repairs changing no number, no finding beyond narrowing to its evidence, and no user-written '
-            'or approved wording') in review
+    assert ('At that stop, make the small repairs, those changing no number, no finding beyond narrowing to its '
+            'evidence, and no user-written or approved wording') in review
     assert ("list them in one plain note saying the next request's scoped review checks them") in review
-    assert 'Show each other problem in plain words with a recommended repair' in review
+    assert 'show the user each other problem in plain words with a recommended repair' in review
     assert ('If any need the user, make small repairs with their answer, after recording any acceptances with '
             '`--accept`; otherwise make them now') in review
     # Package is done on a passed review of the final files, full or scoped.
@@ -887,11 +887,10 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
     assert 'Only an exact check says "exactly" or "every row"' in rules
     assert 'before the data was seen' not in review
     assert ('definitions, exclusion rules, metric names, and accounts of what a metric or check counts match '
-            '`brief.md`’s **Population and scope** and **Local terms or departures** and `methodology.md`’s '
+            "`brief.md`'s **Population and scope** and **Local terms or departures** and `methodology.md`'s "
             'definitions, or `methodology.md` states the departure') in step3
     assert 'a recorded check that establishes the claim' in step3
-    assert ('a verification-only part confirming another result may be answered in **Notes:** alone; other parts '
-            'stay visible') in step3
+    assert ('a verification-only part confirming another result may be answered in **Notes:** alone') in step3
     assert 'record words ledger or disposition' in rules and 'ledger, flagged, or disposition' not in review + contract
     assert 'Repair a true statement by citing its record or rewording it, not deleting it' in review
     assert 'departure from the shared glossary or the brief' in read(
@@ -961,7 +960,7 @@ def test_package_writing_rules_are_one_short_list_read_before_drafting():
         assert all_text.count(rule) == 1, rule
     skill = (package / 'SKILL.md').read_text(encoding='utf-8')
     step3 = next(line for line in skill.splitlines() if line.startswith('3. **Write**'))
-    assert 'contract’s **Writing rules**' in step3
+    assert "contract's **Writing rules**" in step3
     review = (package / 'references/review.md').read_text(encoding='utf-8')
     assert '[Writing rules](package-contract.md#writing-rules)' in review
     assert 'ledger, flagged, or disposition' not in review
