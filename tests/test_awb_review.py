@@ -563,8 +563,12 @@ def test_package_and_release_invoke_the_read_only_review():
         assert tool in brief
     assert "never fix them, and change no file" in brief
     # The boundary is no command that writes, so a host that reads files through a shell can still read.
-    assert "Run no command that writes: the only `awb.py` command you run is " \
-           "`python3 src/awb.py review-rules check <investigation> <package>`" in brief
+    assert "Run no command that writes: the only `awb.py` commands you run are " \
+           "`python3 src/awb.py review-rules check <investigation> <package>` and, for a scoped review, " \
+           "`python3 src/awb.py review-receipt show <investigation> <package>`, which write nothing" in brief
+    # In Claude Code the reviewer takes the awb MCP read tool when the session has it, the shell otherwise.
+    assert "When the session has the awb MCP `read` tool, the reviewer runs `review-rules` and `review-receipt` " \
+           "through it, with Bash `python3 src/awb.py ...` as the fallback." in brief
     assert "read-only commands such as `cat`, `sed -n`, and `rg` are reads" in brief
     assert "run only" not in brief.lower()
     assert "one line per rule" in brief and "In Codex" in brief
@@ -579,9 +583,9 @@ def test_package_and_release_invoke_the_read_only_review():
     # The last line counts every kind of problem, so it never says clean while one blocks.
     assert "`review: clean` when there is no violation, no narrative problem, and the command exited 0" in brief
     assert "`review: <v> violations (<e> error), <n> narrative problems, <c> command problems`" in brief
-    assert "no `error` violation, no narrative problem, and no command problem" in brief
-    assert "An `error` violation, a narrative problem, or a command problem stops the release" in release
-    assert "the last review is a full review, passed and not stale" in package and "goes stale" in release
+    assert "reports no `error` violation and no command problem" in brief
+    assert "releasing only once a review is passed" in release
+    assert "its `review` row is `current`" in package and "`stale`" in brief and "`stale`" in release
     assert "whether its disposition is `omit`" in brief
     assert "later drafts could repeat" in brief and "later drafts could repeat" in agents
 

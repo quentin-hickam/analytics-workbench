@@ -85,6 +85,9 @@ The user's choice for a flagged finding that a draft represents: revalidate it, 
 **Review rule**:
 A numbered rule, `R-<area>-NNN`, recorded from a correction the user made while reviewing a package draft, which every later review of a draft checks. Its ID is never renumbered or reused. Its scope, `line` by default, `slide`, or `document`, is what one violation covers.
 
+**Review receipt**:
+The record of a package draft's last review, kept beside the draft: the report, the problems the user accepted with their reasons, and a copy of what the review read. It is current while that review passed and nothing it read has changed; the next review is scoped against it, and a release needs it current.
+
 **Question ledger**:
 An investigation's record of every question it has raised, answered or not, with who can answer each: the user, a stakeholder, or the data. It lives in `questions.json`, rendered whole to `questions.md`. A data question is answered only by a recorded result whose settings declare it; a question is never deleted, and a scope change supersedes an answered one. Questions form a tree: each has a parent question or is a root, and a priority of must, should, or could. The roots are the questions the user asked, and every other question, a stakeholder's or a decision the user deferred included, names the question it serves as its parent, so status and the turn footer count the roots, in the user's terms, before any sub-question. A package proposes its finding slide order from that tree; an order the user approves instead is the package's presentation order, which leaves the tree unchanged. The package's **Open questions** slide lists the unanswered must questions, each in its audience wording when set and its text otherwise. Data problems, actions, and settled decisions are not questions and stay in the state and brief.
 

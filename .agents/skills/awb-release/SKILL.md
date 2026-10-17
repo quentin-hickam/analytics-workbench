@@ -15,16 +15,17 @@ When README's `Released packages are kept at` line is missing, blank, or `not ye
 
 ## 2. Review
 
-Run the full read-only review in [awb-package's references/review.md](../awb-package/references/review.md) on the draft at the start of every release request, never a scoped re-review: rules can be added after packaging, no earlier report is kept, and the reviewer did not write the draft. An `error` violation, a narrative problem, or a command problem stops the release; repairs are package revisions through awb-package, which reviews again. Report each `warning` violation and release only once the user accepts it. Within this release request, review again in full whenever the review goes stale as that file's **After the review** defines; recording `release_with_caveat` under **4. Resolve flags** does not make it stale.
+Read `review-receipt` through the `read` tool, or run `python3 src/awb.py review-receipt show <investigation> <package>`. A matching receipt, `current`, needs no review. When it is `stale` or `failed`, run the scoped read-only review in [awb-package's references/review.md](../awb-package/references/review.md) against it, or the full one when it is `none`, then record it and settle its report as that file's **After the review** says, releasing only once a review is passed. A repair it needs is a package revision through awb-package; after it, show the user the changed slides and wait for their yes before running `release`, unless they said to release without seeing it. Recording `release_with_caveat` under **4. Resolve flags** leaves the review current.
 
 ## 3. Release
 
 First run `python3 src/awb.py check-draft <investigation> <package> --verify-only`, which writes nothing. A release copies the draft byte for byte, so when `draft_markers` lists wording such as DRAFT or working copy in the deck's title, subtitle, headings, or title notes, show each row and ask the user to confirm it or revise it through awb-package, and release only once they confirm.
 
-Then run `python3 src/awb.py release <investigation> <package>`. Its gate is `check-draft --verify-only`: a pass reruns every mechanical check and verifies every file but the manifest against the recorded inventory, so the contract needs no rereading and only the review reads the narratives. It refuses, creating nothing, in two ways:
+Then run `python3 src/awb.py release <investigation> <package>`. Its gate is `check-draft --verify-only`: a pass reruns every mechanical check and verifies every file but the manifest against the recorded inventory, so the contract needs no rereading and only the review reads the narratives. It refuses, creating nothing, in three ways:
 
 - `check-draft --verify-only does not pass`: report the `check` rows verbatim and stop; repairs are package revisions through awb-package. A `claims` row also follows a claim strength or causal design basis changed in `state.md` since packaging: the released methodology must state each finding's current Claim.
 - `flagged findings without a release disposition`: settle them under **4. Resolve flags**, then run `release` again.
+- `no passed review of this draft`: review it as **2. Review** says, then run `release` again.
 
 The step is done when it exits with `released: true`; report whether the local copy verified.
 
@@ -52,6 +53,6 @@ When the user asks only to record or change where released packages are kept, re
 
 ## Report
 
-Report the review's outcome and any accepted `warning` violations, then from the `release` output: `release` and `release_number`; `datasets`, or none; `dispositions`, separating those marked `new` (absent from the prior release's manifest) from those carried forward; each `provenance_gaps` entry as what went unrecorded, from its `field` and `reason`, such as "the Python version for one result was not recorded" for an unknown runtime or "one result's package versions were not recorded" for a requirements line it could not read, or not at all when it changes nothing the user decides, such as an unrecorded packaging commit in a project without Git; each `checkout_only_acquisitions` entry as an acquisition held only in this checkout; and the storage result as in **5. Copy to storage**, copy instruction included.
+Report the review's outcome and each problem its `review` lists as accepted, then from the `release` output: `release` and `release_number`; `datasets`, or none; `dispositions`, separating those marked `new` (absent from the prior release's manifest) from those carried forward; each `provenance_gaps` entry as what went unrecorded, from its `field` and `reason`, such as "the Python version for one result was not recorded" for an unknown runtime or "one result's package versions were not recorded" for a requirements line it could not read, or not at all when it changes nothing the user decides, such as an unrecorded packaging commit in a project without Git; each `checkout_only_acquisitions` entry as an acquisition held only in this checkout; and the storage result as in **5. Copy to storage**, copy instruction included.
 
 List every `open_caveats` entry, those carried forward included: the headline and bullets of the deck's **Limitations and open caveats** and **Open questions** slides, then each flag released with its caveat. While one remains, never call the release clean or say nothing is outstanding.
