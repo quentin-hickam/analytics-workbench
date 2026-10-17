@@ -12,6 +12,10 @@
 # test_check_charts_spec_rows: an unknown or missing form, a missing Data line, a malformed entry, a role the form does not take, a repeated single role, a missing needed role, a series with two values, a column the file lacks, and a file column no role names give one row each; an interval role on a form without intervals says only a Bar with intervals draws them, and an unnamed column there says so if it holds interval bounds.
 # test_chart_fields_read_past_a_nested_item: an item nested under a field is kept out of the fields and the bullets and reported, and the fields after it still count; a blank line before the nested item changes none of this; a later paragraph in a field is reported, after a nested item too, and the fields after it still count; a paragraph at a nested specification's own depth is outside the fields; a field-named item back at a shallower depth is a bullet.
 # test_check_draft_help_lists_every_chart_row: the check-draft --help epilog names the unnamed-column and field-list chart rows.
+# test_a_supporting_citation_does_not_move_a_slide: a slide ranks by its primary result, the first its methodology section cites, so a supporting result answering a higher question moves nothing; ledger_order lists the derived order.
+# test_a_plain_word_is_no_citation_of_a_result_with_that_id: the bare word monthly cites nothing, a code span holding the ID alone and an evidence path cite, the first citation is primary; within one line a code span comes before a link target (known limit).
+# test_a_reworded_heading_keeps_its_presentation_order_slot: a slide whose heading changed keeps the recorded slug of its primary result, so the user's order still holds; a moved slide is reported by heading and slug.
+# test_slide_slugs: an exact heading keeps its slug; a reworded slide with another primary result, or sharing one with another reworded slide, takes a new slug; new slugs are ASCII, six words at most, numbered past a taken one; malformed or repeated recorded entries record nothing; a vanished slide's slug is dropped.
 
 import importlib.util
 from pathlib import Path
@@ -524,3 +528,111 @@ def test_check_draft_help_lists_every_chart_row(tmp_path, capsys):
     help_text = " ".join(capsys.readouterr().out.split())
     assert "a column of the file that it names by no role" in help_text
     assert "an item nested under a field or a second paragraph in one" in help_text
+
+
+class Ledger:
+    """A stand-in for the provenance helper: a question tree in walk order and each result's declared answers."""
+
+    def __init__(self, priorities, answers):
+        self.tree = [{"id": f"Q-{n:03d}", "priority": p} for n, p in enumerate(priorities, 1)]
+        self.answers = answers
+
+    def question_tree(self, root, investigation):
+        return self.tree
+
+    def result_answers(self, root, investigation, result):
+        return self.answers.get(result, [])
+
+
+def story(tmp_path, slides):
+    """A draft whose finding slides are slides' (heading, methodology text) pairs, in deck order."""
+    findings = "# Claims\nRegional managers\n\n## Answer\n\n**Headline:** The west is late\n\n**Notes:** N.\n\n## Findings\n\n"
+    findings += "".join(f"### {heading}\n\n**Notes:** N.\n\n" for heading, _ in slides)
+    methodology = "# Methodology\n\n## Findings\n\n" + "".join(f"### {heading}\n\n{text}\n\n" for heading, text in slides)
+    (tmp_path / "findings.md").write_text(findings, encoding="utf-8")
+    (tmp_path / "methodology.md").write_text(methodology, encoding="utf-8")
+    return tmp_path
+
+
+def storyline(tmp_path, slides, ledger, represented, order="none", recorded=None):
+    return draft.storyline_problems(tmp_path, "inv", story(tmp_path, slides), represented, ledger, order, recorded)
+
+
+def test_a_supporting_citation_does_not_move_a_slide(tmp_path):
+    # Q-001 and Q-002 are must, Q-003 should. The second slide's supporting result answers Q-001, which once
+    # ranked it first; its primary result answers only Q-003, so it stays second.
+    ledger = Ledger(["must", "must", "should"], {"a": ["Q-002"], "b": ["Q-003"], "c": ["Q-001"]})
+    slides = [("West claims close late", "Result `a`."), ("Late claims rose", "Result `b`, supported by `c`.")]
+    rows, unlinked, order, _ = storyline(tmp_path, slides, ledger, ["a", "b", "c"])
+    assert rows == [] and unlinked == []
+    assert [(e["heading"], e["primary"], e["question"]) for e in order] == [
+        ("West claims close late", "a", "Q-002"), ("Late claims rose", "b", "Q-003")]
+    rows, _, _, _ = storyline(tmp_path, slides[::-1], ledger, ["a", "b", "c"])
+    assert [(row["slide"], row["expected_position"]) for row in rows] == [("Late claims rose", 2)]
+
+
+def test_a_plain_word_is_no_citation_of_a_result_with_that_id(tmp_path):
+    ledger = Ledger(["must", "should"], {"monthly": ["Q-001"], "late": ["Q-002"]})
+    slides = [("Late claims rose", "Monthly counts rose, as `late` shows."),
+              ("Counts vary by month", "The monthly series is noisy."),
+              ("Monthly counts are small", "Result `monthly`; see evidence/late.json.")]
+    primaries = [primary for _, primary in draft.finding_primaries(story(tmp_path, slides), ["monthly", "late"])]
+    assert primaries == ["late", None, "monthly"]
+    _, unlinked, _, _ = storyline(tmp_path, slides, ledger, ["monthly", "late"])
+    assert unlinked == ["Counts vary by month"]
+    # An evidence path cites wherever it stands, and the first citation is the primary one.
+    slides = [("Late claims rose", "See [the record](evidence/late.json).\n\nThen `monthly`.")]
+    assert draft.finding_primaries(story(tmp_path, slides), ["monthly", "late"])[0][1] == "late"
+    # Known limit: within one line, a result its text names comes before one in a link target.
+    slides = [("Late claims rose", "See [the record](evidence/late.json), then `monthly`.")]
+    assert draft.finding_primaries(story(tmp_path, slides), ["monthly", "late"])[0][1] == "monthly"
+    # A code span cites only when it holds the ID alone.
+    slides = [("Late claims rose", "Ran `late` and `monthly_late`, and `late monthly`.")]
+    assert draft.finding_primaries(story(tmp_path, slides), ["monthly", "late"])[0][1] == "late"
+    slides = [("Late claims rose", "Ran `monthly_late` and `late monthly`.")]
+    assert draft.finding_primaries(story(tmp_path, slides), ["monthly", "late"])[0][1] is None
+
+
+def test_a_reworded_heading_keeps_its_presentation_order_slot(tmp_path):
+    ledger = Ledger(["must", "should"], {"west": ["Q-001"], "monthly": ["Q-002"]})
+    recorded = [{"slug": "west-claims-close-late", "heading": "West claims close late", "primary": "west"},
+                {"slug": "late-claims-rose", "heading": "Late claims rose", "primary": "monthly"}]
+    order = ["late-claims-rose", "west-claims-close-late"]  # the user's order, against the ledger's
+    slides = [("Late claims rose each month", "Result `monthly`."), ("The west closes claims late", "Result `west`.")]
+    rows, _, ledger_order, entries = storyline(tmp_path, slides, ledger, ["west", "monthly"], order, recorded)
+    assert rows == []
+    assert entries == [{"slug": "late-claims-rose", "heading": "Late claims rose each month", "primary": "monthly"},
+                       {"slug": "west-claims-close-late", "heading": "The west closes claims late", "primary": "west"}]
+    assert [e["slug"] for e in ledger_order] == ["west-claims-close-late", "late-claims-rose"]
+    # Out of the recorded order, one slide is reported by its heading and slug.
+    rows, _, _, _ = storyline(tmp_path, slides[::-1], ledger, ["west", "monthly"], order, recorded)
+    assert [(row["slide"], row["slug"], row["expected_position"]) for row in rows] == [
+        ("The west closes claims late", "west-claims-close-late", 2)]
+
+
+@pytest.mark.parametrize("slides, recorded, slugs", [
+    # An exact heading keeps its slug even when its primary result changed.
+    ([("West is late", "b")], [{"slug": "kept", "heading": "West is late", "primary": "a"}], ["kept"]),
+    # Reworded and given another primary result: a new slug from the heading.
+    ([("The west is late", "b")], [{"slug": "kept", "heading": "West is late", "primary": "a"}],
+     ["the-west-is-late"]),
+    # Two reworded slides sharing the recorded primary result: neither takes it.
+    ([("West one", "a"), ("West two", "a")], [{"slug": "kept", "heading": "West", "primary": "a"}],
+     ["west-one", "west-two"]),
+    # A new slug never repeats one another slide holds, and takes the first six words, ASCII only.
+    ([("Late claims", None), ("Late claims!", None)], None, ["late-claims", "late-claims-2"]),
+    ([("Café claims in the west rose by 4% in June", None)], [], ["cafe-claims-in-the-west-rose"]),
+    ([("—", None)], [], ["slide"]),
+    # Malformed recorded entries record nothing; a repeated slug keeps only its first entry.
+    ([("West", "a")], "none", ["west"]),
+    ([("West", "a")], [{"slug": 3, "heading": "West"}, "west"], ["west"]),
+    ([("East", "a"), ("West", "b")], [{"slug": "s", "heading": "East", "primary": "a"},
+                                      {"slug": "s", "heading": "West", "primary": "b"}], ["s", "west"]),
+    # A slug recorded for a slide no longer in the deck is dropped; a removed primary takes none.
+    ([("North", None)], [{"slug": "gone", "heading": "South", "primary": "none"}], ["north"]),
+])
+def test_slide_slugs(slides, recorded, slugs):
+    found, entries = draft.slide_slugs(slides, recorded)
+    assert found == slugs
+    assert entries == [{"slug": slug, "heading": heading, "primary": primary or "none"}
+                       for slug, (heading, primary) in zip(slugs, slides)]

@@ -6,6 +6,8 @@
 # test_evidence_older_than_scoped_3_is_reported_for_rerun: check-draft and export --result refuse awb-evidence/1 and unscoped /3 with a rerun instruction.
 # test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
 # test_check_draft_reports_outline_and_chart_spec_rows: a headline over 15 words, a chart form outside the seven, a Data column the chart file lacks, and a file column no Data role names fail check-draft with outline and charts rows in both modes, and release refuses on them.
+# test_export_creates_a_missing_draft_folder: export with no draft folder creates it on a write, and not when missing evidence writes nothing; with no findings.md it records no slides; check-draft refuses a missing draft by naming the step that creates it.
+# test_a_headline_preview_is_no_package_file: a file under the draft's top-level .preview/ is not inventoried, and rewriting or removing it leaves the inventory verifying; a .preview/ deeper in the draft is a foreign file.
 # test_check_draft_requires_each_question_in_methodology: export's questions pass once methodology repeats them; a question methodology lacks or rewords, a results entry without a question, and a manifest without results fail check-draft's questions, and release refuses on the check.
 # test_questions_check_reads_methodology_as_it_renders: a question wrapped, emphasized, linked, escaped, in a code span, heading, or list item, or after a comment block on its line matches; one only in a comment, inline or a block, in fenced code, split over two paragraphs, or reworded does not.
 # test_questions_check_matches_a_code_span_as_written: a question holding brackets, a tilde, an edge underscore, an asterisk, a character reference, or a backslash matches when a code span shows it exactly as written.
@@ -46,7 +48,7 @@
 # test_chart_selection_grammar_accepts / test_chart_selection_grammar_refuses: accepted and refused rows for --chart RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]], each refusal naming the part that does not fit.
 # test_export_selects_chart_rows_and_records_the_selection: @first=10 writes the first 10 rows and @where the matching rows in table order, the manifest recording each selection; an unknown column, a value no row holds, or too many rows is an error, malformed syntax and a dataset selection exit 2, and nothing is written.
 # test_check_draft_refuses_a_chart_file_that_differs_from_its_selection: a hand-edited value, an extra row, a renamed header, or a changed saved table fails check-draft in both modes and refuses release; a chart file with no charts entry, an entry from an earlier export, which a --result-only export keeps, so its row names the export with every --chart, an entry whose file is missing, and a malformed charts field each give a row.
-# test_check_draft_writes_start_here_before_the_inventory: check-draft writes START-HERE.md's three parts, listing the methodology note and datasets when present, before the inventory lists it; --verify-only writes none and reports an edited one; the prompt is assembly/m365.md's.
+# test_check_draft_writes_start_here_before_the_inventory: check-draft writes START-HERE.md's three parts, listing the methodology note and datasets when present, methodology.md and deck-rules.md once each as for the builder only, and part 3 titled for the audience, before the inventory lists it; --verify-only writes none and reports an edited one; the prompt is assembly/m365.md's.
 # test_check_draft_reports_draft_markers_as_information: draft, working copy, or not a numbered release in the title, subtitle, a heading or headline, or title notes is an informational draft_markers row in both modes; drafted, redraft, working copies, other notes, and bullets are not read as markers.
 # test_export_checks_follow_the_represented_set: a represented result not serialized keeps its entry; a result outside the represented set drops; an export without --chart removes the chart files and records charts none.
 # test_export_names_every_gap_and_blocks_stale_results: every missing display name is listed at once; a changed setting blocks a serializing export with a stop message and writes nothing; --no-datasets records none; --chart without a dataset choice is refused.
@@ -55,8 +57,8 @@
 # test_release_reports_fields_for_the_report: datasets, dispositions marked new against the prior release's manifest (unknown when it is unreadable), open caveats (the Limitations and open caveats slide's headline and bullets, then flags released with their caveat, new or carried forward), provenance gaps, checkout-only acquisitions, and a clean local verify.
 # test_open_caveats_read_the_deck_wherever_its_caveat_slides_stand: the Open questions slide's headline and bullets and a Limitations and open caveats slide moved under ## Appendix are read in deck order, each headline before its bullets, nested items kept with their bullet; a Limitations slide holding only its headline gives that headline's row; finding slides, omitted flags, and unrepresented flags give no row.
 # test_release_manifest_lists_runtime_per_result: export copies each represented result's runtime block into its results entry, unknown when the evidence has none or a null one, as stale reads it, and the release manifest keeps them; each unread requirements line is a provenance gap.
-# test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy at <location>/<investigation>/<package>/<n>/ compared, with no released/ folder there.
-# test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do, naming <location>/<investigation>/<package>/<n>/.
+# test_release_numbers_stamps_and_copies_to_storage: the next number after a gap, stamped copy, untouched draft, storage copy at <location>/<investigation>/<package>/<n>/ compared, its full path reported, with no released/ folder there; the headline preview is neither inventoried, released, nor copied.
+# test_release_storage_conflict_and_instructions: an existing destination is never overwritten; none chosen, unrecorded, and URL locations report what to do, naming <location>/<investigation>/<package>/<n>/, a URL location's full destination as path.
 # test_check_draft_refuses_causal_wording_above_claim_strength: causal wording on an association finding's slide fails with a row naming the phrase, line, and claim; a causal finding's slide and the Answer slide under a causal represented finding pass; method and caveat slides, code, comments, and hyphenated words are not read; release refuses on the row.
 # test_review_probes_read_markdown_as_it_renders: every reviewer probe of the claim check from rounds 1 to 3, one row each with its claims, headings, and markdown rows: headlines, caveat bullets, fences, comments open, closed, or in a list, declarations hidden, ambiguous, in a code span, in a list or quote, or naming another design, emphasis, links, hard breaks, and other inline markup, commented-out, duplicated, and indented headings, headings continuing a list item, and every form outside the Markdown subset.
 # test_unsupported_markdown_fails_check_draft: a heading continuing a list item fails check-draft and release with its markdown row, and the wording below it is read on the finding slide.
@@ -76,8 +78,9 @@
 # test_check_draft_counts_main_and_appendix_slides: slides counts the main sequence, title included, and the appendix apart; How we know under ## Appendix passes.
 # test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section; an appendix finding slide is held to its claim strength.
 # test_appendix_how_we_know_and_limitations_wording_is_not_read: with only an association result represented, causal wording on How we know and Limitations under ## Appendix gives no claims row, and the same wording on an appendix finding slide is refused.
-# test_presentation_order_decides_finding_order_when_set: absent or none leaves the ledger order; a non-ledger order the slides follow passes, inline markup read as the heading is; an order missing a finding, listing one twice, naming a heading no slide has, out of the slides' order, not a list, holding a blank entry, or recorded as JSON null fails storyline in both modes.
-# test_export_keeps_presentation_order: export keeps the hand-recorded presentation_order.
+# test_presentation_order_decides_finding_order_when_set: absent or none leaves the ledger order; a non-ledger order of slide slugs the slides follow passes; an order missing a slide's slug, listing one twice, naming a slug no slide has, of headings rather than slugs, out of the slides' order, not a list, holding a blank entry, or recorded as JSON null fails storyline in both modes.
+# test_export_keeps_presentation_order: export keeps the hand-recorded presentation_order, and records and prints each finding slide's slug, heading, and primary result.
+# test_a_reworded_heading_keeps_its_presentation_order_slot: rewording a finding heading in both narratives keeps its slug and its presentation_order slot; check-draft records the new heading under the slug, which the next export keeps, and prints the derived ledger_order.
 # test_presentation_order_is_no_provenance_gap: a presentation_order heading that starts with Unknown is no release provenance gap, as allowed_numbers is not.
 # test_storyline_orders_main_and_appendix_findings_each_by_the_ledger: main and appendix finding slides are ranked separately, the appendix numbering on.
 # test_open_questions_follows_how_we_know_when_limitations_is_in_the_appendix: with Limitations under ## Appendix, Open questions passes after How we know and fails before it.
@@ -87,6 +90,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 import random
 import re
 import shutil
@@ -368,6 +372,43 @@ def set_results(project, results):
 
 NOT_REPEATED = ("methodology.md does not repeat this question verbatim in text that renders, within one paragraph "
                 "or heading")
+
+
+def test_export_creates_a_missing_draft_folder(project, capsys):
+    package = project / "deliveries/inv/pkg"
+    shutil.rmtree(package / "draft")
+    # Missing evidence writes nothing: the folder is created only for a write.
+    code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-404")
+    assert code == 1 and not report["written"] and not (package / "draft").exists()
+    code, report = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,late_rate", "--no-datasets")
+    assert code == 0 and report["written"] and report["created"], report
+    assert (package / "draft/manifest.json").is_file() and (package / "draft/charts/chart-1.csv").is_file()
+    # With no findings.md yet, export records no slides and prints none.
+    assert report["slides"] == [] and "slides" not in manifest(project)
+    # check-draft and review-receipt record refuse a missing draft by naming the step that creates it.
+    shutil.rmtree(package / "draft")
+    refusal = "no draft at deliveries/inv/pkg/draft; write findings.md and methodology.md there, then run export"
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["errors"] == [refusal]
+
+
+def test_a_headline_preview_is_no_package_file(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    write(draft, ".preview/headlines.md", "# Order quality\n\n- The west has the most late orders\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"], report
+    paths = [row["path"] for row in manifest(project)["inventory"]]
+    assert not any(path.startswith(".preview") for path in paths) and "findings.md" in paths
+    # Rewriting or removing the preview leaves the recorded inventory verifying.
+    write(draft, ".preview/headlines.md", "# Order quality\n\n- Reordered\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert code == 0 and report["verify"] == [], report
+    shutil.rmtree(draft / ".preview")
+    assert run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")[1]["verify"] == []
+    # Only the draft's own top-level .preview/ is skipped; one deeper is a foreign file, as before.
+    write(draft, "datasets/.preview/headlines.md", "stray\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
+    assert [(row["path"], row["kind"]) for row in report["verify"]] == [("datasets/.preview/headlines.md", "extra")]
 
 
 def test_check_draft_requires_each_question_in_methodology(project, capsys):
@@ -1580,21 +1621,18 @@ In a Microsoft 365 Copilot app chat, add the PowerPoint agent and attach these f
 
 - findings.md
 - charts/chart-1.csv
-- methodology.md
-- deck-rules.md
+- methodology.md, the full account of the analysis, for the builder only
+- deck-rules.md, the rules the deck is built by, for the builder only
 - assembly/m365.md
 
 Then send this prompt:
 
 Build a PowerPoint deck from findings.md and the chart files, following deck-rules.md and m365.md.
 
-3. Internal: keep these, and do not send them
+3. Internal: keep these; do not send them to the audience
 
-- methodology.md, the full account of the analysis
 - manifest.json, the record of what this package holds and what produced it
-- deck-rules.md, the rules the deck is built by
-
-The other files in part 2 are the deck's source; your audience gets the deck instead.
+- the files part 2 attaches, which build the deck; your audience gets the deck instead
 """
 
 
@@ -1609,6 +1647,13 @@ def test_check_draft_writes_start_here_before_the_inventory(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["start_here"] == "deliveries/inv/pkg/draft/START-HERE.md"
     assert note.read_text() == START_HERE.format(audience="")
+    # Each builder file is listed once, as for the builder only, never also as internal.
+    listed = [line for line in note.read_text().splitlines() if line.startswith("- ")]
+    assert [line for line in listed if "methodology.md" in line] == [
+        "- methodology.md, the full account of the analysis, for the builder only"]
+    assert len([line for line in listed if "deck-rules.md" in line]) == 1
+    assert note.read_text().count("methodology.md") == 1
+    assert "3. Internal: keep these; do not send them to the audience" in note.read_text()
     assert "START-HERE.md" in [row["path"] for row in manifest(project)["inventory"]]
     # The audience part lists the methodology note and each dataset the draft holds.
     write(draft, "methodology-note.md", "# How we did it\n\nWe counted orders.\n")
@@ -1840,6 +1885,7 @@ def test_release_numbers_stamps_and_copies_to_storage(project, capsys, tmp_path_
     store = tmp_path_factory.mktemp("store")
     readme = project / "README.md"
     readme.write_text(readme.read_text().replace("not yet recorded", f"`{store}`"))
+    write(project, "deliveries/inv/pkg/draft/.preview/headlines.md", "# Order quality\n\n- Late orders rose\n")
     run(project, capsys, "check-draft", "inv", "pkg")
     for number in ("001", "003"):
         (project / f"deliveries/inv/pkg/released/{number}").mkdir(parents=True)
@@ -1855,9 +1901,15 @@ def test_release_numbers_stamps_and_copies_to_storage(project, capsys, tmp_path_
     assert datetime.fromisoformat(record["released_at"]).utcoffset() is not None
     assert record["inventory"] == draft_before["inventory"] and manifest(project) == draft_before
     # Storage holds <location>/<investigation>/<package>/<n>/, without the checkout's released/ folder.
-    assert report["storage"] == {"status": "copied", "copy": str(store / "inv/pkg/004"), "compare_trees": []}
+    # The report gives the full storage path.
+    assert report["storage"] == {"status": "copied", "copy": str(store / "inv/pkg/004"),
+                                 "path": os.path.abspath(store / "inv/pkg/004") + os.sep, "compare_trees": []}
     assert (store / "inv/pkg/004/findings.md").read_text() == FINDINGS
     assert not (store / "inv/pkg/released").exists()
+    # The headline preview is no package file: neither inventoried, released, nor copied to storage.
+    assert not any(row["path"].startswith(".preview") for row in record["inventory"])
+    assert not (project / "deliveries/inv/pkg/released/004/.preview").exists()
+    assert not (store / "inv/pkg/004/.preview").exists()
 
 
 def test_release_storage_conflict_and_instructions(project, capsys, tmp_path_factory):
@@ -1888,6 +1940,7 @@ def test_release_storage_conflict_and_instructions(project, capsys, tmp_path_fac
                 "there as <location>/inv/pkg/003/")
     assert report["storage"]["instruction"] == (
         "copy deliveries/inv/pkg/released/004/ to https://example.invalid/sites/team/inv/pkg/004/")
+    assert report["storage"]["path"] == "https://example.invalid/sites/team/inv/pkg/004/"
 
 
 NO_REVIEW = "no passed review of this draft: run the review in awb-package's references/review.md"
@@ -2763,7 +2816,7 @@ def storyline_fixture(project):
     set_manifest(project, charts="none")
     write(draft, "methodology.md", "# Methodology\n\n## Findings\n\n"
           "### Customer rates differ\n\n**Claim strength:** association\n\n[r-002](../../../../investigations/inv/evidence/r-002.json)\n\n"
-          "### Regional rates differ\n\n**Claim strength:** association\n\nResult: r-001\n\n"
+          "### Regional rates differ\n\n**Claim strength:** association\n\nResult: `r-001`\n\n"
           "### Coverage remains limited\n\n**Claim strength:** association\n\nNo recorded answer is claimed here.\n\n"
           "How many claims closed late?\n\nWhich regions close claims late?\n")
     return draft
@@ -2882,12 +2935,16 @@ def test_open_questions_includes_parked_and_recheck_without_truncation(project, 
                for row in report["open_questions"])
 
 
+# A result ID cites only as a whole code span or in an evidence path; the bare ID in prose cites nothing.
 @pytest.mark.parametrize("citation, unlinked", [
-    ("Result: r-001", ["Coverage remains limited"]),
+    ("Result: r-001", ["Regional rates differ", "Coverage remains limited"]),
     ("Result: `r-001`", ["Coverage remains limited"]),
+    ("Result: `` r-001 ``", ["Coverage remains limited"]),
     ("[Evidence](../../../../investigations/inv/evidence/r-001.json)", ["Coverage remains limited"]),
-    ("Result (r-001).", ["Coverage remains limited"]),
-    ("Result: r-001-extra", ["Regional rates differ", "Coverage remains limited"]),
+    ("Evidence: `investigations/inv/evidence/r-001.json`", ["Coverage remains limited"]),
+    ("Result (r-001).", ["Regional rates differ", "Coverage remains limited"]),
+    ("Result: `r-001-extra`", ["Regional rates differ", "Coverage remains limited"]),
+    ("Result: `r-001 and r-002`", ["Regional rates differ", "Coverage remains limited"]),
     ("<!-- Result: r-001 -->", ["Regional rates differ", "Coverage remains limited"]),
     ("The regional result", ["Regional rates differ", "Coverage remains limited"]),
     (None, ["Regional rates differ", "Coverage remains limited"]),
@@ -2901,7 +2958,7 @@ def test_storyline_citation_grammar_reports_unlinked_text(project, capsys, citat
     if citation is None:
         (project / "investigations/inv/evidence/r-001.json").unlink()
     else:
-        path.write_text(path.read_text().replace("Result: r-001", citation))
+        path.write_text(path.read_text().replace("Result: `r-001`", citation))
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert report["unlinked_findings"] == unlinked and report["storyline"] == []
     assert code == 0, report
@@ -3086,6 +3143,7 @@ def test_appendix_how_we_know_and_limitations_wording_is_not_read(project, capsy
 
 
 ORDER = ["Regional rates differ", "Coverage remains limited", "Customer rates differ"]
+SLUGS = ["regional-rates-differ", "coverage-remains-limited", "customer-rates-differ"]
 NULL = object()  # presentation_order recorded as JSON null, which is malformed rather than absent
 
 
@@ -3102,34 +3160,40 @@ def ordered_deck(project, headlines, order):
     # Without an order the ledger decides: Customer answers the must root, so it leads.
     (None, [("Customer rates differ", 1, "finding slide is out of place; move it to finding position 1")]),
     ("none", [("Customer rates differ", 1, "finding slide is out of place; move it to finding position 1")]),
-    (ORDER, []),
-    (["Regional rates differ", "Coverage remains limited"],
-     [("Customer rates differ", None, "presentation_order does not list this finding slide; add its heading where "
-                                      "the user placed it")]),
-    (ORDER + ["Regional rates differ"],
-     [("Regional rates differ", None, "presentation_order lists this heading 2 times; keep it once")]),
-    (ORDER + ["West volume is flat"],
-     [("West volume is flat", None, "presentation_order names no finding slide with this heading; give the "
-                                    "slide's current heading or remove it")]),
-    (["Customer rates differ", "Regional rates differ", "Coverage remains limited"],
+    (SLUGS, []),
+    (SLUGS[:2],
+     [("Customer rates differ", None, "presentation_order does not list this finding slide's slug; add it where the "
+                                      "user placed the slide")]),
+    (SLUGS + [SLUGS[0]],
+     [("regional-rates-differ", None, "presentation_order lists this slug 2 times; keep it once")]),
+    (SLUGS + ["west-volume-is-flat"],
+     [("west-volume-is-flat", None, "presentation_order names no finding slide with this slug; give a slug "
+                                    "ledger_order lists, or remove it")]),
+    ([SLUGS[2], SLUGS[0], SLUGS[1]],
      [("Customer rates differ", 1, "finding slide is out of place in presentation_order; move it to finding "
                                    "position 1")]),
-    (["Regional rates differ", "Coverage remains limited", "Customer rates **differ**"], []),
-    ("Regional rates differ",
-     [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
+    # Headings are not slugs: each names no slide, and each slide is unlisted.
+    (ORDER,
+     [(heading, None, "presentation_order names no finding slide with this slug; give a slug ledger_order lists, "
+                      "or remove it") for heading in ORDER] +
+     [(heading, None, "presentation_order does not list this finding slide's slug; add it where the user placed "
+                      "the slide") for heading in ORDER]),
+    ("regional-rates-differ",
+     [(None, None, "presentation_order is not none or a list of finding slide slugs; record the approved order, "
                    "or none")]),
-    ([ORDER[0], ORDER[1], ""],
-     [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
+    ([SLUGS[0], SLUGS[1], ""],
+     [(None, None, "presentation_order is not none or a list of finding slide slugs; record the approved order, "
                    "or none")]),
     (NULL,
-     [(None, None, "presentation_order is not none or a list of finding headings; record the approved order, "
+     [(None, None, "presentation_order is not none or a list of finding slide slugs; record the approved order, "
                    "or none")]),
-], ids=["absent", "none", "followed", "missing", "repeated", "unknown", "moved", "markup", "not a list", "blank",
+], ids=["absent", "none", "followed", "missing", "repeated", "unknown", "moved", "headings", "not a list", "blank",
         "null"])
 def test_presentation_order_decides_finding_order_when_set(project, capsys, order, rows):
     ordered_deck(project, ORDER, order)
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
-    assert [(row["slide"], row.get("expected_position"), row["problem"]) for row in report["storyline"]] == rows
+    assert [(row["slide"] or row.get("slug"), row.get("expected_position"), row["problem"])
+            for row in report["storyline"]] == rows
     assert report["unlinked_findings"] == ["Coverage remains limited"]
     assert code == (1 if rows else 0) and report["passed"] is (not rows), report
     _, verified = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
@@ -3137,9 +3201,33 @@ def test_presentation_order_decides_finding_order_when_set(project, capsys, orde
 
 
 def test_export_keeps_presentation_order(project, capsys):
-    ordered_deck(project, ORDER, ORDER)
+    ordered_deck(project, ORDER, SLUGS)
     code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
-    assert code == 0 and report["written"] and manifest(project)["presentation_order"] == ORDER
+    assert code == 0 and report["written"] and manifest(project)["presentation_order"] == SLUGS
+    # export records each finding slide's slug with its heading and primary result, and prints the slugs.
+    assert manifest(project)["slides"] == [
+        {"slug": "regional-rates-differ", "heading": "Regional rates differ", "primary": "r-001"},
+        {"slug": "coverage-remains-limited", "heading": "Coverage remains limited", "primary": "none"},
+        {"slug": "customer-rates-differ", "heading": "Customer rates differ", "primary": "r-002"}]
+    assert [entry["slug"] for entry in report["slides"]] == SLUGS
+
+
+def test_a_reworded_heading_keeps_its_presentation_order_slot(project, capsys):
+    draft = ordered_deck(project, ORDER, SLUGS)
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    for name in ("findings.md", "methodology.md"):
+        path = draft / name
+        path.write_text(path.read_text().replace("Regional rates differ", "Regions differ in their rates"))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["storyline"] == [] and code == 0, report
+    # check-draft records the new heading under the kept slug, so the next export keeps it too.
+    assert manifest(project)["slides"][0] == {"slug": "regional-rates-differ",
+                                              "heading": "Regions differ in their rates", "primary": "r-001"}
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    assert manifest(project)["slides"][0]["slug"] == "regional-rates-differ"
+    # The derived order is printed whatever presentation_order holds: the must root's slide first.
+    assert [(entry["slug"], entry["question"]) for entry in report["ledger_order"]] == [
+        ("customer-rates-differ", "Q-003"), ("regional-rates-differ", "Q-002"), ("coverage-remains-limited", None)]
 
 
 def test_presentation_order_is_no_provenance_gap():

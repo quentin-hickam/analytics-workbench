@@ -42,6 +42,11 @@ MANIFEST = "manifest.json"
 # The optional audience-facing account of method; when the draft holds it, the names, numbers, claims,
 # Markdown, and review-rule checks read it beside findings.md and methodology.md.
 METHODOLOGY_NOTE = "methodology-note.md"
+# The headline checkpoint's preview-and-wait headlines go in .preview/headlines.md under the draft. The folder
+# is not part of the package: the inventory, and so check-draft and release, skip it, and release never copies it.
+PREVIEW = ".preview"
+# What every refusal of a missing draft says: the step that creates it, not the skill already running.
+_NO_DRAFT = "no draft at {}; write findings.md and methodology.md there, then run export"
 _SIMPLE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _EVIDENCE_SCHEMA = "awb-evidence/3"
 _EVIDENCE_LINK = re.compile(r"evidence/([A-Za-z0-9][A-Za-z0-9._-]*)\.json")
@@ -1678,6 +1683,8 @@ def _scan(directory):
         for name in dirnames + filenames:
             if Path(current, name).is_symlink():
                 raise ValueError(f"Symlink in tree: {Path(current, name)}")
+        if Path(current) == root and PREVIEW in dirnames:
+            dirnames.remove(PREVIEW)  # The headline preview is no package file.
         for name in filenames:
             file = Path(current, name)
             if not file.is_file():
@@ -1694,7 +1701,8 @@ def _scan(directory):
 
 
 def inventory(package_dir: str | os.PathLike) -> list[dict]:
-    """List files in path order, reserving a path-only row for manifest.json."""
+    """List files in path order, reserving a path-only row for manifest.json; a top-level .preview/ folder,
+    the headline preview, is left out."""
     files = _scan(package_dir)
     files[MANIFEST] = {"path": MANIFEST}
     return [files[path] for path in sorted(files)]
@@ -2367,61 +2375,138 @@ def chart_file_problems(root, investigation, draft, record) -> list[dict]:
 
 # ---------------------------------------------------------------- check-draft
 
-def storyline_problems(root, investigation, draft, represented, provenance, order="none"):
-    """Accepted input: the outline reader's Markdown subset (references/helpers.md), with ### finding headlines matched
-    exactly to ### methodology headings. The matching section names represented results using
-    the existing _cited grammar (bounded result IDs or evidence/<ID>.json links, outside
-    comments). Only those results' recorded settings `answers` supply ledger question IDs.
+def _citations(text, represented):
+    """The represented results a methodology section cites, in the order it first cites them: a result ID as a
+    whole code span, `r-001`, or in an evidence path, evidence/r-001.json, wherever it stands. A plain word that
+    is also a result ID, such as monthly, cites nothing."""
+    represented = set(represented)
+    found = [(match.start(), match[1]) for match in _EVIDENCE_LINK.finditer(text) if match[1] in represented]
+    for start, end in _code_spans(text):
+        content = text[start:end].strip("`").strip()
+        if content in represented:
+            found.append((start, content))
+    return list(dict.fromkeys(result for _, result in sorted(found)))
 
-    Missing citations or empty answers are reported in unlinked_findings and sort last; no
-    fallback infers answers from prose or from other represented results. A result without
-    evidence has no declared linkage and is reported as unlinked, preserving the package's
-    existing handling of provenance gaps. Malformed settings
-    or ledgers raise an error. Known limits: a literal result ID mentioned in methodology counts
-    as a citation; the reader cannot judge whether that evidence supports the audience's claim.
-    Ties keep the author's slide order. Existing markdown/headings checks refuse unsupported
-    Markdown and missing/repeated methodology headings.
 
-    A row names each slide outside the longest run of finding slides already in order, so moving
-    one slide reports that slide alone rather than every slide it shifted. The main sequence's finding
-    slides and the appendix's each follow the ledger order, the appendix numbering on from the main.
-
-    `order` is the manifest's presentation_order. When it is a list it decides the order instead: each
-    entry is a finding slide's heading, read as inline Markdown as the heading is, and the list holds
-    every finding slide, main and appendix, exactly once, in deck order. A list entry that is not
-    non-blank text makes the whole field malformed, as does any other value, JSON null included; absent
-    and "none" leave the ledger order in force.
-    """
-    tree = provenance.question_tree(root, investigation)
-    ranks = {q["id"]: (("must", "should", "could").index(q["priority"]), position)
-             for position, q in enumerate(tree)}
+def finding_primaries(draft, represented) -> list[tuple]:
+    """(slide, primary result or None) for each finding slide in deck order, as `read_outline` gives the slide. A
+    slide's primary result is the first one its methodology.md namesake cites (`_citations`), each line read as
+    its rendered text and then its link targets."""
+    draft = Path(draft)
     sections = {}
     for level, heading, _, lines in _regions(_read_view(draft / "methodology.md")[0]):
         if level == 3:
             sections.setdefault(heading, []).extend(" ".join([line.plain, *line.links]) for line in lines)
-    slides = [s for s in read_outline(draft / "findings.md")["slides"] if s["finding"]]
+    return [(slide, next(iter(_citations("\n".join(sections.get(slide["heading"], [])), represented)), None))
+            for slide in read_outline(draft / "findings.md")["slides"] if slide["finding"]]
+
+
+# A slide slug: the first six words of its heading when first recorded, ASCII letters and digits, joined by hyphens.
+_SLUG_WORDS = re.compile(r"[a-z0-9]+")
+
+
+def _slug(heading):
+    words = _SLUG_WORDS.findall(unicodedata.normalize("NFKD", heading).encode("ascii", "ignore").decode().lower())
+    return "-".join(words[:6]) or "slide"
+
+
+def slide_slugs(slides, recorded) -> tuple:
+    """(each slide's slug, the manifest's slides entries) for slides given as (heading, primary result or None)
+    in deck order, against the manifest's recorded slides entries.
+
+    Accepted input: recorded is a list of {slug, heading, primary}; anything else, and an entry without text slug
+    and heading or repeating an earlier slug, records nothing. A slide keeps the slug of the recorded entry with
+    its exact heading; otherwise, of the one recorded entry left with its primary result, when no other slide
+    still unmatched has that primary result; otherwise it takes a new slug from its heading (`_slug`), numbered
+    -2, -3, ... past a slug another slide holds. So a reworded heading keeps its slug while its primary result
+    stays, and a slug recorded for a slide no longer in the deck is dropped. Known limit: a slide both reworded and
+    given another primary result, or sharing its primary result with another reworded slide, takes a new slug,
+    which a presentation_order then reports as unlisted.
+    """
+    entries, seen = [], set()
+    for entry in recorded if isinstance(recorded, list) else []:
+        if isinstance(entry, dict) and isinstance(entry.get("slug"), str) and isinstance(entry.get("heading"), str) \
+                and entry["slug"] not in seen:
+            entries.append(entry)
+            seen.add(entry["slug"])
+    slugs = {}
+    for index, (heading, _) in enumerate(slides):
+        match = next((entry for entry in entries if entry["heading"] == heading), None)
+        if match is not None:
+            slugs[index] = match["slug"]
+            entries.remove(match)
+    for index, (heading, primary) in enumerate(slides):
+        if index in slugs or primary is None:
+            continue
+        candidates = [entry for entry in entries if entry.get("primary") == primary]
+        rivals = [other for other, (_, result) in enumerate(slides) if other not in slugs and result == primary]
+        if len(candidates) == 1 and rivals == [index]:
+            slugs[index] = candidates[0]["slug"]
+            entries.remove(candidates[0])
+    taken = set(slugs.values())
+    for index, (heading, _) in enumerate(slides):
+        if index not in slugs:
+            base = slug = _slug(heading)
+            number = 2
+            while slug in taken:
+                slug, number = f"{base}-{number}", number + 1
+            slugs[index] = slug
+            taken.add(slug)
+    ordered = [slugs[index] for index in range(len(slides))]
+    return ordered, [{"slug": slug, "heading": heading, "primary": primary or "none"}
+                     for slug, (heading, primary) in zip(ordered, slides)]
+
+
+def storyline_problems(root, investigation, draft, represented, provenance, order="none", recorded=None):
+    """(rows, unlinked_findings, ledger_order, slides entries) for the draft's finding slide order.
+
+    Accepted input: the outline reader's Markdown subset (references/helpers.md), with ### finding headlines
+    matched exactly to ### methodology headings. A slide ranks by its primary result alone (`finding_primaries`):
+    that result's recorded settings `answers` supply its ledger question IDs, and the highest-priority one, then
+    the earlier in the depth-first walk, ranks the slide; a supporting result it cites later moves nothing. A slide
+    citing no result, or whose primary result answers no question, is in unlinked_findings and ranks last; no
+    fallback infers answers from prose or from its other results. A result without evidence declares no answers.
+    Malformed settings or ledgers raise an error. Known limits: the reader cannot judge whether the primary result
+    supports the audience's claim; within one line, a result named in its text comes before one in a link target.
+    Ties keep the author's slide order.
+
+    A row names each slide outside the longest run of finding slides already in order, so moving one slide
+    reports that slide alone rather than every slide it shifted. The main sequence's finding slides and the
+    appendix's each follow the ledger order, the appendix numbering on from the main. ledger_order lists every
+    finding slide in that order, as slug, heading, primary, question, and appendix.
+
+    `order` is the manifest's presentation_order and `recorded` its slides entries, which give each slide its slug
+    (`slide_slugs`). When order is a list it decides the order instead: it holds every finding slide's slug, main
+    and appendix, exactly once, in deck order. A list entry that is not non-blank text makes the whole field
+    malformed, as does any other value, JSON null included; absent and "none" leave the ledger order in force.
+    """
+    tree = provenance.question_tree(root, investigation)
+    ranks = {q["id"]: (("must", "should", "could").index(q["priority"]), position)
+             for position, q in enumerate(tree)}
+    primaries = finding_primaries(draft, represented)
+    slugs, entries = slide_slugs([(slide["heading"], primary) for slide, primary in primaries], recorded)
     ranked, unlinked, answers = [], [], {}
-    for slide in slides:
-        cited = _cited("\n".join(sections.get(slide["heading"], [])), represented)
-        questions = set()
-        for result in cited:
-            if result not in answers:
-                answers[result] = provenance.result_answers(root, investigation, result)
-            questions.update(answers[result])
+    for (slide, primary), slug in zip(primaries, slugs):
+        if primary is not None and primary not in answers:
+            answers[primary] = provenance.result_answers(root, investigation, primary)
+        questions = answers.get(primary, [])
         question = min(questions, key=ranks.__getitem__) if questions else None
         if question is None:
             unlinked.append(slide["heading"])
-        ranked.append((ranks[question] if question else (3, 0), slide, question))
-    if order != "none":
-        return _order_problems(order, [slide for _, slide, _ in ranked]), unlinked
+        ranked.append((ranks[question] if question else (3, 0), {**slide, "slug": slug}, question, primary))
     main = [entry for entry in ranked if not entry[1]["appendix"]]
     behind = [entry for entry in ranked if entry[1]["appendix"]]
+    ledger_order = [{"slug": slide["slug"], "heading": slide["heading"], "primary": primary, "question": question,
+                     "appendix": slide["appendix"]}
+                    for part in (main, behind) for _, slide, question, primary in sorted(part, key=lambda e: e[0])]
+    if order != "none":
+        return _order_problems(order, [slide for _, slide, _, _ in ranked]), unlinked, ledger_order, entries
     rows = []
     for part, offset in ((main, 0), (behind, len(main))):
         rows += [{**row, "question": part[index][2],
                   "problem": f"finding slide is out of place; move it to finding position {row['expected_position']}"}
-                 for index, row in _misplaced([rank for rank, _, _ in part], [s for _, s, _ in part], offset)]
-    return rows, unlinked
+                 for index, row in _misplaced([rank for rank, _, _, _ in part], [s for _, s, _, _ in part], offset)]
+    return rows, unlinked, ledger_order, entries
 
 
 def _misplaced(ranks, slides, offset=0):
@@ -2429,36 +2514,37 @@ def _misplaced(ranks, slides, offset=0):
     ordered = sorted(range(len(ranks)), key=ranks.__getitem__)
     positions = {index: position for position, index in enumerate(ordered, offset + 1)}
     in_order = _longest_ordered_run(ranks)
-    return [(index, {"slide": slide["heading"], "line": slide["line"], "position": offset + index + 1,
-                     "expected_position": positions[index]})
+    return [(index, {"slide": slide["heading"], "slug": slide["slug"], "line": slide["line"],
+                     "position": offset + index + 1, "expected_position": positions[index]})
             for index, slide in enumerate(slides) if index not in in_order]
 
 
 def _order_problems(order, slides):
-    """Rows for a presentation_order that is malformed, misses or repeats a finding slide, names a heading no
+    """Rows for a presentation_order that is malformed, misses or repeats a finding slide's slug, names a slug no
     finding slide has, or that the finding slides, in deck order, do not follow."""
     if not isinstance(order, list) or not all(isinstance(entry, str) and entry.strip() for entry in order):
-        return [{"slide": None, "line": None, "problem": "presentation_order is not none or a list of finding "
-                                                         "headings; record the approved order, or none"}]
-    listed = Counter(_collapse(_shown(_inline(entry)[0])) for entry in order)
-    headings = {slide["heading"] for slide in slides}
+        return [{"slide": None, "line": None, "problem": "presentation_order is not none or a list of finding slide "
+                                                         "slugs; record the approved order, or none"}]
+    listed = Counter(entry.strip() for entry in order)
+    slugs = {slide["slug"] for slide in slides}
     rows = []
-    for heading, count in listed.items():
+    for slug, count in listed.items():
         if count > 1:
-            rows.append({"slide": heading, "line": None,
-                         "problem": f"presentation_order lists this heading {count} times; keep it once"})
-        if heading not in headings:
-            rows.append({"slide": heading, "line": None, "problem": "presentation_order names no finding slide with "
-                                                                    "this heading; give the slide's current heading "
-                                                                    "or remove it"})
-    rows += [{"slide": slide["heading"], "line": slide["line"], "problem": "presentation_order does not list this "
-              "finding slide; add its heading where the user placed it"}
-             for slide in slides if slide["heading"] not in listed]
-    rank = {heading: index for index, heading in enumerate(listed)}
-    placed = [slide for slide in slides if slide["heading"] in rank]
+            rows.append({"slide": None, "slug": slug, "line": None,
+                         "problem": f"presentation_order lists this slug {count} times; keep it once"})
+        if slug not in slugs:
+            rows.append({"slide": None, "slug": slug, "line": None,
+                         "problem": "presentation_order names no finding slide with this slug; give a slug "
+                                    "ledger_order lists, or remove it"})
+    rows += [{"slide": slide["heading"], "slug": slide["slug"], "line": slide["line"],
+              "problem": "presentation_order does not list this finding slide's slug; add it where the user placed "
+                         "the slide"}
+             for slide in slides if slide["slug"] not in listed]
+    rank = {slug: index for index, slug in enumerate(listed)}
+    placed = [slide for slide in slides if slide["slug"] in rank]
     return rows + [{**row, "problem": "finding slide is out of place in presentation_order; move it to finding "
                                       f"position {row['expected_position']}"}
-                   for _, row in _misplaced([rank[slide["heading"]] for slide in placed], placed)]
+                   for _, row in _misplaced([rank[slide["slug"]] for slide in placed], placed)]
 
 
 def _longest_ordered_run(ranks):
@@ -2484,8 +2570,8 @@ def open_question_problems(root, investigation, draft, provenance, *, names, roo
     each required question's audience wording when set, otherwise its text, rendered by
     _inline/_shown with whitespace collapsed, once each.
 
-    Required means priority must and status open, parked, or answered (awaiting recheck); an
-    answered (provisional) question is answered here, since a draft may represent provisional findings.
+    Required means priority must, or the ledger's show flag set, and status open, parked, or answered (awaiting
+    recheck); an answered (provisional) question is answered here, since a draft may represent provisional findings.
     Declined and superseded questions are set aside. Nested bullets, charts, missing/repeated
     questions and any other bullet text are reported; outline/markdown checks report other
     structural forms. Known limits: this compares rendered text, not paraphrases or audience
@@ -2495,7 +2581,7 @@ def open_question_problems(root, investigation, draft, provenance, *, names, roo
     outline reader refuses, which the slide's own names check still covers. Block markup/comments in that wording
     are not an alternate matching form. Notes remain presenter context and do not satisfy a question.
     """
-    questions = [q for q in provenance.question_tree(root, investigation) if q["priority"] == "must"
+    questions = [q for q in provenance.question_tree(root, investigation) if (q["priority"] == "must" or q["show"])
                  and q["display_status"] in ("open", "parked", provenance.AWAITING_RECHECK)]
     expected = Counter(_collapse(_shown(_inline(q["audience"] or q["text"])[0])) for q in questions)
     slides = read_outline(draft / "findings.md")["slides"]
@@ -2513,10 +2599,11 @@ def open_question_problems(root, investigation, draft, provenance, *, names, roo
 
     if not expected:
         if opened:
-            row("no unanswered must questions; omit the Open questions slide", opened[0][1]["line"])
+            row("no unanswered must questions and none marked show; omit the Open questions slide",
+                opened[0][1]["line"])
         return rows, len(questions)
     if not opened:
-        row("missing Open questions slide; list every unanswered must question")
+        row("missing Open questions slide; list every unanswered must question and each one marked show")
         return rows, len(questions)
     if len(opened) != 1:
         row("keep exactly one Open questions slide", opened[1][1]["line"])
@@ -2587,8 +2674,8 @@ M365_PROMPT = "Build a PowerPoint deck from findings.md and the chart files, fol
 def start_here(draft, investigation, package) -> str:
     """START-HERE.md's plain text for a draft as it now stands: send these to your audience (the deck once
     built, methodology-note.md when present, each file under datasets/); to build the deck (the attach list
-    and prompt assembly/m365.md gives, each chart file named); internal (methodology.md, manifest.json,
-    deck-rules.md)."""
+    and prompt assembly/m365.md gives, each chart file named, methodology.md and deck-rules.md marked as for the
+    builder only); internal (manifest.json and the part 2 files). Each file is listed once."""
     draft = Path(draft)
     charts = sorted((int(match[1]), path.name) for path in
                     ((draft / "charts").iterdir() if (draft / "charts").is_dir() else ())
@@ -2600,8 +2687,9 @@ def start_here(draft, investigation, package) -> str:
     audience = ["the deck, once you build it as part 2 says"]
     if (draft / METHODOLOGY_NOTE).is_file():
         audience.append(f"{METHODOLOGY_NOTE}, a plain account of how the analysis was done")
-    attach = ["findings.md", *(f"charts/{name}" for _, name in charts), "methodology.md", "deck-rules.md",
-              "assembly/m365.md"]
+    attach = ["findings.md", *(f"charts/{name}" for _, name in charts),
+              "methodology.md, the full account of the analysis, for the builder only",
+              "deck-rules.md, the rules the deck is built by, for the builder only", "assembly/m365.md"]
     # Plain text, a blank line after each list, so a viewer that renders Markdown joins no line to a list item.
     lines = ["Start here", "",
              f"This folder is the {package} package of the {investigation} investigation. Its files fall into "
@@ -2610,11 +2698,9 @@ def start_here(draft, investigation, package) -> str:
              "2. To build the deck", "",
              "In a Microsoft 365 Copilot app chat, add the PowerPoint agent and attach these files:", "",
              *(f"- {path}" for path in attach), "", "Then send this prompt:", "", M365_PROMPT, "",
-             "3. Internal: keep these, and do not send them", "",
-             "- methodology.md, the full account of the analysis",
+             "3. Internal: keep these; do not send them to the audience", "",
              "- manifest.json, the record of what this package holds and what produced it",
-             "- deck-rules.md, the rules the deck is built by", "",
-             "The other files in part 2 are the deck's source; your audience gets the deck instead."]
+             "- the files part 2 attaches, which build the deck; your audience gets the deck instead"]
     return "\n".join(lines) + "\n"
 
 
@@ -2689,12 +2775,13 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"draft": _rel(root, draft), "names": 0, "names_problems": [], "findings": None,
               "outline": None, "slides": None, "charts": None, "headings": None, "markdown": None, "claims": None, "questions": None,
-              "storyline": None, "unlinked_findings": None, "open_questions": None, "open_questions_count": None,
+              "storyline": None, "unlinked_findings": None, "ledger_order": None, "open_questions": None,
+              "open_questions_count": None,
               "numbers": None, "numbers_problems": [], "inventory": None, "verify": None,
               "flag_entries": None, "unmatched_flags": None, "draft_markers": None, "note_length": None,
               "start_here": None, "review": None, "errors": [], "passed": False}
     if not draft.is_dir():
-        report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
+        report["errors"].append(_NO_DRAFT.format(report["draft"]))
         return report
 
     recorded, report["names_problems"] = _recorded_names(root, investigation, package)
@@ -2785,18 +2872,21 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
                 report["claims"], claim_lines = _claim_review(draft, [r["result_id"] for r in represented], claims)
             except (OSError, UnicodeError) as error:
                 report["errors"].append(f"claims check: {error}")
+        slides = record.get("slides")
         if provenance is not None:
             try:
-                report["storyline"], report["unlinked_findings"] = storyline_problems(
+                report["storyline"], report["unlinked_findings"], report["ledger_order"], slides = storyline_problems(
                     root, investigation, draft, [r["result_id"] for r in represented], provenance,
-                    record.get("presentation_order", "none"))
+                    record.get("presentation_order", "none"), record.get("slides"))
             except (OSError, ValueError, AttributeError) as error:
                 report["errors"].append(f"storyline check: {error}")
         if not verify_only:
             _write_start_here(draft, investigation, package)  # before the inventory, which then lists it
             rows = inventory(draft)
-            if rows != record.get("inventory"):
-                record.update(inventory=rows, revised_at=_now())
+            if rows != record.get("inventory") or slides != record.get("slides"):
+                if rows != record.get("inventory"):
+                    record["revised_at"] = _now()
+                record.update(inventory=rows, slides=slides)
                 _write_json(path, record)
         elif not isinstance(record.get("inventory"), list):
             raise ValueError(f"{MANIFEST} records no inventory list; run check-draft without --verify-only")
@@ -2850,7 +2940,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                     "each represented result's question in methodology.md, numbers in the narratives, the "
                     "manifest inventory, and state.md's current flags), write START-HERE.md, and rewrite the "
                     "manifest inventory, stamping revised_at when it changes; --verify-only checks a release "
-                    "candidate and writes nothing.",
+                    "candidate and writes nothing. The inventory leaves out the draft's .preview/ folder, the "
+                    "headline preview.",
         epilog="Prints one JSON line.\nmethodology-note.md, when the draft holds it, is read by the findings, "
                "claims, markdown, and numbers checks too; its rows carry file.\n"
                "outline lists, as slide, line, and problem, each break of the slide "
@@ -2865,9 +2956,15 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "## Appendix, an appendix slide that stays in the main sequence, or an empty ## Appendix. slides "
                "counts the main sequence's slides, title included, and the appendix's.\nstoryline lists the "
                "finding slides to move, those outside the longest run already in priority/tree order, the main "
-               "sequence and the appendix each ranked alone, each with its expected position; when the manifest's "
-               "presentation_order is a list it ranks every finding slide instead, and storyline also lists a "
-               "malformed order, a heading it repeats or that no finding slide has, and a finding slide it misses. "
+               "sequence and the appendix each ranked alone, each with its slug and expected position; a slide "
+               "ranks by its primary result, the first its methodology.md section cites as a whole code span or "
+               "an evidence path, and that result's highest ledger question. When the manifest's "
+               "presentation_order is a list of slide slugs it ranks every finding slide instead, and storyline "
+               "also lists a malformed order, a slug it repeats or that no finding slide has, and a finding slide "
+               "it misses. ledger_order lists every finding slide in the derived order, as slug, heading, "
+               "primary, question, and appendix, whatever presentation_order holds. A slide keeps its slug, "
+               "recorded in the manifest's slides, across a reworded heading while its primary result stays; "
+               "without --verify-only, check-draft records each slide's current heading there. "
                "unlinked_findings names slides with no declared ledger answer, which go last without a "
                "presentation_order; it is informational.\n"
                "open_questions lists presence, placement, and exact-question-bullet problems on Open questions; "
@@ -2925,7 +3022,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "informational, and empty without a note or a recorded length.\n"
                "Without --verify-only it first writes START-HERE.md, plain text in three parts: what to send the "
                "audience (the deck once built, methodology-note.md, each dataset), what builds the deck (the "
-               "attach list and prompt assembly/m365.md gives), and what stays internal; the inventory then lists "
+               "attach list and prompt assembly/m365.md gives, methodology.md and deck-rules.md for the builder "
+               "only), and what stays internal; the inventory then lists "
                "it, and --verify-only verifies it like any other file and lists an errors row when the draft lacks "
                "it. start_here names it when present.\n"
                "Exit 0 only when names_problems, findings, outline, charts, "
@@ -3351,9 +3449,6 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     draft = _package_dir(root, investigation, package) / "draft"
     full = bool(charts or datasets or no_datasets)
     report = {"charts": [], "datasets": [], "written": False, "errors": []}
-    if not draft.is_dir():
-        report["errors"].append(f"no draft at {_rel(root, draft)}; create it with awb-package")
-        return report
     path = draft / MANIFEST
     try:
         report["created"] = not path.exists()
@@ -3432,6 +3527,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
         flags = sync_flags(record.get("revalidation_flags"), state_flags(root, investigation))
     except ValueError as error:
         flags, report["flags_error"] = None, str(error)
+    draft.mkdir(parents=True, exist_ok=True)  # The first export creates the draft folder.
 
     if full:
         frames = [(entry, rows) for kind, _, entry, rows in shaped if kind == "chart"]
@@ -3484,8 +3580,19 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     # revalidation_flags follows state.md on every write; an unreadable state.md leaves it as it was.
     if flags is not None:
         record["revalidation_flags"] = flags
+    # Each finding slide's slug, which presentation_order lists, kept across a reworded heading.
+    if (draft / "findings.md").is_file() and (draft / "methodology.md").is_file():
+        try:
+            primaries = finding_primaries(draft, represented)
+            record["slides"] = slide_slugs([(slide["heading"], primary) for slide, primary in primaries],
+                                           record.get("slides"))[1]
+        except (OSError, UnicodeError) as error:
+            report["slides_error"] = str(error)
     _write_json(path, record)
     report["written"] = True
+    report["slides"] = [{"slug": entry["slug"], "heading": entry["heading"]}
+                        for entry in record.get("slides", []) if isinstance(entry, dict)] \
+        if isinstance(record.get("slides"), list) else []
     commits, changes = fields["producing_commit"], fields["producing_uncommitted_changes"]
     report["results"] = represented
     report["questions"] = questions
@@ -3506,7 +3613,7 @@ def cli_export(root: Path, argv: list[str]) -> int:
                     "scaled, and rounded through foundation/display.toml, a chart's rows selected as its --chart "
                     "says, once compare_evidence passes for every serialized result, and the manifest's "
                     "producing and packaging state from the evidence of every represented result. Creates the "
-                    "manifest when absent.",
+                    "draft folder and the manifest when absent.",
         epilog="Prints one JSON line.\nAny --chart, --dataset, or --no-datasets replaces the whole chart set "
                "and dataset selection: no --chart records charts none. With only --result it records "
                "provenance and leaves exported files untouched.\n"
@@ -3548,7 +3655,9 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "each entry that needs represented_in or, once represented, a disposition. When state.md "
                "cannot be read, flags_error says why and revalidation_flags is left as it was.\nquestions maps "
                "each represented result to the question its evidence records, for methodology.md to repeat "
-               "verbatim; the manifest's results entries record it.\nExit 0 only "
+               "verbatim; the manifest's results entries record it.\nslides lists each finding slide's slug and "
+               "heading, which the manifest's slides records with its primary result, once findings.md and "
+               "methodology.md exist; presentation_order lists these slugs.\nExit 0 only "
                "when written and check_charts is empty; 2 for unusable arguments.")
     _package_arguments(parser)
     parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS][@SELECTION]",
@@ -4171,8 +4280,7 @@ def record_review(root, investigation, package, kind, text, accepted=(), *, now=
     root = Path(root)
     package_dir = _package_dir(root, investigation, package)
     if not (package_dir / "draft").is_dir():
-        return {"recorded": False, "refused": f"no draft at {_rel(root, package_dir / 'draft')}; create it "
-                                              "with awb-package"}
+        return {"recorded": False, "refused": _NO_DRAFT.format(_rel(root, package_dir / "draft"))}
     accepted = list(accepted)
     passed, refusal = review_summary(text, kind, accepted)
     if refusal:
@@ -4491,7 +4599,8 @@ def storage_location(root) -> tuple:
 
 def _copy_to_storage(root, local, investigation, package, number):
     """Copy one release to <location>/<investigation>/<package>/<n>/. The checkout's released/ folder is not
-    repeated there, so a location the user calls releases holds no releases/.../released/ path."""
+    repeated there, so a location the user calls releases holds no releases/.../released/ path. Every row with a
+    recorded location names that destination in full as path: absolute for a path location, else as recorded."""
     kind, location = storage_location(root)
     if kind == "none-chosen":
         return {"status": "none chosen",
@@ -4501,26 +4610,28 @@ def _copy_to_storage(root, local, investigation, package, number):
                    f"record where released packages are kept, then copy {_rel(root, local)}/ there "
                    f"as <location>/{investigation}/{package}/{number}/")
     if kind != "path":
-        return {"status": kind, "location": location, "instruction": instruction}
+        return {"status": kind, "location": location, "instruction": instruction,
+                **({"path": destination} if destination else {})}
     base = Path(location).expanduser()
     base = base if base.is_absolute() else Path(root) / base
-    if not base.is_dir():
-        return {"status": "unreachable", "location": location, "instruction": instruction}
     target = base / investigation / package / number
+    full = os.path.abspath(target) + os.sep
+    if not base.is_dir():
+        return {"status": "unreachable", "location": location, "path": full, "instruction": instruction}
     try:
         if target.exists():
             # An identical earlier copy is already in place; anything else is left for the user.
             differences = compare_trees(local, target)
             if not differences:
-                return {"status": "already copied", "copy": str(target), "compare_trees": []}
-            return {"status": "conflict", "copy": str(target), "compare_trees": differences,
+                return {"status": "already copied", "copy": str(target), "path": full, "compare_trees": []}
+            return {"status": "conflict", "copy": str(target), "path": full, "compare_trees": differences,
                     "problem": "destination already exists and differs; nothing was overwritten"}
         shutil.copytree(local, target)
         differences = compare_trees(local, target)
     except (OSError, ValueError, shutil.Error) as error:
-        return {"status": "copy failed", "copy": str(target), "problem": str(error),
+        return {"status": "copy failed", "copy": str(target), "path": full, "problem": str(error),
                 "instruction": instruction}
-    return {"status": "copied" if not differences else "mismatch", "copy": str(target),
+    return {"status": "copied" if not differences else "mismatch", "copy": str(target), "path": full,
             "compare_trees": differences}
 
 
@@ -4564,7 +4675,9 @@ def release(root, investigation, package) -> dict:
     staging = released / f".{number}.{os.getpid()}.tmp"
     released.mkdir(parents=True, exist_ok=True)
     try:
-        shutil.copytree(package_dir / "draft", staging)
+        # The headline preview stays behind: it is no package file.
+        shutil.copytree(package_dir / "draft", staging,
+                        ignore=lambda folder, names: [PREVIEW] if Path(folder) == package_dir / "draft" else [])
         record.update({"status": "release", "release_number": number, "released_at": _now(),
                        "prior_release": f"released/{prior.name}" if prior else "none",
                        "review": {key: review[key] for key in ("kind", "recorded_at", "accepted")}})
@@ -4603,7 +4716,8 @@ def cli_release(root: Path, argv: list[str]) -> int:
                "its caveat, as finding, reason, and "
                "represented_in; while one remains, the release is not clean.\nThe release is "
                "deliveries/<investigation>/<package>/released/<n>/; storage holds its copy at "
-               "<location>/<investigation>/<package>/<n>/.\nstorage.status is copied or "
+               "<location>/<investigation>/<package>/<n>/, which storage.path gives in full, absolute for a path "
+               "location, whenever a location is recorded.\nstorage.status is copied or "
                "already copied (empty compare_trees), mismatch or conflict (compare_trees rows), copy failed "
                "(problem), unreachable or unrecorded (instruction), or none chosen (warning).\nExit 1 on "
                "refusal, a verify row, or storage status mismatch, conflict, or copy failed.")

@@ -11,6 +11,7 @@
 # test_results_answer_only_data_questions: answers naming a user or stakeholder question is refused before evidence, by run.py, and by a hand link; link_answers skips one; the person's answer is still taken; a ledger linking results to a person's question is malformed.
 # test_status_transitions: answered can only be superseded, keeping its answer; open reopens parked or declined and is a no-op on open; reasons are required; only open or parked questions are edited, and a data question keeps answerer data; a superseded answer stays visible in questions.md and list.
 # test_status_collector_reads_the_ledger: collect_status reports counts, the root and must sub-question counts, open questions by answerer, and derived answers awaiting recheck or provisional; null without a ledger; a malformed one, or questions.md without questions.json, is an uncertainty.
+# test_a_shown_should_question_is_on_open_questions: questions edit --show puts an unanswered should question on the Open questions slide, keeping its priority, and list and questions.md show it; --no-show clears it; an answered question is never listed; a show that is not true or false is malformed.
 # test_resume_and_list_show_finding_status: state shows open questions and answers awaiting recheck or provisional until promoted; list shows each linked finding's current status.
 
 from datetime import date
@@ -511,6 +512,78 @@ def test_cli_audience_wording_in_every_status(project, capsys, status):
     entry = ledger(project)["Q-001"]
     assert entry["audience"] == "" and entry["text"] == "Which internal measure?" and entry["status"] == status
     assert "audience:" not in cli(project, capsys, "list", "--all")[1]
+
+
+OPEN_DECK = """# Churn
+Retention leads
+
+## Answer
+
+**Headline:** Churn is highest in the west
+
+**Notes:** N.
+
+## Findings
+
+### West churn is highest
+
+**Notes:** N.
+
+## How we know
+
+**Headline:** Every account is counted once
+
+**Notes:** N.
+
+## Limitations and open caveats
+
+**Headline:** March is incomplete
+
+**Notes:** N.
+{opened}"""
+
+
+def test_a_shown_should_question_is_on_open_questions(project, capsys):
+    spec = importlib.util.spec_from_file_location("awb_draft_questions",
+                                                  ROOT / ".agents/skills/awb-package/assets/awb_draft.py")
+    draft = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(draft)
+    folder = project / "deliveries/churn/pkg/draft"
+    folder.mkdir(parents=True)
+    opened = "\n## Open questions\n\n**Headline:** One question remains\n\n- Which vendor needs review?\n\n**Notes:** N.\n"
+
+    def problems(slide):
+        (folder / "findings.md").write_text(OPEN_DECK.format(opened=opened if slide else ""))
+        rows, count = draft.open_question_problems(project, "churn", folder, provenance, names=(), roots=())
+        return [row["problem"] for row in rows], count
+
+    add(project, "Which vendor needs review?", answerer="user", kind="context")
+    assert ledger(project)["Q-001"]["priority"] == "should" and ledger(project)["Q-001"]["show"] is False
+    assert problems(False) == ([], 0)
+    # show is separate from priority: the question stays should and is listed while unanswered.
+    assert cli(project, capsys, "edit", "Q-001", "--show")[0] == 0
+    entry = ledger(project)["Q-001"]
+    assert entry["show"] is True and entry["priority"] == "should"
+    assert "Q-001 open [user, context, should, shown; parent: root]" in cli(project, capsys, "list")[1]
+    assert "| should | | yes |" in (project / INV / "questions.md").read_text()
+    assert problems(True) == ([], 1)
+    assert problems(False)[0] == ["missing Open questions slide; list every unanswered must question and each "
+                                  "one marked show"]
+    # --no-show clears it; an answered question is never listed, shown or not.
+    assert cli(project, capsys, "edit", "Q-001", "--no-show")[0] == 0
+    assert problems(True)[0] == ["no unanswered must questions and none marked show; omit the Open questions slide"]
+    assert cli(project, capsys, "edit", "Q-001", "--show")[0] == 0
+    assert cli(project, capsys, "answer", "Q-001", "--text", "Vendor 6", "--by", "user")[0] == 0
+    assert cli(project, capsys, "edit", "Q-001", "--no-show")[0] == 0 and cli(project, capsys, "edit", "Q-001",
+                                                                               "--show")[0] == 0
+    assert problems(False) == ([], 0)
+    # A ledger whose show is not true or false is malformed.
+    path = project / INV / "questions.json"
+    content = json.loads(path.read_text())
+    content["questions"][0]["show"] = "yes"
+    path.write_text(json.dumps(content))
+    code, _, err = cli(project, capsys, "list")
+    assert code == 1 and "show must be true or false" in err
 
 
 def test_cli_tree_sorts_ids_by_number_and_indents_under_listed_parents(project, capsys):

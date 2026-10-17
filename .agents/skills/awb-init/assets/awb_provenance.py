@@ -1852,7 +1852,7 @@ _ORIGINS = ("scope", "brainstorm", "eda", "analysis")
 _PRIORITIES = ("must", "should", "could")
 _QSTATUSES = ("open", "answered", "parked", "declined", "superseded")
 _QUESTION_KEYS = {"id", "text", "kind", "answerer", "unblocks", "origin", "status", "answer", "by", "results",
-                  "reason", "updated", "parent", "priority", "audience"}
+                  "reason", "updated", "parent", "priority", "audience", "show"}
 _LEDGER_HEADER = [
     "# Question ledger", "",
     "Every question this investigation has raised, answered or not. Rendered from `questions.json`: change it "
@@ -1860,7 +1860,8 @@ _LEDGER_HEADER = [
     "A data question is answered only by a recorded result: its settings table declares `answers = [\"Q-NNN\"]` "
     "and `run.py` links it here. `python3 src/awb.py questions list` shows each linked finding's current status.",
     ""]
-_LEDGER_COLUMNS = ["ID", "Question", "Kind", "Answerer", "Unblocks", "Status", "Answer or reason", "Parent", "Priority", "Audience"]
+_LEDGER_COLUMNS = ["ID", "Question", "Kind", "Answerer", "Unblocks", "Status", "Answer or reason", "Parent", "Priority", "Audience",
+                   "Show"]
 
 
 class _Ledger:
@@ -1973,8 +1974,10 @@ def _question_problem(entry):
         return f"needs exactly the keys {', '.join(sorted(_QUESTION_KEYS))}"
     if not isinstance(entry["id"], str) or not _QID.fullmatch(entry["id"]):
         return "id must be Q-NNN"
-    if not all(isinstance(entry[k], str) for k in _QUESTION_KEYS - {"results"}):
-        return "every field but results must be a string"
+    if not all(isinstance(entry[k], str) for k in _QUESTION_KEYS - {"results", "show"}):
+        return "every field but results and show must be a string"
+    if not isinstance(entry["show"], bool):
+        return "show must be true or false"
     if not entry["text"].strip():
         return "text is empty"
     for key, allowed in (("kind", _KINDS), ("answerer", _ANSWERERS), ("origin", _ORIGINS), ("status", _QSTATUSES), ("priority", _PRIORITIES)):
@@ -2005,7 +2008,8 @@ def _question_cells(entry, status=None, depth=0):
             parts.append(f"{entry['answer']} ({entry['by']})")
         answer = entry["reason"] + (f"; was answered: {'; '.join(parts)}" if parts else "")
     return [entry["id"], "&nbsp;&nbsp;" * depth + _cell(entry["text"]), entry["kind"], entry["answerer"],
-            _cell(entry["unblocks"]), status or entry["status"], _cell(answer), entry["parent"], entry["priority"], _cell(entry["audience"])]
+            _cell(entry["unblocks"]), status or entry["status"], _cell(answer), entry["parent"], entry["priority"], _cell(entry["audience"]),
+            "yes" if entry["show"] else ""]
 
 
 def ledger_answerers(project_root, investigation: str) -> dict[str, str]:
@@ -2134,7 +2138,7 @@ def add_question(project_root, investigation: str, text: str, *, kind: str, answ
     entry = {"id": f"Q-{number:03d}", "text": text, "kind": kind, "answerer": answerer,
              "unblocks": " ".join((unblocks or "").split()), "origin": origin, "status": status, "answer": "",
              "by": "", "results": [], "reason": reason, "updated": today or _today(),
-             "parent": parent, "priority": priority, "audience": " ".join(audience.split())}
+             "parent": parent, "priority": priority, "audience": " ".join(audience.split()), "show": False}
     ledger.entries.append(entry)
     ledger.check_parent(entry["id"], parent)
     ledger.write()
@@ -2225,9 +2229,10 @@ def set_question(project_root, investigation: str, question_ids: list[str], stat
 def edit_question(project_root, investigation: str, question_id: str, *, text: str | None = None,
                   kind: str | None = None, answerer: str | None = None, unblocks: str | None = None,
                   parent: str | None = None, priority: str | None = None, audience: str | None = None,
-                  today: str | None = None) -> bool:
-    """Reword or reclassify an open or parked question; edit parent, priority or audience in any status.
-    A data question keeps answerer data. Returns whether it changed."""
+                  show: bool | None = None, today: str | None = None) -> bool:
+    """Reword or reclassify an open or parked question; edit parent, priority, audience, or show in any status.
+    show puts an unanswered question on the Open questions slide whatever its priority. A data question keeps
+    answerer data. Returns whether it changed."""
     root = Path(project_root).resolve()
     if text is not None and not text.strip():
         raise ValueError("the question text is empty")
@@ -2250,6 +2255,8 @@ def edit_question(project_root, investigation: str, question_id: str, *, text: s
         ledger.check_parent(question_id, parent)
     if priority is not None and priority not in _PRIORITIES:
         raise ValueError(f"priority must be one of {', '.join(_PRIORITIES)}")
+    if show is not None:
+        new["show"] = bool(show)
     if all(entry[k] == v for k, v in new.items()):
         return False
     entry.update(new, updated=today or _today())
@@ -2303,7 +2310,8 @@ def question_lines(project_root, investigation: str, statuses=("open",), *, show
         if not listed:
             continue
         line = "  " * indent + f"{entry['id']} {displayed} [{entry['answerer']}, {entry['kind']}, " \
-            f"{entry['priority']}; parent: {entry['parent'] or 'root'}] {entry['text']}"
+            f"{entry['priority']}{', shown' if entry['show'] else ''}; parent: {entry['parent'] or 'root'}] " \
+            f"{entry['text']}"
         answer = "; ".join([f"{r} ({findings.get(r, 'no findings row')})" for r in entry["results"]]
                            + ([f"{entry['answer']} ({entry['by']})"] if entry["answer"] else []))
         if entry["status"] == "answered":
@@ -2328,7 +2336,8 @@ def cli_questions(root: Path, argv: list[str]) -> int:
         "add": "append the next numbered question",
         "answer": "record a person's answer, or link recorded results that declare the question",
         "status": "park, decline, supersede, or reopen questions",
-        "edit": "reword or reclassify an open or parked question; edit parent, priority or audience in any status",
+        "edit": "reword or reclassify an open or parked question; edit parent, priority, audience or show in any "
+                "status",
         "render": "restore questions.md from questions.json, discarding hand edits; with neither file, "
                   "write an empty ledger",
     }
@@ -2379,6 +2388,9 @@ def cli_questions(root: Path, argv: list[str]) -> int:
         parser.add_argument("--kind", choices=_KINDS)
         parser.add_argument("--answerer", choices=_ANSWERERS)
         parser.add_argument("--unblocks")
+        parser.add_argument("--show", action=argparse.BooleanOptionalAction, default=None,
+                            help="--show lists it on the Open questions slide while it is unanswered, whatever its "
+                                 "priority; --no-show clears that")
     if action in ("add", "edit"):
         parser.add_argument("--audience", default="" if action == "add" else None,
                             help="audience wording for Open questions; empty clears it; whitespace is collapsed")
@@ -2416,7 +2428,8 @@ def cli_questions(root: Path, argv: list[str]) -> int:
             print(f"{args.status}: {', '.join(changed) or 'none changed'}")
         elif action == "edit":
             changed = edit_question(root, name, args.question_id, text=args.text, kind=args.kind,
-                                    answerer=args.answerer, unblocks=args.unblocks, parent=args.parent, priority=args.priority, audience=args.audience)
+                                    answerer=args.answerer, unblocks=args.unblocks, parent=args.parent, priority=args.priority, audience=args.audience,
+                                    show=args.show)
             print(("edited: " if changed else "unchanged: ") + args.question_id)
         else:
             ledger = _Ledger(root, name)

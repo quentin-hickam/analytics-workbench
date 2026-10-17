@@ -903,7 +903,9 @@ def test_record_reads_the_report_from_stdin_and_checks_arguments(project, capsys
         assert run(project, capsys, "review-receipt", "record", "inv", "pkg", *argv)[0] == 2, argv
     assert snapshot(project) == before
     code, out = run(project, capsys, "review-receipt", "record", "inv", "absent", "--kind", "full", "--report", "-")
-    assert code == 1 and out["refused"] == "no draft at deliveries/inv/absent/draft; create it with awb-package"
+    # The refusal names the step that creates the draft, not the skill already running.
+    assert code == 1 and out["refused"] == ("no draft at deliveries/inv/absent/draft; write findings.md and "
+                                            "methodology.md there, then run export")
 
 
 def test_brief_change_makes_a_review_stale(project, capsys):
