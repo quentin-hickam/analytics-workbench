@@ -63,7 +63,7 @@ Connect the findings to the decision or exploratory purpose. Keep recommendation
 
 **Headline:** <why the answer can be trusted, in one sentence>
 
-Give the method in plain language: the definitions the answer depends on; the sources, described by owner, content, and period; each exclusion and analytical choice, described by its effect on the population or result; and the validation performed, in plain terms ("every month's total matches the finance ledger exactly"). Put what the audience needs on the slide and the rest in the notes, a check's tolerance included, stated only when it was set before the data was seen.
+Give the method in plain language: the definitions the answer depends on; the sources, described by owner, content, and period; each exclusion and analytical choice, described by its effect on the population or result; and the validation performed, in plain terms ("every month's total matches the finance ledger exactly"). Put what the audience needs on the slide and the rest in the notes, a check's tolerance included, stated only when the brief or the result's settings recorded it before the result, as `methodology.md` cites; a tolerance chosen after seeing the result is not a tolerance.
 
 ## Limitations and open caveats
 
