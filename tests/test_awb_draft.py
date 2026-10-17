@@ -384,7 +384,7 @@ def test_export_creates_a_missing_draft_folder(project, capsys):
     assert code == 0 and report["written"] and report["created"], report
     assert (package / "draft/manifest.json").is_file() and (package / "draft/charts/chart-1.csv").is_file()
     # With no findings.md yet, export records no slides and prints none.
-    assert report["slides"] == [] and "slides" not in manifest(project)
+    assert report["slide_slugs"] == [] and "slide_slugs" not in manifest(project)
     # check-draft and review-receipt record refuse a missing draft by naming the step that creates it.
     shutil.rmtree(package / "draft")
     refusal = "no draft at deliveries/inv/pkg/draft; write findings.md and methodology.md there, then run export"
@@ -3205,11 +3205,11 @@ def test_export_keeps_presentation_order(project, capsys):
     code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
     assert code == 0 and report["written"] and manifest(project)["presentation_order"] == SLUGS
     # export records each finding slide's slug with its heading and primary result, and prints the slugs.
-    assert manifest(project)["slides"] == [
+    assert manifest(project)["slide_slugs"] == [
         {"slug": "regional-rates-differ", "heading": "Regional rates differ", "primary": "r-001"},
         {"slug": "coverage-remains-limited", "heading": "Coverage remains limited", "primary": "none"},
         {"slug": "customer-rates-differ", "heading": "Customer rates differ", "primary": "r-002"}]
-    assert [entry["slug"] for entry in report["slides"]] == SLUGS
+    assert [entry["slug"] for entry in report["slide_slugs"]] == SLUGS
 
 
 def test_a_reworded_heading_keeps_its_presentation_order_slot(project, capsys):
@@ -3221,10 +3221,10 @@ def test_a_reworded_heading_keeps_its_presentation_order_slot(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert report["storyline"] == [] and code == 0, report
     # check-draft records the new heading under the kept slug, so the next export keeps it too.
-    assert manifest(project)["slides"][0] == {"slug": "regional-rates-differ",
+    assert manifest(project)["slide_slugs"][0] == {"slug": "regional-rates-differ",
                                               "heading": "Regions differ in their rates", "primary": "r-001"}
     run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
-    assert manifest(project)["slides"][0]["slug"] == "regional-rates-differ"
+    assert manifest(project)["slide_slugs"][0]["slug"] == "regional-rates-differ"
     # The derived order is printed whatever presentation_order holds: the must root's slide first.
     assert [(entry["slug"], entry["question"]) for entry in report["ledger_order"]] == [
         ("customer-rates-differ", "Q-003"), ("regional-rates-differ", "Q-002"), ("coverage-remains-limited", None)]

@@ -2411,8 +2411,8 @@ def _slug(heading):
 
 
 def slide_slugs(slides, recorded) -> tuple:
-    """(each slide's slug, the manifest's slides entries) for slides given as (heading, primary result or None)
-    in deck order, against the manifest's recorded slides entries.
+    """(each slide's slug, the manifest's slide_slugs entries) for slides given as (heading, primary result or
+    None) in deck order, against the manifest's recorded slide_slugs entries.
 
     Accepted input: recorded is a list of {slug, heading, primary}; anything else, and an entry without text slug
     and heading or repeating an earlier slug, records nothing. A slide keeps the slug of the recorded entry with
@@ -2458,7 +2458,7 @@ def slide_slugs(slides, recorded) -> tuple:
 
 
 def storyline_problems(root, investigation, draft, represented, provenance, order="none", recorded=None):
-    """(rows, unlinked_findings, ledger_order, slides entries) for the draft's finding slide order.
+    """(rows, unlinked_findings, ledger_order, slide_slugs entries) for the draft's finding slide order.
 
     Accepted input: the outline reader's Markdown subset (references/helpers.md), with ### finding headlines
     matched exactly to ### methodology headings. A slide ranks by its primary result alone (`finding_primaries`):
@@ -2475,7 +2475,7 @@ def storyline_problems(root, investigation, draft, represented, provenance, orde
     appendix's each follow the ledger order, the appendix numbering on from the main. ledger_order lists every
     finding slide in that order, as slug, heading, primary, question, and appendix.
 
-    `order` is the manifest's presentation_order and `recorded` its slides entries, which give each slide its slug
+    `order` is the manifest's presentation_order and `recorded` its slide_slugs, which give each slide its slug
     (`slide_slugs`). When order is a list it decides the order instead: it holds every finding slide's slug, main
     and appendix, exactly once, in deck order. A list entry that is not non-blank text makes the whole field
     malformed, as does any other value, JSON null included; absent and "none" leave the ledger order in force.
@@ -2872,21 +2872,21 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
                 report["claims"], claim_lines = _claim_review(draft, [r["result_id"] for r in represented], claims)
             except (OSError, UnicodeError) as error:
                 report["errors"].append(f"claims check: {error}")
-        slides = record.get("slides")
+        slugs = record.get("slide_slugs")
         if provenance is not None:
             try:
-                report["storyline"], report["unlinked_findings"], report["ledger_order"], slides = storyline_problems(
+                report["storyline"], report["unlinked_findings"], report["ledger_order"], slugs = storyline_problems(
                     root, investigation, draft, [r["result_id"] for r in represented], provenance,
-                    record.get("presentation_order", "none"), record.get("slides"))
+                    record.get("presentation_order", "none"), record.get("slide_slugs"))
             except (OSError, ValueError, AttributeError) as error:
                 report["errors"].append(f"storyline check: {error}")
         if not verify_only:
             _write_start_here(draft, investigation, package)  # before the inventory, which then lists it
             rows = inventory(draft)
-            if rows != record.get("inventory") or slides != record.get("slides"):
+            if rows != record.get("inventory") or slugs != record.get("slide_slugs"):
                 if rows != record.get("inventory"):
                     record["revised_at"] = _now()
-                record.update(inventory=rows, slides=slides)
+                record.update(inventory=rows, slide_slugs=slugs)
                 _write_json(path, record)
         elif not isinstance(record.get("inventory"), list):
             raise ValueError(f"{MANIFEST} records no inventory list; run check-draft without --verify-only")
@@ -2963,7 +2963,7 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "also lists a malformed order, a slug it repeats or that no finding slide has, and a finding slide "
                "it misses. ledger_order lists every finding slide in the derived order, as slug, heading, "
                "primary, question, and appendix, whatever presentation_order holds. A slide keeps its slug, "
-               "recorded in the manifest's slides, across a reworded heading while its primary result stays; "
+               "recorded in the manifest's slide_slugs, across a reworded heading while its primary result stays; "
                "without --verify-only, check-draft records each slide's current heading there. "
                "unlinked_findings names slides with no declared ledger answer, which go last without a "
                "presentation_order; it is informational.\n"
@@ -3584,15 +3584,15 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     if (draft / "findings.md").is_file() and (draft / "methodology.md").is_file():
         try:
             primaries = finding_primaries(draft, represented)
-            record["slides"] = slide_slugs([(slide["heading"], primary) for slide, primary in primaries],
-                                           record.get("slides"))[1]
+            record["slide_slugs"] = slide_slugs([(slide["heading"], primary) for slide, primary in primaries],
+                                                record.get("slide_slugs"))[1]
         except (OSError, UnicodeError) as error:
-            report["slides_error"] = str(error)
+            report["slide_slugs_error"] = str(error)
     _write_json(path, record)
     report["written"] = True
-    report["slides"] = [{"slug": entry["slug"], "heading": entry["heading"]}
-                        for entry in record.get("slides", []) if isinstance(entry, dict)] \
-        if isinstance(record.get("slides"), list) else []
+    report["slide_slugs"] = [{"slug": entry["slug"], "heading": entry["heading"]}
+                             for entry in record.get("slide_slugs", []) if isinstance(entry, dict)] \
+        if isinstance(record.get("slide_slugs"), list) else []
     commits, changes = fields["producing_commit"], fields["producing_uncommitted_changes"]
     report["results"] = represented
     report["questions"] = questions
@@ -3655,8 +3655,8 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "each entry that needs represented_in or, once represented, a disposition. When state.md "
                "cannot be read, flags_error says why and revalidation_flags is left as it was.\nquestions maps "
                "each represented result to the question its evidence records, for methodology.md to repeat "
-               "verbatim; the manifest's results entries record it.\nslides lists each finding slide's slug and "
-               "heading, which the manifest's slides records with its primary result, once findings.md and "
+               "verbatim; the manifest's results entries record it.\nslide_slugs lists each finding slide's slug and "
+               "heading, which the manifest's slide_slugs records with its primary result, once findings.md and "
                "methodology.md exist; presentation_order lists these slugs.\nExit 0 only "
                "when written and check_charts is empty; 2 for unusable arguments.")
     _package_arguments(parser)

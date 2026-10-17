@@ -45,11 +45,14 @@ Say the provenance locates the producing state; never call a package reproducibl
 
 ## Storyline
 
-- `presentation_order`: absent or `none`, or the finding slide headings in the order the user approved, main sequence first and then the appendix, each written as its `###` heading shows.
-  - Record it when the user approves an order of finding slides that differs from the order the ledger gives. Ledger priority and parent stay as they are: they decide what the **Open questions** slide lists.
-  - While it is a list, `check-draft`'s `storyline` rows hold the finding slides to it, and refuse a list that misses or repeats a finding slide or names a heading no finding slide has. A revision that rewords a finding heading rewords its entry here too.
+- `slide_slugs`: each finding slide in deck order as `slug`, `heading`, and `primary`, the first result its methodology section cites, or `none`. `export` writes it once `findings.md` and `methodology.md` exist, and `check-draft` updates each `heading`.
+  - A slug is taken from the slide's heading the first time it is recorded: its first six words, lowercased ASCII letters and digits joined by hyphens, such as `late-orders-rose-in-the-west`.
+  - A slide keeps its slug while its heading stays, or, reworded, while its primary result stays, so a reworded heading keeps its place in `presentation_order`. A slide both reworded and given another primary result takes a new slug.
+- `presentation_order`: absent or `none`, or the finding slide slugs in the order the user approved, main sequence first and then the appendix, as `slide_slugs` and `check-draft`'s `ledger_order` give them.
+  - Record it when the user approves an order of finding slides that differs from the order the ledger gives. Ledger priority, parent, and `show` stay as they are: they decide what the **Open questions** slide lists.
+  - While it is a list, `check-draft`'s `storyline` rows hold the finding slides to it, and refuse a list that misses or repeats a slide's slug or names a slug no finding slide has.
 
-You record it and `export` keeps it.
+You record `presentation_order` and `export` keeps it.
 
 ## Numbers
 

@@ -214,9 +214,10 @@ def test_headline_checkpoint_names_both_modes_and_never_waits_unconditionally():
     # The current request comes before a mode the brief recorded for an earlier package.
     precedence = ("the mode the request states; **draft-then-review** when the request supplies the storyline or "
                   "asks for the full draft; the mode the brief's **Audience** section records; **preview-and-wait**")
-    for text in (package, contract):
-        assert '**preview-and-wait**' in text and '**draft-then-review**' in text
-        assert precedence in ' '.join(text.split())
+    assert '**preview-and-wait**' in package and '**draft-then-review**' in package
+    assert precedence in ' '.join(package.split())
+    # The skill states the modes once; the contract points to it rather than repeating them.
+    assert precedence not in ' '.join(contract.split()) and "`awb-package`'s **The headline checkpoint**" in contract
     assert 'preview-and-wait' in brief and 'draft-then-review' in brief
     retired = ('wait for their answer before expanding the slides', "and wait for the user's approval or reorder")
     offenders = [(str(path.relative_to(ROOT)), phrase) for path in sorted((ROOT / '.agents/skills').rglob('*'))
@@ -262,6 +263,40 @@ def test_status_asks_to_copy_releases_when_recorded_storage_lacks_the_latest():
                     '| `python3 src/awb.py copy-releases <investigation> <package>` | risk |']
     record = [row for row in rows if 'Record where releases are kept' in row]
     assert len(record) == 1 and 'latest_release_in_storage' not in record[0]
+
+
+# awb-package/SKILL.md's length after #90 shortened it, rounded up to the next 100 words. Trim the file rather
+# than raise this when a change pushes it over.
+PACKAGE_SKILL_WORDS = 2500
+
+
+def test_package_skill_stays_under_its_word_budget():
+    text = (ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8')
+    assert len(text.split()) <= PACKAGE_SKILL_WORDS
+
+
+def test_package_steps_export_before_filling_names_and_keep_the_preview_out_of_the_package():
+    package = (ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8')
+    sequence = ' '.join(package[package.index('## Sequence'):package.index('## 1. Establish')].split())
+    # Writing is a first pass; export comes next and creates the folder; names, then methodology lines, after it.
+    assert '**Write** a first pass of `findings.md`' in sequence
+    assert 'which creates the draft folder; then fill in the display names and paste the `methodology_lines`' in sequence
+    export = skill_section('.agents/skills/awb-package/SKILL.md', '## 4. Export the files and provenance')
+    assert export.index('`display_stub`') < export.index('`methodology_lines`')
+    assert 'Before writing, give each column' not in package
+    # The evidence-restoring procedure lives in helpers.md; the step points to it.
+    assert '**Missing evidence** in [helpers](references/helpers.md)' in export and 'restore them after each' not in export
+    helpers = (ROOT / '.agents/skills/awb-package/references/helpers.md').read_text(encoding='utf-8')
+    assert '\n## Missing evidence\n' in helpers and 'restore them after each' in helpers
+    # Step 4 is numbered sub-steps, not one paragraph.
+    assert re.search(r'\n1\. Run `python3 src/awb.py export', package) and '\n5. When `export` reports' in package
+    checkpoint = skill_section('.agents/skills/awb-package/SKILL.md', '### The headline checkpoint')
+    assert '`.preview/headlines.md` in the draft folder, which no check reads and no release copies' in checkpoint
+    assert 'takes `--show`, leaving its priority' in checkpoint
+    # The report repeats the package name; scoping names the folder; release gives the full storage path.
+    assert 'the package name, the draft path' in skill_section('.agents/skills/awb-package/SKILL.md', '## 7. Report')
+    assert '`investigations/<slug>/`' in skill_section('.agents/skills/awb-scope/SKILL.md', '## 4. Report')
+    assert 'the full `path`' in skill_section('.agents/skills/awb-release/SKILL.md', '## 5. Copy to storage')
 
 
 def test_a_caveat_only_revision_names_the_full_export_for_a_charts_row():
