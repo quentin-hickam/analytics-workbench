@@ -46,6 +46,7 @@
 # test_record_reads_the_report_from_stdin_and_checks_arguments: start prints started and kind; --report - reads standard input; an unknown kind, a missing or unreadable report, and a blank or multi-line --accept exit 2 and write nothing; a missing draft is refused.
 # test_brief_change_makes_a_review_stale: the investigation's brief.md is snapshotted with the review, and an edit to it shows stale with brief.md alone in changed and a diff labelled with its path.
 # test_source_register_or_glossary_change_makes_a_review_stale: foundation/sources.md and foundation/glossary.md are snapshotted with the review, and an edit to either, or its removal, shows stale with it alone in changed and a diff labelled with its path.
+# test_withdrawn_quality_observation_or_its_cited_scan_makes_a_review_stale: foundation/quality.md is snapshotted whole and each foundation/scans/<name>.json path methodology.md names as evidence; withdrawing a cited observation, rescanning the cited scan, or removing the record shows stale with it in changed, and a scan no narrative names leaves the review current.
 # test_show_reports_an_unreadable_receipt_and_bounds_the_diff: a long diff is cut so the printed line, a long prior report and typographic punctuation included, fits one read result, with a note counting the rest; an unreadable or malformed receipt is an error, exit 1, with status none.
 
 import importlib.util
@@ -975,6 +976,36 @@ def test_source_register_or_glossary_change_makes_a_review_stale(project, capsys
     out = show(project, capsys)[1]
     assert out["status"] == "stale" and out["changed"] == [name]
 
+
+
+def test_withdrawn_quality_observation_or_its_cited_scan_makes_a_review_stale(project, capsys):
+    # A methodology.md check citing DQ-001 with its scan's path: the quality record is read whole and the
+    # scan as evidence, so withdrawing the observation or rescanning makes the review stale; a scan no
+    # narrative names leaves it current.
+    quality, scan, other = (project / "foundation/quality.md", project / "foundation/scans/orders.json",
+                            project / "foundation/scans/returns.json")
+    scan.parent.mkdir(parents=True)
+    quality.write_text("| ID | Observation and evidence | Status |\n|---|---|---|\n| DQ-001 | rows reconcile | open |\n")
+    scan.write_text('{"check": "pass"}\n')
+    other.write_text('{"check": "pass"}\n')
+    (project / DRAFT / "methodology.md").write_text(
+        METHODOLOGY + "\nEvery row reconciles (DQ-001; `foundation/scans/orders.json`).\n")
+    record(project, capsys, CLEAN)
+    assert (project / "deliveries/inv/pkg/review/snapshot/quality.md").read_text() == quality.read_text()
+    other.write_text('{"check": "fail"}\n')
+    assert show(project, capsys)[1]["status"] == "current"
+    quality.write_text(quality.read_text().replace("rows reconcile", "Withdrawn; source rows do not reconcile"))
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == ["foundation/quality.md"]
+    assert "--- reviewed foundation/quality.md\n+++ foundation/quality.md\n" in out["diff"]
+    assert "+| DQ-001 | Withdrawn; source rows do not reconcile | open |" in out["diff"]
+    record(project, capsys, CLEAN)
+    scan.write_text('{"check": "fail"}\n')
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == ["foundation/scans/orders.json"]
+    assert '+{"check": "fail"}' in out["diff"]
+    quality.unlink()
+    assert show(project, capsys)[1]["changed"] == ["foundation/quality.md", "foundation/scans/orders.json"]
 
 def test_show_reports_an_unreadable_receipt_and_bounds_the_diff(project, capsys):
     # A long prior report and typographic punctuation, which JSON prints six characters wide, still leave the

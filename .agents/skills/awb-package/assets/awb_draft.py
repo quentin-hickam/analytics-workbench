@@ -4486,15 +4486,20 @@ RECEIPT = "receipt.json"
 STARTED = "started.json"
 _KINDS = ("full", "scoped")
 # What a review reads, in the order the fingerprint hashes it, and each one's file in the snapshot; then
-# each represented result's evidence file the manifest's results name, by its path, in sorted order.
+# each evidence file the manifest's results name and each scan methodology.md names by its foundation/scans/
+# path, which step 3 reads beside a cited quality ID, by its path, in sorted order.
 # The brief is keyed brief.md and read from the investigation; its questions and Audience set what a review checks.
-# The glossary and source register are read whole, as step 3's readability and source-series checks read them.
+# The glossary, source register, and quality record are read whole, as step 3's readability, source-series,
+# and cited-check checks read them.
 BRIEF = "brief.md"
 GLOSSARY = "foundation/glossary.md"
 SOURCES = "foundation/sources.md"
+QUALITY = "foundation/quality.md"
+_SCAN_PATH = re.compile(r"foundation/scans/[A-Za-z0-9][A-Za-z0-9._@-]*\.json")
 _REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.md",
                   METHODOLOGY_NOTE: METHODOLOGY_NOTE, BRIEF: BRIEF, REVIEW_RULES: "review-rules.md",
-                  GLOSSARY: "glossary.md", SOURCES: "sources.md", "revalidation_flags": "revalidation_flags.json"}
+                  GLOSSARY: "glossary.md", SOURCES: "sources.md", QUALITY: "quality.md",
+                  "revalidation_flags": "revalidation_flags.json"}
 # show's whole JSON line, as printed, stays within one read tool result (16,000 characters by default).
 _READ_LIMIT = 16000
 _SUMMARY = re.compile(r"review( \(scoped\))?: (?:(clean)|([0-9]+) violations? \(([0-9]+) errors?\), "
@@ -4556,15 +4561,16 @@ def _package_rules(data, investigation, package):
 def review_inputs(root, investigation, package) -> dict:
     """{input: bytes, or None when absent} for exactly what a review reads: the three narratives, the
     investigation's brief.md, the rule file without rules kept for another package (_package_rules), the
-    glossary and source register whole, the reduced revalidation_flags as indented JSON, and each evidence
-    file the manifest's results name, which step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a directory
-    included."""
+    glossary, source register, and quality record whole, the reduced revalidation_flags as indented JSON, and
+    each evidence file the manifest's results name or scan methodology.md names by its foundation/scans/
+    path, which step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a
+    directory included."""
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     paths = {name: draft / name for name in NARRATIVES + (METHODOLOGY_NOTE,)}
     paths[BRIEF] = root / "investigations" / investigation / BRIEF
     paths[REVIEW_RULES] = root / REVIEW_RULES
-    paths[GLOSSARY], paths[SOURCES] = root / GLOSSARY, root / SOURCES
+    paths[GLOSSARY], paths[SOURCES], paths[QUALITY] = root / GLOSSARY, root / SOURCES, root / QUALITY
     inputs = {}
     for name, path in paths.items():
         try:
@@ -4585,6 +4591,7 @@ def review_inputs(root, investigation, package) -> dict:
     results = record.get("results") if isinstance(record.get("results"), list) else []
     evidence = {entry["evidence"] for entry in results if isinstance(entry, dict)
                 and isinstance(entry.get("evidence"), str) and entry["evidence"] not in ("", *_REVIEW_INPUTS)}
+    evidence.update(_SCAN_PATH.findall((inputs["methodology.md"] or b"").decode("utf-8", "replace")))
     for name in sorted(evidence):
         try:
             inputs[name] = (root / name).read_bytes()
@@ -4865,10 +4872,11 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
         "record", formatter_class=raw, help="record a review's report and what it read",
         description="Record the report of a review begun with start: snapshot the draft's findings.md, "
                     "methodology.md, methodology-note.md when present, the investigation's brief.md when present, "
-                    "foundation/glossary.md and foundation/sources.md when present, "
+                    "foundation/glossary.md, foundation/sources.md, and foundation/quality.md when present, "
                     "foundation/review-rules.md when present without rules kept for another package, and the "
                     "manifest's revalidation_flags (finding, reason, represented_in, and whether the "
-                    "disposition is omit) and each evidence file its results name, and write receipt.json with "
+                    "disposition is omit), each evidence file its results name, and each scan methodology.md names "
+                    "by its foundation/scans/<name>.json path, and write receipt.json with "
                     "a SHA-256 fingerprint of them, the report verbatim, passed, and accepted. Each record "
                     "replaces the previous one and consumes the start.",
         epilog=f"The report's last line is {_SUMMARY_FORM}. passed is true when it is clean, or when it counts no "

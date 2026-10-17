@@ -864,7 +864,8 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
             'or **Limitations and open caveats** slide, not only in a slide\'s **Notes:** or nowhere') in step3
     assert 'how a source builds a series' in step3 and '`foundation/sources.md`' in step3
     # Citation forms for a checked sentence, and the narrowed tolerance rule.
-    assert 'a result ID, an evidence path, or a foundation quality ID (`DQ-NNN`) with the scan its row cites' in step3
+    assert ('a result ID, an evidence path, or a foundation quality ID (`DQ-NNN`) with the path of the scan its row '
+            'cites, `foundation/scans/<name>.json`') in step3
     assert 'with its tolerance' not in review
     # The reviewer checks the record a tolerance comes from, not when it was chosen; the timing is writer guidance.
     assert ('only one a record holds from before the result: `brief.md`, such as its **Usefulness criteria**, or the '
@@ -893,8 +894,11 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
     # The glossary and source register the step 3 checks read make a review stale and scope a later one.
     assert ('the checks against `brief.md`, `foundation/glossary.md`, or `foundation/sources.md` when the diff '
             'changes it') in review
-    assert ('once the narratives, `brief.md`, `foundation/glossary.md`, `foundation/sources.md`, or '
-            '`foundation/review-rules.md` change') in review
+    assert ('once the narratives, `brief.md`, `foundation/glossary.md`, `foundation/sources.md`, '
+            '`foundation/quality.md`, or `foundation/review-rules.md` change') in review
+    # So does the quality record and each scan methodology.md cites by its path, which scope a later one.
+    assert 'or a scan `methodology.md` names by its `foundation/scans/` path changes' in review
+    assert 'every sentence citing a quality ID whose row the diff of `foundation/quality.md` changes' in review
     assert 'a tolerance chosen after seeing the result is not a tolerance' in read(
         'awb-package/assets/package-format/findings-template.md')
 
