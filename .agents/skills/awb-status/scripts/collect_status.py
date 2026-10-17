@@ -933,6 +933,7 @@ def git_status(root, slug, state_date, uncertain):
             for name, commit_time in sorted(latest.items()):
                 # A clean file's mtime is its change time unless it postdates the commit, as after a
                 # checkout rewrote it; a quoted, deleted, or rewritten file has only the commit's time.
+                # A commit merged or pulled in carries the time it was made elsewhere, not when it arrived.
                 try:
                     mtime = modified(root / name)
                 except OSError:
@@ -941,6 +942,7 @@ def git_status(root, slug, state_date, uncertain):
                     changes.append((mtime, name, True))
                 else:
                     changes.append((datetime.fromtimestamp(commit_time).astimezone(), name, False))
+    changes = [change for change in changes if not run_output(root, prefix, change[1])]
     if state_date is None or not changes and not missing:
         result["state_status"] = "unknown" if missing or state_date is None else "no newer dated change found"
         return result
@@ -978,6 +980,27 @@ def git_status(root, slug, state_date, uncertain):
         result["latest_change"] = {"date": newest[0].date().isoformat(), "time": newest[0].isoformat(timespec="seconds"),
                                    "source": newest[1]}
     return result
+
+
+def run_output(root, prefix, name):
+    """Whether name is a result's evidence, table, or profile whose evidence is no older than its table and profile.
+
+    run.py writes a result's table and profile, then its evidence, then its finding, which stamps the
+    state, or leaves it as it is when the table, checks, and settings are unchanged (kept). Outputs
+    whose evidence followed them were therefore followed by that finding write, so they never date
+    the state; a failed finding write removes the evidence, and a later edit to the table postdates it.
+    """
+    result_id = r"([A-Za-z0-9][A-Za-z0-9._-]*?)"
+    match = re.fullmatch(re.escape(prefix) + rf"(?:evidence/{result_id}\.json|results/{result_id}(?:\.profile\.json|\.csv))", name)
+    if not match:
+        return False
+    base, result_id = root / prefix, match[1] or match[2]
+    outputs = [base / "results" / f"{result_id}.csv", base / "results" / f"{result_id}.profile.json"]
+    try:
+        evidence = (base / "evidence" / f"{result_id}.json").stat().st_mtime
+        return outputs[0].exists() and all(evidence >= path.stat().st_mtime for path in outputs if path.exists())
+    except OSError:
+        return False
 
 
 def modified(path):

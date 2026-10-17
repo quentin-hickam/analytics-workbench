@@ -1372,6 +1372,7 @@ def render_findings(project_root, investigation) -> dict:
     def mutate(findings):
         discarded = [r["disk"] for r in findings.drift() if r["disk"] is not None]
         findings.changed = True
+        findings.state.touch()
         return {"discarded": discarded}
     return _write_findings(Path(project_root).resolve(), investigation, mutate, render=True)
 
