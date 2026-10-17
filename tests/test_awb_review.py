@@ -24,6 +24,10 @@
 # test_document_scope_lists_one_entry_per_file: add --scope document writes the Scope field after Pattern; check lists one entry per file, at most 20 lines with more_lines beyond; --scope line is written, an absent scope is not, and both list lines as before with no scope key.
 # test_scope_field_accepted_and_refused_forms: Scope line, slide, or document is accepted; any other value, a blank one included, is a problem, the rule is unchecked, and add refuses until it is repaired.
 # test_repeated_scope_line_is_reported: a second Scope line in a rule is a problem at its line.
+# test_add_refuses_without_the_users_yes: add without --confirmed refuses, exit 1, writing nothing, naming the question to ask; with it the rule is added.
+# test_package_rule_holds_for_its_package_alone: add --package <investigation>/<package> writes a Package field after Scope; check lists the rule, with package, for that package only, and a rule without one for every package; --package naming no package is refused and a malformed one exits 2, writing nothing; a malformed Package field is a problem and the rule holds for every package.
+# test_add_warns_on_a_number_a_draft_states: add still adds, warning once per number in the rule or fix that a draft narrative states, compared by value (1,240 and 1240.0), naming the first place; --package reads only that package's draft; a number no draft states, or an unreadable narrative's numbers, give no number warning, the latter a read warning instead.
+# test_another_packages_rule_leaves_a_review_current: adding or editing a rule kept for another package leaves a package's review current and its snapshot without that rule; a rule for this package or every package makes it stale; a rule file with problems counts whole.
 # test_package_and_release_invoke_the_read_only_review: both skills link the review brief and run it before their final command; the brief has a fresh subagent review in every host with subagents, Codex included, and the writer review only where there are none; it limits the reviewer to reads, shell reads included, and the read-only command, running no command that writes, asks one line per rule, ends with a summary line counting violations, narrative problems, and command problems, any of which blocks, defines when a review is stale, and with AGENTS.md says which corrections become rules.
 # test_receipt_after_a_clean_review_matches_until_what_it_read_changes: show is none before any record; a clean full review records a receipt (fingerprint, report verbatim, passed) and shows current, writing nothing; an edit to either narrative, the rule file, an added methodology note, or a flag's represented_in shows stale with that input alone in changed and a labelled diff whose hunks carry the current file's line numbers; undoing the edit shows current again.
 # test_only_a_disposition_to_or_from_omit_makes_a_review_stale: release_with_caveat or revalidate leaves the review current, omit makes it stale, and an inventory rewrite leaves it current.
@@ -35,6 +39,7 @@
 # test_summary_line_probes: backticks, a closing period, singular words, and bulleted rows read the same; the counts decide passed.
 # test_snapshot_sits_beside_the_draft_and_is_replaced: the snapshot holds exactly what a review reads, under the package's review/, never in draft/, and each record replaces it, a removed note included.
 # test_record_reads_the_report_from_stdin_and_checks_arguments: --report - reads standard input; an unknown kind, a missing or unreadable report, and a blank or multi-line --accept exit 2 and write nothing; a missing draft is refused.
+# test_brief_change_makes_a_review_stale: the investigation's brief.md is snapshotted with the review, and an edit to it shows stale with brief.md alone in changed and a diff labelled with its path.
 # test_show_reports_an_unreadable_receipt_and_bounds_the_diff: a long diff is cut at the limit with a note counting the rest; an unreadable or malformed receipt is an error, exit 1, with status none.
 
 import importlib.util
@@ -87,10 +92,11 @@ def run(project, capsys, *argv):
 
 
 def add(project, capsys, area="periods", severity="error", rule="Compare only complete months.",
-        fix="Drop the partial month.", pattern=None, scope=None):
+        fix="Drop the partial month.", pattern=None, scope=None, package=None, confirmed=True):
     argv = ["review-rules", "add", "--area", area, "--severity", severity, "--rule", rule, "--fix", fix]
     return run(project, capsys, *argv, *(["--pattern", pattern] if pattern is not None else []),
-               *(["--scope", scope] if scope is not None else []))
+               *(["--scope", scope] if scope is not None else []),
+               *(["--package", package] if package is not None else []), *(["--confirmed"] * confirmed))
 
 
 def snapshot(root, *, caches=False):
@@ -102,7 +108,8 @@ def snapshot(root, *, caches=False):
 
 def test_correction_becomes_a_numbered_rule(project, capsys):
     code, out = add(project, capsys, pattern=r"(?i)partial month")
-    assert code == 0 and out == {"added": "R-periods-001", "rules_file": RULES, "created": True, "rules": 1}
+    assert code == 0 and out == {"added": "R-periods-001", "rules_file": RULES, "created": True, "rules": 1,
+                                 "warnings": []}
     text = (project / RULES).read_text()
     assert text.startswith("# Review rules\n")
     assert "## R-periods-001\n\n- Severity: error\n- Rule: Compare only complete months.\n" \
@@ -252,12 +259,12 @@ def test_wrapped_field_line_is_reported(project, capsys):
                     "  partial months.\n- Pattern: none\n- Fix: Drop it.\n")
     code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
     assert code == 1 and out["problems"] == [
-        {"rule": "R-periods-001", "line": 7, "problem": "line is not a - Severity, Rule, Pattern, Scope, Fix, or Added field"}]
+        {"rule": "R-periods-001", "line": 7, "problem": "line is not a - Severity, Rule, Pattern, Scope, Package, Fix, or Added field"}]
 
 
 @pytest.mark.parametrize("tail, expected", [
     ("- Fix: Replace\n#hashtags with plain words.\n",
-     [{"rule": "R-wording-001", "line": 8, "problem": "line is not a - Severity, Rule, Pattern, Scope, Fix, or Added field"}]),
+     [{"rule": "R-wording-001", "line": 8, "problem": "line is not a - Severity, Rule, Pattern, Scope, Package, Fix, or Added field"}]),
     ("- Fix: Count\n# of customers, not users.\n",
      [{"line": 8, "problem": "heading after the first rule is not a ## R-<area>-NNN rule heading"}]),
     ("- Fix: Rename.\n\n## Notes\n\nSee the style guide.\n",
@@ -547,6 +554,92 @@ def test_repeated_scope_line_is_reported(project, capsys):
     assert code == 1 and out["problems"] == [{"rule": "R-periods-001", "line": 9, "problem": "repeated Scope line"}]
 
 
+def test_add_refuses_without_the_users_yes(project, capsys):
+    code, out = add(project, capsys, confirmed=False)
+    assert code == 1 and out["added"] is None and "ask the user first" in out["refused"]
+    assert "--confirmed" in out["refused"] and not (project / RULES).exists()
+    assert add(project, capsys)[1]["added"] == "R-periods-001"
+
+
+def other_package(project):
+    draft = project / "deliveries/inv/other/draft"
+    draft.mkdir(parents=True)
+    (draft / "findings.md").write_text("# Other\n\n- Returns fell 1,240 orders.\n")
+    (draft / "methodology.md").write_text("# Methodology\n")
+    return draft
+
+
+def test_package_rule_holds_for_its_package_alone(project, capsys):
+    other_package(project)
+    add(project, capsys)
+    code, out = add(project, capsys, area="wording", scope="slide", package="inv/pkg")
+    assert code == 0 and out["added"] == "R-wording-001"
+    assert "- Pattern: none\n- Scope: slide\n- Package: inv/pkg\n- Fix: " in (project / RULES).read_text()
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 0 and [(r["id"], r.get("package")) for r in out["rules"]] == [
+        ("R-periods-001", None), ("R-wording-001", "inv/pkg")]
+    code, out = run(project, capsys, "review-rules", "check", "inv", "other")
+    assert code == 0 and [r["id"] for r in out["rules"]] == ["R-periods-001"]
+
+    before = (project / RULES).read_text()
+    code, out = add(project, capsys, package="inv/absent")
+    assert code == 1 and out["refused"].startswith("no package at deliveries/inv/absent")
+    for value in ("pkg", "inv/pkg/extra", "../pkg", "inv/"):
+        assert add(project, capsys, package=value)[0] == 2, value
+    assert (project / RULES).read_text() == before
+
+    # A typo in the field never hides the rule: it is a problem, and the rule holds for every package.
+    (project / RULES).write_text(before.replace("- Package: inv/pkg", "- Package: inv pkg"))
+    code, out = run(project, capsys, "review-rules", "check", "inv", "other")
+    assert code == 1 and [r["id"] for r in out["rules"]] == ["R-periods-001", "R-wording-001"]
+    assert out["problems"] == [{"rule": "R-wording-001", "problem": "Package 'inv pkg' is not "
+                                                                    "<investigation>/<package>"}]
+
+
+def test_add_warns_on_a_number_a_draft_states(project, capsys):
+    other_package(project)
+    code, out = add(project, capsys, rule="Say that sales rose 4% in October.", fix="Write 1240.0 orders.")
+    assert code == 0 and out["added"] == "R-periods-001"
+    assert [w.split(",")[0] for w in out["warnings"]] == [
+        "the rule names 4", "the rule names 1240.0"]
+    assert "deliveries/inv/pkg/draft/findings.md:3 also states" in out["warnings"][0]
+    assert "deliveries/inv/other/draft/findings.md:3 also states" in out["warnings"][1]
+    assert "reword it in place with the user" in out["warnings"][0]
+    # A package rule is compared with that package's draft alone.
+    code, out = add(project, capsys, rule="Never say 4% here.", fix="Write 1240.0 orders.", package="inv/other")
+    assert code == 0 and [w.split(",")[0] for w in out["warnings"]] == ["the rule names 1240.0"]
+    assert add(project, capsys, rule="Name every month in full.", fix="Spell out the month.")[1]["warnings"] == []
+    (project / "deliveries/inv/other/draft/methodology-note.md").mkdir()
+    out = add(project, capsys, rule="Name the 7 regions.", fix="List them.")[1]
+    assert out["added"] and len(out["warnings"]) == 1
+    assert out["warnings"][0].startswith("deliveries/inv/other/draft/methodology-note.md not read for numbers")
+
+
+def test_another_packages_rule_leaves_a_review_current(project, capsys):
+    other_package(project)
+    add(project, capsys)
+    record(project, capsys, CLEAN)
+    reviewed = (project / "deliveries/inv/pkg/review/snapshot/review-rules.md").read_bytes()
+    add(project, capsys, area="wording", package="inv/other")
+    assert show(project, capsys)[1]["status"] == "current"
+    path = project / RULES
+    path.write_text(path.read_text().replace("- Package: inv/other\n", "- Package: inv/other\n- Scope: slide\n"))
+    assert show(project, capsys)[1]["status"] == "current"
+    add(project, capsys, area="numbers")  # another rule after it, for every package
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == [RULES]
+    assert "+## R-numbers-001" in out["diff"] and "R-wording-001" not in out["diff"]
+    record(project, capsys, "R-periods-001 pass\nR-numbers-001 pass\nreview: clean\n")
+    snap = (project / "deliveries/inv/pkg/review/snapshot/review-rules.md").read_bytes()
+    assert b"R-wording-001" not in snap and snap.startswith(reviewed.rstrip(b"\n"))
+    add(project, capsys, area="wording", package="inv/pkg")
+    assert show(project, capsys)[1]["status"] == "stale"
+    record(project, capsys, "R-periods-001 pass\nR-numbers-001 pass\nR-wording-002 pass\nreview: clean\n")
+    # A file with problems is read whole, so any change to it counts.
+    path.write_text(path.read_text() + "- Rule: stray\n")
+    assert show(project, capsys)[1]["status"] == "stale"
+
+
 def test_package_and_release_invoke_the_read_only_review():
     package = (SKILLS / "awb-package/SKILL.md").read_text()
     release = (SKILLS / "awb-release/SKILL.md").read_text()
@@ -578,7 +671,7 @@ def test_package_and_release_invoke_the_read_only_review():
     assert "Only in a host with no subagents, follow **Brief** yourself, changing no file and running no "\
            "command that writes" in brief
     assert "a fresh subagent, limited to read tools" in package and "**Launch**" in package
-    assert "review-rules add --area" in brief
+    assert "review-rules add --confirmed --area" in brief
     assert "foundation/review-rules.md" in agents and "`awb-package`" in agents
     # The last line counts every kind of problem, so it never says clean while one blocks.
     assert "`review: clean` when there is no violation, no narrative problem, and the command exited 0" in brief
@@ -811,6 +904,21 @@ def test_record_reads_the_report_from_stdin_and_checks_arguments(project, capsys
     assert snapshot(project) == before
     code, out = run(project, capsys, "review-receipt", "record", "inv", "absent", "--kind", "full", "--report", "-")
     assert code == 1 and out["refused"] == "no draft at deliveries/inv/absent/draft; create it with awb-package"
+
+
+def test_brief_change_makes_a_review_stale(project, capsys):
+    brief = project / "investigations/inv/brief.md"
+    brief.parent.mkdir(parents=True)
+    brief.write_text("# Investigation brief\n\n## Audience\n\nThe board.\n")
+    record(project, capsys, CLEAN)
+    snap = project / "deliveries/inv/pkg/review/snapshot"
+    assert (snap / "brief.md").read_text() == brief.read_text()
+    assert show(project, capsys)[1]["status"] == "current"
+    brief.write_text(brief.read_text() + "Methods note length: about 500 words\n")
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == ["brief.md"]
+    assert "--- reviewed investigations/inv/brief.md\n+++ investigations/inv/brief.md\n" in out["diff"]
+    assert "+Methods note length: about 500 words" in out["diff"]
 
 
 def test_show_reports_an_unreadable_receipt_and_bounds_the_diff(project, capsys):

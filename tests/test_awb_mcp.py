@@ -4,7 +4,7 @@
 # test_setup_installs_into_a_folder_without_helpers: setup round trip: check writes nothing, then install writes src/awb.py and the receipt; a folder without workbench markers exits 1 with the installer's hint.
 # test_setup_runs_under_awb_python_over_a_recorded_interpreter: with AWB_PYTHON set, setup runs under it while README records another interpreter, reports the line overridden, and leaves it as written.
 # test_read_commands_round_trip_and_write_nothing: every read command without DuckDB (state, questions, stale, review-rules, check-draft, status, help) runs its helper and leaves the project, .git included, unchanged.
-# test_records_round_trip: records adds a question, edits next steps, adds a review rule and one with --scope, flags through stdin, and runs clean-record, each writing its record.
+# test_records_round_trip: records adds a question, edits next steps, refuses a review rule without --confirmed, adds one with it and one with --scope and --package, flags through stdin, and runs clean-record, each writing its record.
 # test_review_receipt_round_trip: read review-receipt shows none, package review-receipt records a report passed on stdin, and read then shows it stale with the diff and the prior report after an edit, writing nothing; its help topic resolves, and read requires the package.
 # test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit; read returns both changes while keeping its answer, and attempts to change answered question content or replace its answer are refused.
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
@@ -282,19 +282,23 @@ def test_records_round_trip(workbench, connect):
     assert "Q-001" in client.call("read", command="questions")[0]
     text, error = client.call("records", command="state", args=["next", "--add", "Rerun by-region"])
     assert not error and "Rerun by-region" in (workbench / INV / "state.md").read_text()
-    text, error = client.call("records", command="review-rules", args=[
-        "add", "--area", "periods", "--severity", "error", "--rule", "Name the period.", "--fix", "Add it."])
+    rule = ["add", "--area", "periods", "--severity", "error", "--rule", "Name the period.", "--fix", "Add it."]
+    text, error = client.call("records", command="review-rules", args=rule)
+    assert error and "--confirmed" in text and not (workbench / "foundation/review-rules.md").exists()
+    text, error = client.call("records", command="review-rules", args=rule + ["--confirmed"])
     assert not error and (workbench / "foundation/review-rules.md").is_file()
+    (workbench / "deliveries/churn/pkg/draft").mkdir(parents=True)
     text, error = client.call("records", command="review-rules", args=[
         "add", "--area", "wording", "--severity", "warning", "--rule", "Say customers.", "--fix", "Rename.",
-        "--pattern", "users", "--scope", "document"])
+        "--pattern", "users", "--scope", "document", "--package", "churn/pkg", "--confirmed"])
     assert not error and '"R-wording-001"' in text
-    assert "- Pattern: `users`\n- Scope: document\n" in (workbench / "foundation/review-rules.md").read_text()
+    assert "- Pattern: `users`\n- Scope: document\n- Package: churn/pkg\n" in \
+        (workbench / "foundation/review-rules.md").read_text()
     text, error = client.call("records", command="state", args=["flag", "--check"], stdin="[]")
     assert not error and text.startswith("{")
     text, error = client.call("records", command="clean-record", args=["absent", "--dry-run"], stdin="{}")
     assert error and "absent" in text
-    assert client.roots_asked == 7
+    assert client.roots_asked == 8
 
 
 def test_review_receipt_round_trip(workbench, connect):
