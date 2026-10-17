@@ -14,4 +14,4 @@
 
 ### Fixed
 
-- The `charts` check compares a chart file's headers NFKC-normalized, as it reads the **Data:** line, so a `CO₂` header matches a `CO₂` role.
+- The `charts` check compares a chart file's headers NFKC-normalized, as it reads the **Data:** line, so a `CO₂` header matches a `CO₂` role, and `deck-rules.md` tells builders to find each column the same way.
