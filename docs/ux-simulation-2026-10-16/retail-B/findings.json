@@ -1,0 +1,402 @@
+[
+  {
+    "id": "retail-B-01",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The package review loop converges slowly: the drafting turn took 40.4 minutes and $11.86 (57% of agent cost) with 12 reviewer subagent runs, because every small repair restarts a required full review.",
+    "evidence": "A5-A7; relay/agent-005.jsonl; feedback/agent.md §1.1, §5; feedback/harness-log.md",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The review procedure in awb-package/references/review.md, which requires the final review to be full, drives the loop on any host."
+  },
+  {
+    "id": "retail-B-02",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "The agent offered interpretations beyond the evidence in chat (Christmas buyers, 'real pattern', France and Germany growth spread from buyer counts, early cohorts 'overstated'), and no workbench check caught them.",
+    "evidence": "A2, A3, U3, U4; human/notes.md turns 3-4; feedback/human.md §2.1; feedback/agent-notes.md turn 3",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The agent broke the AGENTS.md rule on untested explanations under normal skill guidance, and the finding-number and check-draft checks do not cover chat summaries; a real user would see the same."
+  },
+  {
+    "id": "retail-B-03",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "Shares rounded to 4 decimal places in result queries were rounded again on display, giving 52.5% instead of 52.4% and 63.2% instead of 63.1% in the draft, and check-draft accepted the wrong values.",
+    "evidence": "A5; feedback/agent.md §1.2; state.md (corrected values)",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The analysis guidance and the export/check-draft helpers allow silent double rounding; a reviewer caught it here only by chance."
+  },
+  {
+    "id": "retail-B-04",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The first draft's audience-facing 'How we know' slide and methodology note listed internal filter row-retention thresholds instead of plain-language reliability checks.",
+    "evidence": "U6; feedback/human.md §2.3; human/notes.md turn 6",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The thresholds came from the package templates and the export's methodology lines, which any host would produce."
+  },
+  {
+    "id": "retail-B-05",
+    "source": [
+      "agent",
+      "user"
+    ],
+    "summary": "Plain-language audience claims ('totals reconcile', 'overlap counts once') needed recorded checks that were not set up front, forcing producer changes, reruns and re-promotion after the user had accepted the findings.",
+    "evidence": "U6, A6; feedback/agent.md §1.3; feedback/human.md §3",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "analysis.md does not suggest standard reconciliation or coverage checks when results are added, so the gap appears late on any host."
+  },
+  {
+    "id": "retail-B-06",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The awb-clean scan cannot detect rows duplicated across sheets or extracts, because the grain key includes the sheet; a 22,523-line, £377k double count was found only by the agent's own date-range check.",
+    "evidence": "A2; feedback/agent.md §1.7; referee/check1.py (overlap confirmed)",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "scan_dataset.py has this blind spot whatever the host; a less careful agent would have kept the double count."
+  },
+  {
+    "id": "retail-B-07",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Interim updates and replies narrated implementation detail (settings-file mistakes, shell word-splitting, repeated review passes, commit details) that a commercial user could not use.",
+    "evidence": "A2, A5, A6; feedback/human.md §2.2, §7; human/notes.md turns 3, 6, 7",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "Interactive hosts show interim messages too, and the skills' reporting guidance does not stop step-by-step narration."
+  },
+  {
+    "id": "retail-B-08",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "awb-status reported 'none open… the one recorded caveat is the kept repeated lines', leaving out missing customer IDs, the first-observed definition, cancellation booking and the December 2011 exclusion.",
+    "evidence": "A3, U4; feedback/human.md §2.7",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The status collector surfaces only state.md's unresolved issues, not the caveats attached to findings."
+  },
+  {
+    "id": "retail-B-09",
+    "source": [
+      "user"
+    ],
+    "summary": "The first answers were summaries without the 24 monthly figures, cohort counts and rates, or units ('124 cancellations' did not say invoices or lines), which cost a follow-up turn.",
+    "evidence": "A2, U3; feedback/human.md §2.4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is how the agent reported results under the skills' brevity guidance, and it would recur for a real user."
+  },
+  {
+    "id": "retail-B-10",
+    "source": [
+      "user"
+    ],
+    "summary": "The agent recommended deleting about 12k repeated lines as 'double-scanned' without evidence from the order system; it asked first, and the user kept them.",
+    "evidence": "A2, U3; feedback/human.md §2.5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the agent's recommendation under awb-clean guidance; a real user would get the same framing."
+  },
+  {
+    "id": "retail-B-11",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The full draft departed from the approved preview: rounded headlines became exact figures, a review rule forced a reworded France/Australia headline, and an unannounced third appendix slide appeared.",
+    "evidence": "A4, A5, U6; feedback/human.md §2.6; feedback/agent.md §4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The package contract (required supporting-datasets slide, exact-number habits, review-rule enforcement) caused these on any host."
+  },
+  {
+    "id": "retail-B-12",
+    "source": [
+      "user"
+    ],
+    "summary": "The README is long for a first-time user, and it does not warn that choosing supporting tables adds a required appendix slide, that keeping all findings can push past the requested slide count, or that a 'checked' finding can still hold an unsupported interpretation.",
+    "evidence": "feedback/human.md §3; human/notes.md turn 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This concerns the released README, the only document a real user reads."
+  },
+  {
+    "id": "retail-B-13",
+    "source": [
+      "agent"
+    ],
+    "summary": "The awb-package step order is confusing: writing findings.md needs the export's methodology lines and display names, but export refuses to run until the draft folder exists, and nothing says to create it.",
+    "evidence": "A5; feedback/agent.md §2, §3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The skill's step order and the export helper's precondition apply on any host."
+  },
+  {
+    "id": "retail-B-14",
+    "source": [
+      "agent"
+    ],
+    "summary": "The findings template's chart-spec prose led the agent to put blank lines between spec fields, so check-draft counted them as slide bullets ('11 bullets; keep it to 5').",
+    "evidence": "A5; feedback/agent.md §1.5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The template wording is ambiguous, and the outline check does not recognise separated spec fields."
+  },
+  {
+    "id": "retail-B-15",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "check-draft's claims check refused the user's own caveat wording ('the effect on repeat rates is unknown', 'causes cannot be inferred'), so the agent paraphrased while telling the user the wording was theirs.",
+    "evidence": "U4, A5; feedback/agent.md §3; released/001/findings.md",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The check-draft causal-phrase rule flags caveat phrasing that denies causation."
+  },
+  {
+    "id": "retail-B-16",
+    "source": [
+      "agent"
+    ],
+    "summary": "Results produced before the first commit stay 'uncommitted' in provenance until they are rerun after a commit, which needs commit, rerun, re-export and another commit, and nothing reports this.",
+    "evidence": "A5, A6; feedback/agent.md §1.4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is run.py and export behaviour that a real user would also meet."
+  },
+  {
+    "id": "retail-B-17",
+    "source": [
+      "agent"
+    ],
+    "summary": "validate.py crashes with KeyError: 'left_rows' when a joins check omits left_rows, instead of giving a validation message.",
+    "evidence": "A2; feedback/agent.md §1.6, §3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is a helper defect in src/exploration/validate.py."
+  },
+  {
+    "id": "retail-B-18",
+    "source": [
+      "agent"
+    ],
+    "summary": "Producers loaded by run.py cannot import sibling helper modules, so the agent had to add sys.path.insert to each producer.",
+    "evidence": "A2; feedback/agent.md §1.8",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the run.py producer loader's behaviour."
+  },
+  {
+    "id": "retail-B-19",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb.py sql accepts no query parameters, and when a relative .sql path is missing it treats the path as SQL text ('Parser Error: syntax error at or near \"queries\"').",
+    "evidence": "A2; feedback/agent.md §1.9-1.10",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "These are helper CLI limitations."
+  },
+  {
+    "id": "retail-B-20",
+    "source": [
+      "agent"
+    ],
+    "summary": "The settings.toml template uses the literal '[parameters]' in its prose comments, so the agent's programmatic edit commented out the real table and DuckDB failed with missing prepared-statement parameters.",
+    "evidence": "A2; feedback/agent.md §1.11",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The agent's own string slicing caused it, although the template's wording made that slicing fragile."
+  },
+  {
+    "id": "retail-B-21",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-init does not say to create the project venv before MCP setup, nor to fill the README's storage lines from the user's first request.",
+    "evidence": "A1; feedback/agent-notes.md turn 1; feedback/agent.md §2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "These are gaps in the awb-init skill instructions."
+  },
+  {
+    "id": "retail-B-22",
+    "source": [
+      "agent"
+    ],
+    "summary": "The sources.md template's long reference grammar led to a 'from documentation / reference: not yet retained' row, which awb-status then flagged as documentation without a reference.",
+    "evidence": "A1, A3; feedback/agent.md §2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is template and status-collector behaviour."
+  },
+  {
+    "id": "retail-B-23",
+    "source": [
+      "agent"
+    ],
+    "summary": "The awb-status 'You can ask for' table has no row for approving findings and previewing headlines, the natural next step after analysis.",
+    "evidence": "A3; feedback/agent.md §2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is a gap in the awb-status skill."
+  },
+  {
+    "id": "retail-B-24",
+    "source": [
+      "agent"
+    ],
+    "summary": "The awb-package SKILL and package contract are very long, and 'one ### slide per finding' conflicts with combining two results on one slide.",
+    "evidence": "A4; feedback/agent.md §2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This concerns the released skill documents."
+  },
+  {
+    "id": "retail-B-25",
+    "source": [
+      "agent"
+    ],
+    "summary": "check-draft's number check treats a year after a month name as a quantity in some contexts but not others, and the rule is documented only in the 45KB helpers.md.",
+    "evidence": "A5; feedback/agent.md §2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is check-draft heuristic behaviour."
+  },
+  {
+    "id": "retail-B-26",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-status's upstream probe can never check this UCI source, because the server sends no ETag or Last-Modified header.",
+    "evidence": "A2; feedback/agent.md §3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The probe's design depends on those headers, whatever the host."
+  },
+  {
+    "id": "retail-B-27",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-clean says the user decides whether repeated rows are errors, but does not separate identical rows landed twice from overlapping extracts (where the agent removed them itself) from repeats within one extract.",
+    "evidence": "A2; feedback/agent.md §2, §4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This ambiguity is in the awb-clean skill."
+  },
+  {
+    "id": "retail-B-28",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The agent ran run.py, export, check-draft, questions, state and review-rules through the CLI, although AGENTS.md prefers the MCP run and package tools.",
+    "evidence": "A2-A6; feedback/agent.md 'awb MCP tools seen and used'",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "This was the agent's habit, not a tool failure; it is unclear whether the skills steer clearly enough toward MCP."
+  },
+  {
+    "id": "retail-B-29",
+    "source": [
+      "referee"
+    ],
+    "summary": "The Q3 'purchase' definition (a non-cancellation day with a positive-quantity goods line, so postage-only orders do not count) appears only in the settings validation detail, not in the definition the user saw; it shifts repeat counts by 1-3 customers per cohort.",
+    "evidence": "A2/A3; investigations/marketing-budget-2012/settings.toml line 76; methodology-note.md; referee/check3.py",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The agent made this analytic choice without disclosing it; it is not clearly a defect in the skills."
+  },
+  {
+    "id": "retail-B-30",
+    "source": [
+      "referee"
+    ],
+    "summary": "One permission prompt was raised (and auto-approved) for a compound Bash call in A1 that copied templates, edited the README and created the venv; a real Claude Code user would have to approve it.",
+    "evidence": "A1; relay/permission-prompts.jsonl",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The referee playbook counts permission prompts as product evidence of friction on a real host."
+  },
+  {
+    "id": "retail-B-31",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "U1 began with the Codex role's own preamble, 'I'll read BRIEF.md and README.md, then follow the simulation's response format', relayed to the agent, which ignored it.",
+    "evidence": "U1; relay/human-001.jsonl; feedback/agent-notes.md turn 1",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The relay passed both Codex messages of turn 1 verbatim, including the role's narration."
+  },
+  {
+    "id": "retail-B-32",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "A1 contained the interim line 'Now the friction log.', which the user found unexplained.",
+    "evidence": "A1; human/notes.md turn 2; feedback/human.md §2.2",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The friction log is a harness-only request appended to the agent's first turn."
+  },
+  {
+    "id": "retail-B-33",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The agent briefly wrote scratch files (check.json, export.json) to /tmp/claude-501, outside the simulation folders, then deleted them and moved scratch files to agent-home/tmp.",
+    "evidence": "A5; relay/agent-005.jsonl; feedback/agent.md §4",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This was a boundary of the simulated home and sandbox, not of the released product."
+  },
+  {
+    "id": "retail-B-34",
+    "source": [
+      "agent"
+    ],
+    "summary": "The agent set commit authorship with git -c user.name/user.email using the user's identity, because the simulated home has no git identity configured.",
+    "evidence": "A6; feedback/agent.md §4",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The simulated home lacks the git configuration a real user's machine would have."
+  },
+  {
+    "id": "retail-B-35",
+    "source": [
+      "referee"
+    ],
+    "summary": "The persona front-loaded facts (storage paths, headline-preview preference, audience; December 2011 incomplete volunteered in U2), which thinned the scoping interview.",
+    "evidence": "U1, U2; human/BRIEF.md",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is the known study limit of persona briefs, kept for comparability with Oct 15."
+  }
+]

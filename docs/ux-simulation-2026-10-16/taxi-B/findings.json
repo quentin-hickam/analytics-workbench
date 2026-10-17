@@ -1,0 +1,397 @@
+[
+  {
+    "id": "taxi-B-01",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "The awb-package draft review loop does not converge: 15 full reviewer runs before a clean pass, plus 2 in revision and 4 at release, with reviewers drifting and a release review reversing a prior clean verdict.",
+    "evidence": "reply 5 (58.5 min, $21.71), replies 6-7, msg 6; relay/agent-005.jsonl, relay/agent-007.jsonl; feedback/harness-log.md; feedback/agent.md §1.1; feedback/human.md §2.2",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The loop follows the released awb-package review procedure and would recur for any user on an interactive host."
+  },
+  {
+    "id": "taxi-B-02",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Fifteen package reviews fixed wording but missed four substantive defects the user caught in one read: methods note far over one page, base fare defined as meter-only despite flat-fare findings, Newark short durations missing from the caveat, and methods text admitting row counts and joins were unchecked.",
+    "evidence": "msg 6; reply 5; deliveries/airport-trips-and-tipping/board-briefing/draft/; feedback/human.md §2.3-2.5",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "Review scope and checklists come from the released skill; a real user's draft would get the same coverage."
+  },
+  {
+    "id": "taxi-B-03",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "Validation leaves row counts and joins 'not assessed' by default, so every finding carries that boilerplate (even the reconciliation result) and a real reconciliation happened only when the user asked.",
+    "evidence": "msg 6; reply 6; investigations/airport-trips-and-tipping/state.md caveat column; results/record-reconciliation.csv; feedback/agent.md §1.2",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "Default validation behaviour of run.py and the analysis guide in the release."
+  },
+  {
+    "id": "taxi-B-04",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "The agent made method choices after seeing results: it applied an unapproved 1,000-trip zone minimum (then recommended 10,000) and proposed dropping rate-code-99 zero-tip trips because they made borough medians 0%.",
+    "evidence": "reply 3; msg 4; investigations/airport-trips-and-tipping/questions.md Q-010, Q-011; feedback/agent.md §1.3; feedback/human.md §2.1",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The analysis guide has no rule that result-level thresholds or exclusions are user decisions; the scope and clean skills have one."
+  },
+  {
+    "id": "taxi-B-05",
+    "source": [
+      "referee"
+    ],
+    "summary": "Recorded findings drift from the released package: the volume-by-weekday finding still says one holiday per month and 'Monday to Wednesday', and tips-by-borough says rc99 trips 'all' record zero tips, while the release says MLK Day, 'Sunday to Wednesday' and 'almost all'.",
+    "evidence": "investigations/airport-trips-and-tipping/findings.json vs storage/releases/airport-trips-and-tipping/board-briefing/001/findings.md; reply 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "check-draft traces numbers but not claims back to findings, so corrections made in review never reach the records."
+  },
+  {
+    "id": "taxi-B-06",
+    "source": [
+      "referee"
+    ],
+    "summary": "User-facing progress messages counted to 'Thirteenth review' while 15 reviewer runs actually happened (the first review's result was never announced).",
+    "evidence": "reply 5; relay/agent-005.jsonl (Agent calls at view lines 34-502)",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "Possibly agent narration slippage rather than skill wording; the review procedure does not prescribe user-facing counts."
+  },
+  {
+    "id": "taxi-B-07",
+    "source": [
+      "agent"
+    ],
+    "summary": "run.py marks a root question 'answered' on first run even while its answer hinges on pending user method decisions, so status reads '5 answered'.",
+    "evidence": "reply 3 ('5 answered (provisional)'); investigations/airport-trips-and-tipping/questions.md; feedback/agent.md §1.10",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Ledger and status behaviour of the released helpers."
+  },
+  {
+    "id": "taxi-B-08",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Interim replies narrated internal mechanics (private notes file, helpers, zsh word-splitting, ignored script arguments, missed record updates) that a non-technical user could not act on.",
+    "evidence": "replies 1, 4, 6; feedback/human.md §2.6; human/notes.md turns 2, 7",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The agent's system note said the user sees only final replies while the relay passes interim messages, and the 'private notes file' line stems from the harness friction log; but real interactive users also see interim text."
+  },
+  {
+    "id": "taxi-B-09",
+    "source": [
+      "user"
+    ],
+    "summary": "The agent asked again for confirmation of payment-code-0 treatment after the user had already specified it.",
+    "evidence": "msg 2; reply 2 decision table; human/notes.md turn 3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Re-asking settled decisions is agent behaviour under the released awb-clean flow, not a harness artifact."
+  },
+  {
+    "id": "taxi-B-10",
+    "source": [
+      "user"
+    ],
+    "summary": "The first 'all five answered' report lacked the full top-10 ranking and the hour and borough tip breakdowns with no-tip shares, which forced a follow-up.",
+    "evidence": "reply 3; msg 4; feedback/human.md §2.7",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Answer completeness at the answering step is governed by the released skills' reporting guidance."
+  },
+  {
+    "id": "taxi-B-11",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The agent first inferred that missing airport-fee fields meant code-0 totals were understated, and the user had to ask for a check (which disproved it).",
+    "evidence": "reply 2; msg 3; reply 3; exploration/code0-total-composition.sql",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "Agent analytical judgment; it is not clear that any skill instruction caused or could have prevented it."
+  },
+  {
+    "id": "taxi-B-12",
+    "source": [
+      "referee"
+    ],
+    "summary": "Zone 265 ('Outside of NYC') is treated as an unknown zone alongside 264, although it is a known location class; the effect on results is negligible (airport share 9.90% vs 9.91%).",
+    "evidence": "referee/spotcheck2-output.txt variant B; inbox/taxi_zone_lookup.csv rows 264-265; methodology-note.md 'Unknown zones'",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "Likely agent judgment; whether the clean guidance discusses catch-all codes is not verifiable from the run."
+  },
+  {
+    "id": "taxi-B-13",
+    "source": [
+      "agent"
+    ],
+    "summary": "No investigation-local shared SQL: the screening CTE was copied into 15+ query files, and [eda] where repeats the rules as literals rather than parameters.",
+    "evidence": "investigations/airport-trips-and-tipping/queries/; settings.toml; feedback/agent.md §1.4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Missing capability in the released helpers; any multi-result investigation with shared filters hits it."
+  },
+  {
+    "id": "taxi-B-14",
+    "source": [
+      "agent"
+    ],
+    "summary": "Every result a package represents needs an 'answers' declaration for the ledger storyline, which is not stated when results are added, so the agent had to add it to eight results afterwards.",
+    "evidence": "reply 5; feedback/agent.md §1.5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Documentation gap between the analysis guide and the package contract in the release."
+  },
+  {
+    "id": "taxi-B-15",
+    "source": [
+      "agent"
+    ],
+    "summary": "The findings-template prose about a blank line after a chart spec led to a blank line after **Data:**, so all fields counted as bullets and check-draft reported 10 bullets per slide.",
+    "evidence": "reply 5; feedback/agent.md §1.6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Ambiguous wording in the released package-format template."
+  },
+  {
+    "id": "taxi-B-16",
+    "source": [
+      "agent"
+    ],
+    "summary": "export fails with 'no draft at …; create it with awb-package' before the draft folder exists, although the skill says export creates the manifest.",
+    "evidence": "reply 5; feedback/agent.md §1.7, §3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Released helper behaviour and skill step order."
+  },
+  {
+    "id": "taxi-B-17",
+    "source": [
+      "agent"
+    ],
+    "summary": "The source-register reference grammar is very long; a replacement silently failed after land changed the Status, leaving documentation_without_reference in status and wasting a step.",
+    "evidence": "reply 4; feedback/agent.md §1.8; feedback/agent-notes.md turn 4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Template content shipped in the release."
+  },
+  {
+    "id": "taxi-B-18",
+    "source": [
+      "agent"
+    ],
+    "summary": "The datasets.toml template shows only one-line inline tables, and a multi-line types table failed publish with a TOML parse error.",
+    "evidence": "reply 2; feedback/agent.md §1.9, §3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Template guidance shipped in the release."
+  },
+  {
+    "id": "taxi-B-19",
+    "source": [
+      "agent"
+    ],
+    "summary": "A failed publish left a p1.partial directory that had to be removed by hand; the output named it but did not say whether a rerun cleans it.",
+    "evidence": "reply 2; feedback/agent.md §3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Released helper behaviour."
+  },
+  {
+    "id": "taxi-B-20",
+    "source": [
+      "agent"
+    ],
+    "summary": "MCP setup's output after installing still lists packages as missing (it reports pre-install state).",
+    "evidence": "reply 1; relay/agent-001.jsonl; feedback/agent.md §3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Released MCP server output."
+  },
+  {
+    "id": "taxi-B-21",
+    "source": [
+      "agent"
+    ],
+    "summary": "check-draft does not warn when methodology cites a result ID that the manifest does not represent, and its claim-word list flags benign phrases such as 'not trends or causes'.",
+    "evidence": "reply 6; feedback/agent.md §3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Released check-draft behaviour."
+  },
+  {
+    "id": "taxi-B-22",
+    "source": [
+      "agent"
+    ],
+    "summary": "Two review rules (state trip-hours beside a rate; methods note about 500 words) conflicted on the same note line at release, with no precedence guidance.",
+    "evidence": "reply 7; feedback/agent.md §2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The review-rules mechanism and release review are released features; the conflict would recur for any user."
+  },
+  {
+    "id": "taxi-B-23",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-init does not say to create a project virtual environment, although the installer prefers an in-project interpreter.",
+    "evidence": "reply 1; feedback/agent.md §2; feedback/agent-notes.md turn 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Gap in the released awb-init instructions."
+  },
+  {
+    "id": "taxi-B-24",
+    "source": [
+      "agent"
+    ],
+    "summary": "The skills give no supported way to peek at data before landing (AGENTS.md says to compute through awb.py sql; the data guide says inspect landed copies only), so the agent used raw DuckDB on the inbox.",
+    "evidence": "reply 1; relay/agent-001.jsonl; feedback/agent.md §2, §4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Conflicting guidance in released instruction files."
+  },
+  {
+    "id": "taxi-B-25",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-clean is unclear on recording timing when some decisions await the user, and on whether user-stated broken-record rules belong in foundation views or investigation settings.",
+    "evidence": "reply 2; feedback/agent.md §2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Ambiguity in released awb-clean instructions."
+  },
+  {
+    "id": "taxi-B-26",
+    "source": [
+      "agent"
+    ],
+    "summary": "A documentation-answerable question (are cash tips recorded) must still be answered through a run.py result, which is awkward.",
+    "evidence": "Q-006 in questions.md; feedback/agent.md §2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Ledger rule in the released workbench."
+  },
+  {
+    "id": "taxi-B-27",
+    "source": [
+      "user"
+    ],
+    "summary": "The README is long and dominated by installer material, with no short analyst entry point.",
+    "evidence": "feedback/human.md §3; human/notes.md turn 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "README content shipped with the release."
+  },
+  {
+    "id": "taxi-B-28",
+    "source": [
+      "user"
+    ],
+    "summary": "The README does not set expectations for review rounds or when a draft is stable, whether count reconciliation and join checks are standard, or how long a 'one-page' note should be.",
+    "evidence": "feedback/human.md §3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "README content shipped with the release."
+  },
+  {
+    "id": "taxi-B-29",
+    "source": [
+      "referee"
+    ],
+    "summary": "Agent and subagents read 8 of Claude Code's own spilled tool-result files under the real ~/.claude/projects folder, outside the simulated home.",
+    "evidence": "referee/agent-005.view.txt lines 9, 11, 248, 291, 293, 318, 464; referee/agent-007.view.txt line 52",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "Claude Code writes oversized tool output to the real home's session storage because the harness redirects only git, uv and pip to the simulated home."
+  },
+  {
+    "id": "taxi-B-30",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The agent listed directory names of SIMDIR's parent and /private/tmp/claude-501, checked for CLAUDE.md/AGENTS.md up the tree, and wrote a temp script to /tmp, all outside its stated bounds; no contents were read.",
+    "evidence": "turn 1 (referee/agent-001.view.txt lines 3, 55); turn 5 (/tmp/awb-export-board.sh); feedback/agent.md §4",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "Breach of the simulation's boundary protocol, not of anything the released skills instruct."
+  },
+  {
+    "id": "taxi-B-31",
+    "source": [
+      "referee"
+    ],
+    "summary": "User message 1 began with a Codex meta-line ('I'll read BRIEF.md and README.md, then follow the simulation's response format.') that the relay passed verbatim to the agent.",
+    "evidence": "transcript.md msg 1; relay/human-001.jsonl (2 messages)",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The Codex user role broke its output protocol and the relay relays every user message verbatim."
+  },
+  {
+    "id": "taxi-B-32",
+    "source": [
+      "referee"
+    ],
+    "summary": "The persona front-loaded facts (storage paths, exclusion policy, dictionary doubt, headline preview), thinning the scoping interview to one round plus cleaning decisions.",
+    "evidence": "transcript.md msgs 1-2",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "Known study limit: persona briefs list facts to give 'if it asks' and the models volunteer them; kept for comparability with Oct 15."
+  },
+  {
+    "id": "taxi-B-33",
+    "source": [
+      "referee"
+    ],
+    "summary": "The persona made a factually wrong calendar objection (claiming January and July 2024 have different weekday counts), which cost a check before the user retracted it.",
+    "evidence": "msg 4; reply 4; msg 5; referee/spotcheck-output.txt calendar check",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The Codex user role erred; the agent handled it correctly with evidence, which is positive product evidence."
+  },
+  {
+    "id": "taxi-B-34",
+    "source": [
+      "referee"
+    ],
+    "summary": "The persona premise that the TLC data dictionary download is blocked did not hold for the agent, which fetched it with curl.",
+    "evidence": "reply 2; relay/agent-002.jsonl (curl to nyc.gov); foundation/references/tlc-yellow-trips/",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The simulated environment's network access differs from the persona's stated situation; no workbench behaviour is involved."
+  },
+  {
+    "id": "taxi-B-35",
+    "source": [
+      "user"
+    ],
+    "summary": "The user's private friction notes are offset by one turn (each note describes the previous agent reply).",
+    "evidence": "human/notes.md",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "Artifact of how the Codex user role logs before reading the next reply; does not affect the product."
+  }
+]

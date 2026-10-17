@@ -1,0 +1,263 @@
+[
+  {
+    "id": "taxi-A-01",
+    "source": ["user", "agent", "referee"],
+    "summary": "The first full draft put Q3's hour-of-day and pickup-borough tip variation only in speaker notes, and it still passed check-draft and an independent fresh review.",
+    "evidence": "Transcript msg 7 (user correction 1), agent reply 6; feedback/human.md section 6; feedback/agent.md rank 5; deliveries/taxi-trip-patterns/board-decisions/draft/findings.md",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The package checks and review guidance in the release have no question-dimension coverage check, so any user would get the same pass."
+  },
+  {
+    "id": "taxi-A-02",
+    "source": ["agent", "referee"],
+    "summary": "check-draft number matching treats slash-separated paired values (54.8/57.6), clock times (18:00), identifier codes (264/265) and assertion tolerances as unsupported numbers, forcing repeated failed preflights and a methodology rewrite.",
+    "evidence": "Agent reply 6 (relay/agent-006.jsonl); feedback/agent.md rank 2 and section 3 item 15; feedback/harness-log.md turn 6 (4 awb/read failures)",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "This is how the shipped check-draft helper behaves on ordinary board wording, whatever the host."
+  },
+  {
+    "id": "taxi-A-03",
+    "source": ["agent", "referee"],
+    "summary": "awb-package's long, overlapping instruction layers made the headline preview take 5.7 minutes and the full draft 16.6 minutes, the longest turn of the run and longer than the analysis.",
+    "evidence": "Agent replies 5 and 6; feedback/harness-log.md; feedback/agent.md rank 1 and section 5; feedback/agent-notes.md packaging sections",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The skill, contract, templates and review references are release content that every packaging session must read."
+  },
+  {
+    "id": "taxi-A-04",
+    "source": ["agent"],
+    "summary": "The workbench has no defined preview artifact or status for preview-and-wait, so the agent improvised preview-plan.md, and the intentionally incomplete findings.md cannot pass the final checks.",
+    "evidence": "Agent reply 5; feedback/agent.md rank 9; feedback/agent-notes.md headline-preview section",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The package contract and status helper in the release define no preview state."
+  },
+  {
+    "id": "taxi-A-05",
+    "source": ["user", "referee"],
+    "summary": "The agent linked and quoted skill instruction files to the user three times (awb-init SKILL.md twice, awb-package SKILL.md once), which reads as internal process leaking into chat.",
+    "evidence": "Transcript agent reply 1 (lines 47 and 62), agent reply 5 (line 225); feedback/human.md pain point 1; human/notes.md turns 2 and 6; feedback/agent-notes.md init section ('mandatory skill-quote explanation')",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The harness note asks for nothing like this; the agent attributes the quotes to init's report requirements, so the skills drive it."
+  },
+  {
+    "id": "taxi-A-06",
+    "source": ["agent", "referee"],
+    "summary": "awb/setup recorded the MCP server's interpreter (<python-prefix>/bin/python3, which lacks duckdb) as the project interpreter and offers no interpreter argument, so the agent had to create a .venv and rerun the installer through the CLI.",
+    "evidence": "Agent reply 1 (relay/agent-001.jsonl); agent-home/.codex/config.toml (mcp_servers.awb command); feedback/agent.md rank 3",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "Any user who registers the MCP server with a Python that lacks duckdb hits this, and on hosts that cannot auto-approve terminal calls the CLI fallback costs prompts."
+  },
+  {
+    "id": "taxi-A-07",
+    "source": ["user", "referee"],
+    "summary": "User-facing interim reports (cleaning-report.md, analysis-report.md) carry internal terms and IDs such as canonical views, primary_eligible, Q-008, strict⊆primary⊆relaxed, run.py and deadheading.",
+    "evidence": "Agent replies 2 and 3; project/investigations/taxi-trip-patterns/cleaning-report.md and analysis-report.md; feedback/human.md pain point 2; human/notes.md turns 3 and 4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The release gives no plain-language format for interim reports, so the agent filled them with record-level vocabulary."
+  },
+  {
+    "id": "taxi-A-08",
+    "source": ["user", "agent", "referee"],
+    "summary": "Review guidance pushes 'with zero-record tolerance' into audience text; it was removed from the methods note at the user's request but remains on the released appendix slide 'How we know'.",
+    "evidence": "Transcript msg 7 item 6, agent reply 7; storage/releases/taxi-trip-patterns/board-decisions/001/findings.md (How we know); feedback/agent.md section 2 ('With tolerance' versus board language)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The agent traces the phrase to the release's reviewer instructions, and the release review did not flag the leftover on the slide."
+  },
+  {
+    "id": "taxi-A-09",
+    "source": ["user", "agent"],
+    "summary": "The agent saved four review rules (R-tipping-001, R-fare-definitions-001, R-question-coverage-001, R-zone-display-001) without asking whether each correction was general or one-off.",
+    "evidence": "Agent replies 6 and 7; feedback/human.md pain point 3; feedback/agent.md section 2 (review rules versus one-off edits)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The README says one-off edits should not become rules, but awb-package leaves the decision to agent judgment with no prompt to ask the user."
+  },
+  {
+    "id": "taxi-A-10",
+    "source": ["user", "agent"],
+    "summary": "Chat replies carried commit hashes, review-rule IDs and long caveat repeats that the package and release report requirements ask for, which is noise for a non-programmer.",
+    "evidence": "Agent replies 3, 6, 7 and 8; feedback/human.md pain point 5; feedback/agent.md section 2 (reporting burden)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The report requirements in awb-package and awb-release specify these details."
+  },
+  {
+    "id": "taxi-A-11",
+    "source": ["user", "agent"],
+    "summary": "Progress counts were opaque: the footer said '1 answered' without naming Q4, status reported 'nine findings' against five questions, and the Vendor 6 context question became a sixth root.",
+    "evidence": "Transcript agent reply 2 footer, msg 3, agent reply 4; feedback/human.md pain point 4; feedback/agent.md section 2 (roots/count footer)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The footer and status conventions come from the skills and status collector, not from the harness."
+  },
+  {
+    "id": "taxi-A-12",
+    "source": ["user", "referee"],
+    "summary": "The agent saw single-trip zones in the top-ten ranking and recorded only a limitation, without proposing a minimum-volume floor; the user had to set the 1,000-trip floor.",
+    "evidence": "Agent reply 2, msg 3; feedback/human.md pain point 6; human/notes.md turn 3",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "One run cannot separate Codex's judgment from what awb-clean or awb-scope guidance says about proposing support floors."
+  },
+  {
+    "id": "taxi-A-13",
+    "source": ["user"],
+    "summary": "Replies were long and repetitive: the four scope questions appeared twice in reply 1, progress narration preceded every final summary, and the preview counted the title as slide 1 without saying so.",
+    "evidence": "Agent replies 1 and 5; feedback/human.md section 4; human/notes.md turns 2 and 6",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The relay passes Codex's interim messages through, and this run cannot separate Codex's narration style from what the skills require in reports."
+  },
+  {
+    "id": "taxi-A-14",
+    "source": ["agent"],
+    "summary": "settings.toml views accepted logical view names instead of definition paths; results ran and passed runtime checks, but stale reported missing evidence and looked for a nonexistent project/yellow_trips path.",
+    "evidence": "Agent reply 2 (relay/agent-002.jsonl); feedback/agent.md rank 4 and section 3 item 8",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The shipped settings loader does not validate views entries."
+  },
+  {
+    "id": "taxi-A-15",
+    "source": ["agent"],
+    "summary": "Every packaging repair needed another fresh full review, and the release needed one more even though the approved draft had not changed since its last review.",
+    "evidence": "Agent replies 6, 7 and 8; feedback/agent.md rank 6; feedback/agent-notes.md release section",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "awb-package references/review.md and awb-release step 2 require these reviews."
+  },
+  {
+    "id": "taxi-A-16",
+    "source": ["agent", "referee"],
+    "summary": "awb/package export writes files and then exits 1 when chart specifications are missing, and check-draft errors only because the inventory is stale after edits; both show up as MCP failures.",
+    "evidence": "Agent replies 6 and 7; feedback/harness-log.md (turn 3: 2 records failures, turn 6: 5, turn 7: 1); feedback/agent.md rank 10 and the telemetry note in section 3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The helpers' exit-status semantics are release behavior, though the harness log counts guard refusals as failures."
+  },
+  {
+    "id": "taxi-A-17",
+    "source": ["agent"],
+    "summary": "awb-init requires the scope interview before an investigation exists, and there is no pending-intake record, so the agent improvised an intake section in README.",
+    "evidence": "Agent reply 1; feedback/agent.md rank 7; feedback/agent-notes.md init section",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This follows from the init and scope skills' structure."
+  },
+  {
+    "id": "taxi-A-18",
+    "source": ["agent"],
+    "summary": "Clean-scan recording created separate quality rows for the raw and canonical forms of the same issues (DQ-007 to DQ-025), bloating the quality ledger.",
+    "evidence": "Agent reply 2; project/foundation/quality.md; feedback/agent.md rank 8",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is how the shipped clean-record helper and ledger design behave."
+  },
+  {
+    "id": "taxi-A-19",
+    "source": ["agent"],
+    "summary": "The analysis guide does not document how to import a shared investigation-local producer module, and parallel DuckDB aggregation changed floating-point tails between runs until threads=1 was set.",
+    "evidence": "Agent reply 3; project/investigations/taxi-trip-patterns/producers/; feedback/agent.md rank 14",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "These are gaps in the shipped workbench-guides/analysis.md and the default run configuration."
+  },
+  {
+    "id": "taxi-A-20",
+    "source": ["agent"],
+    "summary": "The source register's Notes field needs strict machine-readable reference syntax, and status's state_status is ambiguous when the latest state and commit share a date.",
+    "evidence": "Agent replies 1 and 4; feedback/agent.md rank 13",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "These are formats defined by the release's foundation templates and status collector."
+  },
+  {
+    "id": "taxi-A-21",
+    "source": ["agent"],
+    "summary": "awb-status says to stay read-only, but the user's status request also asked for a caveat edit, and the skill gives no example of how to handle a mixed request.",
+    "evidence": "Msg 4, agent reply 4; feedback/agent.md section 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The tension is in the awb-status skill text; there was no user-visible impact."
+  },
+  {
+    "id": "taxi-A-22",
+    "source": ["agent"],
+    "summary": "The data guide expects a retained data dictionary but has no supported form for an access/assessment note when the original cannot be retained (TLC PDF returned HTTP 403), or for a non-contemporaneous mapping such as Vendor 6.",
+    "evidence": "Agent replies 1 and 3; project/foundation/references/tlc-yellow/documentation-notes.md; feedback/agent.md rank 11",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The 403 is external, but the missing guidance for a dictionary that cannot be retained is a gap in the release."
+  },
+  {
+    "id": "taxi-A-23",
+    "source": ["agent"],
+    "summary": "The 'deck' package is a Markdown outline plus chart CSVs and Copilot assembly instructions, and the 'one-page' methods note is about 400 words of Markdown, not a PPTX or paginated page.",
+    "evidence": "Agent reply 6; storage/releases/taxi-trip-patterns/board-decisions/001/START-HERE.md and methodology-note.md (399 words); feedback/agent.md section 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The deliverable names come from the package contract; START-HERE explained it clearly and the user accepted it."
+  },
+  {
+    "id": "taxi-A-24",
+    "source": ["user"],
+    "summary": "The README mixes administrator and internal material with analyst guidance, and it does not explain what commits mean for the user, that findings are not questions, that the agent can fetch web docs, or when appendix consent is asked.",
+    "evidence": "human/README.md; feedback/human.md section 3; human/notes.md turns 1, 3, 5 and 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The README is the release's only user documentation."
+  },
+  {
+    "id": "taxi-A-25",
+    "source": ["agent"],
+    "summary": "The Codex sandbox blocked zsh heredoc temp files, Apple git printed xcrun cache-permission warnings, and pip disabled caching because agent-home's cache was not writable.",
+    "evidence": "Agent replies 1 and 6; feedback/agent.md rank 12 and section 3 items 1-5; feedback/agent-notes.md",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "These come from the workspace-write sandbox and simulated home, not the workbench."
+  },
+  {
+    "id": "taxi-A-26",
+    "source": ["referee"],
+    "summary": "The user persona volunteered most 'if it asks' facts in the first message and pre-answered package questions in msg 5 ('To save you asking'), which shrank scoping to one round.",
+    "evidence": "Transcript msgs 1 and 5; human/BRIEF.md ('Things you can tell the agent if it asks')",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is persona front-loading, a known study limit kept for comparability with Oct 15."
+  },
+  {
+    "id": "taxi-A-27",
+    "source": ["referee"],
+    "summary": "During the post-session feedback turn the agent read feedback/harness-log.md, harness telemetry that sits in a folder the agent can write to.",
+    "evidence": "relay/agent-009.jsonl (logview line 749: head -35 ../feedback/harness-log.md)",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The harness log shares the feedback folder with the agent's notes; the read came after DONE and did not affect the conversation."
+  },
+  {
+    "id": "taxi-A-28",
+    "source": ["referee"],
+    "summary": "relay.py status printed DEAD for a run that had never started (empty state), which could mislead a resumed referee into treating a fresh sandbox as crashed.",
+    "evidence": "Referee's first relay.py status call; kit/relay.py wait/status logic (DEAD whenever no relay_pid is alive)",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is relay tooling behavior, unrelated to the released skills."
+  },
+  {
+    "id": "taxi-A-29",
+    "source": ["user"],
+    "summary": "File links in chat switched from absolute paths (replies 1-5) to project-relative paths (replies 6-8).",
+    "evidence": "Transcript agent replies 6-8; human/notes.md turn 7",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "This may be Codex output formatting or skill report guidance; one run cannot tell which."
+  }
+]

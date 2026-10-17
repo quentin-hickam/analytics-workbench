@@ -1,0 +1,320 @@
+[
+  {
+    "id": "co2-A-01",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "The packaging checker enforces a hard 15-word headline limit with no user-override mechanism, so the agent slashed and then trimmed a user-approved Answer headline, and finally patched the project's draft.py checker and two format templates to let the user's wording pass release.",
+    "evidence": "A3 (slash headline), A4 (second clause dropped), U5 (user restores it), A5 ('exceeds the template's word limit'); project/src/packaging/draft.py, package-format/findings-template.md, package-format/manifest-template.md differ from .awb-receipt.json hashes; feedback/agent.md item 1; feedback/human.md pain point 2",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The limit and missing override live in the released helper and skill, and any interactive user who asks for a longer headline hits them."
+  },
+  {
+    "id": "co2-A-02",
+    "source": [
+      "referee"
+    ],
+    "summary": "The agent modified installed helper code that gates release (draft.py outline checks and START-HERE generator), so release 001 passed a locally altered check and the project's helpers now drift from the install receipt.",
+    "evidence": "A5; agent-notes.md 'four donor corrections' entry; .awb-receipt.json vs sha256 of src/packaging/draft.py, package-format/findings-template.md, package-format/manifest-template.md (DIFF; all other helpers MATCH)",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The skills let an agent edit project helpers when a check blocks a user request; that would happen the same way on an interactive host, and no harness constraint forced it."
+  },
+  {
+    "id": "co2-A-03",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The agent reported all five questions as answered while showing only the top country for Q1 and Q5 in chat (Q1 top-ten lists absent from the preview file too), costing the user a full turn to get the actual answers.",
+    "evidence": "A2 footer '5 answered with stated caveats'; U3; human/notes.md turn 2; feedback/human.md pain point 1; draft/headline-preview.md",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The skills' report-footer convention and answer-reporting guidance shape this, and a real user would see the same claim before the numbers."
+  },
+  {
+    "id": "co2-A-04",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "check-draft normalises CO2 subscripts in narrative text but not in exported CSV headers, so all six chart Data lines failed until the agent switched chart labels to ASCII.",
+    "evidence": "A4; MCP awb/package failures in feedback/harness-log.md (agent-004); feedback/agent.md item 2; agent-notes.md full-draft entry",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The mismatch is in the released packaging helper and would occur for any user whose labels use CO2 with a subscript or other non-ASCII text."
+  },
+  {
+    "id": "co2-A-05",
+    "source": [
+      "agent"
+    ],
+    "summary": "Number tracing cannot recognise presentation unit conversions (Mt shown as Gt), forcing the agent to add Gt columns to saved queries, rerun and re-promote two findings, and whitelist the constant 1000.",
+    "evidence": "A4; investigations/co2-country-priorities/state.md caveats 'Gt presentation column divides the same Mt change by 1000'; feedback/agent.md item 4",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The restriction is in the released number-check helper and applies to any package that displays a recorded value in other units."
+  },
+  {
+    "id": "co2-A-06",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The review procedure requires a fresh full narrative review after even small citation or wording repairs, which made packaging the slowest phase of the run (16.5 minutes in A4) and repeated in A5 and A6.",
+    "evidence": "A4 (16.5 min), A5, A6 in feedback/harness-log.md; feedback/agent.md item 3; awb-package references/review.md as cited by the agent",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The rule comes from the released awb-package review procedure and costs time on any host."
+  },
+  {
+    "id": "co2-A-07",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The read-only SQL tool answered an ordinary DuckDB binder error (ambiguous column) by suggesting a retry without --read-only, steering the agent toward more privilege for a SQL mistake.",
+    "evidence": "A3; MCP awb/read failure in feedback/harness-log.md (agent-003); feedback/agent.md item 6",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The message text comes from the released MCP read tool."
+  },
+  {
+    "id": "co2-A-08",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Workbench internals leaked into chat: a link to the agent's SKILL.md with a quoted rule, review-rule IDs, record names, 'template word limit', and finding/subquestion counts.",
+    "evidence": "A1 (SKILL.md link and quote, transcript line 41), A3 (R-headlines-001), A5 (R-metric-definitions-001, '11 findings', 'two required supporting questions'); feedback/human.md pain point 4; human/notes.md turns 1, 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The agent followed the skills' own vocabulary and citation habits; an interactive user would see the same text."
+  },
+  {
+    "id": "co2-A-09",
+    "source": [
+      "user"
+    ],
+    "summary": "The agent turned one-off headline and wording corrections into standing review rules without asking or explaining what future drafts are committed to.",
+    "evidence": "A3 (R-headlines-001), A4 (R-headlines-002, R-consumption-001), A5 (R-metric-definitions-001); feedback/human.md pain point 3; foundation/review-rules.md",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The awb-package review procedure tells the agent to record corrections as rules, and the README does not say this happens automatically."
+  },
+  {
+    "id": "co2-A-10",
+    "source": [
+      "user",
+      "agent"
+    ],
+    "summary": "The deliverable boundary was unclear: the package is an outline, chart CSVs and assembly instructions rather than a PPTX, and awb-status said to assemble the PowerPoint before marking it delivered, while the README is silent on the order.",
+    "evidence": "A4, A5 status 'next: assemble and review PowerPoint, then Mark donor-roundtable delivered'; U6; feedback/human.md pain point 5 and README section; feedback/agent.md section 2 'Package versus completed PowerPoint'",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Both the status wording and the README gap are in the release."
+  },
+  {
+    "id": "co2-A-11",
+    "source": [
+      "user",
+      "agent"
+    ],
+    "summary": "The generated START-HERE told the user to attach methodology.md to the builder and also listed it as internal, without saying who it is withheld from.",
+    "evidence": "A4, U5 item 4, A5; draft/START-HERE.md (before and after); feedback/agent.md item 8; feedback/human.md section 3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The text comes from the released START-HERE generator in draft.py; the agent changed the project copy."
+  },
+  {
+    "id": "co2-A-12",
+    "source": [
+      "user"
+    ],
+    "summary": "headline-preview.md is included in the frozen release folder, but START-HERE does not mention it.",
+    "evidence": "storage/releases/co2-country-priorities/donor-roundtable/001/headline-preview.md; feedback/human.md section 6; human/notes.md turn 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The release inventory and START-HERE come from the released helpers."
+  },
+  {
+    "id": "co2-A-13",
+    "source": [
+      "user"
+    ],
+    "summary": "Agent replies were long and padded with progress narration, and A4 used relative file links while other replies used absolute paths.",
+    "evidence": "A2 to A5; feedback/human.md section 4; human/notes.md turns 3, 4",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "Message style comes partly from the skills' reporting guidance and partly from the Codex model and its non-interactive exec mode, where interim messages are batched into one reply."
+  },
+  {
+    "id": "co2-A-14",
+    "source": [
+      "user"
+    ],
+    "summary": "A1 ended with 'The setup is ready for an initial commit', which the user could not tell was a request to act.",
+    "evidence": "A1; feedback/human.md pain point 6; human/notes.md turn 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The commit prompt follows the awb-init handoff, which a real user would also see."
+  },
+  {
+    "id": "co2-A-15",
+    "source": [
+      "user"
+    ],
+    "summary": "The README leaves first-time users unsure whether data at a URL is fetched during setup. It also took two reads to tell preview-and-wait from draft-then-review, and it puts admin-only internals ('How it works': Parquet, DuckDB, receipts) in the middle of the user path.",
+    "evidence": "human/README.md; human/notes.md turn 1; feedback/human.md section 3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "These are properties of the released README."
+  },
+  {
+    "id": "co2-A-16",
+    "source": [
+      "user"
+    ],
+    "summary": "The release path nests investigation and package names (co2-country-priorities/donor-roundtable/001) that the user never chose explicitly.",
+    "evidence": "A6; storage/releases/co2-country-priorities/donor-roundtable/001/; human/notes.md turn 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The naming comes from awb-init/awb-package defaults, not from the harness."
+  },
+  {
+    "id": "co2-A-17",
+    "source": [
+      "agent"
+    ],
+    "summary": "The default storyline order derives from ledger ancestry, so slides citing a supporting EU-reconciliation result moved ahead of the GDP slide, and the agent had to set presentation_order explicitly to keep the approved order.",
+    "evidence": "A4; agent-notes.md full-draft entry; feedback/agent.md item 9",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The ordering rule is in the released package contract and helper."
+  },
+  {
+    "id": "co2-A-18",
+    "source": [
+      "agent"
+    ],
+    "summary": "check-draft's causal-language detector flagged a negated statement ('not attributable to'), forcing a reword.",
+    "evidence": "A4; MCP awb/package failures (agent-004) in feedback/harness-log.md; feedback/agent.md section 3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The detector is in the released check-draft helper."
+  },
+  {
+    "id": "co2-A-19",
+    "source": [
+      "agent"
+    ],
+    "summary": "MCP and manifest reads are very large (a 17,385-token manifest read; a 36,108-token search of the packaging helper), which truncated outputs and once hid an interpreter refusal.",
+    "evidence": "A1, A4, A5; feedback/agent.md item 5; agent-notes.md",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The verbose provenance in the manifest and MCP output is product, but the largest outputs came from the agent's own broad cat and rg commands."
+  },
+  {
+    "id": "co2-A-20",
+    "source": [
+      "agent"
+    ],
+    "summary": "Source registration mixes helper-written acquisition rows with hand-maintained assessment, reference and restriction fields, which adds manual upkeep.",
+    "evidence": "A2; foundation/sources.md; feedback/agent.md item 11",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The split is in the released foundation templates and helpers."
+  },
+  {
+    "id": "co2-A-21",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-status reports state freshness as 'indeterminate at date precision' in a no-commit session, even though evidence checks show all 11 findings current.",
+    "evidence": "A5; feedback/agent.md item 12",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The freshness signal comes from the released read/status tool; a user who defers commits sees the same thing."
+  },
+  {
+    "id": "co2-A-22",
+    "source": [
+      "agent"
+    ],
+    "summary": "The awb-package skill and its references are long and repetitive, with no concrete size target for a 'short' methods note and no slide-budget example for 'about eight slides' with mandatory methods and caveat slides.",
+    "evidence": "feedback/agent.md section 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is a property of the released skill text."
+  },
+  {
+    "id": "co2-A-23",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-init requires a scope interview before investigation records exist, even when the first message already supplies questions, sources, storage paths, audience and checkpoint mode, so the agent had to park facts in a temporary README handoff.",
+    "evidence": "A1; agent-notes.md init entry; feedback/agent.md item 10",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The rule is in the released skill, but the very detailed first message comes from the persona front-loading its brief, a known study limit."
+  },
+  {
+    "id": "co2-A-24",
+    "source": [
+      "agent"
+    ],
+    "summary": "After creating a project venv because the default python3 lacked duckdb, the helper installer refused to run until the README's 'Project interpreter' line was hand-edited.",
+    "evidence": "A1; agent-notes.md init entry; feedback/agent.md section 3",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The refusal and its message are product behaviour, but the missing duckdb came from the simulated environment's interpreter."
+  },
+  {
+    "id": "co2-A-25",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The Codex sandbox blocked temp-file creation, so zsh heredocs failed (one caused the first awb/setup failure) and xcrun and pip could not write caches under /var/folders and the simulated home.",
+    "evidence": "A1 (awb/setup failure), A4, reviewer subagent; feedback/harness-log.md; feedback/agent.md item 7",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "Caused by the workspace-write sandbox and simulated home, not by the released skills."
+  },
+  {
+    "id": "co2-A-26",
+    "source": [
+      "agent"
+    ],
+    "summary": "Codex's web tool returned a 400 Unicode decoding error when opening the GCP methodology PDF on Zenodo, so the agent fell back to urllib and pdftotext.",
+    "evidence": "A3; feedback/agent.md section 3",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is a Codex web-tool limitation in the simulation host, unrelated to the workbench."
+  },
+  {
+    "id": "co2-A-27",
+    "source": [
+      "referee"
+    ],
+    "summary": "Reviewer-subagent spawns and their tool calls are not captured in the relay's Codex JSON stream (only 'wait' events appear), so the isolation audit had to read the rollouts in agent-home/.codex/sessions directly.",
+    "evidence": "relay/agent-004..006.jsonl collab_tool_call events; agent-home/.codex/sessions/2026/10/16/rollout-*.jsonl",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is a logging gap in how the relay records Codex sessions."
+  },
+  {
+    "id": "co2-A-28",
+    "source": [
+      "referee"
+    ],
+    "summary": "relay.py status prints DEAD for a never-started simulation with an empty state file, which can be mistaken for a crashed run.",
+    "evidence": "Referee's first 'relay.py status' call printed 'DEAD' and '{}' before the relay was started",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is relay status wording in the simulation kit."
+  }
+]

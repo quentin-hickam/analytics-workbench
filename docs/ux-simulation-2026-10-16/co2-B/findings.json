@@ -1,0 +1,359 @@
+[
+  {
+    "id": "co2-B-01",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "Package review did not settle: 38 full-review subagent runs across A4-A8, each clean pass followed by new findings in unchanged text, consuming 129.5 of 142.9 conversation minutes and about 91% of agent cost.",
+    "evidence": "A4-A8; relay/agent-004..008.jsonl (5+14+5+12+2 Agent calls); feedback/agent.md s1.1; feedback/human.md s2.2; feedback/harness-log.md",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The full-review-must-be-last-and-clean rule in awb-package's review reference and the non-deterministic reviewer would behave the same on an interactive host."
+  },
+  {
+    "id": "co2-B-02",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "Review-driven edits kept changing user-approved text after the user explicitly asked to avoid unrelated wording changes, and the skill offers no way to waive a narrative finding with user consent.",
+    "evidence": "U7 ('avoid another round of unrelated wording changes'); A7 lists six extra changes; A8 one more at release; feedback/agent-notes.md turn 7; human/notes.md turns 6-8",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The release gate requiring a clean review with no user waiver path is part of the released skill."
+  },
+  {
+    "id": "co2-B-03",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "The China/India early-year coverage gap behind the 1850 cumulative shares was not flagged in clean/explore or at first answer, then surfaced in A5 misdescribed as missing years that 'count as zero'.",
+    "evidence": "A2 (Q4 answer without gap), A5 (caveat 'count as zero'), U6 (user challenge), A6 (correction); results/q4-missing-years.csv; feedback/human.md s2.1",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The clean/explore guidance and scan did not check per-entity coverage of series feeding a cumulative calculation, which any real user's agent would also miss."
+  },
+  {
+    "id": "co2-B-04",
+    "source": [
+      "user",
+      "agent"
+    ],
+    "summary": "The agent and its reviewer stated an unsupported inference about source construction (that OWID's World series omits the missing country years) based only on reconciliation; the user had to challenge it.",
+    "evidence": "A6, U7, A7; foundation/quality.md DQ-008; feedback/agent.md s1.2; feedback/human.md s2.1",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The reviewer prompt checks traceability and consistency, not whether claims about how a source is built are documented."
+  },
+  {
+    "id": "co2-B-05",
+    "source": [
+      "agent"
+    ],
+    "summary": "The reviewer gave contradictory guidance across passes, e.g. removing a land-use-change effect claim as unsupported and later demanding the narratives carry the same state.md caveat.",
+    "evidence": "A4-A5; feedback/agent.md s1.2; feedback/agent-notes.md turn 5",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "Reviewer instructions in the released skill do not make state.md caveats a single source of truth across passes."
+  },
+  {
+    "id": "co2-B-06",
+    "source": [
+      "user",
+      "agent"
+    ],
+    "summary": "Review rules degraded the donor deck: the subtitle grew into a list of every comparison period and the Answer caveat accumulated many qualifications in one bullet.",
+    "evidence": "A5 (combined caveat), A6 (subtitle listing all periods), U7 (user restores short subtitle); feedback/human.md s2.3; feedback/agent-notes.md turn 5",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The periods/caveats rule as applied by the released reviewer produces this on any host."
+  },
+  {
+    "id": "co2-B-07",
+    "source": [
+      "user",
+      "agent"
+    ],
+    "summary": "A contract rule that 'checked/matches' sentences state a tolerance conflicted with the user's request to keep the tolerance in speaker notes; the agent kept a visible tolerance bullet until the user repeated the request.",
+    "evidence": "U5, A5, U6, A6; feedback/human.md s2.6; feedback/agent.md s2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The rule lives in the released package contract."
+  },
+  {
+    "id": "co2-B-08",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "To satisfy the tolerance rule the agent invented a 0.15 Mt reconciliation tolerance after observing a 0.13 Mt maximum gap.",
+    "evidence": "A4; feedback/agent.md s4; feedback/agent-notes.md turn 4; draft and release findings.md How we know notes",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The package contract pushes toward stating a tolerance distinct from the observed result, which invites a post-hoc number."
+  },
+  {
+    "id": "co2-B-09",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "First answers were incomplete in chat (Q1 figures for only 3 of 20 countries, Q2 list without numbers, 'most' without a count), costing a follow-up round.",
+    "evidence": "A2, U3, A3; feedback/human.md s2.4; human/notes.md turn 3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Answer formatting under the released skills; a real user would have to ask the same follow-up."
+  },
+  {
+    "id": "co2-B-10",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Version-history reminders repeated across the session (A1, A2, A3, A4, A8; explicit commit invitations in A2 and A4) despite the README's once-per-session promise, and the agent's feedback claims it suggested once.",
+    "evidence": "transcript.md lines 37, 157, 187, 353, 578; feedback/human.md s2.5; feedback/agent.md s4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Reminder behaviour is governed by the released skills and README."
+  },
+  {
+    "id": "co2-B-11",
+    "source": [
+      "referee",
+      "agent"
+    ],
+    "summary": "Release 001 was frozen from a repository with no commits, so provenance is file fingerprints only (producing_commit 'uncommitted', packaging_commit unknown).",
+    "evidence": "storage/releases/co2-cuts-growth-consumption/donor-briefing/001/manifest.json; project git log (no commits); A8",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "On-request commit mode lets a release proceed without a commit on any host."
+  },
+  {
+    "id": "co2-B-12",
+    "source": [
+      "agent"
+    ],
+    "summary": "validate.py crashed with KeyError 'left_rows' (traceback per result) on a joins spec lacking left_rows instead of a validation message.",
+    "evidence": "A2; src/exploration/validate.py:124 per feedback/agent.md s3; feedback/agent-notes.md turn 2",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "A released helper bug, independent of the host."
+  },
+  {
+    "id": "co2-B-13",
+    "source": [
+      "agent"
+    ],
+    "summary": "eda_scan.py fails on an integer year column (Conversion Error INTEGER -> DATE) and its output does not report per-measure coverage years.",
+    "evidence": "A2; feedback/agent.md s1.4, s3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "A released helper limitation, independent of the host."
+  },
+  {
+    "id": "co2-B-14",
+    "source": [
+      "agent"
+    ],
+    "summary": "The awb-clean scan missed the countries-vs-aggregates mix and Kosovo's missing ISO code, and flagged aggregates as IQR extremes instead.",
+    "evidence": "A2; foundation/quality.md; feedback/agent.md s1.5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Scan heuristics in the released helpers."
+  },
+  {
+    "id": "co2-B-15",
+    "source": [
+      "agent",
+      "user"
+    ],
+    "summary": "record_cleaning cannot amend an observation, so DQ-008 still carries the withdrawn World-series claim, and the agent hand-edited quality.md once to fix a Libya error.",
+    "evidence": "A2, A7; foundation/quality.md DQ-008; feedback/agent.md s1.6; human/notes.md turn 8",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "A released helper limitation."
+  },
+  {
+    "id": "co2-B-16",
+    "source": [
+      "agent"
+    ],
+    "summary": "Simple aggregate results required static row_counts/joins magic numbers in settings.toml to avoid 'not assessed'.",
+    "evidence": "A2; investigations/co2-cuts-growth-consumption/settings.toml; feedback/agent.md s1.7",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Settings design in the released template."
+  },
+  {
+    "id": "co2-B-17",
+    "source": [
+      "agent"
+    ],
+    "summary": "Chart-spec formatting guidance in the findings template is ambiguous about blank lines, which led check-draft to count chart fields as slide bullets.",
+    "evidence": "A4; package-format/findings-template.md per feedback/agent.md s1.8",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Released template wording."
+  },
+  {
+    "id": "co2-B-18",
+    "source": [
+      "agent"
+    ],
+    "summary": "export refused to run before the draft folder existed, and the awb-package skill does not say to create it.",
+    "evidence": "A4; feedback/agent.md s1.9, s3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Released helper and skill gap."
+  },
+  {
+    "id": "co2-B-19",
+    "source": [
+      "agent"
+    ],
+    "summary": "display.toml boolean value keys (true = ...) silently failed to map because saved CSVs hold 'True'.",
+    "evidence": "A4; feedback/agent.md s1.10",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Released helper behaviour."
+  },
+  {
+    "id": "co2-B-20",
+    "source": [
+      "agent"
+    ],
+    "summary": "presentation_order must be hand-edited in manifest.json whenever a heading changes, and the ledger storyline puts a child 'should' question after all roots.",
+    "evidence": "A3-A7; manifest.json presentation_order; feedback/agent.md s1.11, s2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "No command exists for it in the released helpers."
+  },
+  {
+    "id": "co2-B-21",
+    "source": [
+      "agent"
+    ],
+    "summary": "check-draft flagged false positives: a negated causal word ('does not test what caused them') and a bare year ('1907') as an unrecorded number.",
+    "evidence": "A4, A6; feedback/agent.md s3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Released checker heuristics."
+  },
+  {
+    "id": "co2-B-22",
+    "source": [
+      "agent"
+    ],
+    "summary": "Instructions conflict or are missing: MCP setup tool vs the project interpreter, a read-only awb-status vs combined status-plus-work requests, commit-before-publish vs on-request commits, allowed record_cleaning statuses, and history entry placement.",
+    "evidence": "A1-A3; feedback/agent.md s2; feedback/agent-notes.md turns 1-3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Wording of the released skills and guides."
+  },
+  {
+    "id": "co2-B-23",
+    "source": [
+      "user"
+    ],
+    "summary": "The README is long for an analyst and did not prepare the user for review churn or for 'clean review' coexisting with an undiscovered source-coverage assumption.",
+    "evidence": "human/README.md; feedback/human.md s3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "README content is part of the release."
+  },
+  {
+    "id": "co2-B-24",
+    "source": [
+      "user"
+    ],
+    "summary": "Agent messages grew long near completion, with full recaps, repeated release invitations and internal narration (validation settings, glossary exports, file fingerprints).",
+    "evidence": "A5-A8; feedback/human.md s4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Reply style under the released skills on any host."
+  },
+  {
+    "id": "co2-B-25",
+    "source": [
+      "referee"
+    ],
+    "summary": "The agent stated '219 entities with a code, plus Kosovo' in chat; the data has 218 coded entities plus Kosovo (219 total), an unrecorded chat number later stated correctly.",
+    "evidence": "A2 vs A3; referee/spotcheck2.py",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "A chat-only figure not backed by a recorded result; nothing on the host prevents it."
+  },
+  {
+    "id": "co2-B-26",
+    "source": [
+      "referee"
+    ],
+    "summary": "One permission prompt was raised (Bash cp from the skill folder plus heredoc append to foundation/catalog.md), which a real user would have had to approve.",
+    "evidence": "A2 19:20:48Z; relay/permission-prompts.jsonl",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The init/landing step's command shape triggers a prompt under normal Claude Code permissions."
+  },
+  {
+    "id": "co2-B-27",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The review scratch copy is specified 'in the system's temporary directory', which conflicted with the session's bounds; the agent wrote /tmp/q.sql and /tmp/claude-501/review-diff.txt outside SIMDIR (the latter deleted).",
+    "evidence": "A2, A4; referee/agent-full.txt lines 126, 233, 621-939; feedback/agent-notes.md turns 2, 4",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The out-of-bounds restriction comes from the simulation's system-prompt boundary; on a normal host the system temp directory is acceptable."
+  },
+  {
+    "id": "co2-B-28",
+    "source": [
+      "referee",
+      "agent"
+    ],
+    "summary": "The Codex user's first message carried a stray preamble line ('I'll read BRIEF.md and README.md, then follow the simulation's response format.') that the relay passed verbatim.",
+    "evidence": "U1; transcript.md message 1; feedback/agent-notes.md turn 1",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "A role breaking its output protocol, not a product behaviour."
+  },
+  {
+    "id": "co2-B-29",
+    "source": [
+      "referee"
+    ],
+    "summary": "The persona front-loaded nearly all 'if it asks' facts in U1 (territorial default, land-use exclusion, aggregates, storage paths, year statements), thinning scoping to a single round.",
+    "evidence": "U1, A1, U2; human/BRIEF.md",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "A known study limit of persona briefs, kept for comparability with Oct 15."
+  },
+  {
+    "id": "co2-B-30",
+    "source": [
+      "referee"
+    ],
+    "summary": "A review subagent read two Claude Code tool-result overflow files under the real ~/.claude/projects directory, outside SIMDIR; they held only the session's own outputs.",
+    "evidence": "A7; referee/agent-full.txt lines 2756, 2944",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "Claude Code stores its own oversized tool outputs under the real home in this harness; no study material was involved."
+  },
+  {
+    "id": "co2-B-31",
+    "source": [
+      "referee"
+    ],
+    "summary": "In A1 the agent's 'ls project/..' printed SIMDIR's top-level names (human, relay, transcript.md, REFEREE.md) while looking for .claude folders; nothing was opened.",
+    "evidence": "A1; referee/agent-full.txt lines 30-36",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "Exposure arises from the simulation's folder layout placing study files beside the project."
+  }
+]

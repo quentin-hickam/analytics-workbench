@@ -1,0 +1,367 @@
+[
+  {
+    "id": "retail-A-01",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "The agent reported all five questions as answered and asked for headline approval while the user had seen the numbers behind only one of them; Q2 used the identified-revenue denominator alone and guest revenue was given only as a percentage.",
+    "evidence": "A2, U3, A3; feedback/human.md pain point 1; human/notes.md Turn 3; feedback/agent.md section 5",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The status line convention ('N answered' means recorded) and the headline-only preview format are workbench behaviour that any interactive user would meet."
+  },
+  {
+    "id": "retail-A-02",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "Packaging and release carry heavy instruction volume and four full independent reviews, including a fresh full re-review at release when the reviewed candidate had not changed, making packaging the slowest phase.",
+    "evidence": "A5 (13.3 min), A6, A7; feedback/agent.md 1.1 and 5; feedback/harness-log.md; project/investigations/marketing-investment/package-reviews/",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The review gates and contract size come from the released awb-package/awb-release skills, not from the simulation setup."
+  },
+  {
+    "id": "retail-A-03",
+    "source": [
+      "agent"
+    ],
+    "summary": "The draft and finding number checks flag dates, a citation year, compact count/rate pairs and source counts as unrecorded numbers, forcing prose rewrites around the checker.",
+    "evidence": "A3 and A5; feedback/agent.md 1.2 and section 3; feedback/agent-notes.md (seasonality-comparison warning, check-draft numeric rows)",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The records/state finding and package check-draft helpers raised these warnings on sound prose."
+  },
+  {
+    "id": "retail-A-04",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The awb read SQL tool reports unbound prepared-statement parameters as a read-only plan-safety refusal and advises running without --read-only.",
+    "evidence": "A2; feedback/harness-log.md (awb/read failure); feedback/agent.md 1.3 and section 3",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The error text and missing parameter binding come from the released MCP read tool and would appear on any host."
+  },
+  {
+    "id": "retail-A-05",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "Because awb-status is read-only, slide edits the user sent in the same message as the status request were not recorded until a separate awb-package request, costing a turn.",
+    "evidence": "U4, A4, U5; feedback/human.md pain point 3; feedback/agent.md 1.4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The read-only rule is in the awb-status skill, and the README does not warn that combined edits wait."
+  },
+  {
+    "id": "retail-A-06",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The agent linked and quoted internal SKILL.md files in its messages to the user to justify pauses, which the user found irrelevant and could not open.",
+    "evidence": "A1, A4, A6; feedback/human.md pain point 2; human/notes.md Turns 2, 5, 7",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "It could be a Codex habit or a skill instruction to name the rule when pausing; the release text was not inspected to tell which."
+  },
+  {
+    "id": "retail-A-07",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The README presents clean and explore as steps, but the agent folded them into answering, leaving the user unsure whether something was skipped.",
+    "evidence": "A2, U3; feedback/human.md pain point 6 and section 3; human/notes.md Turn 3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The README sets the step expectation, and the release does not say when cleaning and exploring are folded into analysis."
+  },
+  {
+    "id": "retail-A-08",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-clean would have required a user choice over which rows win even for the proven exact 22,523-line overlap between the two sheets, so the agent bypassed it with a per-investigation sheet split.",
+    "evidence": "A2; feedback/agent.md 1.5 and section 4; feedback/agent-notes.md (scope settled entry)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the agent's reading of the released awb-clean skill and would apply on any host."
+  },
+  {
+    "id": "retail-A-09",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-init cannot create an investigation before the first scope interview, so the rich intake had to be parked in the project README.",
+    "evidence": "A1; feedback/agent.md 1.5 and section 2; feedback/agent-notes.md (initial setup entry)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The ordering is set by the released awb-init and awb-scope skills."
+  },
+  {
+    "id": "retail-A-10",
+    "source": [
+      "agent"
+    ],
+    "summary": "The package contract's required title, answer, findings, methods and caveats sections produce nine content slides against an 'about 8 slides' request; the agent resolved it as 8 main slides plus an appendix.",
+    "evidence": "A2 headline preview; feedback/agent.md 1.6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The slide structure comes from the released package contract and deck rules."
+  },
+  {
+    "id": "retail-A-11",
+    "source": [
+      "user",
+      "agent"
+    ],
+    "summary": "The first full draft described the company as a 'UK online retailer' and labelled chart sources as the UCI export, so the user had to correct identity and source wording.",
+    "evidence": "U6 items 1-2; feedback/human.md section 6; feedback/agent.md 1.13",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "Both come from a public dataset standing in for the persona's own export; a real company export would not carry a UCI identity or label."
+  },
+  {
+    "id": "retail-A-12",
+    "source": [
+      "user",
+      "agent"
+    ],
+    "summary": "The first draft used technical control-group wording, imperative 'How we know' bullets (after the slide-8 headline had already been corrected) and an undefined repeat-buyer metric, needing user corrections.",
+    "evidence": "U6 items 3-6, A6; feedback/human.md section 6; feedback/agent.md 1.13",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "Partly the Codex agent's drafting and partly the templates and review rules not prompting for plain language or declarative methods; the split cannot be determined from the logs."
+  },
+  {
+    "id": "retail-A-13",
+    "source": [
+      "user"
+    ],
+    "summary": "The scope interview did not ask about non-product stock codes; the user raised them, and the agent then gave a good recommendation.",
+    "evidence": "U2, A2; feedback/human.md pain point 4; human/notes.md Turn 2",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The interview ran before the data was landed, and the persona volunteered the codes before the agent's data checks surfaced them, so a real user's experience cannot be inferred."
+  },
+  {
+    "id": "retail-A-14",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Replies were long and repeated content: scope questions listed twice, confirmation asked twice, and a lot of progress narration.",
+    "evidence": "A1, A2, A6, A7; feedback/human.md pain point 5 and section 4",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "Messaging style is mostly the Codex model's; the skills may encourage a recap line, but that cannot be told from the logs."
+  },
+  {
+    "id": "retail-A-15",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Agent and release messages used jargon a business user did not understand: 'signed financial lines', 'first observed', 'one-penny tolerance', and 'No packaging Git commit exists; producing-file checksums are recorded'.",
+    "evidence": "A2, A5, A7; feedback/human.md section 4; human/notes.md Turn 8",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The packaging-commit and tolerance statements come from release and review helper output that the agent relayed."
+  },
+  {
+    "id": "retail-A-16",
+    "source": [
+      "user"
+    ],
+    "summary": "The 97.0% repeat-buyer revenue share appeared first in the draft without being shown in chat, and the user doubted leaning on a two-year measure that is close to true by construction.",
+    "evidence": "A5, U6 item 6, A6; feedback/human.md section 5",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "It was an agent analytic choice (child question Q-009) rather than a clear workbench defect."
+  },
+  {
+    "id": "retail-A-17",
+    "source": [
+      "referee"
+    ],
+    "summary": "The published data upper-cases stock codes (merging 47566b into 47566B) without any record in the publication, catalog or methodology; this moves Tea Time Party Bunting from 17.4% (rank 7) to 16.3% (rank 9).",
+    "evidence": "Q4 spot-check: referee/spot.out, referee/spot2.out; project/data/parquet/retail_lines/2026-10-16-v1/retail_lines.parquet; project/investigations/marketing-investment/results/products-without-reversal.csv",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The agent's conversion did it; whether the release's conversion guidance prescribes or should surface such normalisation was not inspected."
+  },
+  {
+    "id": "retail-A-18",
+    "source": [
+      "user"
+    ],
+    "summary": "The release folder nests under investigation and package names the user never chose, and the README mentions this only in its 'How it works' section.",
+    "evidence": "A7, U8; feedback/human.md section 3; human/notes.md Turn 8",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Folder layout and README placement are release behaviour."
+  },
+  {
+    "id": "retail-A-19",
+    "source": [
+      "user"
+    ],
+    "summary": "START-HERE lists methodology.md both as a file to attach to the deck builder and as internal, which was confusing on first read.",
+    "evidence": "A5; feedback/human.md section 6; human/notes.md Turn 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "START-HERE comes from the package format templates."
+  },
+  {
+    "id": "retail-A-20",
+    "source": [
+      "user"
+    ],
+    "summary": "The README's headline-checkpoint paragraph is dense, install and MCP material sits in the same document, and it does not explain what 'answered' means or that status will not apply edits.",
+    "evidence": "human/README.md; feedback/human.md section 3; human/notes.md Turn 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The README is the release's user documentation."
+  },
+  {
+    "id": "retail-A-21",
+    "source": [
+      "agent"
+    ],
+    "summary": "Setup first targeted the base interpreter and reported DuckDB missing outside the project, so the agent built a project venv by hand and then mis-installed DuckDB into the user site by resolving the venv symlink.",
+    "evidence": "A1; feedback/agent.md 1.7 and section 3; feedback/agent-notes.md (initial setup entry)",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The harness put a base Python 3.13 first on PATH, and the pip mistake was the agent's own; how setup picks an interpreter is product behaviour."
+  },
+  {
+    "id": "retail-A-22",
+    "source": [
+      "agent"
+    ],
+    "summary": "The source register template's reference-link parsing guidance is disproportionately long for entering a normal source reference.",
+    "evidence": "A1; feedback/agent.md 1.8; feedback/agent-notes.md (initial setup entry)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The guidance is in the released foundation templates."
+  },
+  {
+    "id": "retail-A-23",
+    "source": [
+      "agent"
+    ],
+    "summary": "Status cannot record that a headline-only preview checkpoint is in progress, so expected missing draft files had to be explained by hand.",
+    "evidence": "A4; feedback/agent.md 1.9",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is a gap in the release's checkpoint and status model."
+  },
+  {
+    "id": "retail-A-24",
+    "source": [
+      "agent"
+    ],
+    "summary": "Helper output is verbose, with long absolute paths, and a result-only export returns an empty charts list while keeping the existing chart files, which is easy to misread.",
+    "evidence": "A5, A6; feedback/agent.md 1.10",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The output format comes from the released helpers."
+  },
+  {
+    "id": "retail-A-25",
+    "source": [
+      "agent"
+    ],
+    "summary": "check-draft expected a slide order different from the user-approved one until the agent applied the presentation_order override, and gave no preview of the order it expected.",
+    "evidence": "A5; feedback/agent.md 1.11; feedback/agent-notes.md (full package draft entry)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The storyline check is a release helper."
+  },
+  {
+    "id": "retail-A-26",
+    "source": [
+      "agent"
+    ],
+    "summary": "Lifecycle text went stale (the project README still said no release was authorized after authorization), and scaffold guidance text remains in live state records.",
+    "evidence": "A7; feedback/agent.md 1.12; project/investigations/marketing-investment/state.md",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Scaffolded records and lifecycle fields come from the release templates."
+  },
+  {
+    "id": "retail-A-27",
+    "source": [
+      "agent"
+    ],
+    "summary": "Exporting before the chart specifications existed failed with 'no specification in findings'; the agent asked for a metadata-only or dry-run export.",
+    "evidence": "A5; feedback/harness-log.md (awb/package failures); feedback/agent.md section 3",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The agent says the sequencing was its own error; whether a dry-run mode is missing is a product question."
+  },
+  {
+    "id": "retail-A-28",
+    "source": [
+      "agent"
+    ],
+    "summary": "A reviewer subagent called the CLI with a --project flag it does not accept (exit 2), while the MCP tool takes a project argument.",
+    "evidence": "A5; feedback/agent.md section 3; feedback/agent-notes.md (full package draft entry)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The argument shape differs between the release's CLI and its MCP tool."
+  },
+  {
+    "id": "retail-A-29",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The Codex sandbox could not create heredoc temp files or the macOS xcrun cache, so several commands failed and were retried with python -c.",
+    "evidence": "A1, A5; feedback/agent.md sections 2-3; feedback/agent-notes.md",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "These are Codex workspace-write sandbox limits, not workbench behaviour."
+  },
+  {
+    "id": "retail-A-30",
+    "source": [
+      "referee"
+    ],
+    "summary": "The Codex backend returned 403 Forbidden on three reconnect attempts during agent turn 5; the turn recovered and completed.",
+    "evidence": "feedback/harness-log.md (agent-005.jsonl errors)",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "A transient model-backend connection error unrelated to the workbench."
+  },
+  {
+    "id": "retail-A-31",
+    "source": [
+      "referee"
+    ],
+    "summary": "The reviewer subagents spawned in A5-A7 do not have their tool calls in the parent Codex log, so their reads cannot be fully audited for isolation.",
+    "evidence": "relay/agent-005.jsonl to agent-007.jsonl (only collab wait items); project/investigations/marketing-investment/package-reviews/",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "A logging limit of the harness's Codex capture, not a product defect."
+  },
+  {
+    "id": "retail-A-32",
+    "source": [
+      "referee"
+    ],
+    "summary": "The persona front-loaded nearly all its context in U1-U2, including facts meant to be given only if asked, which thinned scoping to one round.",
+    "evidence": "U1, U2; human/BRIEF.md",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "A known study limit of the persona briefs, kept for comparability with the Oct 15 runs."
+  }
+]
