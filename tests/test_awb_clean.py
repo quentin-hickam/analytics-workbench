@@ -4,6 +4,7 @@
 # test_text_dates_and_codes_are_typed_conservatively: a day-first text date column is typed by its one covering format, an all-ambiguous one is reported, and leading-zero codes stay text.
 # test_rescan_reports_delta_with_stable_ids_and_inherited_options: a rescan after a correction view reports before and after counts by issue, keeps ids, and reuses the baseline's options.
 # test_duplicate_rows_leave_lineage_columns_out_of_the_match: two sheets' copies split into across-part rows and remaining repeats when --lineage leaves their sheet and sheet_row values out of the match; examples keep lineage first, and explicit, declared and inherited lineage, tomli fallback and invalid-column refusals retain their behavior.
+# test_declared_lineage_keeps_the_scanned_datasets_own_order: a dataset's own lineage declaration keeps its order, so its part column comes first; a dataset with none falls back to every declared column.
 # test_duplicate_rows_split_follows_cross_part_correction: repeats within the first part and copies in later parts split as the correction view keeps and drops them, their counts sum to the former combined count, separate quality rows and hashed links retain independent statuses, missing links rebuild from their full markers, and a corrected-view rescan resolves only the across-part issue.
 # test_duplicate_rows_without_lineage_keep_one_issue: exact repeats with no lineage produce only duplicate-rows.
 # test_duplicate_rows_use_the_first_lineage_column_as_the_part: changing lineage order changes which part's repeats remain.
@@ -283,6 +284,14 @@ def test_duplicate_rows_leave_lineage_columns_out_of_the_match(tmp_path, capsys)
         assert message in capsys.readouterr().err
 
 
+def test_declared_lineage_keeps_the_scanned_datasets_own_order(tmp_path):
+    write(tmp_path, "foundation/datasets.toml", '[datasets.budget]\nlineage = ["sheet", "sheet_row"]\n\n'
+          '[datasets.sales]\nlineage = ["file", "sheet", "sheet_row"]\n')
+    # The first lineage column is the part, so a dataset's own declaration wins over the merged list.
+    assert scanner.declared_lineage(tmp_path, "sales") == ["file", "sheet", "sheet_row"]
+    assert scanner.declared_lineage(tmp_path, "other") == ["sheet", "sheet_row", "file"]
+
+
 def test_duplicate_rows_split_follows_cross_part_correction(tmp_path):
     duckdb = pytest.importorskip("duckdb")
     write(tmp_path, "data/lines.csv", "sheet,sheet_row,invoice,amount\n"
@@ -303,6 +312,9 @@ def test_duplicate_rows_split_follows_cross_part_correction(tmp_path):
     assert across["count"] + within["count"] == old_count == 7
     assert next(e for e in across["examples"] if e["value"]["invoice"] == "100")["count"] == 4
     assert next(e for e in within["examples"] if e["value"]["invoice"] == "100")["count"] == 2
+    # A retained repeat's example names only the part it repeats in; a cross-part one names every part.
+    assert next(e for e in within["examples"] if e["value"]["invoice"] == "100")["value"]["sheet"] == ["A"]
+    assert next(e for e in across["examples"] if e["value"]["invoice"] == "100")["value"]["sheet"] == ["A", "B", "C"]
     result = recorder.record(tmp_path, "lines", {"issues": {
         across["id"]: {**judgment(), "treatment": "Await a decision on copies"},
         within["id"]: {**judgment(), "treatment": "Keep the separate events"}}}, today=TODAY)

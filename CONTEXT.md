@@ -11,7 +11,7 @@ A workspace containing a shared data foundation and investigations that use it; 
 The shared data, reusable definitions, and knowledge about data preparation and quality available to investigations within a project.
 
 **Canonical data**:
-The shared, authoritative representation of source data under documented preparation rules. Canonical data may retain limitations: missing periods, including gaps inside a series, are unreported, never zero; assumption-based filling is an illustrative scenario, never a bound.
+The shared, authoritative representation of source data under documented preparation rules. Canonical status does not imply that the data is free of limitations or suitable for every investigation.
 
 **Landed data**:
 Source records durably captured independently of the canonical analytical store, with provenance linking them to their acquisition. Landed data is the input to preparation, not an assertion of cleanliness or analytical fitness.
@@ -29,7 +29,7 @@ The logical collection of approved datasets and shared views available to invest
 The normalization, quality assessment, and documented correction of source data into canonical data. Preparation is driven by analytical needs and can evolve as exploration reveals issues.
 
 **Data cleaning**:
-Correction of shared data errors under explicit rules. Cross-part copies and remaining repeats have independent decisions: only the user or source documentation establishes re-extracts; overlap or prior knowledge does not. Within-part removal requires a recorded grain excluding lineage. Question-specific exclusions remain analytical choices.
+The part of data preparation that addresses errors and inconsistencies under explicit correction rules. Question-specific exclusions are analytical choices rather than general cleaning rules.
 
 **Exploratory data analysis (EDA)**:
 The examination of data distributions, relationships, and quality to develop or assess questions and explanations. EDA uses canonical data and local exploratory transformations without implicitly changing the shared preparation rules.
@@ -50,7 +50,7 @@ An investigation's `run.py`, the thin entry point that composes shared operation
 A validated result an investigation records as a row of `state.md`, with a status, a claim strength, and a link to its result evidence. The row is rendered from the investigation's `findings.json`, which the provenance helper alone writes. The agent promotes a provisional finding to supported once its checks are recorded and the user approves its headline or text. Exploration notes are recorded separately and are not findings.
 
 **Claim strength**:
-The strongest wording a finding supports: descriptive, association, or causal. Causal requires an experiment or identified natural experiment; exploration supports association at most. Narratives stay within that strength. Untested causes, labels and recollections are questions; recollections remain the user's and codes are named by meaning.
+The strongest wording a finding supports: descriptive, association, or causal. Causal requires a stated design basis, an experiment or an identified natural experiment; exploration supports association at most. A delivered narrative never words a finding above it.
 
 **Flagged**:
 Awaiting revalidation: a finding that a shared correction or changed input may affect, marked with the reason and with its prior status kept visible in the status value, as in `revalidation-needed (was supported)`. Scan output is an anomaly in EDA and an issue in cleaning, never a flag.

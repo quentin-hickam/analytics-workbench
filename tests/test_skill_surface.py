@@ -532,7 +532,7 @@ def test_cross_part_copies_need_the_user_or_source_to_call_them_reextracts():
     assert ("an overlap you observe, or what you already know of a dataset, is not the source saying so") in decide
     assert "When `duplicate-rows:across-parts` spans more than two parts, count each pair's shared rows" in decide
     assert "compare the counts with the issue's" not in decide
-    assert 'under a recorded grain excluding lineage columns (repeats then share one grain key)' in decide
+    assert 'under a recorded grain with no lineage column in it (repeats then share one grain key)' in decide
     assert "The user decides everything else" in decide
     checks = (ROOT / '.agents/skills/awb-clean/references/checks.md').read_text(encoding='utf-8')
     assert checks.count('first lineage column') == 1
@@ -747,7 +747,7 @@ def test_analysis_states_the_threshold_rule_and_the_standard_checks():
     assert ("A threshold, minimum, or exclusion the brief does not settle is the user's decision: propose it to "
             "the user before looking at which rows lead, and say so when you propose one after seeing results.") in add
     assert "with every filtered population reconciled by `reconcile()`" in add
-    assert ("For a series summed over a period, list each entity's missing periods, inside its series too, "
+    assert ("For a series summed over a period, list each in-scope entity's missing periods, inside its series too, "
             'as a caveat: "unreported in <periods>; sums cover reported periods only", never zero; '
             "filling gaps by assumption gives an illustrative scenario, never a bound.") in add
     assert 'a count below the period length' not in add

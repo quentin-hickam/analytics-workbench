@@ -10,8 +10,8 @@ src/preparation/landing.py. Landed CSV is read as text so parse failures stay vi
 Lineage columns, such as the sheet, file, or row a conversion records, are left out of the
 duplicate-rows match. Cross-part copies have key duplicate-rows:across-parts; remaining repeats
 have key duplicate-rows, each with its own count and quality decision.
-They are --lineage, else every column in the target that foundation/datasets.toml lists under
-any dataset's lineage key.
+They are --lineage, else the target's own lineage key in foundation/datasets.toml, else every
+column in the target that any dataset lists there. The first lineage column is the part.
 
 The complete scan goes to foundation/scans/<name>.json, which stays local to the checkout.
 Stdout is compact JSON: counts, a few examples, and the scan path.
@@ -547,20 +547,25 @@ class Scan:
                       "FROM __awb_scan)")
             kept = f"count(*) FILTER (WHERE {part} IS NOT DISTINCT FROM __awb_first_part)"
         # Materialize once: both decisions and their examples use the same repeated groups.
+        # Cross-part examples show every part holding the group; retained repeats show the first part's only.
+        first = f" FILTER (WHERE {q(lineage[0])} IS NOT DISTINCT FROM __awb_first_part)" if lineage else ""
         spread = "".join(f", list(DISTINCT {q(n)} ORDER BY {q(n)})[1:5] AS __awb_lineage{i}"
+                         f", list(DISTINCT {q(n)} ORDER BY {q(n)}){first}[1:5] AS __awb_kept_lineage{i}"
                          for i, n in enumerate(lineage))
         self.db.execute(f"CREATE OR REPLACE TEMP TABLE __awb_duplicates AS SELECT {everything}, "
                         f"count(*) AS __awb_n, {kept} AS __awb_kept{spread} FROM {source} "
                         f"GROUP BY {everything} HAVING count(*) > 1")
-        checks = [(None, "__awb_kept - 1", "__awb_kept", " in the retained part" if lineage else " exactly")]
+        checks = [(None, "__awb_kept - 1", "__awb_kept", " in the retained part" if lineage else " exactly",
+                   "__awb_kept_lineage")]
         if lineage:
-            checks.insert(0, ("across-parts", "__awb_n - __awb_kept", "__awb_n - __awb_kept", " across parts"))
-        for suffix, amount, example_count, where in checks:
+            checks.insert(0, ("across-parts", "__awb_n - __awb_kept", "__awb_n - __awb_kept", " across parts",
+                              "__awb_lineage"))
+        for suffix, amount, example_count, where, shown in checks:
             extra, groups = self.one(f"SELECT coalesce(sum({amount}), 0), count(*) FROM __awb_duplicates "
                                      f"WHERE {amount} > 0")
             if not extra:
                 continue
-            spread_columns = "".join(f", __awb_lineage{i}" for i in range(len(lineage)))
+            spread_columns = "".join(f", {shown}{i}" for i in range(len(lineage)))
             sample = self.db.execute(f"SELECT {everything}, {example_count} AS __awb_count{spread_columns} "
                                      f"FROM __awb_duplicates WHERE {amount} > 0 "
                                      f"ORDER BY __awb_count DESC, {everything} LIMIT 5").fetchall()
@@ -728,9 +733,10 @@ def _delta(baseline, row_count, columns, issues):
             "issues": changes, "null_rates": null_rates, "types": types}
 
 
-def declared_lineage(root):
-    """Every column foundation/datasets.toml lists under a dataset's lineage key; the landing helper
-    validates the file, so an unreadable one, or Python 3.10 without tomli, declares none here."""
+def declared_lineage(root, dataset=None):
+    """The lineage foundation/datasets.toml declares for DATASET, in its order, since its first column is
+    the part; else every column any dataset lists under its lineage key. The landing helper validates the
+    file, so an unreadable one, or Python 3.10 without tomli, declares none here."""
     try:
         try:
             import tomllib
@@ -739,8 +745,13 @@ def declared_lineage(root):
         datasets = tomllib.loads((root / "foundation/datasets.toml").read_text(encoding="utf-8")).get("datasets")
     except (ImportError, OSError, ValueError):
         return []
+    datasets = datasets if isinstance(datasets, dict) else {}
+    own = datasets.get(dataset)
+    own = own.get("lineage") if isinstance(own, dict) else None
+    if isinstance(own, list) and own:
+        return [c for c in dict.fromkeys(own) if isinstance(c, str)]
     found = []
-    for entry in (datasets.values() if isinstance(datasets, dict) else []):
+    for entry in datasets.values():
         lineage = entry.get("lineage") if isinstance(entry, dict) else None
         found += [c for c in (lineage if isinstance(lineage, list) else []) if isinstance(c, str) and c not in found]
     return found
@@ -767,7 +778,7 @@ def scan(project_root, dataset, *, keys=(), refs=(), ranges=(), columns=None, li
         elif previous:
             options["lineage"] = old.get("lineage", [])
         else:
-            options["lineage"] = declared_lineage(root)
+            options["lineage"] = declared_lineage(root, target["name"])
         today = (today or date.today()).isoformat()
         worker = Scan(connection, target, {**options, "root": root, "explicit_lineage": list(lineage or [])}, today)
         row_count, info, candidate_keys, null_patterns = worker.run()
@@ -864,8 +875,8 @@ def main(argv=None):
     parser.add_argument("--range", action="append", default=[], dest="ranges",
                         help="COLUMN=MIN:MAX valid range, numbers or ISO dates, one side may be empty; repeatable")
     parser.add_argument("--columns", help="limit per-column checks to these comma-separated columns")
-    parser.add_argument("--lineage", help="comma-separated lineage columns, such as the sheet, file, or source row "
-                                          "a conversion records, left out of the duplicate-rows match (default: "
+    parser.add_argument("--lineage", help="comma-separated lineage columns, part column first, such as the sheet, "
+                                          "file, or source row a conversion records, left out of the duplicate-rows match (default: "
                                           "those foundation/datasets.toml declares under lineage)")
     parser.add_argument("--name", help="scan name (default: view name, <dataset>@<publication>, or file stem)")
     parser.add_argument("--rescan", action="store_true",
