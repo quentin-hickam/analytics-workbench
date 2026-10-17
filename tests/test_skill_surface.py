@@ -265,6 +265,47 @@ def test_status_asks_to_copy_releases_when_recorded_storage_lacks_the_latest():
     assert len(record) == 1 and 'latest_release_in_storage' not in record[0]
 
 
+def test_status_scopes_read_only_to_its_report():
+    # "Stay read-only" with no scope deferred the edits a user sent with "where are we?".
+    status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
+    assert 'Stay *read-only*' not in status
+    assert ("The status report is *read-only*: report what the records say, and turn every fix it finds into a "
+            "next request. Carry out the message's other requests, such as edits, through their own skills after "
+            "the report.") in status
+
+
+def test_status_offers_a_headline_preview_for_provisional_findings():
+    # With every finding provisional, only brainstorming and a commit applied, and the agent improvised the preview.
+    rows = [line for line in (ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').splitlines()
+            if line.startswith('| ')]
+    preview = rows.index('| Provisional findings and no draft | "Preview the slide headlines" | `awb-package` | progress |')
+    assert rows[preview + 1].startswith('| Supported findings and no draft | "Prepare a draft package"')
+    # Who promotes a finding, and when, is said where its status is defined.
+    template = ' '.join((ROOT / '.agents/skills/awb-init/assets/workbench/investigation/state.md')
+                        .read_text(encoding='utf-8').split())
+    assert ("The agent promotes a provisional finding to supported with `python3 src/awb.py state finding` once its "
+            "checks are understood and recorded and the user has approved its headline or text, such as at the slide "
+            "headline preview") in template
+    assert "to be promoted again once the user approves its text as rerun" in template
+
+
+def test_status_reports_findings_by_question_every_caveat_and_plain_freshness():
+    status = ' '.join(section((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8'),
+                              '## Report').split())
+    # Findings are counted against the user's questions, by text, and a root the agent added is labelled.
+    assert ('then each `questions.by_question` entry, one of the user\'s questions, by its text with its findings by '
+            'status, as "Which zones grew fastest: 2 findings, 1 supported"') in status
+    assert 'labelling one whose `origin` is `brainstorm`, `eda`, or `analysis`' in status
+    # Every caveat, not only flagged findings', as awb-release lists open caveats.
+    assert 'every flagged finding in `active.findings`' not in status
+    assert 'Then every `active.caveats` entry, flagged findings first; while one remains, never say nothing is open.' in status
+    # A freshness order the records cannot settle is said plainly beside the evidence check.
+    assert 'indeterminate' not in status
+    assert ('run `read` command `stale` for the investigation (`python3 <project-root>/src/awb.py stale '
+            '--investigation <name>`) and give the status in plain words beside how many checked results it finds '
+            'current, as "saved the same day as the latest change; evidence checks show 11 of 11 current"') in status
+
+
 # awb-package/SKILL.md's length after #90 shortened it, rounded up to the next 100 words. Trim the file rather
 # than raise this when a change pushes it over.
 PACKAGE_SKILL_WORDS = 2500
