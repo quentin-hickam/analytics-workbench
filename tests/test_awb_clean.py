@@ -3,7 +3,10 @@
 # test_scan_reads_views_through_session_and_changes_no_data: a view loads through the project's session(); landed and view files keep their bytes and only the scan file is written.
 # test_text_dates_and_codes_are_typed_conservatively: a day-first text date column is typed by its one covering format, an all-ambiguous one is reported, and leading-zero codes stay text.
 # test_rescan_reports_delta_with_stable_ids_and_inherited_options: a rescan after a correction view reports before and after counts by issue, keeps ids, and reuses the baseline's options.
-# test_duplicate_rows_leave_lineage_columns_out_of_the_match: two sheets holding the same rows under their own sheet and sheet_row values give no duplicate-rows issue matched on every column, and one counting every copy when --lineage names those columns, its examples listing each lineage column's values first; the lineage declared in foundation/datasets.toml is the default, read through tomli where tomllib is missing, --lineage replaces it, and a rescan keeps the baseline's; an unknown --lineage column, or one naming every column, refuses.
+# test_duplicate_rows_leave_lineage_columns_out_of_the_match: two sheets' copies split into across-part rows and remaining repeats when --lineage leaves their sheet and sheet_row values out of the match; examples keep lineage first, and explicit, declared and inherited lineage, tomli fallback and invalid-column refusals retain their behavior.
+# test_duplicate_rows_split_follows_cross_part_correction: repeats within the first part and copies in later parts split as the correction view keeps and drops them, their counts sum to the former combined count, separate quality rows and hashed links retain independent statuses, missing links rebuild from their full markers, and a corrected-view rescan resolves only the across-part issue.
+# test_duplicate_rows_without_lineage_keep_one_issue: exact repeats with no lineage produce only duplicate-rows.
+# test_duplicate_rows_use_the_first_lineage_column_as_the_part: changing lineage order changes which part's repeats remain.
 # test_removed_targets_and_options_are_rejected: a saved .sql query is not a scan target; --rescan takes no scan name; --typed-threshold and --max-categories are gone.
 # test_recorded_markers_mark_issues_as_recorded: issues whose `<scan>#<key>` marker is in the quality record are reported as recorded with their quality ID and recorded count beside the current count.
 # test_record_sets_the_view_row_when_a_publication_shares_its_name: a publication row named like its canonical view leaves the view row the one record sets; two non-view rows with one name still refuse.
@@ -238,25 +241,33 @@ def test_duplicate_rows_leave_lineage_columns_out_of_the_match(tmp_path, capsys)
             "2010-2011,1,101,6", "2010-2011,2,102,7", "2010-2011,3,103,8", "2010-2011,4,103,8"]
     write(tmp_path, "data/lines.csv", "\n".join(rows) + "\n")
     record, _ = scanner.scan(tmp_path, "data/lines.csv", today=TODAY)
-    assert "duplicate-rows" not in keys(record) and record["options"]["lineage"] == []
+    assert not any(k.startswith("duplicate-rows") for k in keys(record)) and record["options"]["lineage"] == []
     assert scanner.main([str(tmp_path), "data/lines.csv", "--lineage", "sheet, sheet_row"]) == 0
     out = json.loads(capsys.readouterr().out)
-    issue = next(i for i in out["issues"] if i["key"] == "duplicate-rows")
-    assert issue["count"] == 3 and issue["lineage"] == ["sheet", "sheet_row"]
+    issue = next(i for i in out["issues"] if i["key"] == "duplicate-rows:across-parts")
+    assert issue["count"] == 2 and issue["lineage"] == ["sheet", "sheet_row"]
     assert issue["examples"][0].startswith('{"sheet": ["2009-2010", "2010-2011"], "sheet_row": ["1", "2"')
     record = json.loads((tmp_path / "foundation/scans/lines.json").read_text())
-    full = keys(record)["duplicate-rows"]
-    assert full["summary"] == "3 extra rows repeating another row in every column but sheet, sheet_row (3 distinct repeated rows)"
-    assert full["detail"] == {"lineage": ["sheet", "sheet_row"]}
+    across, full = keys(record)["duplicate-rows:across-parts"], keys(record)["duplicate-rows"]
+    assert across["count"] + full["count"] == 3
+    assert across["summary"] == ("2 extra rows repeating another row across parts (ignoring sheet, sheet_row) "
+                                  "(2 distinct repeated rows)")
+    assert full["summary"] == ("1 extra row repeating another row in the retained part (ignoring sheet, sheet_row) "
+                                "(1 distinct repeated rows)")
+    assert across["check"] == full["check"] == "duplicate-rows"
+    assert across["detail"] == full["detail"] == {"lineage": ["sheet", "sheet_row"]}
     within = next(e for e in full["examples"] if e["value"]["invoice"] == "103")
     assert within == {"value": {"sheet": ["2010-2011"], "sheet_row": ["3", "4"], "invoice": "103", "amount": "8"}, "count": 2}
     assert list(full["examples"][0]["value"])[:2] == ["sheet", "sheet_row"]
     # A rescan keeps the baseline's lineage; the datasets.toml declaration is the default for a new scan.
     record, _ = scanner.scan(tmp_path, "data/lines.csv", rescan=True, today=TODAY)
-    assert record["options"]["lineage"] == ["sheet", "sheet_row"] and keys(record)["duplicate-rows"]["count"] == 3
+    assert record["options"]["lineage"] == ["sheet", "sheet_row"]
+    assert {k: keys(record)[k]["count"] for k in ("duplicate-rows:across-parts", "duplicate-rows")} == {
+        "duplicate-rows:across-parts": 2, "duplicate-rows": 1}
     write(tmp_path, "foundation/datasets.toml", '[datasets.lines]\nlineage = ["sheet", "sheet_row", "file"]\n')
     record, _ = scanner.scan(tmp_path, "data/lines.csv", today=TODAY)
-    assert keys(record)["duplicate-rows"]["count"] == 3 and keys(record)["duplicate-rows"]["detail"] == {"lineage": ["sheet", "sheet_row"]}
+    assert keys(record)["duplicate-rows:across-parts"]["count"] == 2 and keys(record)["duplicate-rows"]["count"] == 1
+    assert keys(record)["duplicate-rows"]["detail"] == {"lineage": ["sheet", "sheet_row"]}
     tomllib = pytest.importorskip("tomllib")
     with pytest.MonkeyPatch.context() as patch:  # As on Python 3.10 with tomli installed.
         patch.setitem(sys.modules, "tomllib", None)
@@ -265,11 +276,85 @@ def test_duplicate_rows_leave_lineage_columns_out_of_the_match(tmp_path, capsys)
         patch.setitem(sys.modules, "tomli", None)
         assert scanner.declared_lineage(tmp_path) == []
     record, _ = scanner.scan(tmp_path, "data/lines.csv", lineage=["sheet"], today=TODAY)
-    assert "duplicate-rows" not in keys(record)  # every copy keeps its own sheet_row
+    assert not any(k.startswith("duplicate-rows") for k in keys(record))  # every copy keeps its own sheet_row
     for lineage, message in ((["shet"], "--lineage names unknown columns: shet"),
                              (["sheet", "sheet_row", "invoice", "amount"], "--lineage names every column")):
         assert scanner.main([str(tmp_path), "data/lines.csv", "--lineage", ",".join(lineage)]) == 2
         assert message in capsys.readouterr().err
+
+
+def test_duplicate_rows_split_follows_cross_part_correction(tmp_path):
+    duckdb = pytest.importorskip("duckdb")
+    write(tmp_path, "data/lines.csv", "sheet,sheet_row,invoice,amount\n"
+          "A,1,100,5\nA,2,100,5\nA,3,200,6\n"
+          "B,1,100,5\nB,2,100,5\nB,3,100,5\nB,4,200,6\n"
+          "C,1,100,5\nC,2,300,7\nC,3,300,7\n")
+    shutil.copyfile(ROOT / ".agents/skills/awb-init/assets/awb_landing.py",
+                    write(tmp_path, "src/preparation/landing.py", ""))
+    source = "SELECT * FROM read_csv('data/lines.csv', all_varchar = true)"
+    view = write(tmp_path, "foundation/views/01_lines.sql", f"CREATE VIEW lines AS {source};\n")
+    first, _ = scanner.scan(tmp_path, "lines", lineage=["sheet", "sheet_row"], today=TODAY)
+    found = keys(first)
+    across, within = found["duplicate-rows:across-parts"], found["duplicate-rows"]
+    with duckdb.connect() as db:
+        old_count = db.execute("SELECT count(*) - count(DISTINCT (invoice, amount)) FROM read_csv(?, all_varchar = true)",
+                               [str(tmp_path / "data/lines.csv")]).fetchone()[0]
+    assert (across["count"], within["count"]) == (5, 2)
+    assert across["count"] + within["count"] == old_count == 7
+    assert next(e for e in across["examples"] if e["value"]["invoice"] == "100")["count"] == 4
+    assert next(e for e in within["examples"] if e["value"]["invoice"] == "100")["count"] == 2
+    result = recorder.record(tmp_path, "lines", {"issues": {
+        across["id"]: {**judgment(), "treatment": "Await a decision on copies"},
+        within["id"]: {**judgment(), "treatment": "Keep the separate events"}}}, today=TODAY)
+    assert result["quality_ids"] == {across["id"]: "DQ-001", within["id"]: "DQ-002"}
+    links = {key: quality_link(tmp_path, "lines", key) for key in (across["key"], within["key"])}
+    assert links[across["key"]]["recorded_count"] == 5 and links[within["key"]]["recorded_count"] == 2
+    assert len(json.loads((tmp_path / "foundation/quality.json").read_text())["links"]) == 2
+    (tmp_path / "foundation/quality.json").unlink()
+    recorded = scanner._recorded(tmp_path, "lines", [across["key"], within["key"]])
+    assert recorded == {across["key"]: {"id": "DQ-001", "status": "open", "count": 5},
+                        within["key"]: {"id": "DQ-002", "status": "open", "count": 2}}
+    assert not (tmp_path / "foundation/quality.json").exists()
+    assert recorder.record(tmp_path, "lines", {}, today=TODAY)["written"] == ["foundation/quality.json"]
+    assert {key: quality_link(tmp_path, "lines", key) for key in links} == links
+    view.write_text(f"CREATE VIEW lines AS {source} "
+                    "QUALIFY sheet = min(sheet) OVER (PARTITION BY invoice, amount);\n")
+    corrected, _ = scanner.scan(tmp_path, "lines", rescan=True, today=TODAY)
+    assert corrected["options"]["lineage"] == ["sheet", "sheet_row"]
+    assert corrected["row_count"] == first["row_count"] - across["count"] == 5
+    assert "duplicate-rows:across-parts" not in keys(corrected)
+    assert keys(corrected)["duplicate-rows"]["count"] == within["count"]
+    assert keys(corrected)["duplicate-rows"]["id"] == within["id"]
+    delta = {change["key"]: change for change in corrected["delta"]["issues"]}
+    assert (delta[across["key"]]["before"], delta[across["key"]]["after"], delta[across["key"]]["change"]) == (5, 0, "resolved")
+    assert (delta[within["key"]]["before"], delta[within["key"]]["after"], delta[within["key"]]["change"]) == (2, 2, "unchanged")
+    recorder.record(tmp_path, "lines", {"issues": {across["id"]: {
+        "status": "corrected", "treatment": "One part retained after the user's decision",
+        "correction": "Keep the first part's copies", "change": "foundation/views/01_lines.sql"}},
+        "findings": "none: no finding reads lines"}, today=TODAY)
+    recorded = scanner._recorded(tmp_path, "lines", [across["key"], within["key"]])
+    assert recorded[across["key"]] == {"id": "DQ-001", "status": "corrected", "count": 5}
+    assert recorded[within["key"]] == {"id": "DQ-002", "status": "open", "count": 2}
+    quality = (tmp_path / "foundation/quality.md").read_text()
+    assert "`lines#duplicate-rows:across-parts`" in quality and "`lines#duplicate-rows`" in quality
+    assert "rescan 5 -> 0" in quality and "Keep the separate events | open |" in quality
+
+
+def test_duplicate_rows_without_lineage_keep_one_issue(tmp_path):
+    pytest.importorskip("duckdb")
+    write(tmp_path, "data/repeated.csv", "invoice,amount\n100,5\n100,5\n100,5\n101,6\n")
+    record, _ = scanner.scan(tmp_path, "data/repeated.csv", today=TODAY)
+    assert record["options"]["lineage"] == []
+    assert {k: i["count"] for k, i in keys(record).items() if k.startswith("duplicate-rows")} == {"duplicate-rows": 2}
+
+
+def test_duplicate_rows_use_the_first_lineage_column_as_the_part(tmp_path):
+    pytest.importorskip("duckdb")
+    write(tmp_path, "data/lines.csv", "sheet,sheet_row,invoice\nB,1,100\nB,2,100\nB,3,100\nA,2,100\nA,3,100\n")
+    for lineage, expected in ((["sheet", "sheet_row"], (3, 1)), (["sheet_row", "sheet"], (4, 0))):
+        record, _ = scanner.scan(tmp_path, "data/lines.csv", lineage=lineage, today=TODAY)
+        found = keys(record)
+        assert (found["duplicate-rows:across-parts"]["count"], found.get("duplicate-rows", {}).get("count", 0)) == expected
 
 
 def test_removed_targets_and_options_are_rejected(project, capsys):

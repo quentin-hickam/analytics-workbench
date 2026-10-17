@@ -519,8 +519,30 @@ def test_chat_claim_rules_sit_where_chat_is_written():
     # A duplicate row is a repeat to explain, its treatment proposed without a cause asserted.
     clean = ' '.join((ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8').split())
     assert 'landed twice' not in clean
-    assert '`duplicate-rows` are repeats to explain, not known copies: propose their treatment without ' \
+    assert 'Both duplicate issues are repeats to explain, not known copies: propose their treatment without ' \
            'asserting why they repeat.' in clean
+
+
+def test_cross_part_copies_need_the_user_or_source_to_call_them_reextracts():
+    clean = (ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8')
+    decide = ' '.join(section(clean, '## 2. Decide').split())
+    assert 'such as overlapping periods' not in clean
+    assert 'known to be re-extracts' not in clean
+    assert "when the user or source documentation says the parts are re-extracts" in decide
+    assert ("an overlap you observe, or what you already know of a dataset, is not the source saying so") in decide
+    assert "When `duplicate-rows:across-parts` spans more than two parts, count each pair's shared rows" in decide
+    assert "compare the counts with the issue's" not in decide
+    assert 'under a recorded grain excluding lineage columns (repeats then share one grain key)' in decide
+    assert "The user decides everything else" in decide
+    checks = (ROOT / '.agents/skills/awb-clean/references/checks.md').read_text(encoding='utf-8')
+    assert checks.count('first lineage column') == 1
+    assert 'counts rows outside each repeated group\'s minimum part' in checks
+    assert 'counts repeats beyond one in that part, or all repeats without lineage' in checks
+    landing = (ROOT / '.agents/skills/awb-init/references/landing.md').read_text(encoding='utf-8')
+    assert 'part column first, such as `sheet` and `sheet_row`' in landing
+    correction = (ROOT / '.agents/skills/awb-clean/references/correction-views.md').read_text(encoding='utf-8')
+    assert '**Cross-part copies (`duplicate-rows:across-parts`):**' in correction
+    assert '**Exact repeats (`duplicate-rows`), without lineage:**' in correction
 
 
 def test_footer_counts_a_provisional_answer_as_provisional():

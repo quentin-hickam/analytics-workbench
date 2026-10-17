@@ -8,7 +8,8 @@ DATASET is a canonical view, a dataset under data/parquet/ (its newest publicati
 or acquisition directory, or a data file. Views load through the project's session() in
 src/preparation/landing.py. Landed CSV is read as text so parse failures stay visible.
 Lineage columns, such as the sheet, file, or row a conversion records, are left out of the
-duplicate-rows match, so a copy of the same rows in two sheets or files counts as a duplicate.
+duplicate-rows match. Cross-part copies have key duplicate-rows:across-parts; remaining repeats
+have key duplicate-rows, each with its own count and quality decision.
 They are --lineage, else every column in the target that foundation/datasets.toml lists under
 any dataset's lineage key.
 
@@ -539,18 +540,34 @@ class Scan:
         if self.options["lineage"] and not compared:
             raise ValueError("--lineage names every column; leave at least one column to compare")
         everything = ", ".join(q(n) for n in compared)
-        extra, groups = self.one(f"SELECT coalesce(sum(n - 1), 0), count(*) FROM (SELECT count(*) AS n "
-                                 f"FROM __awb_scan GROUP BY {everything} HAVING count(*) > 1)")
-        if extra:
-            # Each lineage column's values in a repeated group show which sheets or files hold the copies.
-            spread = "".join(f", list(DISTINCT {q(n)} ORDER BY {q(n)})[1:5]" for n in lineage)
-            sample = self.db.execute(f"SELECT {everything}, count(*) AS __awb_n{spread} FROM __awb_scan "
-                                     f"GROUP BY {everything} HAVING count(*) > 1 "
-                                     f"ORDER BY __awb_n DESC, {everything} LIMIT 5").fetchall()
+        source, kept = "__awb_scan", "count(*)"
+        if lineage:
+            part = q(lineage[0])
+            source = (f"(SELECT *, min({part}) OVER (PARTITION BY {everything}) AS __awb_first_part "
+                      "FROM __awb_scan)")
+            kept = f"count(*) FILTER (WHERE {part} IS NOT DISTINCT FROM __awb_first_part)"
+        # Materialize once: both decisions and their examples use the same repeated groups.
+        spread = "".join(f", list(DISTINCT {q(n)} ORDER BY {q(n)})[1:5] AS __awb_lineage{i}"
+                         for i, n in enumerate(lineage))
+        self.db.execute(f"CREATE OR REPLACE TEMP TABLE __awb_duplicates AS SELECT {everything}, "
+                        f"count(*) AS __awb_n, {kept} AS __awb_kept{spread} FROM {source} "
+                        f"GROUP BY {everything} HAVING count(*) > 1")
+        checks = [(None, "__awb_kept - 1", "__awb_kept", " in the retained part" if lineage else " exactly")]
+        if lineage:
+            checks.insert(0, ("across-parts", "__awb_n - __awb_kept", "__awb_n - __awb_kept", " across parts"))
+        for suffix, amount, example_count, where in checks:
+            extra, groups = self.one(f"SELECT coalesce(sum({amount}), 0), count(*) FROM __awb_duplicates "
+                                     f"WHERE {amount} > 0")
+            if not extra:
+                continue
+            spread_columns = "".join(f", __awb_lineage{i}" for i in range(len(lineage)))
+            sample = self.db.execute(f"SELECT {everything}, {example_count} AS __awb_count{spread_columns} "
+                                     f"FROM __awb_duplicates WHERE {amount} > 0 "
+                                     f"ORDER BY __awb_count DESC, {everything} LIMIT 5").fetchall()
             width = len(compared)
-            but = f" in every column but {', '.join(lineage)}" if lineage else " exactly"
-            self.add("duplicate-rows", None, None, extra, rows,
-                     f"{extra} extra rows repeating another row{but} ({groups} distinct repeated rows)",
+            but = f" (ignoring {', '.join(lineage)})" if lineage else ""
+            self.add("duplicate-rows", None, suffix, extra, rows,
+                     f"{extra} extra rows repeating another row{where}{but} ({groups} distinct repeated rows)",
                      [{"value": _plain({**dict(zip(lineage, row[width + 1:])), **dict(zip(compared, row[:width]))}),
                        "count": row[width]} for row in sample], {"lineage": lineage} if lineage else None)
         keys = [[c.strip() for c in spec.split(",") if c.strip()] for spec in self.options["keys"]]

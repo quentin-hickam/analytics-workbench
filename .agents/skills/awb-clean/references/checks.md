@@ -6,7 +6,7 @@ Counts are rows unless noted; `of` is the column's non-null values, or all rows 
 
 | Key | Counts | Common false positives |
 | --- | --- | --- |
-| `duplicate-rows` | rows repeating another row in every column but the lineage columns (`--lineage`, else those `foundation/datasets.toml` declares), beyond the first; each example lists its lineage columns' values first, up to five | event data with no timestamp or identifier, where identical rows are separate events |
+| `duplicate-rows` / `duplicate-rows:across-parts` | compare all non-lineage columns (`--lineage`, else `foundation/datasets.toml`). The first lineage column identifies parts: `across-parts` counts rows outside each repeated group's minimum part; `duplicate-rows` counts repeats beyond one in that part, or all repeats without lineage. Examples list lineage values first, up to five | identical events; part names that are data |
 | `duplicate-key:<cols>` | extra rows for key values that occur more than once. Explicit `--key` or, without one, near-unique columns and columns named like `id`, `*_id`, or `key` | a near-unique attribute such as an email that is not the grain |
 | `null-key:<cols>` | rows missing part of an explicit key | none |
 | `parse:<col>:<type>` | non-placeholder values that fail to parse when at least 90% parse as the type | free-text columns that are mostly numeric |

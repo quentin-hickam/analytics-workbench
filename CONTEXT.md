@@ -29,7 +29,7 @@ The logical collection of approved datasets and shared views available to invest
 The normalization, quality assessment, and documented correction of source data into canonical data. Preparation is driven by analytical needs and can evolve as exploration reveals issues.
 
 **Data cleaning**:
-The part of data preparation that addresses errors and inconsistencies under explicit correction rules. Question-specific exclusions are analytical choices rather than general cleaning rules.
+Correction of shared data errors under explicit rules. Cross-part copies and remaining repeats have independent decisions: only the user or source documentation establishes re-extracts; overlap or prior knowledge does not. Within-part removal requires a recorded grain excluding lineage. Question-specific exclusions remain analytical choices.
 
 **Exploratory data analysis (EDA)**:
 The examination of data distributions, relationships, and quality to develop or assess questions and explanations. EDA uses canonical data and local exploratory transformations without implicitly changing the shared preparation rules.
