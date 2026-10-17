@@ -72,7 +72,7 @@ Write the draft at the contract's paths, or revise the same files: a first pass,
 4. For a revision that only adds caveats and keeps the exported files, pass only `--result`, once for every represented result; omit `--chart`, `--dataset`, and `--no-datasets`. A `check-draft` `charts` row that asks to rerun export needs the full export, with every `--chart`.
 5. When `export` reports `exports_blocked`, stop and report it. When it reports missing evidence it writes nothing; stop, or rerun and restore, as **Missing evidence** in [helpers](references/helpers.md) says. Commit nothing on the user's behalf to make provenance look clean.
 
-`export` records each flag's finding and reason and lists `flags_pending`. Review every flag's `represented_in` against the revised draft and fill pending places per the contract; then for any represented flag whose disposition is still `none`, ask the user to revalidate, omit, or release with the caveat, and record the answer, or leave it `none`.
+`export` records each flag's finding and reason and lists `flags_pending`. Review every flag's `represented_in` against the revised draft and fill pending places per the contract; then for any represented flag whose disposition is still `none`, ask the user to revalidate, omit, or release with the caveat, and record the answer, `none` until there is one.
 
 ## 5. Review
 
