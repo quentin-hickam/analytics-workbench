@@ -52,8 +52,8 @@ COMMANDS = {
                      "check: list each review rule with the draft lines its pattern matches, writing nothing; "
                      "add: append the next numbered rule from a user's correction"),
     "review-receipt": ("packaging/draft.py", "cli_review_receipt",
-                       "record: keep a draft review's report and a snapshot of what it read; show: compare "
-                       "that record with the draft now, writing nothing"),
+                       "start: mark a draft review launched; record: keep its report and a snapshot of what "
+                       "it read; show: compare that record with the draft now, writing nothing"),
     "check-draft": ("packaging/draft.py", "cli_check_draft",
                     "run every mechanical draft check, including narrative numbers against recorded results "
                     "and state.md's current flags, write START-HERE.md, and rewrite the manifest inventory; "

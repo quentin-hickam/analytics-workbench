@@ -1650,7 +1650,7 @@ def _finding_warnings(root, investigation, result_id, text, evidence_path):
             continue
         warnings.append(f'warning: {result_id}: "{asserted.group(0)}" asserts a reconciliation or a completed '
                         "check that no passing check in its evidence records; state the check, with any "
-                        "tolerance set before the data was seen, in the detail of a passing values or "
+                        "tolerance the brief or the result's settings record, in the detail of a passing values or "
                         f"metrics judgment in [results.{result_id}.validation] and rerun, or reword")
     return warnings
 
