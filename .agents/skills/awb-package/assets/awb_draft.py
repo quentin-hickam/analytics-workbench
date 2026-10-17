@@ -4508,7 +4508,7 @@ _KINDS = ("full", "scoped")
 # each evidence file the manifest's results name and each scan or saved query methodology.md names by its
 # path, which step 3 reads beside a cited quality ID, by its path, in sorted order.
 # The brief is keyed brief.md and read from the investigation; its questions and Audience set what a review checks.
-# The glossary, source register, and quality record are read whole, as step 3's readability, source-series,
+# The glossary, source register, and quality record are read whole, as the contract's writing rules and step 3's source-series,
 # and cited-check checks read them.
 BRIEF = "brief.md"
 GLOSSARY = "foundation/glossary.md"

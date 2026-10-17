@@ -65,7 +65,7 @@ A collection of audience-facing outputs, with an internal methodology reference,
 The shared conventions for package structure and presentation, including the single writing-rule list used by writer and reviewer, the audience number format, the audience-facing findings document written as a deck outline with its required slides and an optional appendix, the internal methodology reference, the methodology note template, the chart files, the deck rules any builder follows to build the deck from the outline, and the assembly file for each builder, such as Microsoft 365 Copilot's PowerPoint agent. It is independent of an investigation's scope, narrative, and results.
 
 **Audience number format**:
-The precision and clock format an investigation's brief records for its audience: the user's choices, or audience defaults when unstated. An audience not recorded as technical defaults to whole large values, one decimal for shares and rates, and its usual clock format.
+The precision and clock format an investigation's brief records for its audience: the user's choices, or audience defaults when unstated. An audience not recorded as technical defaults to whole large values (or one decimal with a scale word), one decimal for shares and rates, and its usual clock format.
 
 **Methodology note**:
 The optional audience-facing account of a package's method, sources, definitions, exclusions, and limitations, written in the audience's terms and delivered beside the deck. The methodology reference stays internal; the note states nothing the reference does not support.

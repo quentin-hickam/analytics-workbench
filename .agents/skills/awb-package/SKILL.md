@@ -76,7 +76,7 @@ Write the draft at the contract's paths, or revise the same files: a first pass,
 
 ## 5. Review
 
-Run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against the brief's definitions and questions, every rule in `foundation/review-rules.md`, and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it, right after `review-receipt start`. Record and act on its report as that file's **After the review** says; the first review of a draft is full, and later ones are scoped against the recorded one.
+Once the narratives and flags are complete, run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against the brief's definitions and questions, every rule in `foundation/review-rules.md`, and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it, right after `review-receipt start`. Record and act on its report as that file's **After the review** says; the first review of a draft is full, and later ones are scoped against the recorded one.
 
 ## 6. Check
 

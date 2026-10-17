@@ -256,7 +256,8 @@ def test_headline_checkpoint_states_the_word_limit_and_asks_before_trimming():
 def test_package_records_and_previews_audience_number_formats_and_prose_approximations():
     brief = (ROOT / '.agents/skills/awb-init/assets/workbench/investigation/brief.md').read_text()
     assert "Once the audience is named, always record precision and clock format: the user's choices, otherwise audience defaults." in brief
-    assert ('Unless the audience is recorded as technical, use whole numbers for large values, one decimal '
+    assert ('Unless the audience is recorded as technical, use whole numbers for large values, or one decimal '
+            'with a scale word (8.6 billion), one decimal '
             "for shares and rates, and the audience's usual clock format.") in brief
     assert 'when the user states them' not in brief
     package = (ROOT / '.agents/skills/awb-package/SKILL.md').read_text()
@@ -893,12 +894,12 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     # Routine repairs are reported at the cap; decisions and rule conflicts still go to the user.
     assert '(unchanged since the prior review)' not in review and 'why the earlier pass missed it' not in review
     assert 'Take a conflict between two rules to the user rather than repairing it' in review
-    assert ('At that stop, make the small repairs, those changing no number, no finding beyond narrowing to its '
-            'evidence, and no user-written or approved wording') in review
-    assert ("list them in one plain note saying the next request's scoped review checks them") in review
+    assert ('At that stop, list the small repairs, those changing no number, no finding beyond narrowing to its '
+            'evidence, and no user-written or approved wording, in one plain note') in review
+    assert ("in one plain note saying the next request's scoped review checks them") in review
     assert 'show the user each other problem in plain words with a recommended repair' in review
-    assert ('If any need the user, make small repairs with their answer, after recording any acceptances with '
-            '`--accept`; otherwise make them now') in review
+    assert ("Make the small repairs now when no problem needs the user; otherwise make them with the user's answer, "
+            'after recording any acceptances with `--accept`') in review
     # Package is done on a passed review of the final files, full or scoped.
     assert 'its `review` row is `current`' in package
     assert 'the last review before the final `check-draft` is a full one' not in package
