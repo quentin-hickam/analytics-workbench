@@ -300,8 +300,9 @@ def test_declared_lineage_keeps_the_scanned_datasets_own_order(tmp_path):
         db.execute("CREATE TABLE t (file VARCHAR, sheet VARCHAR, sheet_row INTEGER, amount INTEGER)")
         db.executemany("INSERT INTO t VALUES (?, ?, ?, ?)", rows)
         db.execute(f"COPY t TO '{publication / 'part-0.parquet'}' (FORMAT parquet)")
-    record, _ = scanner.scan(tmp_path, "sales", today=TODAY)
-    assert record["options"]["lineage"] == ["file", "sheet", "sheet_row"]
+    for spelling in ("sales", "sales/", "./sales"):
+        record, _ = scanner.scan(tmp_path, spelling, today=TODAY)
+        assert record["options"]["lineage"] == ["file", "sheet", "sheet_row"], spelling
     assert {k: keys(record)[k]["count"] for k in keys(record) if k.startswith("duplicate-rows")} == {
         "duplicate-rows:across-parts": 4, "duplicate-rows": 1}
     # A key may hold @, as sales@2025 does; a view or file of that name keeps it whole.

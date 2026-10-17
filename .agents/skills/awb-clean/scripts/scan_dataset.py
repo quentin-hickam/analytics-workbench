@@ -150,8 +150,8 @@ def _connect(root, need_views):
 
 
 def _file_relation(path):
-    """Return (relation SQL, kind, default name, dataset) for a data file or directory; a publication's or
-    acquisition's dataset is its parent directory, a file's its stem."""
+    """Return (relation SQL, kind, default name, dataset) for a data file or directory; the key is a
+    publication's dataset or an acquisition's source, its parent directory, or a file's stem."""
     if path.is_file():
         files, directory = [path], path.parent
     else:
@@ -205,10 +205,10 @@ def _resolve(root, connection, dataset):
     if publications.is_dir():
         newest = _newest_publication(publications)
         if newest is not None:
-            relation, kind, name, _ = _file_relation(newest)
+            relation, kind, name, key = _file_relation(newest)
             relative = os.path.relpath(newest, root)
             return {"relation": relation, "kind": kind, "label": f"{kind} {relative}",
-                    "path": relative, "name": name, "dataset": dataset}
+                    "path": relative, "name": name, "dataset": key}
     raise ValueError(f"no view, dataset, or path named {dataset!r}")
 
 
