@@ -5,10 +5,11 @@ Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With 
 produces every result in settings.toml. It refuses to run, exiting 2, while a wanted result's ID
 cannot name its files, or its table lacks its question, lists code that is not files in the project
 or parameters that are not names, names views that are not view files, or declares answers the
-question ledger does not hold as data questions, and exits 1 when the ledger cannot be read. For each
-result it runs the result's saved queries in one session of canonical views and this folder's
-views/*.sql, the investigation's shared SQL, on one thread so a rerun repeats floating-point sums
-exactly; it validates the result, saves the table and its profile
+question ledger does not hold as data questions, or while its shared SQL reads a file directly that
+is neither a publication nor in its code (unrecorded_reads()), and exits 1 when the ledger cannot be
+read. For each result it runs the result's saved queries in one session of canonical views and
+this folder's views/*.sql, the investigation's shared SQL, on one thread so a rerun repeats
+floating-point sums exactly; it validates the result, saves the table and its profile
 under results/, records evidence under evidence/, writes its state.md findings row, and prints one
 compact JSON line with the paths, failed and unassessed checks, and what it did to the row, with
 the row's status and claim strength.
@@ -20,8 +21,10 @@ A result that needs more than its query gets a producer module, producers/<id>.p
 so adding a result never edits this file; put reusable operations in src/. Requires duckdb and pandas.
 """
 
+import glob
 import importlib.util
 import json
+import os
 import posixpath
 import re
 import sys
@@ -151,6 +154,38 @@ def produce_result(connection, result_id, config, parameters):
     }
 
 
+# A token of SQL text: a string literal, captured, or a comment or quoted identifier, skipped.
+_TOKEN = re.compile(r"'((?:[^']|'')*)'|--[^\n]*|/\*.*?\*/|\"(?:[^\"]|\"\")*\"", re.S)
+
+
+def unrecorded_reads(results, wanted):
+    """Each file a shared SQL string literal names in the project that a wanted result's evidence would
+    miss: one neither under a data/parquet/<dataset>/<publication>/ path the literal names nor in that
+    result's code. A path built at run time, or a directory, is not checked."""
+    problems = set()
+    for view in investigation_views(ROOT, NAME):
+        for literal in filter(None, (m.group(1) for m in _TOKEN.finditer((ROOT / view).read_text()))):
+            literal = literal.replace("''", "'")
+            publications = re.findall(r"data/parquet/[^/\s'\"]+/[^/\s'\"*]+/", literal)
+            for path in glob.glob(os.path.join(ROOT, literal), recursive=True) if "://" not in literal else []:
+                file = Path(os.path.normpath(path))
+                if not file.is_file():
+                    continue
+                if not file.is_relative_to(ROOT):
+                    problems.add(f"{view} reads {literal}, outside the project; copy it into the project")
+                    continue
+                path = file.relative_to(ROOT).as_posix()
+                if any(path.startswith(publication) for publication in publications):
+                    continue  # recorded as a publication of the view
+                missing = [result_id for result_id in wanted if path not in {
+                    posixpath.normpath(f"investigations/{NAME}/{c}") for c in results[result_id].get("code", [])}]
+                if missing:
+                    problems.add(f"{view} reads {path}, which is not a publication; list it in every result's code, "
+                                 f"as code = [\"{posixpath.relpath(path, f'investigations/{NAME}')}\"], so a change "
+                                 f"to it stales them (missing from {', '.join(missing)})")
+    return sorted(problems)
+
+
 def main(argv):
     settings = tomllib.loads((ROOT / SETTINGS).read_text())
     results = settings.get("results", {})
@@ -172,6 +207,10 @@ def main(argv):
                 for problem in result_problems(result_id, results[result_id], questions, folder=HERE)]
     if problems:
         print("\n".join(f"settings.toml: {problem}" for problem in problems), file=sys.stderr)
+        return 2
+    problems = unrecorded_reads(results, wanted)
+    if problems:
+        print("\n".join(problems), file=sys.stderr)
         return 2
     status = 0
     with session(ROOT, investigation=NAME) as connection:

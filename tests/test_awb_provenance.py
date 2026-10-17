@@ -1015,6 +1015,45 @@ def test_run_template_records_shared_views_whatever_views_says(project):
     assert outcomes(project)[3] == "fail"
 
 
+def test_run_template_refuses_shared_sql_reading_an_undeclared_file(project, tmp_path_factory):
+    pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    install_run_template(project)
+    write(project, "investigations/inv/test_accounts.csv", b"n\n1\n")
+    write(project, "investigations/inv/views/01_screen.sql",
+          b"-- don't count test accounts\ncreate view screened as select n from orders where n not in\n"
+          b"(select n from read_csv('investigations/inv/test_accounts.csv'));\n")
+    write(project, "investigations/inv/queries/r1.sql", b"select n from screened order by n\n")
+    run = [sys.executable, str(project / "investigations/inv/run.py")]
+    # Neither result lists the file, then only r1 does: every run result must, before anything runs.
+    for argv, settings, missing in (
+            ([], SETTINGS, "r1, r2"),
+            ([], SETTINGS.replace(b"[results.r1]\n", b'[results.r1]\ncode = ["test_accounts.csv"]\n'), "r2")):
+        write(project, "investigations/inv/settings.toml", settings)
+        done = subprocess.run(run + argv, capture_output=True, text=True)
+        assert done.returncode == 2 and done.stdout == "", done.stdout + done.stderr
+        assert done.stderr == (
+            "investigations/inv/views/01_screen.sql reads investigations/inv/test_accounts.csv, which is not a "
+            "publication; list it in every result's code, as code = [\"test_accounts.csv\"], so a change to it "
+            f"stales them (missing from {missing})\n")
+        assert not (project / "investigations/inv/evidence").exists()
+    done = subprocess.run(run + ["r1"], capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    commit_all(project)
+    assert outcomes(project) == ["pass"] * 5
+    write(project, "investigations/inv/test_accounts.csv", b"n\n2\n")
+    assert outcomes(project)[1] == "fail"
+    # A commented-out read is not checked; a file outside the project cannot be code, so it is refused.
+    outside = tmp_path_factory.mktemp("outside") / "accounts.csv"
+    outside.write_bytes(b"n\n1\n")
+    write(project, "investigations/inv/views/01_screen.sql",
+          f"-- read_csv('investigations/inv/test_accounts.csv')\n"
+          f"create view screened as select n from read_csv('{outside}');\n".encode())
+    done = subprocess.run(run + ["r1"], capture_output=True, text=True)
+    assert done.returncode == 2
+    assert done.stderr == f"investigations/inv/views/01_screen.sql reads {outside}, outside the project; copy it into the project\n"
+
+
 def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(project):
     pytest.importorskip("duckdb")
     pytest.importorskip("pandas")

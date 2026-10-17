@@ -28,7 +28,9 @@
 #                        # .sql file in foundation/views/ or this folder's views/; replaces detection, for a
 #                        # producer that reads views its queries do not name. Shared SQL in views/ loads in
 #                        # every result's session after the foundation views and is every result's code;
-#                        # evidence records it, and the views it reads, whatever this lists.
+#                        # evidence records it, and the views it reads, whatever this lists. A file it
+#                        # reads directly must be a publication or in every result's code; run.py
+#                        # refuses to run a result whose code lacks one.
 #
 # Validation spec for validate(): static checks here, run-time counts from the result's producer.
 #   required_columns = [names that must exist]
