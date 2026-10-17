@@ -3123,7 +3123,7 @@ _COLLISION = ("results answering different questions share this [columns] name; 
               "the column under [confirmed] columns, or name the column for one result under "
               "[results.\"<result>\".columns]")
 _PRECISION = ("its fractions are saved to exactly four decimal places, a sign the query rounded them, and shown as "
-              "a percent to {places} places they are rounded a second time, which can move the last digit; save "
+              "a percent rounded to {places} they are rounded a second time, which can move the last digit; save "
               "the result at full precision and round only under [round]")
 _UNMATCHED = "no cell of the saved tables it labels holds this code; a code matches the saved text exactly"
 
@@ -3428,7 +3428,7 @@ def _shape(root, investigation, result_id, columns, selection, display, rounding
                             and _number(row[column]) and _places(row[column], scale.get(column)) == 4), None)
             if example is not None:
                 notes["precision"].append({"result_id": result_id, "column": column, "example": example,
-                                           "warning": _PRECISION.format(places=places[column])})
+                                           "warning": _PRECISION.format(places=_rounded_to(places[column]))})
     used = {}
     for column in chosen:
         codes = values.get(column, {})
@@ -3455,10 +3455,13 @@ def _sources(entry):
         places, divide = entry["round"].get(column), entry["scale"].get(column)
         shaping = ([] if divide is None else [f", divided by {format(Decimal(str(divide)).normalize(), 'f')}"]) + (
             [", times 100"] if column in entry["percent"] else []) + (
-            [] if places is None else [", rounded to whole numbers" if places == 0
-                                       else f", rounded to {places} decimal place{'s' if places != 1 else ''}"])
+            [] if places is None else [f", rounded to {_rounded_to(places)}"])
         lines.append(f"{header} <- {result_id}.{column}{''.join(shaping)}")
     return lines
+
+
+def _rounded_to(places):
+    return "whole numbers" if places == 0 else f"{places} decimal place{'s' if places != 1 else ''}"
 
 
 def label_collisions(display, files, questions) -> list[dict]:

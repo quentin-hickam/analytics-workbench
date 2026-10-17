@@ -1484,7 +1484,7 @@ def test_export_scale_needs_places_when_its_quotient_is_unrounded(project, capsy
 
 
 PRECISION = ("its fractions are saved to exactly four decimal places, a sign the query rounded them, and shown as a "
-             "percent to 1 places they are rounded a second time, which can move the last digit; save the result at "
+             "percent rounded to 1 decimal place they are rounded a second time, which can move the last digit; save the result at "
              "full precision and round only under [round]")
 
 
@@ -1497,6 +1497,9 @@ def test_export_warns_on_a_fraction_rounded_in_its_query(project, capsys):
     assert out["written"] and out["precision_warnings"] == [  # a warning: the files are written
         {"result_id": "r-001", "column": "share", "example": "0.6315", "warning": PRECISION}]
     assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_text() == "Region,Share (%)\nW,63.2\nE,2.7\n"
+    write(project, "foundation/display.toml", display + "\n[round]\nshare = 0\n")
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    assert out["precision_warnings"][0]["warning"] == PRECISION.replace("1 decimal place", "whole numbers")
     # Shown to two places nothing is rounded again, and fractions saved at full precision raise nothing.
     write(project, "foundation/display.toml", display + "\n[round]\nshare = 2\n")
     _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
