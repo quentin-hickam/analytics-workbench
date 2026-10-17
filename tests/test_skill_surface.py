@@ -241,6 +241,24 @@ def test_a_folded_revision_waits_for_the_users_check_before_release():
     assert 'unless they said to release without seeing it' in milestone
 
 
+def test_headline_checkpoint_states_the_word_limit_and_asks_before_trimming():
+    # The limit was once written only for the agent, which trimmed approved headlines and said so afterwards.
+    checkpoint = skill_section('.agents/skills/awb-package/SKILL.md', '### The headline checkpoint')
+    assert 'a headline holds at most 15 words' in checkpoint
+    assert 'Before trimming a headline the user wrote or approved, ask' in checkpoint
+    assert '`accepted_long_headlines`' in checkpoint
+
+
+def test_release_asks_the_user_to_confirm_helper_drift():
+    release = skill_section('.agents/skills/awb-release/SKILL.md', '## 3. Release')
+    assert '`helper_drift`' in release and 'ask the user' in release and '`helper_drift_confirmed`' in release
+    helpers = (ROOT / '.agents/skills/awb-package/references/helpers.md').read_text(encoding='utf-8')
+    opening = ' '.join(helpers.split('\n\n', 2)[1].split())
+    assert 'change one only after the user says yes to the change, asked in plain words' in opening
+    manifest = (ROOT / '.agents/skills/awb-package/assets/package-format/manifest-template.md').read_text(encoding='utf-8')
+    assert '`accepted_long_headlines`' in manifest and '`helper_drift_confirmed`' in manifest
+
+
 def test_release_shows_draft_markers_and_reports_every_open_caveat():
     release = skill_section('.agents/skills/awb-release/SKILL.md', '## 3. Release')
     assert '`draft_markers`' in release and 'confirm' in release and 'revise' in release

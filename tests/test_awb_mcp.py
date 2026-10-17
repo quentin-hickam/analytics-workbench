@@ -4,6 +4,7 @@
 # test_setup_installs_into_a_folder_without_helpers: setup round trip: check writes nothing, then install writes src/awb.py and the receipt; a folder without workbench markers exits 1 with the installer's hint.
 # test_setup_runs_under_awb_python_over_a_recorded_interpreter: with AWB_PYTHON set, setup runs under it while README records another interpreter, reports the line overridden, and leaves it as written.
 # test_read_commands_round_trip_and_write_nothing: every read command without DuckDB (state, questions, stale, review-rules, check-draft, status, help) runs its helper and leaves the project, .git included, unchanged.
+# test_read_check_draft_reports_helper_drift: read check-draft reports no helper_drift on a fresh setup, and a helper_drift row naming src/packaging/draft.py once it is edited.
 # test_records_round_trip: records adds a question, edits next steps, adds a review rule and one with --scope, flags through stdin, and runs clean-record, each writing its record.
 # test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit; read returns both changes while keeping its answer, and attempts to change answered question content or replace its answer are refused.
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
@@ -271,6 +272,16 @@ def test_read_commands_round_trip_and_write_nothing(workbench, connect):
         text, error = client.call("read", command="help", **({"topic": topic} if topic else {}))
         assert not error and expected in text, topic
     assert snapshot(workbench) == before
+
+
+def test_read_check_draft_reports_helper_drift(workbench, connect):
+    client = connect(cwd=workbench)
+    text, _ = client.call("read", command="check-draft", investigation="churn", package="pkg")
+    assert '"helper_drift": []' in text
+    helper = workbench / "src/packaging/draft.py"
+    helper.write_bytes(helper.read_bytes() + b"\n# adapted\n")
+    text, _ = client.call("read", command="check-draft", investigation="churn", package="pkg")
+    assert json.loads(text.split("\n\n")[0])["helper_drift"][0]["file"] == "src/packaging/draft.py"
 
 
 def test_records_round_trip(workbench, connect):
