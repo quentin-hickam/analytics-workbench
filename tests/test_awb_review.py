@@ -31,7 +31,8 @@
 # test_accepted_narrative_problem_is_recorded_with_its_reason: a warning violation and a narrative problem, each accepted with the user's reason, pass and are recorded verbatim; fewer or more acceptances do not pass.
 # test_acceptance_amends_the_recorded_review_and_refuses_after_a_change: --accept amends the recorded report, keeping its snapshot and time, and refuses, writing nothing, after an edit to what it read or for another report.
 # test_scoped_start_needs_a_prior_record: start --kind scoped with no record to scope against, or with no draft, is refused, writing nothing.
-# test_record_binds_the_report_to_what_start_saw: record without a start of its kind, or after an edit since the start, is refused, writing nothing, and a record consumes its start; the round-2 closure's re-record route is refused and show stays stale.
+# test_record_binds_the_report_to_what_start_saw: record without a start of its kind, or after an edit since the start, is refused, writing nothing but the note in started.json, and a record consumes its start; the round-2 closure's re-record route is refused and show stays stale.
+# test_a_report_in_hand_never_covers_an_edit: the round-3 sequence (record, edit, --accept refused, start, the same report again) is refused at the record after start and show stays stale; a new report of the edit records and takes its acceptances; a report refused for a change after start is refused after the next start; a repeated clean report records.
 # test_represented_results_evidence_is_what_the_review_read: each evidence file the manifest's results name is snapshotted; a changed or dropped one shows stale, named by its path, with its diff.
 # test_an_error_violation_or_command_problem_cannot_be_accepted: an --accept never passes a report counting an error violation or a command problem.
 # test_unusable_report_is_refused_and_writes_nothing: an empty report, a last line that does not parse or is not last, a --kind its opening contradicts, more errors than violations, and rows the last line undercounts, backticked or numbered rows included, in backticks inside or outside the marker, are refused, writing nothing and leaving an earlier record as it was.
@@ -869,16 +870,19 @@ def test_acceptance_amends_the_recorded_review_and_refuses_after_a_change(projec
     path = project / DRAFT / "findings.md"
     path.write_text(FINDINGS + "- Churn doubled because of the price change.\n")
     code, out = record(project, capsys, WARNING_AND_NARRATIVE, accept=ACCEPTED, first=False)
-    assert code == 1 and out["refused"] == ("--accept amends the report already recorded while nothing it read "
-                                            "has changed (show reports stale): start a new review and record its "
-                                            "report before --accept")
+    assert code == 1 and out["refused"] == (
+        "--accept amends the report already recorded while nothing it read has changed (show reports stale), so "
+        "this report cannot be recorded again, with --accept or without: run review-receipt start, launch a new "
+        "reviewer, and record the report it returns, then record that report again with --accept")
     assert show(project, capsys)[1]["changed"] == ["findings.md"]
     path.write_text(FINDINGS)
     assert snapshot(project) == before
     # Another report, or another kind, is not the recorded one.
     other = WARNING_AND_NARRATIVE.replace('"users"', '"customers"')
     code, out = record(project, capsys, other, accept=ACCEPTED, first=False)
-    assert code == 1 and "for another report" in out["refused"] and snapshot(project) == before
+    assert code == 1 and out["refused"] == ("--accept amends the report already recorded (show reports failed), "
+                                            "and this is another report: record it without --accept first")
+    assert snapshot(project) == before
     # Unchanged, only accepted and passed change; the snapshot and recorded_at stay the review's.
     receipt = json.loads((project / RECEIPT).read_text())
     code, out = record(project, capsys, WARNING_AND_NARRATIVE, accept=ACCEPTED, first=False)
@@ -917,8 +921,13 @@ def test_record_binds_the_report_to_what_start_saw(project, capsys):
     path.write_text(FINDINGS + "- Churn doubled because of the price change.\n")
     before = snapshot(project)
     code, out = record(project, capsys, WARNING_AND_NARRATIVE, first=False)
-    assert code == 1 and out["refused"] == "the draft changed after the review started: start a new review"
-    assert snapshot(project) == before
+    assert code == 1 and out["refused"] == ("the draft changed after the review started, so the reviewer did not "
+                                            "read the change and this report cannot be recorded: run "
+                                            "review-receipt start, launch a new reviewer, and record the report "
+                                            "it returns")
+    # The refusal notes the report in started.json and writes nothing else.
+    assert {k: v for k, v in snapshot(project).items() if not k.endswith("review/started.json")} == \
+        {k: v for k, v in before.items() if not k.endswith("review/started.json")}
     path.write_text(FINDINGS)
     assert record(project, capsys, WARNING_AND_NARRATIVE, first=False)[0] == 0 and not started.exists()
     # The round-2 closure's route: record the report, edit, record it again, then accept. The plain re-record
@@ -930,6 +939,50 @@ def test_record_binds_the_report_to_what_start_saw(project, capsys):
     code, out = record(project, capsys, WARNING_AND_NARRATIVE, accept=ACCEPTED, first=False)
     assert code == 1 and "(show reports stale)" in out["refused"]
     assert snapshot(project) == before and show(project, capsys)[1]["status"] == "stale"
+
+
+REPLAYED = ("this report was read against an earlier draft, refused or recorded before a change, so it cannot be "
+            "recorded: run review-receipt start, launch a new reviewer, and record the report it returns")
+
+
+def test_a_report_in_hand_never_covers_an_edit(project, capsys):
+    path = project / DRAFT / "findings.md"
+    edit = FINDINGS + "- Churn doubled because of the price change.\n"
+    # The round-3 sequence: record, edit, accept (refused), start, record the same report, accept. The record
+    # after the new start is refused, so the acceptance has nothing to amend and show stays stale.
+    assert record(project, capsys, WARNING_AND_NARRATIVE)[1]["passed"] is False
+    path.write_text(edit)
+    code, out = record(project, capsys, WARNING_AND_NARRATIVE, accept=ACCEPTED, first=False)
+    assert code == 1 and "cannot be recorded again" in out["refused"]
+    assert run(project, capsys, "review-receipt", "start", "inv", "pkg", "--kind", "full")[1] == {
+        "started": True, "kind": "full"}
+    before = snapshot(project)
+    assert record(project, capsys, WARNING_AND_NARRATIVE, first=False) == (1, {"recorded": False,
+                                                                               "refused": REPLAYED})
+    assert record(project, capsys, WARNING_AND_NARRATIVE, accept=ACCEPTED, first=False)[0] == 1
+    assert snapshot(project) == before and show(project, capsys)[1]["changed"] == ["findings.md"]
+    # A new reviewer's report of the edited draft records, and then takes its acceptances.
+    fresh = WARNING_AND_NARRATIVE.replace("review:", 'narrative findings.md:6 "doubled because of" states a cause '
+                                          'the evidence does not show\nreview:').replace("1 narrative", "2 narrative")
+    assert record(project, capsys, fresh, first=False)[0] == 0
+    accepted = ACCEPTED + ['findings.md:6 "doubled because of": the user accepts the cause']
+    assert record(project, capsys, fresh, accept=accepted, first=False)[1]["passed"] is True
+    assert show(project, capsys)[1]["status"] == "current"
+    # The changed-draft route: start, edit, record (refused), start, record the same report: refused, the note
+    # carried across the start; undoing the edit under the same start lets the report record.
+    path.write_text(edit + "- More.\n")
+    run(project, capsys, "review-receipt", "start", "inv", "pkg", "--kind", "scoped")
+    scoped = fresh.replace("review:", "review (scoped):")
+    path.write_text(edit + "- More, edited.\n")
+    assert "did not read the change" in record(project, capsys, scoped, kind="scoped", first=False)[1]["refused"]
+    run(project, capsys, "review-receipt", "start", "inv", "pkg", "--kind", "scoped")
+    assert record(project, capsys, scoped, kind="scoped", first=False) == (1, {"recorded": False,
+                                                                               "refused": REPLAYED})
+    # A clean report is not checked, since the Brief fixes its words: a repeated one records.
+    assert record(project, capsys, "R-periods-001 pass\nreview (scoped): clean\n", kind="scoped")[0] == 0
+    path.write_text(edit)
+    assert record(project, capsys, "R-periods-001 pass\nreview (scoped): clean\n", kind="scoped")[0] == 0
+    assert show(project, capsys)[1]["status"] == "current"
 
 
 def test_represented_results_evidence_is_what_the_review_read(project, capsys):
