@@ -643,6 +643,8 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
                  'awb-init/references/provenance.md'):
         assert 'with its tolerance' not in read(path), path
     assert 'a tolerance chosen after seeing the result is not one' in read('awb-package/references/package-contract.md')
+    assert "or the result's settings record it outside a judgment's `detail`" in read(
+        'awb-package/references/package-contract.md')
     # The glossary and source register the step 3 checks read make a review stale and scope a later one.
     assert ('the checks against `brief.md`, `foundation/glossary.md`, or `foundation/sources.md` when the diff '
             'changes it') in review
