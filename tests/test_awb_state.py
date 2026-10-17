@@ -20,6 +20,8 @@
 # test_flags_validate_and_are_idempotent: batches validate before writes, check migrates only in memory, duplicate reasons keep all records byte-identical, and a rerun keeps notes, drops the flag reason, and names only the reason in history.
 # test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helpers write, and finds the state they leave up to date.
 # test_last_updated_is_stamped_after_the_records_written_with_it: a state write stamps Last updated, a local time with its offset, after writing the findings and history files it replaces with it.
+# test_a_kept_rerun_leaves_the_state_up_to_date: a kept rerun's table, profile, and evidence, written after the state, leave it up to date; a table edited after its evidence, or without evidence, dates it.
+# test_render_stamps_the_state: state render stamps Last updated, so the findings.json it rewrites leaves the state up to date.
 # test_claim_strength_is_recorded_and_guarded: a new row is association; --claim causal needs an experiment or natural-experiment basis and a reason; a claim change writes history; a rerun keeps the claim; a flagged finding's claim can only be lowered.
 # test_absent_claim_strength_is_refused: a findings.json entry without a valid claim strength makes every writer and the drift check refuse, writing nothing.
 # test_finding_text_warns_on_numbers_its_result_does_not_record: with src/packaging/draft.py, --text or --status supported warns on each number the result's table, profile, checks, and settings do not record, still writing; a recorded number at another precision traces; without draft.py nothing is read; a draft.py that does not load is named.
@@ -480,6 +482,46 @@ def test_last_updated_is_stamped_after_the_records_written_with_it(project, caps
     assert f"Last updated: {stamp()[:10]}T" in text(project, STATE)
 
 
+def backdate_state(project, seconds=10):
+    """Stamp the state `seconds` ago, with every investigation file a second older, as an earlier write leaves them."""
+    when = __import__("time").time() - seconds
+    state = project / STATE
+    state.write_text(re.sub(r"Last updated: \S+", "Last updated: " + __import__("datetime").datetime.fromtimestamp(when)
+                            .astimezone().isoformat(timespec="seconds"), state.read_text()))
+    for path in (project / INV).rglob("*"):
+        if path.is_file():
+            os.utime(path, (when - 1, when - 1))
+    return when
+
+
+def test_a_kept_rerun_leaves_the_state_up_to_date(project):
+    # run.py rewrites a kept result's table and evidence after the last state write, and writes no state.
+    produce(project, "r1")
+    produce(project, "r2")
+    (project / INV / "results/r2.profile.json").write_text("{}\n")
+    backdate_state(project)
+    assert produce(project, "r2")["action"] == "kept"
+    assert status.collect(project)["git"]["state_status"] == "up to date"
+    # A table edited after its evidence, or left without evidence by a failed finding write, still dates the state.
+    when = __import__("time").time() + 5
+    os.utime(project / INV / "results/r2.csv", (when, when))
+    result = status.collect(project)["git"]
+    assert (result["state_status"], result["latest_change"]["source"]) == ("out of date", f"{INV}/results/r2.csv")
+    os.utime(project / INV / "results/r2.csv", (when - 5, when - 5))
+    (project / INV / "evidence/r2.json").unlink()
+    result = status.collect(project)["git"]
+    assert (result["state_status"], result["latest_change"]["source"]) == ("out of date", f"{INV}/results/r2.csv")
+
+
+def test_render_stamps_the_state(project):
+    produce(project, "r1")
+    backdate_state(project)
+    before = text(project, STATE)
+    provenance.render_findings(project, "churn")
+    # Without the stamp, the findings.json render rewrites would postdate the state.
+    assert text(project, STATE) != before and status.collect(project)["git"]["state_status"] == "up to date"
+
+
 @pytest.mark.parametrize("writer", ["record", "update", "flag", "prior"])
 def test_writers_refuse_drift(project, writer):
     produce(project, "r1")
@@ -526,7 +568,9 @@ def test_render_restores_rows(project, capsys):
     with pytest.raises(provenance.StateError, match="findings drift"):  # no findings.json: the table renders empty
         provenance.update_findings(project, "churn", ["r9"], text="x")
     code, out, _ = run(project, capsys, "render")
-    assert code == 0 and out == "discarded: " + hand + "\n" and text(project, STATE) == template
+    # Render stamps Last updated, and keeps the rest of the state.
+    unstamped = lambda value: re.sub(r"Last updated: \S+", "Last updated:", value)
+    assert code == 0 and out == "discarded: " + hand + "\n" and unstamped(text(project, STATE)) == unstamped(template)
     produce(project, "r1")
     original = text(project, STATE)
     (project / STATE).write_text(original.replace("<state the finding from r1>", "Hand edit")
@@ -537,7 +581,7 @@ def test_render_restores_rows(project, capsys):
     json_before = text(project, f"{INV}/findings.json")
     code, out, _ = run(project, capsys, "render")
     assert code == 0 and out == "discarded: " + drift[0]["disk"] + "\n"
-    assert text(project, STATE) == original.replace("## Next steps", "A handwritten note.\n\n## Next steps")
+    assert unstamped(text(project, STATE)) == unstamped(original.replace("## Next steps", "A handwritten note.\n\n## Next steps"))
     assert text(project, f"{INV}/findings.json") == json_before
     assert provenance.findings_drift(project, "churn") == []
 
@@ -748,8 +792,8 @@ def test_finding_text_warns_on_reconciliation_no_check_records(project, capsys):
         code, out, _ = run(project, capsys, "finding", result_id, "--text", wording)
         assert code == 0 and f"| {wording} | [{result_id}]" in out, result_id
         warning = (f'warning: {result_id}: "sums to" asserts a reconciliation or a completed check that no passing '
-                   "check in its evidence records; state the check, with any tolerance set before the data was "
-                   "seen, in the detail of a passing values or metrics judgment in "
+                   "check in its evidence records; state the check, with any tolerance the brief or the "
+                   "result's settings record, in the detail of a passing values or metrics judgment in "
                    f"[results.{result_id}.validation] and rerun, or reword")
         assert (out.splitlines()[0] == warning) is warned, (result_id, out)
     for phrase, found in (("The totals reconciled with finance", "reconciled"),
