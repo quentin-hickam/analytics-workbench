@@ -521,7 +521,32 @@ def collect(root, *, probe_upstream=False):
             packages.append(entry)
     result["packages"] = packages
     result["git"] = git_status(root, slug, state_date, uncertain)
+    if slug and result["git"].get("has_commits"):
+        result["git"]["uncommitted_evidence"] = uncommitted_evidence(root / "investigations" / slug / "evidence",
+                                                                     entries, uncertain)
     return result
+
+
+def uncommitted_evidence(directory, entries, uncertain):
+    """Result IDs whose evidence names no producing commit, recorded before the repository had one, or
+    None when the evidence cannot be listed. Only a rerun records the commit; an unreadable evidence file
+    is an uncertainty and is listed too, since its commit is unknown."""
+    files = entries(directory)
+    if files is None:
+        return None
+    listed = []
+    for path in files:
+        if path.suffix != ".json" or not path.is_file():
+            continue
+        try:
+            commit = json.loads(path.read_text(encoding="utf-8")).get("producing_commit")
+        except (OSError, UnicodeError, ValueError, AttributeError):
+            uncertain(path, "Cannot read result evidence; its producing commit is unknown")
+            commit = None
+        # A commit SHA is the only value that names one: "uncommitted", {"unknown": ...}, or anything else does not.
+        if not (isinstance(commit, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit)):
+            listed.append(path.stem)
+    return listed
 
 
 def upstream(root, probe, uncertain, entries):

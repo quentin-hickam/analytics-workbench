@@ -1155,13 +1155,18 @@ def cli_publish(root: Path, argv: list[str]) -> int:
 
 def session(project_root: str | Path, *,
             views_dir: str | Path = "foundation/views",
-            read_only: bool = False) -> "duckdb.DuckDBPyConnection":
+            read_only: bool = False, investigation: str | None = None) -> "duckdb.DuckDBPyConnection":
     """Open an in-memory DuckDB session and load view files in name order.
 
     Project-relative paths in views, such as data/parquet/..., resolve against
     the project root from any working directory. A view that reads another view
     must sort after it; use numeric prefixes, for example 01_base.sql and
     02_derived.sql.
+
+    investigation opens a result session, as run.py does: after the views_dir files it loads
+    investigations/<investigation>/views/*.sql in name order, the investigation's shared SQL, and
+    pins DuckDB to one thread, so a rerun adds floating-point values in the same order and saves
+    the same table.
 
     read_only=True opens a session that writes nothing: no extension installs (one already
     installed loads when a statement needs it), no persistent secrets, spill files in a
@@ -1180,9 +1185,12 @@ def session(project_root: str | Path, *,
     if "," in str(root):
         # file_search_path is a comma-separated list with no escape for a comma.
         raise ValueError(f"session() cannot use a project root containing a comma: {root}")
-    directory = _under(root, views_dir)
+    directories = [_under(root, views_dir)]
+    if investigation is not None:
+        _check_name(investigation)
+        directories.append(root / "investigations" / investigation / "views")
     views = []
-    for path in sorted(directory.glob("*.sql")):
+    for path in (path for directory in directories for path in sorted(directory.glob("*.sql"))):
         if path.is_file():
             try:
                 text = path.read_text(encoding="utf-8")
@@ -1202,6 +1210,8 @@ def session(project_root: str | Path, *,
         "temp_directory": str(Path(spill) / "spill")}) if read_only else duckdb.connect()
     try:
         connection.execute("SET file_search_path = ?", [str(root)])
+        if investigation is not None:
+            connection.execute("SET threads = 1")
         for path, text, statements in views:
             try:
                 if read_only:  # what runs is the parsed statement whose kind, calls and plan were checked

@@ -38,7 +38,7 @@ python3 src/awb.py publish <dataset> <publication-id> --from <acquisition-dir> -
 
 `--from` names exactly the acquisition directories the select reads. `publish` runs the declared checks on every publication of the dataset and records each outcome in `publication.json`; a failing check refuses publication, and `failed_checks` names it. Each canonical view in `foundation/views/` names its publication. Start the view from the printed `view_sql`. In `foundation/catalog.md`, record the publication from the printed `catalog_row`, completing its grain and availability, and give the view its own row (Kind `canonical view`) with the view's grain and the publication it reads under `Inputs`. `awb-clean` reads the grain from the view's row and records corrections there. Switching publications is a deliberate preparation change. Remove a superseded publication, and its catalog row, once no reader needs it.
 
-Sessions load `foundation/views/*.sql` in filename order, so a dependent view's file sorts after its inputs.
+Sessions load `foundation/views/*.sql` in filename order, so a dependent view's file sorts after its inputs; result sessions then load the investigation's `views/*.sql` the same way.
 
 Preparation owns reusable parsing, normalization, checks, and corrections; their rationale goes in `foundation/quality.md`. EDA consumes canonical data, with population, periods, filters, exclusions, and assumptions local to the investigation; preparation and EDA may iterate before cleaning finishes. Promote a generally valid exploratory rule into preparation, or a saved query into `foundation/views/`, deliberately.
 

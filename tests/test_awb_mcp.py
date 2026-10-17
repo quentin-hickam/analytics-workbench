@@ -10,6 +10,7 @@
 # test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit; read returns both changes while keeping its answer, and attempts to change answered question content or replace its answer are refused.
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
 # test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, records words it and returns state finding's warning on a number the result does not record, read shows sql, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
+# test_shared_views_parameters_and_pre_commit_results_over_mcp: with DuckDB, run loads the investigation's views/*.sql into the result session, eda-scan reads a $name in [eda] where from [parameters], and read status lists a result run before the first commit once the repository has one, until run records it again.
 # test_package_export_passes_the_chart_selection_through: with DuckDB, the package tool passes export's --chart row selection to the helper unchanged: @first=1 writes one row and the manifest records it, and a malformed selection comes back as the helper's refusal with exit status 2.
 # test_read_sql_refuses_writes: read sql and profile refuse COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, CREATE, a SELECT calling enable_profiling with save_location or enable_logging with file storage, and a query() whose SQL differs between the plan check and the run, and write no file; read refuses arguments outside its command and help topics outside the helpers.
 # test_read_runs_the_histogram_aggregate_and_refuses_the_histogram_macro: read sql and profile run the histogram() aggregate, directly and from a view file, and refuse FROM histogram(...), the table macro that calls query_table, writing nothing.
@@ -421,6 +422,37 @@ def test_data_run_package_release_round_trip(workbench, connect):
     assert not error and '"checked": 1, "stale": 0' in text
     assert "by-region" in client.call("read", command="state")[0]
     assert snapshot(workbench) == before
+
+
+@needs_duckdb
+def test_shared_views_parameters_and_pre_commit_results_over_mcp(tmp_path, connect):
+    root = scaffold(tmp_path / "wb")
+    client = connect(cwd=root)
+    text, error = client.call("setup")
+    assert not error, text
+    git(root, "init", "-q")
+    (root / INV / "views").mkdir()
+    (root / INV / "views/01_west.sql").write_text("CREATE VIEW west_orders AS SELECT * FROM orders WHERE region = 'west';\n")
+    (root / INV / "settings.toml").write_text(
+        '[parameters]\nregion = "west"\n\n[eda]\nwhere = "region = $region"\n\n'
+        '[results.by-region]\nquestion = "How many orders does each region take?"\n')
+    (root / INV / "queries/by-region.sql").write_text(
+        "SELECT region, count(*) AS orders FROM west_orders GROUP BY region ORDER BY region\n")
+    text, error = client.call("run", investigation="churn", results=["by-region"])
+    assert not error, text
+    assert (root / INV / "results/by-region.csv").read_text() == "region,orders\nwest,2\n"
+    text, error = client.call("data", command="eda-scan", args=["orders"])
+    assert not error, text
+    scan = json.loads((root / INV / "exploration/eda/orders.json").read_text())
+    assert scan["scope"]["applied"] == [{"sql": "region = 'west'", "source": "eda.where"}] and scan["rows"] == 2
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "first")
+    text, error = client.call("read", command="status")
+    assert not error and json.loads(text.split("\n")[0])["git"]["uncommitted_evidence"] == ["by-region"], text
+    text, error = client.call("run", investigation="churn", results=["by-region"])
+    assert not error, text
+    text, error = client.call("read", command="status")
+    assert not error and json.loads(text.split("\n")[0])["git"]["uncommitted_evidence"] == [], text
 
 
 @needs_duckdb

@@ -16,6 +16,7 @@
 # test_unreadable_draft_manifest_is_unknown: an unreadable draft manifest leaves dates and counts null with an uncertainty.
 # test_git_no_commits_dirty_date_precision_and_no_index_writes: no-commit wording, same-day indeterminate, later change out of date; the index is untouched.
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
+# test_results_recorded_before_the_first_commit_are_listed_for_a_rerun: once the repository has a commit, evidence whose producing_commit is uncommitted, unknown, or unreadable is listed under git.uncommitted_evidence (unreadable with an uncertainty), and evidence naming a commit is not; before any commit, or with no evidence folder, nothing is listed.
 # test_ledger_writes_leave_the_state_current: a later questions.json or questions.md change, uncommitted or committed, leaves the state current; a later brief change does not.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
 # test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by one of the two forms foundation/sources.md defines, a link in its stated grammar or a backticked location with its sha256, in plain text outside code, HTML, emphasis, strikethrough, links and brackets; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
@@ -304,6 +305,29 @@ def test_git_no_commits_dirty_date_precision_and_no_index_writes(workbench):
     result = status.collect(workbench)["git"]
     assert result["state_status"] == "out of date"
     assert result["days_after_state"] == 2
+
+
+def test_results_recorded_before_the_first_commit_are_listed_for_a_rerun(workbench):
+    git(workbench, "init")
+    evidence = workbench / "investigations/churn/evidence"
+    write(workbench, "investigations/churn/evidence/early.json", json.dumps({"producing_commit": "uncommitted"}))
+    assert "uncommitted_evidence" not in status.collect(workbench)["git"]  # no commit yet: nothing to rerun for
+    git(workbench, "add", ".")
+    git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "first")
+    head = git(workbench, "rev-parse", "HEAD").stdout.strip()
+    write(workbench, "investigations/churn/evidence/late.json", json.dumps({"producing_commit": head}))
+    write(workbench, "investigations/churn/evidence/no-git.json",
+          json.dumps({"producing_commit": {"unknown": "not a git repository"}}))
+    write(workbench, "investigations/churn/evidence/broken.json", "{not json")
+    write(workbench, "investigations/churn/evidence/notes.txt", "not evidence")
+    result = status.collect(workbench)
+    assert result["git"]["uncommitted_evidence"] == ["broken", "early", "no-git"]
+    assert {"path": "investigations/churn/evidence/broken.json",
+            "reason": "Cannot read result evidence; its producing commit is unknown"} in result["uncertainties"]
+    for path in evidence.iterdir():
+        path.unlink()
+    evidence.rmdir()
+    assert status.collect(workbench)["git"]["uncommitted_evidence"] == []
 
 
 def test_ledger_writes_leave_the_state_current(workbench):

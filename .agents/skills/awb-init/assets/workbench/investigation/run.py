@@ -4,9 +4,12 @@
 Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With no IDs it
 produces every result in settings.toml. It refuses to run, exiting 2, while a wanted result's ID
 cannot name its files, or its table lacks its question, lists code that is not files in the project
-or parameters that are not names, or declares answers the question ledger does not hold as data
-questions, and exits 1 when the ledger cannot be read. For each result it runs the result's saved
-queries in a fresh session of canonical views, validates the result, saves the table and its profile
+or parameters that are not names, names views that are not view files, or declares answers the
+question ledger does not hold as data questions, or while its shared SQL reads a file directly that
+is neither a publication nor, by its own path, in its code (unrecorded_reads()), and exits 1 when the
+ledger cannot be read. For each result it runs the result's saved queries in one session of
+canonical views and this folder's views/*.sql, the investigation's shared SQL, on one thread so a rerun repeats
+floating-point sums exactly; it validates the result, saves the table and its profile
 under results/, records evidence under evidence/, writes its state.md findings row, and prints one
 compact JSON line with the paths, failed and unassessed checks, and what it did to the row, with
 the row's status and claim strength.
@@ -18,8 +21,11 @@ A result that needs more than its query gets a producer module, producers/<id>.p
 so adding a result never edits this file; put reusable operations in src/. Requires duckdb and pandas.
 """
 
+import glob
 import importlib.util
 import json
+import os
+import posixpath
 import re
 import sys
 import traceback
@@ -39,8 +45,8 @@ sys.path.insert(0, str(ROOT))
 from src.exploration.validate import profile, validate  # noqa: E402
 from src.preparation.landing import session  # noqa: E402
 from src.provenance import (  # noqa: E402
-    ledger_answerers, prior_result, producer_path, record_evidence, record_finding, result_parameters,
-    result_problems, views_read)
+    investigation_views, ledger_answerers, prior_result, producer_path, record_evidence, record_finding,
+    result_parameters, result_problems, views_read)
 
 
 def run(connection, sql, parameters):
@@ -64,14 +70,20 @@ def produce(connection, sql, parameters):
 # known at run time, such as row_counts or joins.left_rows. run.py gives the module run() above
 # before loading it. Read further data through saved queries listed in settings so their views are
 # recorded, and list any other file it imports or reads, or the result's queries read directly, in
-# its table's code = [...], since evidence records only declared files as the result's code.
-# Example, producers/orders-by-month.py:
+# its table's code = [...], since evidence records only declared files as the result's code. A
+# helper module in this folder imports by its name, as `import helpers` for helpers.py, since Python
+# puts this folder on sys.path when it runs run.py. reconcile() records a filter's rows in, kept,
+# and excluded by rule as a row_counts step that validation fails unless they add up.
+# Example, producers/orders-by-month.py, whose second query counts the rows each rule drops:
+#
+# from src.exploration.validate import reconcile
 #
 # def produce(connection, sql, parameters):
-#     before = int(run(connection, sql[1], parameters)["orders"].iloc[0])  # unfiltered count
+#     counts = run(connection, sql[1], parameters).iloc[0]  # columns orders, cancelled, test_accounts
 #     frame = run(connection, sql[0], parameters)
-#     return frame, {"row_counts": [{"step": "period filter", "before": before,
-#                                    "after": int(frame["orders"].sum()), "min_ratio": 0.01}]}
+#     excluded = {"cancelled": int(counts["cancelled"]), "test accounts": int(counts["test_accounts"])}
+#     return frame, {"row_counts": [reconcile("order filter", int(counts["orders"]),
+#                                             int(frame["orders"].sum()), excluded)]}
 def producer(result_id):
     """The result's produce() from its producer module, or the default producer when it has none."""
     path = HERE / producer_path(result_id)
@@ -119,8 +131,13 @@ def produce_result(connection, result_id, config, parameters):
     table, profile_path = output / f"{result_id}.csv", output / f"{result_id}.profile.json"
     frame.to_csv(table, index=False)
     profile_path.write_text(json.dumps(profile(frame), indent=2) + "\n")
-    # Settings `views` overrides detection when a result reads views its queries do not name.
-    views = config.get("views") or views_read(ROOT, [HERE / query for query in queries])
+    # Settings `views` replaces detection from the queries when a result reads views they do not name.
+    # Every session loads the shared SQL, so its files and the foundation views they read are always
+    # recorded as views, with the publications those read.
+    shared = investigation_views(ROOT, NAME)
+    named = config.get("views") or views_read(ROOT, [HERE / query for query in queries])
+    views = sorted({posixpath.normpath(path) for path in named} | set(shared)
+                   | set(views_read(ROOT, [ROOT / path for path in shared])))
     evidence = record_evidence(ROOT, NAME, result_id, views=views, settings_path=SETTINGS, checks=checks,
                                parameters=scoped)
     # Writes findings and renders the row; failure before findings are saved removes this evidence.
@@ -135,6 +152,52 @@ def produce_result(connection, result_id, config, parameters):
         "state": state["action"], "status": state["status"], "claim": state["claim"], "history": state["history"],
         **({"questions": state["questions"]} if "questions" in state else {}),
     }
+
+
+# A token of SQL text: a string literal, captured, or a comment or quoted identifier, skipped.
+_TOKEN = re.compile(r"'((?:[^']|'')*)'|--[^\n]*|/\*.*?\*/|\"(?:[^\"]|\"\")*\"", re.S)
+
+
+def unrecorded_reads(results, wanted):
+    """Each file a shared SQL string literal reads that a wanted result's evidence would miss, under the
+    accepted input references/provenance.md states: a literal naming one file must be in every wanted
+    result's code, and a glob or project folder may match files only under a
+    data/parquet/<dataset>/<publication>/ path it names, since evidence would miss a file added later."""
+    problems = set()
+    for view in investigation_views(ROOT, NAME):
+        for literal in filter(None, (m.group(1) for m in _TOKEN.finditer((ROOT / view).read_text()))):
+            literal = literal.replace("''", "'")
+            target = os.path.normpath(os.path.join(ROOT, literal))
+            if "://" in literal or ("/" not in literal and not os.path.isfile(target)):
+                continue  # a URL, or a word such as a regex or a value
+            publications = re.findall(r"data/parquet/[^/\s'\"]+/[^/\s'\"*]+/", literal)
+            # DuckDB reads every file in a folder it is given.
+            folder = os.path.isdir(target) and Path(target).is_relative_to(ROOT)
+            unpublished = []
+            for path in glob.glob(os.path.join(target, "**") if folder else target, recursive=True):
+                file = Path(os.path.normpath(path))
+                if not file.is_file():
+                    continue
+                if not file.is_relative_to(ROOT):
+                    problems.add(f"{view} reads {literal}, outside the project; copy it into the project")
+                    continue
+                path = file.relative_to(ROOT).as_posix()
+                if not any(path.startswith(publication) for publication in publications):
+                    unpublished.append(path)  # else recorded as a publication of the view
+            if unpublished and (folder or re.search(r"[*?[]", literal)):
+                problems.add(f"{view} reads {', '.join(sorted(unpublished)[:3])}{', ...' * (len(unpublished) > 3)} "
+                             f"through the glob or folder '{literal}', outside a publication: evidence would miss "
+                             f"a file added to it later, so read each file by its own path, listed in every result's "
+                             f"code, or publish them")
+                continue
+            for path in unpublished:
+                missing = [result_id for result_id in wanted if path not in {
+                    posixpath.normpath(f"investigations/{NAME}/{c}") for c in results[result_id].get("code", [])}]
+                if missing:
+                    problems.add(f"{view} reads {path}, which is not a publication; list it in every result's code, "
+                                 f"as code = [\"{posixpath.relpath(path, f'investigations/{NAME}')}\"], so a change "
+                                 f"to it stales them (missing from {', '.join(missing)})")
+    return sorted(problems)
 
 
 def main(argv):
@@ -159,8 +222,12 @@ def main(argv):
     if problems:
         print("\n".join(f"settings.toml: {problem}" for problem in problems), file=sys.stderr)
         return 2
+    problems = unrecorded_reads(results, wanted)
+    if problems:
+        print("\n".join(problems), file=sys.stderr)
+        return 2
     status = 0
-    with session(ROOT) as connection:
+    with session(ROOT, investigation=NAME) as connection:
         for result_id in wanted:
             try:
                 line = produce_result(connection, result_id, results[result_id],

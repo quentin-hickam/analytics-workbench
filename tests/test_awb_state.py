@@ -22,7 +22,7 @@
 # test_claim_strength_is_recorded_and_guarded: a new row is association; --claim causal needs an experiment or natural-experiment basis and a reason; a claim change writes history; a rerun keeps the claim; a flagged finding's claim can only be lowered.
 # test_absent_claim_strength_is_refused: a findings.json entry without a valid claim strength makes every writer and the drift check refuse, writing nothing.
 # test_finding_text_warns_on_numbers_its_result_does_not_record: with src/packaging/draft.py, --text or --status supported warns on each number the result's table, profile, checks, and settings do not record, still writing; a recorded number at another precision traces; without draft.py nothing is read; a draft.py that does not load is named.
-# test_finding_text_warns_on_reconciliation_no_check_records: "sums to", "reconciles", "checked every", or "verified each" wording warns, naming a values or metrics judgment as the place to record the check, unless a passing check's name or detail uses wording of the same kind (sum, add up, or reconcile wording backs only such wording; checked or verified wording backs only such wording), so an unrelated "Checked all date filters" scope judgment does not back "sums to"; a failing check does not back it; the row is still written.
+# test_finding_text_warns_on_reconciliation_no_check_records: "sums to", "reconciles", "checked every", or "verified each" wording warns, naming a values or metrics judgment as the place to record the check, unless a passing check's name or detail uses wording of the same kind (sum or add up wording backs only such wording, reconcile wording only reconcile wording, checked or verified wording only such wording), so an unrelated "Checked all date filters" scope judgment does not back "sums to", nor does a reconcile() row count's "reconciled:" detail; a failing check does not back it; the row is still written.
 # test_finding_text_with_unreadable_evidence_warns_and_writes: --text on a row whose evidence is not JSON, or not a JSON object, warns that nothing was checked and still writes.
 # test_caveat_splits_notes_outside_brackets: --caveat splits at each ; outside parentheses and square brackets, either closer closes the innermost open bracket, a closer with no opener and an unclosed bracket with no ; after it are text, a ; after an unclosed bracket is refused writing nothing, and --help says so.
 
@@ -720,6 +720,8 @@ def test_finding_text_warns_on_numbers_its_result_does_not_record(project, capsy
 
 SUMS = [{"name": "values", "outcome": "pass", "detail": "Country rows plus aggregates sum to World within 0.1%."}]
 SCOPE = [{"name": "scope", "outcome": "pass", "detail": "Checked all date filters are explicit."}]
+RECONCILED = [{"name": "row_counts", "outcome": "pass", "detail": "Steps checked: 1; last 5 -> 3 rows; reconciled: "
+               "order filter 5 = 3 kept + 2 excluded (cancelled 2)."}]
 
 
 def test_finding_text_warns_on_reconciliation_no_check_records(project, capsys):
@@ -727,8 +729,9 @@ def test_finding_text_warns_on_reconciliation_no_check_records(project, capsys):
     produce(project, "r2", checks=OK + SUMS)
     produce(project, "r3", checks=[{**SUMS[0], "outcome": "fail"}])
     produce(project, "r4", checks=OK + SCOPE)
+    produce(project, "r5", checks=OK + RECONCILED)
     wording = "Countries plus regions sums to World"
-    for result_id, warned in (("r1", True), ("r2", False), ("r3", True), ("r4", True)):
+    for result_id, warned in (("r1", True), ("r2", False), ("r3", True), ("r4", True), ("r5", True)):
         code, out, _ = run(project, capsys, "finding", result_id, "--text", wording)
         assert code == 0 and f"| {wording} | [{result_id}]" in out, result_id
         warning = (f'warning: {result_id}: "sums to" asserts a reconciliation or a completed check that no passing '
@@ -744,6 +747,11 @@ def test_finding_text_warns_on_reconciliation_no_check_records(project, capsys):
     assert code == 0 and not out.startswith("warning"), out
     code, out, _ = run(project, capsys, "finding", "r2", "--text", "We checked every region")
     assert out.startswith('warning: r2: "checked every" asserts'), out
+    # A filter's reconciled row count backs reconcile wording only; a sum judgment never backs it.
+    code, out, _ = run(project, capsys, "finding", "r5", "--text", "The order filter reconciles")
+    assert code == 0 and not out.startswith("warning"), out
+    code, out, _ = run(project, capsys, "finding", "r2", "--text", "The order filter reconciles")
+    assert out.startswith('warning: r2: "reconciles" asserts'), out
     for phrase in ("Summary of totals", "A check-in rate of half", "Sums of orders rose"):
         code, out, _ = run(project, capsys, "finding", "r1", "--text", phrase)
         assert not out.startswith("warning"), phrase

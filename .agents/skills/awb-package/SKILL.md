@@ -61,7 +61,7 @@ Create the draft at the contract's paths, or revise the same files. A draft in a
 - `methodology.md` follows `package-format/methodology-template.md` in the workbench's own vocabulary.
 - When the audience needs one, `methodology-note.md` follows `package-format/methodology-note-template.md`.
 - Copy `package-format/deck-rules.md` and `package-format/assembly/m365.md` into the draft unchanged, at the same paths under it.
-- When a revision brings in facts the investigation records lack, such as a limitation the user supplies, record them in the investigation's `history.md` as record maintenance with the revision, so no narrative states more than the records.
+- When a revision brings in facts the investigation records lack, such as a limitation the user supplies, record them in the investigation's `history.md` as record maintenance with the revision, so no narrative states more than the records. When a review or the user corrects a claim a finding's text states, also reword that finding with `python3 src/awb.py state finding <id> --text "<corrected text>"` in the same revision, so a later revision does not start from the old claim.
 
 ## 4. Export the files and provenance
 

@@ -529,6 +529,39 @@ def test_analysis_records_its_questions_under_the_one_they_serve():
             "question it serves, recorded first as a root from the brief when the ledger lacks it.") in sharpen
 
 
+def test_analysis_states_the_threshold_rule_and_the_standard_checks():
+    # A threshold set after seeing which rows lead, or a minimum the user never agreed, shaped answers the
+    # user then rejected; reconciliation and per-entity coverage surfaced only at packaging review.
+    add = ' '.join(section((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/analysis.md')
+                           .read_text(encoding='utf-8'), '## Add a result').split())
+    assert ("A threshold, minimum, or exclusion the brief does not settle is the user's decision: propose it to "
+            "the user before looking at which rows lead, and say so when you propose one after seeing results.") in add
+    assert "with every filtered population reconciled by `reconcile()`" in add
+    assert ("For a series summed over a period, also count the periods each entity in scope has data for, since a "
+            "sum hides missing periods: a count below the period length is a caveat on the finding.") in add
+    assert "Save full precision in result queries and round only for display." in add
+    assert "result sessions run DuckDB on one thread" in add
+    assert "the investigation's `views/*.sql`" in add and "(`import helpers` for `helpers.py`)" in add
+    assert ("A result run before the project's first commit records `uncommitted` as its producing commit until it "
+            "is rerun after that commit.") in add
+    # The MCP route comes first; the terminal command is the fallback.
+    assert ("Run results through the `awb` MCP `run` tool with the investigation and any result IDs, or with "
+            "`python3 investigations/<name>/run.py [result-id ...]` when the host offers no MCP tools.") in add
+    explore = ' '.join((ROOT / '.agents/skills/awb-explore/SKILL.md').read_text(encoding='utf-8').split())
+    assert ("A question-specific exclusion, threshold, or minimum the brief does not settle is the user's decision: "
+            "propose it before looking at which rows lead, say so when you propose one after seeing results") in explore
+    assert "count in a follow-up the periods each entity in scope has data for" in explore
+    contract = ' '.join((ROOT / '.agents/skills/awb-package/references/package-contract.md').read_text(encoding='utf-8').split())
+    assert ("A validation check recorded as not assessed stays out of `findings.md` and the methodology note unless "
+            "the user should act on it.") in contract
+    package = ' '.join((ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8').split())
+    assert ("When a review or the user corrects a claim a finding's text states, also reword that finding with "
+            "`python3 src/awb.py state finding <id> --text \"<corrected text>\"` in the same revision") in package
+    status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
+    assert ("When `git.uncommitted_evidence` lists results, say in one plain line that they were run before the "
+            "first commit, so their evidence names no commit until they are rerun.") in status
+
+
 def test_guide_commit_points_follow_the_commits_line():
     # The README promises at most one commit reminder a session under `on request`, and commits
     # as the work goes under `as I go`; the rerun and publish points keep to both.

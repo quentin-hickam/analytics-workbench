@@ -51,6 +51,12 @@
 # test_run_template_registers_each_producer_module: a producer module defining a dataclass under postponed annotations loads and runs, since run.py registers it by name, and its output is the saved table.
 # test_run_template_names_each_producer_module_apart: IDs that differ only in '.', '-', or '_' load their producer modules under distinct names, so one never takes another's sys.modules entry.
 # test_run_template_checks_declared_code_before_running: a missing declared code path exits 2 naming it before anything runs, leaving the prior evidence and table unchanged.
+# test_investigation_views_are_producing_code_for_every_result: each .sql file in the investigation's views/ is a producing path of every result, recorded or not with a commit; an edit stales them all, and so does a view file added after recording, committed or not, while another file there does not.
+# test_result_problems_refuses_views_that_are_not_view_files: a views entry must be a project-relative .sql file directly under foundation/views/ or the investigation's views/; a logical view name, a missing file, a non-.sql file, a nested or outside path, an absolute path, and a non-list are refused, naming the entry.
+# test_result_problems_accepts_view_files_and_refuses_a_non_list: a foundation view file, written with ./ or not, and a file in the investigation's views/ pass; views that is not a list of non-empty strings is refused with or without the folder.
+# test_run_template_refuses_a_views_entry_that_is_not_a_file: run.py exits 2 naming a views entry that is a view's logical name, before opening a session or writing anything; without duckdb.
+# test_run_template_loads_shared_views_on_one_thread: run.py's session loads investigations/<name>/views/*.sql after the foundation views, in name order, on one thread; a producer imports a helper module from the investigation folder by name; evidence records the shared SQL as producing code and as views, with the foundation view it reads; an edit to the shared SQL stales the result.
+# test_run_template_records_shared_views_whatever_views_says: each shared SQL file, the foundation views it reads, and a publication it reads directly are recorded as views and inputs even when the result's settings set views, which replaces only detection from its queries; a change to that foundation view or that publication stales the result.
 # test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: prior_result checks the state before unlink; the run.py template records a result and writes its state.md row, keeps it on an identical rerun, and refuses before touching evidence when state.md is missing or drifts; a run failing after the table is rewritten leaves no evidence.
 
 import hashlib
@@ -639,6 +645,81 @@ def test_producing_paths_are_an_allow_list(project):
     assert "investigations/inv/producers/r1.py" in provenance.compare_evidence(project, path)[0]["detail"]
 
 
+def test_investigation_views_are_producing_code_for_every_result(project):
+    write(project, "investigations/inv/views/01_screen.sql", b"create view screened as select * from orders;\n")
+    write(project, "investigations/inv/views/README.md", b"# Shared SQL\n")
+    commit_all(project, "shared sql")
+    assert provenance.investigation_views(project, "inv") == ["investigations/inv/views/01_screen.sql"]
+    with pytest.raises(ValueError):
+        provenance.investigation_views(project, "../inv")
+    record(project)
+    record_r2(project)
+    for result_id in ("r1", "r2"):
+        paths = json.loads((project / f"investigations/inv/evidence/{result_id}.json").read_text())["producing_paths"]
+        assert "investigations/inv/views/01_screen.sql" in paths and "investigations/inv/views/README.md" not in paths
+        assert outcomes(project, result_id) == ["pass"] * 5
+    write(project, "investigations/inv/views/README.md", b"# Shared SQL, revised\n")
+    assert outcomes(project, "r1") == outcomes(project, "r2") == ["pass"] * 5
+    write(project, "investigations/inv/views/01_screen.sql", b"create view screened as select 1;\n")
+    for result_id in ("r1", "r2"):
+        detail = provenance.compare_evidence(project, f"investigations/inv/evidence/{result_id}.json")[0]["detail"]
+        assert detail == "investigations/inv/views/01_screen.sql: differs from producing commit."
+    git(project, "checkout", "--", "investigations/inv/views/01_screen.sql")
+    # A view file added later loads in every result session, so it stales every result, committed or not.
+    write(project, "investigations/inv/views/02_more.sql", b"create view more as select 2;\n")
+    for committed in (False, True):
+        if committed:
+            commit_all(project, "another view")
+        for result_id in ("r1", "r2"):
+            check = provenance.compare_evidence(project, f"investigations/inv/evidence/{result_id}.json")[0]
+            assert check["outcome"] == "fail", committed
+            assert "investigations/inv/views/02_more.sql: added after the result was recorded" in check["detail"]
+    # Without a commit, every producing path is checksummed, the shared SQL included.
+    git(project, "update-ref", "-d", "HEAD")
+    path = record(project)
+    changes = {e["path"] for e in json.loads(path.read_text())["producing_uncommitted_changes"]}
+    assert {"investigations/inv/views/01_screen.sql", "investigations/inv/views/02_more.sql"} <= changes
+    write(project, "investigations/inv/views/03_late.sql", b"create view late as select 3;\n")
+    assert "03_late.sql: added after the result was recorded" in provenance.compare_evidence(project, path)[0]["detail"]
+
+
+@pytest.mark.parametrize(("views", "named"), [
+    (["orders"], "orders"),
+    (["yellow_trips", "foundation/views/orders.sql"], "yellow_trips"),
+    (["foundation/views/missing.sql"], "foundation/views/missing.sql"),
+    (["foundation/views/notes.txt"], "foundation/views/notes.txt"),
+    (["foundation/views/sub/nested.sql"], "foundation/views/sub/nested.sql"),
+    (["foundation/../outside.sql"], "foundation/../outside.sql"),
+    (["investigations/other/views/x.sql"], "investigations/other/views/x.sql"),
+    (["/abs/foundation/views/orders.sql"], "/abs/foundation/views/orders.sql"),
+])
+def test_result_problems_refuses_views_that_are_not_view_files(project, views, named):
+    write(project, "foundation/views/notes.txt", b"not a view\n")
+    write(project, "foundation/views/sub/nested.sql", b"select 1;\n")
+    write(project, "outside.sql", b"select 1;\n")
+    write(project, "investigations/other/views/x.sql", b"select 1;\n")
+    folder = project / "investigations/inv"
+    table = {"question": "Which?", "views": views}
+    problems = provenance.result_problems("r1", table, folder=folder)
+    assert len(problems) == 1 and f"views names {named}, which is not a view file" in problems[0], problems
+    # record_evidence refuses it too, writing nothing.
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS.replace(b"[results.r1]\n", f"[results.r1]\nviews = {json.dumps(views)}\n".encode()))
+    with pytest.raises(ValueError, match="views names"):
+        record(project)
+    assert not (project / "investigations/inv/evidence/r1.json").exists()
+
+
+def test_result_problems_accepts_view_files_and_refuses_a_non_list(project):
+    write(project, "investigations/inv/views/01_screen.sql", b"select 1;\n")
+    folder = project / "investigations/inv"
+    accepted = ["foundation/views/orders.sql", "./foundation/views/orders.sql", "investigations/inv/views/01_screen.sql"]
+    assert provenance.result_problems("r1", {"question": "Which?", "views": accepted}, folder=folder) == []
+    for views in ("foundation/views/orders.sql", [""], [3]):
+        assert provenance.result_problems("r1", {"question": "Which?", "views": views}) == [
+            '[results.r1] views must be a list of view files, as views = ["foundation/views/orders.sql"]']
+
+
 def test_run_py_edit_stales_every_result(project):
     record(project)
     record_r2(project)
@@ -830,7 +911,7 @@ def test_run_template_refuses_results_without_a_question(project):
     # Stand-ins for the duckdb and pandas helpers: opening a session would leave a marker.
     write(project, "src/exploration/validate.py", b"profile = validate = None\n")
     write(project, "src/preparation/landing.py",
-          b"from pathlib import Path\n\ndef session(root):\n    Path(root, 'opened').touch()\n    raise SystemExit(9)\n")
+          b"from pathlib import Path\n\ndef session(root, **options):\n    Path(root, 'opened').touch()\n    raise SystemExit(9)\n")
     write(project, "investigations/inv/run.py", (assets / "workbench/investigation/run.py").read_bytes())
     write(project, "investigations/inv/settings.toml",
           SETTINGS + b'\n[results.r3]\n\n[results.r4]\nquestion = "Two\\nlines?"\n')
@@ -844,6 +925,167 @@ def test_run_template_refuses_results_without_a_question(project):
     assert not any((project / p).exists() for p in ("opened", "investigations/inv/results", "investigations/inv/evidence"))
     done = subprocess.run(run + ["r1"], capture_output=True, text=True)
     assert done.returncode == 9 and (project / "opened").exists()  # a result with its question runs
+
+
+def test_run_template_refuses_a_views_entry_that_is_not_a_file(project):
+    assets = ASSET.parent
+    write(project, "src/provenance.py", (assets / "awb_provenance.py").read_bytes())
+    write(project, "src/exploration/validate.py", b"profile = validate = None\n")
+    write(project, "src/preparation/landing.py",
+          b"from pathlib import Path\n\ndef session(root, **options):\n    Path(root, 'opened').touch()\n"
+          b"    raise SystemExit(9)\n")
+    write(project, "investigations/inv/run.py", (assets / "workbench/investigation/run.py").read_bytes())
+    # A logical view name passed the run and was recorded as a missing file; it is now refused first.
+    write(project, "investigations/inv/settings.toml", SETTINGS.replace(
+        b"[results.r1]\n", b'[results.r1]\nviews = ["orders", "foundation/views/orders.sql"]\n'))
+    done = subprocess.run([sys.executable, str(project / "investigations/inv/run.py")], capture_output=True, text=True)
+    assert (done.returncode, done.stdout) == (2, "")
+    assert done.stderr == ("settings.toml: [results.r1] views names orders, which is not a view file under "
+                           "foundation/views/ or investigations/inv/views/; list view files by project-relative path\n")
+    assert not any((project / p).exists() for p in ("opened", "investigations/inv/results", "investigations/inv/evidence"))
+
+
+def test_run_template_loads_shared_views_on_one_thread(project):
+    pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    install_run_template(project)
+    # The shared SQL reads a foundation view; a second file reads the first, so name order matters.
+    write(project, "investigations/inv/views/01_screen.sql", b"create view screened as select n from orders where n > 0;\n")
+    write(project, "investigations/inv/views/02_top.sql", b"create view top as select max(n) as n from screened;\n")
+    write(project, "investigations/inv/helpers.py", b"LABEL = 'screened'\n")
+    write(project, "investigations/inv/queries/r1.sql", b"select n from screened order by n\n")
+    write(project, "investigations/inv/producers/r1.py", b"import helpers\n\n"
+          b"def produce(connection, sql, parameters):\n"
+          b"    threads = connection.execute(\"select current_setting('threads')\").fetchone()[0]\n"
+          b"    top = connection.execute('select n from top').fetchone()[0]\n"
+          b"    return run(connection, sql[0], parameters).assign(label=helpers.LABEL, threads=threads, top=top), {}\n")
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS.replace(b"[results.r1]\n", b'[results.r1]\ncode = ["helpers.py"]\n'))
+    run = [sys.executable, str(project / "investigations/inv/run.py"), "r1"]
+    done = subprocess.run(run, capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (project / "investigations/inv/results/r1.csv").read_text() == (
+        "n,label,threads,top\n1,screened,1,2\n2,screened,1,2\n")
+    evidence = json.loads((project / "investigations/inv/evidence/r1.json").read_text())
+    assert {"investigations/inv/views/01_screen.sql", "investigations/inv/views/02_top.sql",
+            "investigations/inv/helpers.py"} <= set(evidence["producing_paths"])
+    # The query names only the shared view; the shared files and the foundation view they read are views.
+    assert [view["path"] for view in evidence["views"]] == [
+        "foundation/views/orders.sql", "investigations/inv/views/01_screen.sql", "investigations/inv/views/02_top.sql"]
+    assert outcomes(project) == ["pass"] * 5
+    write(project, "investigations/inv/views/01_screen.sql", b"create view screened as select n from orders;\n")
+    assert outcomes(project)[:2] != ["pass", "pass"]
+
+
+def test_run_template_records_shared_views_whatever_views_says(project):
+    duckdb = pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    install_run_template(project)
+    # A real publication, so a shared view can read it directly.
+    part = project / "data/parquet/orders/p1/part-0.parquet"
+    duckdb.connect().execute(f"copy (select range as n from range(3)) to '{part}' (format parquet)")
+    publication = json.loads((project / "data/parquet/orders/p1/publication.json").read_text())
+    publication["files"] = [{"path": "part-0.parquet", "bytes": part.stat().st_size,
+                             "sha256": hashlib.sha256(part.read_bytes()).hexdigest()}]
+    write(project, "data/parquet/orders/p1/publication.json", json.dumps(publication).encode())
+    write(project, "foundation/views/customers.sql", b"create view customers as select 1 as id;\n")
+    write(project, "investigations/inv/views/01_screen.sql", b"create view screened as select n from orders where n > 0;\n")
+    write(project, "investigations/inv/views/02_raw.sql",
+          b"create view raw as select n from read_parquet('data/parquet/orders/p1/*.parquet');\n")
+    write(project, "investigations/inv/queries/r1.sql", b"select n from screened order by n\n")
+    # An explicit views setting replaces detection from the queries, never the shared SQL's views.
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS.replace(b"[results.r1]\n", b'[results.r1]\nviews = ["./foundation/views/customers.sql"]\n'))
+    done = subprocess.run([sys.executable, str(project / "investigations/inv/run.py"), "r1"],
+                          capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    evidence = json.loads((project / "investigations/inv/evidence/r1.json").read_text())
+    views = {view["path"]: view["publications"] for view in evidence["views"]}
+    assert views == {"foundation/views/customers.sql": [], "foundation/views/orders.sql": [],
+                     "investigations/inv/views/01_screen.sql": [],
+                     "investigations/inv/views/02_raw.sql": ["data/parquet/orders/p1"]}
+    assert [p["path"] for p in evidence["publications"]] == ["data/parquet/orders/p1"]
+    assert outcomes(project) == ["pass"] * 5
+    original = (project / "foundation/views/orders.sql").read_bytes()
+    write(project, "foundation/views/orders.sql", b"create view orders as select range * 100 as n from range(3);\n")
+    assert outcomes(project)[2] == "fail"
+    write(project, "foundation/views/orders.sql", original)
+    publication["conversion_commit"] = "another"
+    write(project, "data/parquet/orders/p1/publication.json", json.dumps(publication).encode())
+    assert outcomes(project)[3] == "fail"
+
+
+def test_run_template_refuses_shared_sql_reading_an_undeclared_file(project, tmp_path_factory):
+    pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    install_run_template(project)
+    write(project, "investigations/inv/test_accounts.csv", b"n\n1\n")
+    write(project, "investigations/inv/views/01_screen.sql",
+          b"-- don't count test accounts\ncreate view screened as select n from orders where n not in\n"
+          b"(select n from read_csv('investigations/inv/test_accounts.csv'));\n")
+    write(project, "investigations/inv/queries/r1.sql", b"select n from screened order by n\n")
+    run = [sys.executable, str(project / "investigations/inv/run.py")]
+    # Neither result lists the file, then only r1 does: every run result must, before anything runs.
+    for argv, settings, missing in (
+            ([], SETTINGS, "r1, r2"),
+            ([], SETTINGS.replace(b"[results.r1]\n", b'[results.r1]\ncode = ["test_accounts.csv"]\n'), "r2")):
+        write(project, "investigations/inv/settings.toml", settings)
+        done = subprocess.run(run + argv, capture_output=True, text=True)
+        assert done.returncode == 2 and done.stdout == "", done.stdout + done.stderr
+        assert done.stderr == (
+            "investigations/inv/views/01_screen.sql reads investigations/inv/test_accounts.csv, which is not a "
+            "publication; list it in every result's code, as code = [\"test_accounts.csv\"], so a change to it "
+            f"stales them (missing from {missing})\n")
+        assert not (project / "investigations/inv/evidence").exists()
+    done = subprocess.run(run + ["r1"], capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    commit_all(project)
+    assert outcomes(project) == ["pass"] * 5
+    write(project, "investigations/inv/test_accounts.csv", b"n\n2\n")
+    assert outcomes(project)[1] == "fail"
+    # A commented-out read is not checked; a file outside the project cannot be code, so it is refused.
+    outside = tmp_path_factory.mktemp("outside") / "accounts.csv"
+    outside.write_bytes(b"n\n1\n")
+    write(project, "investigations/inv/views/01_screen.sql",
+          f"-- read_csv('investigations/inv/test_accounts.csv')\n"
+          f"create view screened as select n from read_csv('{outside}');\n".encode())
+    done = subprocess.run(run + ["r1"], capture_output=True, text=True)
+    assert done.returncode == 2
+    assert done.stderr == f"investigations/inv/views/01_screen.sql reads {outside}, outside the project; copy it into the project\n"
+
+
+def test_run_template_refuses_shared_sql_reading_a_glob_or_folder_outside_a_publication(project):
+    pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    install_run_template(project)
+    write(project, ".gitignore", b"*.pyc\n")
+    write(project, "investigations/inv/exclusions/a.csv", b"n\n1\n")
+    write(project, "investigations/inv/queries/r1.sql", b"select n from screened order by n\n")
+    code = b'code = ["exclusions/a.csv"]\n'
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS.replace(b"[results.r1]\n", b"[results.r1]\n" + code).replace(b"[results.r2]\n", b"[results.r2]\n" + code))
+    run = [sys.executable, str(project / "investigations/inv/run.py")]
+    screen = "create view screened as select n from orders where n not in (select n from read_csv({}));\n"
+    # The round-3 closure repro: with every file the glob matches in code, a file added later would
+    # change every result unrecorded, so a glob or folder outside a publication is refused, as code
+    # refuses a folder.
+    for literal in ("investigations/inv/exclusions/*.csv", "investigations/inv/exclusions"):
+        write(project, "investigations/inv/views/01_screen.sql", screen.format(f"'{literal}'").encode())
+        done = subprocess.run(run, capture_output=True, text=True)
+        assert done.returncode == 2 and done.stdout == "", done.stdout + done.stderr
+        assert done.stderr == (
+            f"investigations/inv/views/01_screen.sql reads investigations/inv/exclusions/a.csv through the glob or "
+            f"folder '{literal}', outside a publication: evidence would miss a file added to it later, so read each "
+            f"file by its own path, listed in every result's code, or publish them\n")
+        assert not (project / "investigations/inv/evidence").exists()
+    # Each file by its own path runs; a word without "/" naming no file, such as a regex, is not a path,
+    # and a folder outside the project, such as a separator, is not walked.
+    write(project, "investigations/inv/views/01_screen.sql",
+          (screen.format("['investigations/inv/exclusions/a.csv']").rstrip(";\n")
+           + " and regexp_matches(n::varchar, '.*') and len(string_split('a/b', '/')) = 2;\n").encode())
+    done = subprocess.run(run + ["r1"], capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (project / "investigations/inv/results/r1.csv").read_text() == "n\n0\n2\n"
 
 
 def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(project):
@@ -883,10 +1125,14 @@ def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(p
     assert unwritten.returncode == 1 and "state.md does not exist" in json.loads(unwritten.stdout)["error"]
     assert (project / "investigations/inv/evidence/r1.json").exists()  # prior_result refuses before unlink
     write(project, "investigations/inv/state.md", state)
-    write(project, "investigations/inv/settings.toml", SETTINGS.replace(
-        b"[results.r1]\n", b'[results.r1]\nviews = ["../outside.sql"]\n'))
+    # A producer that drops its result's table from settings makes recording fail after the table is written.
+    write(project, "investigations/inv/producers/r1.py", b"from pathlib import Path\n\n"
+          b"def produce(connection, sql, parameters):\n"
+          b"    frame = run(connection, sql[0], parameters)\n"
+          b"    Path(__file__).parents[1].joinpath('settings.toml').write_text('[parameters]\\n')\n"
+          b"    return frame, {}\n")
     failed = subprocess.run(run, capture_output=True, text=True)
-    assert failed.returncode == 1 and "outside the project root" in failed.stdout
+    assert failed.returncode == 1 and "must hold [results.r1]" in failed.stdout
     assert (project / "investigations/inv/results/r1.csv").exists()
     assert not (project / "investigations/inv/evidence/r1.json").exists()
 
