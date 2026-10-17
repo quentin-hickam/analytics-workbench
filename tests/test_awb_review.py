@@ -32,7 +32,7 @@
 # test_acceptance_amends_the_recorded_review_and_refuses_after_a_change: --accept amends the recorded report, keeping its snapshot and time, and refuses, writing nothing, after an edit to what it read or for another report.
 # test_scoped_start_needs_a_prior_record: start --kind scoped with no record to scope against, or with no draft, is refused, writing nothing.
 # test_record_binds_the_report_to_what_start_saw: record without a start of its kind, or after an edit since the start, is refused, writing nothing but the note in started.json, and a record consumes its start; the round-2 closure's re-record route is refused and show stays stale.
-# test_a_report_in_hand_never_covers_an_edit: the round-3 sequence (record, edit, --accept refused, start, the same report again) is refused at the record after start and show stays stale; a new report of the edit records and takes its acceptances; a report refused for a change after start is refused after the next start; a repeated clean report records.
+# test_a_report_in_hand_never_covers_an_edit: the round-3 sequence (record, edit, --accept refused, start, the same report again) is refused at the record after start and show stays stale, as is a recorded report accepted before the edit; a new report of the edit records and takes its acceptances; a report refused for a change after start is refused after the next start; a repeated clean report records.
 # test_represented_results_evidence_is_what_the_review_read: each evidence file the manifest's results name is snapshotted; a changed or dropped one shows stale, named by its path, with its diff.
 # test_an_error_violation_or_command_problem_cannot_be_accepted: an --accept never passes a report counting an error violation or a command problem.
 # test_unusable_report_is_refused_and_writes_nothing: an empty report, a last line that does not parse or is not last, a --kind its opening contradicts, more errors than violations, and rows the last line undercounts, backticked or numbered rows included, in backticks inside or outside the marker, are refused, writing nothing and leaving an earlier record as it was.
@@ -968,6 +968,10 @@ def test_a_report_in_hand_never_covers_an_edit(project, capsys):
     accepted = ACCEPTED + ['findings.md:6 "doubled because of": the user accepts the cause']
     assert record(project, capsys, fresh, accept=accepted, first=False)[1]["passed"] is True
     assert show(project, capsys)[1]["status"] == "current"
+    # Accepted before the edit, as review.md says, the recorded report is still refused over a later edit.
+    path.write_text(edit + "- Revenue tripled.\n")
+    assert record(project, capsys, fresh) == (1, {"recorded": False, "refused": REPLAYED})
+    path.write_text(edit)
     # The changed-draft route: start, edit, record (refused), start, record the same report: refused, the note
     # carried across the start; undoing the edit under the same start lets the report record.
     path.write_text(edit + "- More.\n")

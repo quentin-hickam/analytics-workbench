@@ -4048,8 +4048,8 @@ def record_review(root, investigation, package, kind, text, accepted=(), *, now=
     input differs from what start saw, since the reviewer did not read that change; such a report that does
     not pass is noted in started.json, which is all that refusal writes.
 
-    A report that does not pass is also refused when it is the one recorded, which did not pass either, and
-    an input has changed since (show reports stale), or when it was refused for a change under an earlier
+    A report that does not pass is also refused when it is the one recorded, accepted or not, and an input
+    has changed since (show reports stale), or when it was refused for a change under an earlier
     start: a report in hand never covers an edit. A new reviewer returning the same words is refused too; a
     report that passes, such as a clean one, is not checked, since the Brief fixes its words.
 
@@ -4109,7 +4109,7 @@ def record_review(root, investigation, package, kind, text, accepted=(), *, now=
     except (OSError, ValueError):
         prior = {}
     if not passed and (report_digest in started.get("earlier", []) or isinstance(prior, dict) and prior.get(
-            "report") == text and prior.get("passed") is False and prior.get("inputs") != digests):
+            "report") == text and prior.get("inputs") != digests):
         return {"recorded": False, "refused": "this report was read against an earlier draft, refused or recorded "
                                               f"before a change, so it cannot be recorded: {_NEW_REVIEW}"}
     snapshot = directory / "snapshot"
@@ -4249,7 +4249,7 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
                "violations, a clean report is given --accept, the report lists more violation or narrative "
                "rows than its last line counts, no review of this --kind was started, the draft changed after "
                "start, --accept comes with another report or after a change, or a report that does not pass is "
-               "the recorded one, which did not pass, after a change, or one refused for a change under an "
+               "the recorded one after a change, or one refused for a change under an "
                "earlier start. A report that does not pass refused for a change after start is noted in "
                "started.json, all that refusal writes; a new reviewer returning the same words is refused too.\n"
                "Exit 0 recorded; 1 refused; "
