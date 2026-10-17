@@ -2121,21 +2121,29 @@ def _status_map(entries):
     return {e["result"]: _finding_cells(e)[2] for e in entries}
 
 
-# The derived display status of an answered data question resting on a flagged or superseded finding.
+# The derived display statuses of an answered data question: resting on a flagged or superseded finding,
+# on findings none of which is promoted yet, or both.
 AWAITING_RECHECK = "answered (awaiting recheck)"
+PROVISIONAL_ANSWER = "answered (provisional)"
+PROVISIONAL_RECHECK = "answered (provisional, awaiting recheck)"
 
 
 def question_status(entry, findings):
-    """Display only: any flagged or superseded answering finding needs recheck, even with settled peers.
+    """Display only: any flagged or superseded answering finding needs recheck, even with settled peers; the
+    answer is provisional while no answering finding is supported or was supported before its flag.
 
     Statuses come from the closed _finding_statuses reading. Missing findings are reported by the evidence checks;
-    they do not assert a flag. A person's answer and non-answered questions keep stored status.
+    they do not assert a flag, and a missing row counts as not promoted. Known limit: a superseded finding
+    records no prior status, so it never counts as promoted. A person's answer and non-answered questions keep
+    stored status.
     """
+    if entry["status"] != "answered" or entry["answerer"] != "data":
+        return entry["status"]
     unsettled = {"superseded", _FLAGGED, *(f"{_FLAGGED} (was {s})" for s in _STATUSES)}
-    if entry["status"] == "answered" and entry["answerer"] == "data" and any(
-            findings.get(r) in unsettled for r in entry["results"]):
-        return AWAITING_RECHECK
-    return entry["status"]
+    promoted = any(findings.get(r) in ("supported", f"{_FLAGGED} (was supported)") for r in entry["results"])
+    if any(findings.get(r) in unsettled for r in entry["results"]):
+        return AWAITING_RECHECK if promoted else PROVISIONAL_RECHECK
+    return entry["status"] if promoted else PROVISIONAL_ANSWER
 
 
 def add_question(project_root, investigation: str, text: str, *, kind: str, answerer: str, origin: str,
@@ -2492,7 +2500,7 @@ def _readme_pointer(root):
 
 def state_view(project_root, investigation: str) -> str:
     """The resume view: brief.md and state.md verbatim, the question each row's evidence records, the
-    ledger's open questions and answers awaiting recheck, then a warning
+    ledger's open questions, answers awaiting recheck, and provisional answers, then a warning
     per row with missing evidence."""
     root = Path(project_root).resolve()
     base = root / "investigations" / investigation
@@ -2522,7 +2530,8 @@ def state_view(project_root, investigation: str) -> str:
         out.append("==> questions the findings answer, by result <==\n" + "\n".join(questions) + "\n")
     try:
         ledger = question_lines(root, investigation, show_audience=False) + question_lines(
-            root, investigation, (AWAITING_RECHECK,), show_audience=False)
+            root, investigation, (AWAITING_RECHECK, PROVISIONAL_ANSWER, PROVISIONAL_RECHECK),
+            show_audience=False)
     except StateError as error:
         ledger = [f"warning: {error}"]
     if ledger:
@@ -2600,7 +2609,7 @@ def cli_state(root: Path, argv: list[str]) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=actions[action] if action else
         "Show an investigation for resuming: brief.md and state.md verbatim, the question each finding's "
-        "evidence records, the question ledger's open questions and answers awaiting recheck, "
+        "evidence records, the question ledger's open questions, answers awaiting recheck, and provisional answers, "
         "and a warning for each finding whose evidence file is missing. Changes nothing. Uses README's Active investigation line unless "
         "--investigation is given; with no active investigation it lists the investigations.",
         epilog=epilog[action] + _STATE_EXIT)

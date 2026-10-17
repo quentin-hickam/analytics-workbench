@@ -94,7 +94,7 @@ def collect(root, *, probe_upstream=False):
         return re.split(r"^##? ", rest, maxsplit=1, flags=re.M)[0].strip()
 
     def ledger(investigation, findings):
-        """The question ledger's counts, open questions, and derived awaiting-recheck answers.
+        """The question ledger's counts, open questions, and derived awaiting-recheck and provisional answers.
 
         roots counts the questions with no parent, which awb-scope keeps for the user's own, and
         must_subquestions the must questions under them, each by displayed status, apart from the
@@ -127,17 +127,27 @@ def collect(root, *, probe_upstream=False):
         recheck = [q for q in questions if q["status"] == "answered" and q["answerer"] == "data"
                    and any(FINDING_STATUSES.get(statuses.get(r)) in ("revalidation-needed", "superseded")
                            for r in q["results"])]
-        displayed = {q["id"]: "answered (awaiting recheck)" if q in recheck else q["status"] for q in questions}
+        # While no answering finding is supported or was before its flag, an unrecognized or missing row included,
+        # the answer is provisional, a recheck included.
+        provisional = [q for q in questions if q["status"] == "answered" and q["answerer"] == "data"
+                       and not any(statuses.get(r) in ("supported", "revalidation-needed (was supported)")
+                                   for r in q["results"])]
+        displayed = {q["id"]: "answered (provisional, awaiting recheck)" if q in recheck and q in provisional
+                     else "answered (awaiting recheck)" if q in recheck else "answered (provisional)"
+                     if q in provisional else q["status"] for q in questions}
         open_questions = [q for q in questions if q["status"] == "open"]
+
+        def answered(listed):
+            return [f"{q['id']} {displayed[q['id']]} [{q['answerer']}, {q['kind']}] {q['text']} -> "
+                    + "; ".join(f"{r} ({statuses.get(r, 'no findings row')})" for r in q["results"]) for q in listed]
+
         return {"counts": dict(Counter(displayed[q["id"]] for q in questions)),
                 "roots": dict(Counter(displayed[q["id"]] for q in questions if not q["parent"])),
                 "must_subquestions": dict(Counter(displayed[q["id"]] for q in questions
                                                   if q["parent"] and q["priority"] == "must")),
                 "open_by_answerer": dict(Counter(q["answerer"] for q in open_questions)),
                 "open": [f"{q['id']} [{q['answerer']}, {q['kind']}] {q['text']}" for q in open_questions],
-                "awaiting_recheck": [f"{q['id']} answered (awaiting recheck) [{q['answerer']}, {q['kind']}] {q['text']} -> "
-                                    + "; ".join(f"{r} ({statuses.get(r, 'no findings row')})" for r in q["results"])
-                                    for q in recheck]}
+                "awaiting_recheck": answered(recheck), "provisional": answered(provisional)}
 
     def table(text, columns, path):
         if text is None:

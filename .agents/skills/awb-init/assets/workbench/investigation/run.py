@@ -16,7 +16,8 @@ the row's status and claim strength.
 
 Adapt this file rather than rewriting it: a new result is a [results.<id>] table in settings.toml,
 with the question it answers, and its query in queries/<id>.sql. A result whose table declares
-answers = ["Q-NNN"] marks those question ledger rows answered, and its output line lists them.
+answers = ["Q-NNN"] marks those question ledger rows answered, shown as answered (provisional)
+until one of their findings is promoted, and its output line lists them.
 A result that needs more than its query gets a producer module, producers/<id>.py, described below,
 so adding a result never edits this file; put reusable operations in src/. Requires duckdb and pandas.
 """

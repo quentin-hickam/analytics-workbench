@@ -413,10 +413,116 @@ def test_first_pass_answers_keep_to_the_evidence():
     invariants = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Analytical invariants').split())
     # A saved query's figure is exploration until run.py records it as a result.
     assert "can become a finding; present other query output, saved queries' too, as exploration" in invariants
-    for rule in ('offer an untested explanation as a question, not an answer',
-                 'Record what the user recalls as their statement, not as confirmed',
+    for rule in ('Record what the user recalls as their statement, not as confirmed',
                  'name what a comparison leaves uncontrolled when a decision rests on it'):
         assert rule in invariants
+
+
+def test_chat_claim_rules_sit_where_chat_is_written():
+    # An untested explanation stated as an answer, and a share whose base changed between replies,
+    # reached chat while the rule sat among the analytical invariants; it moved, not duplicated.
+    text = AGENTS.read_text(encoding='utf-8')
+    conversation = ' '.join(section(text, '## Conversation').split())
+    assert 'Offer an untested explanation as a question.' in conversation
+    assert "Name every share's base and say when it changes." in conversation
+    assert 'untested explanation' not in ' '.join(section(text, '## Analytical invariants').split())
+    # IDs stay in the records: no allowance for one beside plain text in chat.
+    assert 'Records keep precise terms and IDs; chat uses plain words' in conversation
+    assert 'may sit beside plain text' not in conversation
+    # The headline checkpoint repeats the explanation rule and shows the figures chat has not.
+    checkpoint = ' '.join(section((ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8'),
+                                  '### The headline checkpoint').split())
+    assert "Offer an untested explanation as a question, never as a headline's claim." in checkpoint
+    assert 'show them with the figures behind each headline that chat has not shown' in checkpoint
+    # A duplicate row is a repeat to explain, its treatment proposed without a cause asserted.
+    clean = ' '.join((ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8').split())
+    assert 'landed twice' not in clean
+    assert '`duplicate-rows` are repeats to explain, not known copies: propose their treatment without ' \
+           'asserting why they repeat.' in clean
+
+
+def test_footer_counts_a_provisional_answer_as_provisional():
+    # "5 answered" while chat had shown only leaders: an answer resting on unpromoted findings is provisional.
+    agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
+    # A flagged answer never promoted displays answered (provisional, awaiting recheck): provisional too.
+    assert 'counting any `provisional` answer as provisional' in agents
+    assert '1 provisional' in footer_example(AGENTS.read_text(encoding='utf-8'))
+    status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
+    assert ('Count `answered (provisional)` and `answered (provisional, awaiting recheck)`' in status
+            and 'as provisional, not answered' in status)
+
+
+def test_reports_use_plain_words_not_ids():
+    for path in sorted((ROOT / '.agents/skills').rglob('*.md')):
+        assert 'Report the new ID' not in path.read_text(encoding='utf-8'), path
+    review = ' '.join((ROOT / '.agents/skills/awb-package/references/review.md').read_text(encoding='utf-8').split())
+    assert 'Say in plain words what later drafts will be checked for.' in review
+    report = ' '.join(section((ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8'),
+                              '## 7. Report').split())
+    assert 'each chart by what it shows' in report and 'with the result it serializes' not in report
+    clean = ' '.join(section((ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8'),
+                             '## Report').split())
+    assert 'the recorded issues in plain words, their quality IDs kept in the files' in clean
+    status = ' '.join(section((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8'),
+                              '## Report').split())
+    assert "without its keys or their question and result IDs" in status
+    assert "report that question's text and status" in status and 'report the ID' not in status
+    assert 'list each `provisional` question by its text' in status
+
+
+COMMIT_GUARDS = ('already suggested a commit this session', 'at most once a session')
+
+
+def commit_suggestions(text):
+    """Accepted input: Markdown prose or table rows. Returns each sentence (split after a period
+    followed by whitespace) or table row that suggests a commit: `suggest`, `suggests`, `suggested`
+    or `suggesting` followed in the same sentence by `commit` (any case, `uncommitted` included),
+    unless `no` directly follows the verb, or that names the request "Commit the current work".
+    Errs toward listing: a guard sentence such as "unless you already suggested a commit" is listed
+    too, and must then carry a guard itself. Known limit: a suggestion phrased without `suggest`
+    is not found.
+    """
+    found = []
+    for line in text.split('\n'):
+        for sentence in ([line] if line.lstrip().startswith('|') else re.split(r'(?<=\.)\s+', line)):
+            if re.search(r'\bsuggest(?:s|ed|ing)?\b(?! no\b)[^.]*commit', sentence, re.I) \
+                    or 'Commit the current work' in sentence:
+                found.append(sentence)
+    return found
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('Otherwise suggest committing it, unless you already suggested a commit this session. Next.',
+     ['Otherwise suggest committing it, unless you already suggested a commit this session.']),
+    ('Make and suggest no commits. Suggests no commit.', []),
+    ('| `x` is above zero | "Commit the current work" | request | progress |',
+     ['| `x` is above zero | "Commit the current work" | request | progress |']),
+    ('Suggest one at most once a session while it is uncommitted.',
+     ['Suggest one at most once a session while it is uncommitted.']),
+    ('A suggestion to commit. Commit when asked.', []),
+])
+def test_commit_suggestions_accepted_forms(text, expected):
+    assert commit_suggestions(text) == expected
+
+
+def test_every_commit_suggestion_is_once_a_session():
+    suggestions = [(path, sentence) for path in sorted((ROOT / '.agents/skills').rglob('*.md'))
+                   for sentence in commit_suggestions(path.read_text(encoding='utf-8'))]
+    names = {path.relative_to(ROOT / '.agents/skills').as_posix() for path, _ in suggestions}
+    # The status request, both reports, and the repair report carry the guard the guides already had.
+    assert {'awb-status/SKILL.md', 'awb-package/SKILL.md', 'awb-release/SKILL.md', 'awb-init/SKILL.md',
+            'awb-init/assets/workbench/AGENTS.md', 'awb-init/assets/workbench/workbench-guides/data.md',
+            'awb-init/assets/workbench/workbench-guides/analysis.md'} <= names
+    for path, sentence in suggestions:
+        assert any(guard in sentence for guard in COMMIT_GUARDS), (path, sentence)
+
+
+def test_scoping_counts_a_decision_as_one_choice():
+    interview = ' '.join(section((ROOT / '.agents/skills/awb-scope/SKILL.md').read_text(encoding='utf-8'),
+                                 '## 2. Interview').split())
+    assert 'at most four' in interview
+    assert ('A decision is one choice: never number unrelated choices under one item; '
+            'make each its own decision, and ask any beyond four in a second round.') in interview
 
 
 def test_commit_preference_is_a_readme_line_the_rules_follow():
@@ -503,8 +609,8 @@ def test_only_the_users_questions_are_roots():
     assert 'leave the parent empty only when the user takes the question as one of their own' in record
     # The footer names the user's questions as the roots and counts them only when they changed.
     agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
-    assert ("ends with one plain line: what changed for the user's questions, the ledger's roots, "
-            "if anything, and the next step") in agents
+    assert ("ends with one plain line: any change to the user's questions, the ledger's roots, "
+            "counting any `provisional` answer as provisional, and the next step") in agents
     status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
     assert 'lead with `roots`, the questions the user asked' in status
     assert 'Report `questions.counts`, the totals with every sub-question, only on request' in status

@@ -29,6 +29,7 @@
 # test_provenance_gaps_are_unknown_objects_and_unread_requirements: an {"unknown": reason} object and an unread requirements line are gaps; a settings value or column name such as unknown_pickup, or a string starting with unknown, is not.
 # test_check_numbers_reads_ordinary_notation: the issue's probes: 54.8/57.6 traces when both values are recorded, each half traced alone; 18:00 and December 2011 is give no row; an untraced figure still does.
 # test_numbers_rows_name_the_rule_that_applied: each numbers row's problem names why its number did not trace (no recorded value, joined digits, a recorded value on its rounding's upper edge, or a year-like count) and points to allowed_numbers.
+# test_packaging_commit_without_history_is_no_gap: a repository with no commit, or a project without Git, records its packaging commit as unknown with packaging_state's reason, and provenance_gaps lists neither packaging field; another reason, a non-text reason, or a producing commit is still a gap.
 # test_check_numbers_allowed_phrases_and_precision: an allowed phrase covers only the number it is written around, a bare allowed text every occurrence; a row's text copied exactly covers its number after a line wrap or extra spaces; a number traces at every written digit beyond 28 significant digits and not one unit of a further place outside its rounding.
 # test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's or a path's digits add nothing; evidence text and parsed settings content add scaled and scientific values a narrative can write in full, without dates, booleans, or the settings file's size.
 # test_recorded_values_keep_every_json_digit: profile and evidence fractions keep every written digit, so the exact narrative value traces and a value one digit off does not.
@@ -918,6 +919,26 @@ def test_numbers_rows_name_the_rule_that_applied(tmp_path):
     assert [(row["text"], row["problem"]) for row in draft.check_numbers(path, [Decimal("0.5255")])] == [
         ("40", NOT_RECORDED), ("9:30", JOINED), ("52.5%", ON_EDGE), ("1950", YEAR_COUNT)]
     assert all("allowed_numbers" in problem for problem in draft._UNTRACED.values())
+
+
+def test_packaging_commit_without_history_is_no_gap(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_no_history")
+    # A repository with no commit records the packaging commit as unknown, and lists the untracked sources.
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/awb.py").write_text("")
+    commit, changes = draft.packaging_state(tmp_path)
+    assert commit == {"unknown": "the checkout has no commit yet"} and changes == [{"path": "src/awb.py", "status": "??"}]
+    assert draft.provenance_gaps({"packaging_commit": commit, "packaging_uncommitted_changes": changes}) == []
+    # A project without Git is no gap either; any other unknown packaging state still is.
+    unknown = {"unknown": "the project is not a git repository"}
+    assert draft.provenance_gaps({"packaging_commit": unknown, "packaging_uncommitted_changes": unknown}) == []
+    assert draft.provenance_gaps({"packaging_commit": {"unknown": "git timed out"},
+                                  "packaging_uncommitted_changes": {"unknown": ["the checkout has no commit yet"]},
+                                  "producing_commit": {"unknown": "the checkout has no commit yet"}}) == [
+        {"field": "packaging_commit", "reason": "git timed out"},
+        {"field": "packaging_uncommitted_changes", "reason": ["the checkout has no commit yet"]},
+        {"field": "producing_commit", "reason": "the checkout has no commit yet"}]
 
 
 def test_check_numbers_allowed_phrases_and_precision(tmp_path):
@@ -3190,7 +3211,8 @@ def test_check_draft_open_questions_rows(project, capsys, required, body, placem
     assert verified["open_questions"] == report["open_questions"]
 
 
-def test_open_questions_includes_parked_and_recheck_without_truncation(project, capsys):
+@pytest.mark.parametrize("promoted", [True, False])
+def test_open_questions_includes_parked_and_recheck_without_truncation(project, capsys, promoted):
     provenance = load(project / "src/provenance.py", "ledger_complete_fixture")
     questions = ["Which regions need review?", "Which period applies?", "Which owner decides?",
                  "Which population matters?", "Which definition applies?", "Which caveat matters?"]
@@ -3201,8 +3223,13 @@ def test_open_questions_includes_parked_and_recheck_without_truncation(project, 
     settings.write_text(settings.read_text().replace('[results.r-001]', '[results.r-001]\nanswers = ["Q-001"]'))
     provenance.answer_question(project, "inv", "Q-001", results=["r-001"])
     provenance.set_question(project, "inv", ["Q-002"], "parked", reason="Waiting on owner")
+    if not promoted:
+        write(project / "investigations/inv", "history.md", "# Investigation history\n")
+        provenance.update_findings(project, "inv", ["r-001"], status="provisional", reason="Not yet checked")
     provenance.flag_findings(project, "inv", [{"result": "r-001", "reason": "Changed input"}])
-    assert provenance.question_tree(project, "inv")[0]["display_status"] == "answered (awaiting recheck)"
+    # A recheck of a never-promoted answer is still required on the slide.
+    assert provenance.question_tree(project, "inv")[0]["display_status"] == (
+        "answered (awaiting recheck)" if promoted else "answered (provisional, awaiting recheck)")
     provenance.edit_question(project, "inv", "Q-001", audience="Which regions need review?")
     draft = project / "deliveries/inv/pkg/draft"
     record = manifest(project)
