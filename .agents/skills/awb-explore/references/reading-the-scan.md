@@ -6,7 +6,7 @@ Read this for an anomaly kind's confirmation check, or when you cannot tell a sh
 
 | Kind | Reported when | Confirmation check |
 | --- | --- | --- |
-| `duplicate-rows` | Whole rows repeat. | Check the stated grain. An event log can repeat legitimately; a dimension table cannot. |
+| `duplicate-rows` | Whole rows repeat. | Check the grain; identical events can be legitimate. Cleaning separates cross-part copies (`duplicate-rows:across-parts`) from remaining repeats. |
 | `key-violated` | The declared key has duplicated or null values. | List the duplicates with a follow-up query. Decide whether the key or the data is wrong. |
 | `key-missing` | A `--key` column is absent. | Correct the option from the dataset's catalog row (the view's row for a canonical view); a composite grain is one comma-separated `--key`. |
 | `all-null` | Every in-scope row is null. | Scan with `--no-scope --label all`. If the column is populated outside scope, the gap is in scope only. |

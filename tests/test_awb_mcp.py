@@ -26,7 +26,7 @@
 # test_read_writes_no_bytecode_and_reads_no_shared_cache: a read subprocess runs with bytecode writes off and no PYTHONPYCACHEPREFIX, even one the server inherits, so it reads no bytecode from a cache directory; a write subprocess keeps Python's cache settings.
 # test_root_uris_are_unquoted_once: a root URI's percent escapes are decoded once.
 # test_clean_record_passes_new_issues: records clean-record passes a decisions `new` list through stdin, writing an analyst-authored quality row with the next DQ- ID, its evidence, and no scan link; the records description names `new`.
-# test_lineage_year_and_amend_options_reach_their_helpers: with DuckDB, data clean-scan passes --lineage (a copy across two sheets is a duplicate-rows issue), data eda-scan passes an integer year --date-column with year bounds, and records clean-record passes an amend through stdin, each through the existing tools.
+# test_lineage_year_and_amend_options_reach_their_helpers: with DuckDB, data clean-scan passes --lineage and splits cross-part copies from remaining repeats, data eda-scan accepts an integer year, records clean-record passes independent decisions and an amend, and a corrected-view rescan resolves only the cross-part issue, all through the existing tools.
 # test_subprocess_interpreter_follows_the_project: AWB_PYTHON wins, then README's Project interpreter line, then .venv or venv, then the server's own interpreter, as src/awb.py resolves it.
 
 import importlib.util
@@ -803,25 +803,44 @@ def test_clean_record_passes_new_issues(workbench, connect):
 
 @needs_duckdb
 def test_lineage_year_and_amend_options_reach_their_helpers(workbench, connect):
+    source = ("SELECT * FROM (VALUES ('A', 1, 100, 1990), ('A', 2, 101, 1991), "
+              "('A', 3, 101, 1991), ('B', 1, 101, 1991)) t(sheet, sheet_row, invoice, year)")
     (workbench / "foundation/views/02_lines.sql").write_text(
-        "CREATE VIEW lines AS SELECT * FROM (VALUES ('A', 1, 100, 1990), ('A', 2, 101, 1991), "
-        "('B', 1, 101, 1991)) t(sheet, sheet_row, invoice, year);\n")
+        f"CREATE VIEW lines AS {source};\n")
     client = connect(cwd=workbench)
     text, error = client.call("data", command="clean-scan", args=["lines", "--lineage", "sheet,sheet_row"])
     assert not error, text
-    issue = next(i for i in json.loads(text.split("\n\n")[0])["issues"] if i["key"] == "duplicate-rows")
-    assert issue["count"] == 1 and issue["lineage"] == ["sheet", "sheet_row"]
+    issues = {i["key"]: i for i in json.loads(text.split("\n\n")[0])["issues"]}
+    across, within = issues["duplicate-rows:across-parts"], issues["duplicate-rows"]
+    assert across["count"] == within["count"] == 1
+    assert across["lineage"] == within["lineage"] == ["sheet", "sheet_row"]
     text, error = client.call("data", command="eda-scan", args=["lines", "--date-column", "year", "--start", "1990",
                                                                 "--end", "1991"])
     assert not error and "date column: year (option), by year" in text, text
-    decisions = {"issues": {"S1": {"impact": "Double counts", "treatment": "Open", "status": "open"}}}
+    decisions = {"issues": {
+        across["id"]: {"impact": "Double counts", "treatment": "Await the copy decision", "status": "open"},
+        within["id"]: {"impact": "Separate events", "treatment": "Keep the repeats", "status": "open"}}}
     text, error = client.call("records", command="clean-record", args=["lines"], stdin=json.dumps(decisions))
     assert not error, text
+    assert json.loads(text.split("\n\n")[0])["quality_ids"] == {across["id"]: "DQ-001", within["id"]: "DQ-002"}
     decisions = {"issues": {"DQ-001": {"amend": {"observation": "Sheet B repeats sheet A's 1991 line",
                                                  "reason": "the copy is across sheets"}}}}
     text, error = client.call("records", command="clean-record", args=["lines"], stdin=json.dumps(decisions))
     assert not error and json.loads(text.split("\n\n")[0])["amended"] == ["DQ-001"], text
     assert ("| Sheet B repeats sheet A's 1991 line; amended " in (workbench / "foundation/quality.md").read_text())
+    (workbench / "foundation/views/02_lines.sql").write_text(
+        f"CREATE VIEW lines AS {source} QUALIFY sheet = min(sheet) OVER (PARTITION BY invoice, year);\n")
+    text, error = client.call("data", command="clean-scan", args=["lines", "--rescan"])
+    assert not error, text
+    rescan = json.loads(text.split("\n\n")[0])
+    assert f"{across['id']} duplicate-rows:across-parts: 1 -> 0 resolved (DQ-001)" in rescan["delta"]["issues"]
+    assert f"{within['id']} duplicate-rows: 1 -> 1 unchanged (DQ-002)" in rescan["delta"]["issues"]
+    decisions = {"issues": {across["id"]: {"status": "corrected", "treatment": "One part's copy retained"}}}
+    text, error = client.call("records", command="clean-record", args=["lines"], stdin=json.dumps(decisions))
+    assert not error, text
+    quality = (workbench / "foundation/quality.md").read_text()
+    assert "`lines#duplicate-rows:across-parts`" in quality and "`lines#duplicate-rows`" in quality
+    assert "One part's copy retained | corrected |" in quality and "Keep the repeats | open |" in quality
 
 
 def test_subprocess_interpreter_follows_the_project(tmp_path, monkeypatch):

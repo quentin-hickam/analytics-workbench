@@ -494,9 +494,7 @@ def test_first_pass_answers_keep_to_the_evidence():
     invariants = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Analytical invariants').split())
     # A saved query's figure is exploration until run.py records it as a result.
     assert "can become a finding; present other query output, saved queries' too, as exploration" in invariants
-    for rule in ('Record what the user recalls as their statement, not as confirmed',
-                 'name what a comparison leaves uncontrolled when a decision rests on it'):
-        assert rule in invariants
+    assert 'Name what a comparison leaves uncontrolled when a decision rests on it' in invariants
 
 
 def test_chat_claim_rules_sit_where_chat_is_written():
@@ -504,22 +502,48 @@ def test_chat_claim_rules_sit_where_chat_is_written():
     # reached chat while the rule sat among the analytical invariants; it moved, not duplicated.
     text = AGENTS.read_text(encoding='utf-8')
     conversation = ' '.join(section(text, '## Conversation').split())
-    assert 'Offer an untested explanation as a question.' in conversation
-    assert "Name every share's base and say when it changes." in conversation
-    assert 'untested explanation' not in ' '.join(section(text, '## Analytical invariants').split())
+    assert 'Offer an untested cause, label, or recollection as a question' in conversation
+    assert '("timing errors?", not "timing errors")' in conversation
+    assert "record recollections as the user's" in conversation
+    assert text.count('recollections') == 1 and text.count('recollection as a question') == 1
+    assert 'recalls' not in text
+    assert "Name codes by meaning, and every share's base and when it changes." in conversation
+    assert 'untested' not in ' '.join(section(text, '## Analytical invariants').split())
     # IDs stay in the records: no allowance for one beside plain text in chat.
     assert 'Records keep precise terms and IDs; chat uses plain words' in conversation
     assert 'may sit beside plain text' not in conversation
     # The headline checkpoint repeats the explanation rule and shows the figures chat has not.
     checkpoint = ' '.join(section((ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8'),
                                   '### The headline checkpoint').split())
-    assert "Offer an untested explanation as a question, never as a headline's claim." in checkpoint
+    assert 'Headlines claim only what results show: no untested cause or label, no exception dropped.' in checkpoint
     assert 'show them with the figures behind each headline that chat has not shown' in checkpoint
     # A duplicate row is a repeat to explain, its treatment proposed without a cause asserted.
     clean = ' '.join((ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8').split())
     assert 'landed twice' not in clean
-    assert '`duplicate-rows` are repeats to explain, not known copies: propose their treatment without ' \
+    assert 'Both duplicate issues are repeats to explain, not known copies: propose their treatment without ' \
            'asserting why they repeat.' in clean
+
+
+def test_cross_part_copies_need_the_user_or_source_to_call_them_reextracts():
+    clean = (ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8')
+    decide = ' '.join(section(clean, '## 2. Decide').split())
+    assert 'such as overlapping periods' not in clean
+    assert 'known to be re-extracts' not in clean
+    assert "when the user or source documentation says the parts are re-extracts" in decide
+    assert ("an overlap you observe, or what you already know of a dataset, is not the source saying so") in decide
+    assert "When `duplicate-rows:across-parts` spans more than two parts, count each pair's shared rows" in decide
+    assert "compare the counts with the issue's" not in decide
+    assert 'under a recorded grain with no lineage column in it (repeats then share one grain key)' in decide
+    assert "The user decides everything else" in decide
+    checks = (ROOT / '.agents/skills/awb-clean/references/checks.md').read_text(encoding='utf-8')
+    assert checks.count('first lineage column') == 1
+    assert 'counts rows outside each repeated group\'s minimum part' in checks
+    assert 'counts repeats beyond one in that part, or all repeats without lineage' in checks
+    landing = (ROOT / '.agents/skills/awb-init/references/landing.md').read_text(encoding='utf-8')
+    assert 'part column first, such as `sheet` and `sheet_row`' in landing
+    correction = (ROOT / '.agents/skills/awb-clean/references/correction-views.md').read_text(encoding='utf-8')
+    assert '**Cross-part copies (`duplicate-rows:across-parts`):**' in correction
+    assert '**Exact repeats (`duplicate-rows`), without lineage:**' in correction
 
 
 def test_footer_counts_a_provisional_answer_as_provisional():
@@ -724,8 +748,10 @@ def test_analysis_states_the_threshold_rule_and_the_standard_checks():
     assert ("A threshold, minimum, or exclusion the brief does not settle is the user's decision: propose it to "
             "the user before looking at which rows lead, and say so when you propose one after seeing results.") in add
     assert "with every filtered population reconciled by `reconcile()`" in add
-    assert ("For a series summed over a period, also count the periods each entity in scope has data for, since a "
-            "sum hides missing periods: a count below the period length is a caveat on the finding.") in add
+    assert ("For a series summed over a period, list each in-scope entity's missing periods, inside its series too, "
+            'as a caveat: "unreported in <periods>; sums cover reported periods only", never zero; '
+            "filling gaps by assumption gives an illustrative scenario, never a bound.") in add
+    assert 'a count below the period length' not in add
     assert "Save full precision in result queries and round only for display." in add
     assert "result sessions run DuckDB on one thread" in add
     assert "the investigation's `views/*.sql`" in add and "(`import helpers` for `helpers.py`)" in add
@@ -737,7 +763,9 @@ def test_analysis_states_the_threshold_rule_and_the_standard_checks():
     explore = ' '.join((ROOT / '.agents/skills/awb-explore/SKILL.md').read_text(encoding='utf-8').split())
     assert ("A question-specific exclusion, threshold, or minimum the brief does not settle is the user's decision: "
             "propose it before looking at which rows lead, say so when you propose one after seeing results") in explore
-    assert "count in a follow-up the periods each entity in scope has data for" in explore
+    assert ("list in a follow-up the periods each entity in scope lacks, mid-series too, and record them under "
+            "Unresolved issues and in any quality.md row as unreported, never zero, so the finding on that sum "
+            "carries the caveat") in explore
     contract = ' '.join((ROOT / '.agents/skills/awb-package/references/package-contract.md').read_text(encoding='utf-8').split())
     assert ("A validation check recorded as not assessed stays out of `findings.md` and the methodology note unless "
             "the user should act on it.") in contract
