@@ -47,4 +47,4 @@ Change findings, issues, and next steps with `awb.py state finding`, `state issu
 
 Commit when asked; when README's `Commits:` line says `as I go`, which you set when asked, also commit analytical code as you go. Otherwise suggest one at most once a session while analytical code is uncommitted. While README's `Code history:` line says `none`, make and suggest no commits.
 
-Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen. Take a user's correction to a package draft through `awb-package`, which keeps one later drafts could repeat in `foundation/review-rules.md`.
+Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen. Take a user's correction to a package draft through `awb-package`, which offers to keep one later drafts could repeat in `foundation/review-rules.md`.

@@ -6,6 +6,7 @@ awb-init's installer places this file at `src/packaging/draft.py`. `src/awb.py` 
         [--dataset NAME=RESULT[:COLUMNS]]... [--no-datasets] [--result RESULT]... [--round COLUMN=PLACES]...
     python3 src/awb.py review-rules check <investigation> <package>
     python3 src/awb.py review-rules add --area AREA --severity error|warning --rule TEXT --fix TEXT [--pattern REGEX] [--scope line|slide|document]
+        [--package INVESTIGATION/PACKAGE] --confirmed
     python3 src/awb.py review-receipt start <investigation> <package> --kind full|scoped
     python3 src/awb.py review-receipt record <investigation> <package> --kind full|scoped --report FILE|- [--accept TEXT]...
     python3 src/awb.py review-receipt show <investigation> <package>
@@ -2778,6 +2779,53 @@ def _write_start_here(draft, investigation, package):
         _write_text(path, text)
 
 
+# The brief's Audience line that records a methods note length, in its one written form, and any line that
+# starts like it, after a list marker, `>`, `|`, or `**`, "methodology note" included, so a length recorded
+# in another form is reported rather than read as none.
+_NOTE_LENGTH = re.compile(r"(?:(?:[-*+]|[0-9]+[.)])\s+)?Methods note length: about ([0-9]+) words\.?")
+_NOTE_LENGTH_LIKE = re.compile(r"\s*(?:(?:[-*+>|]|[0-9]+[.)])\s*)*\**method(?:s|ology)\s+note\s+length",
+                               re.IGNORECASE)
+# How far the note may run over the recorded length before the row: 10%, as integer tenths.
+_NOTE_SLACK_TENTHS = 11
+
+
+def note_length_problems(root, investigation, draft) -> list[dict]:
+    """A row when methodology-note.md runs more than 10% over the length the investigation's brief.md
+    records on a `Methods note length: about <n> words` line, or when a line that starts like one is not in
+    that form or two such lines disagree; no row without a note or a recorded length. Words are counted as
+    the note renders: headings, text, and list items, not comments or fenced code. Informational, like
+    slides: it never fails the check."""
+    note = Path(draft) / METHODOLOGY_NOTE
+    if METHODOLOGY_NOTE not in _narratives(draft):
+        return []
+    try:
+        lines = _read_lines(Path(root) / "investigations" / investigation / "brief.md")
+    except FileNotFoundError:
+        return []
+    brief = f"investigations/{investigation}/brief.md"
+    rows, lengths = [], {}
+    for number, line in enumerate(lines, 1):
+        if not _NOTE_LENGTH_LIKE.match(line):
+            continue
+        match = _NOTE_LENGTH.fullmatch(line.strip())
+        if match:
+            lengths.setdefault(int(match[1]), number)
+        else:
+            rows.append({"file": brief, "line": number, "problem": "the methods note length is not written as "
+                                                                  "`Methods note length: about <n> words`"})
+    if len(lengths) > 1:
+        rows.append({"file": brief, "line": sorted(lengths.values())[1],
+                     "problem": f"the brief records more than one methods note length: {sorted(lengths)}"})
+    if len(lengths) == 1:
+        (recorded, number), = lengths.items()
+        words = sum(_words(line.plain) for line in _read_view(note)[0] if line.kind != "fence")
+        if words * 10 > recorded * _NOTE_SLACK_TENTHS:
+            rows.append({"file": METHODOLOGY_NOTE, "words": words, "recorded": recorded,
+                         "problem": f"the note runs {words} words, more than 10% over the about {recorded} words "
+                                    f"{brief}:{number} records; shorten it, or report the length to the user"})
+    return rows
+
+
 # ---------------------------------------------------------------- user acceptances and helper drift
 
 # awb-init's install_helpers.py writes it: each project path it installed or replaced -> that file's SHA-256,
@@ -2856,8 +2904,8 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
               "outline": None, "slides": None, "charts": None, "headings": None, "markdown": None, "claims": None, "questions": None,
               "storyline": None, "unlinked_findings": None, "open_questions": None, "open_questions_count": None,
               "numbers": None, "numbers_problems": [], "inventory": None, "verify": None,
-              "flag_entries": None, "unmatched_flags": None, "draft_markers": None, "start_here": None,
-              "helper_drift": [{**row, "confirmed": False} for row in helper_drift(root)],
+              "flag_entries": None, "unmatched_flags": None, "draft_markers": None, "note_length": None,
+              "start_here": None, "helper_drift": [{**row, "confirmed": False} for row in helper_drift(root)],
               "review": None, "errors": [], "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
@@ -2884,6 +2932,10 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         report["charts"] = check_charts(findings_path, draft / "charts")
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"charts check: {error}")
+    try:
+        report["note_length"] = note_length_problems(root, investigation, draft)
+    except (OSError, UnicodeError) as error:
+        report["errors"].append(f"note length check: {error}")
     try:
         report["headings"] = heading_problems(draft)
     except (OSError, UnicodeError) as error:
@@ -3097,6 +3149,10 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "or not a numbered release, any case, whole words, in the title, subtitle, a slide heading or "
                "**Headline:**, or the title slide's notes; it is informational, since a release copies the draft "
                "byte for byte, so awb-release asks the user to confirm or revise each before releasing.\n"
+               "note_length lists, when the investigation's brief.md records `Methods note length: about <n> "
+               "words`, a methodology-note.md more than 10% longer as it renders, with words and recorded, and a "
+               "brief line that starts like that one but is not in its form, or a second length; it is "
+               "informational, and empty without a note or a recorded length.\n"
                "Without --verify-only it first writes START-HERE.md, plain text in three parts: what to send the "
                "audience (the deck once built, methodology-note.md, each dataset), what builds the deck (the "
                "attach list and prompt assembly/m365.md gives), and what stays internal; the inventory then lists "
@@ -3873,14 +3929,20 @@ _AREA_TEXT = r"(?:[a-z0-9]+-)*[a-z0-9]*[a-z][a-z0-9]*"
 _AREA = re.compile(_AREA_TEXT)
 # [0-9], not \d, which also takes other scripts' digits, such as Arabic-Indic ones.
 _RULE_HEADING = re.compile(rf"## (R-({_AREA_TEXT})-([0-9]{{3,}}))\s*")
-_RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Scope|Fix|Added): ?(.*)")
-_LOOSE_FIELD = re.compile(r"\s*[-*+]?\s*(?:Severity|Rule|Pattern|Scope|Fix|Added)\s*:", re.IGNORECASE)
+_RULE_FIELD = re.compile(r"- (Severity|Rule|Pattern|Scope|Package|Fix|Added): ?(.*)")
+_LOOSE_FIELD = re.compile(r"\s*[-*+]?\s*(?:Severity|Rule|Pattern|Scope|Package|Fix|Added)\s*:", re.IGNORECASE)
 _MARKDOWN_HEADING = re.compile(r"\s*#{1,6}(?:\s|$)")
 _REQUIRED_FIELDS = ("Severity", "Rule", "Pattern", "Fix")
 # What one violation of a rule covers, and so how check groups its matches: each line (the default, when a
 # rule has no Scope field); each slide, read as the section a #, ##, or ### heading opens as the narrative
 # renders, which in findings.md is one slide and in methodology.md and the note one section; or each file.
 _SCOPES = ("line", "slide", "document")
+# A rule kept for one package names it as <investigation>/<package>; check lists it for that package alone.
+_RULE_PACKAGE = re.compile(rf"({_SIMPLE.pattern})/({_SIMPLE.pattern})")
+# A number in a rule's text, so add can warn when it repeats one a draft states: digits with any thousands
+# groups and decimal part, compared by value. Any digit run counts, a version's parts included, since a
+# needless warning costs a glance and a missed one keeps one draft's figure in every later review.
+_RULE_NUMBER = re.compile(r"(?<![0-9])[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?")
 _BAD_HEADING = ("rule heading is not ## R-<area>-NNN with a lowercase area, its last part holding a letter, "
                 "and a three-digit number")
 _STRAY_HEADING = "heading after the first rule is not a ## R-<area>-NNN rule heading"
@@ -3889,17 +3951,18 @@ _OTHER_BREAK = re.compile("[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 _MATCH_CAP = 20
 _RULES_HEADER = """# Review rules
 
-Rules from the user's corrections to package drafts. The read-only package review checks every rule on \
-every draft; `python3 src/awb.py review-rules check <investigation> <package>` lists each rule with the \
-narrative lines its pattern matches.
+Rules from the user's corrections to package drafts. The read-only package review checks every rule that \
+holds for the draft's package; `python3 src/awb.py review-rules check <investigation> <package>` lists each \
+such rule with the narrative lines its pattern matches.
 
-Add a rule only with `python3 src/awb.py review-rules add`. A rule ID, `R-<area>-NNN`, is never \
+Add a rule only with `python3 src/awb.py review-rules add --confirmed`, after the user says yes to it. A rule ID, `R-<area>-NNN`, is never \
 renumbered, reused, or deleted: edit a rule's other fields in place, and retire a rule by setting its \
 severity to `retired`. A pattern is a Python regular expression in backticks, matched against each line \
 of the draft's `findings.md`, `methodology.md`, and `methodology-note.md` when it has one, or `none` when no \
 pattern can find the problem. An optional scope, `line` (the default), `slide`, or `document`, sets what one \
 violation covers: a line, a slide (in `methodology.md` and the note, a section under a `#`, `##`, or `###` \
-heading), or a whole file.
+heading), or a whole file. An optional package, `<investigation>/<package>`, keeps a rule for that package \
+alone; every other rule holds for every package.
 """
 
 
@@ -3937,8 +4000,10 @@ def parse_review_rules(lines: list) -> tuple:
 
     The grammar is closed. A rule section holds blank lines and `- <Field>: <value>` lines, each field at
     most once: Severity (error, warning, or retired), Rule, Pattern (`regex` in backticks, or none), and
-    Fix, all required; Scope (exactly line, slide, or document; line when absent) and Added, optional. Any
-    other line, field, or value is a problem, and a rule with an unusable Pattern or Scope is unchecked.
+    Fix, all required; Scope (exactly line, slide, or document; line when absent), Package
+    (<investigation>/<package>; every package when absent), and Added, optional. Any other line, field, or
+    value is a problem, and a rule with an unusable Pattern or Scope is unchecked; one with an unusable
+    Package holds for every package, so a typo never hides it.
     Any heading ends a section, and after the first rule every heading must be a rule's. Inside a rule
     section only blank and `- Field:` lines may appear, so a wrapped line starting with `#` is reported
     too; outside one no heading may name a rule and no line may look like a field. A rule that a hand
@@ -3981,7 +4046,8 @@ def parse_review_rules(lines: list) -> tuple:
             current["fields"][field[1]] = field[2].strip()
         elif line.strip():
             problems.append({"rule": current["id"], "line": number,
-                             "problem": "line is not a - Severity, Rule, Pattern, Scope, Fix, or Added field"})
+                             "problem": "line is not a - Severity, Rule, Pattern, Scope, Package, Fix, or "
+                                        "Added field"})
     seen = {}
     for rule in rules:
         fields = rule.pop("fields")
@@ -3998,7 +4064,11 @@ def parse_review_rules(lines: list) -> tuple:
             problems.append({"rule": rule["id"], "problem": f"unknown severity {severity!r}; use error, "
                                                             "warning, or retired"})
         rule.update(severity=severity, rule=fields.get("Rule", ""), fix=fields.get("Fix", ""),
-                    pattern=None, scope=fields.get("Scope", "line"), usable=True)
+                    pattern=None, scope=fields.get("Scope", "line"), package=fields.get("Package"), usable=True)
+        if rule["package"] is not None and not _RULE_PACKAGE.fullmatch(rule["package"]):
+            problems.append({"rule": rule["id"], "problem": f"Package {rule['package']!r} is not "
+                                                            "<investigation>/<package>"})
+            rule["package"] = None
         if fields.get("Pattern"):
             rule["pattern"], problem = _parse_pattern(fields["Pattern"])
             if problem:
@@ -4068,8 +4138,14 @@ def _read_rules(root):
     return parse_review_rules(_read_lines(path))
 
 
+def _for_package(rule, investigation, package):
+    """Whether a rule holds for this package: every rule without a Package field, and one naming it."""
+    return rule["package"] is None or rule["package"] == f"{investigation}/{package}"
+
+
 def check_review_rules(root, investigation, package) -> dict:
-    """List every review rule with the draft narrative lines its pattern matches; writes nothing."""
+    """List every review rule that holds for the package with the draft narrative lines its pattern matches,
+    leaving out a rule kept for another package; writes nothing."""
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"rules_file": REVIEW_RULES, "draft": _rel(root, draft), "rules": [], "problems": [], "errors": []}
@@ -4089,9 +4165,13 @@ def check_review_rules(root, investigation, package) -> dict:
         return report
     rules, report["problems"] = parsed
     for rule in rules:
+        if not _for_package(rule, investigation, package):
+            continue
         row = {"id": rule["id"], "severity": rule["severity"]}
         if rule["scope"] in _SCOPES[1:]:
             row["scope"] = rule["scope"]
+        if rule["package"] is not None:
+            row["package"] = rule["package"]
         if rule["severity"] == "retired":
             row["status"] = "retired"
         elif not rule["usable"]:
@@ -4109,12 +4189,62 @@ def check_review_rules(root, investigation, package) -> dict:
     return report
 
 
-def add_review_rule(root, area, severity, rule, fix, pattern=None, scope=None, *, today=None) -> dict:
+def _draft_numbers(root, drafts):
+    """({value: (narrative path, line)} for the first place each number stands in the drafts' narratives,
+    [warnings for a narrative that cannot be read])."""
+    found, warnings = {}, []
+    for draft in drafts:
+        for name in _narratives(draft):
+            try:
+                lines = _read_lines(draft / name)
+            except FileNotFoundError:
+                continue  # a narrative not written yet states no number
+            except (OSError, UnicodeError) as error:
+                warnings.append(f"{_rel(root, draft / name)} not read for numbers: {error}")
+                continue
+            for number, line in enumerate(lines, 1):
+                for match in _RULE_NUMBER.finditer(line):
+                    found.setdefault(Decimal(match[0].replace(",", "")), (_rel(root, draft / name), number))
+    return found, warnings
+
+
+def rule_number_warnings(root, texts, package=None) -> list[str]:
+    """A warning for each number in texts (the rule and its fix) that a draft's narratives also state: the
+    package's draft for a package rule, else every draft under deliveries/. A rule repeating one draft's
+    figure is usually that draft's correction, not a rule later drafts can follow."""
+    root = Path(root)
+    drafts = [_package_dir(root, *package.split("/")) / "draft"] if package else \
+        sorted(path for path in (root / "deliveries").glob("*/*/draft") if path.is_dir())
+    found, warnings = _draft_numbers(root, drafts)
+    named = {}
+    for text in texts:
+        for match in _RULE_NUMBER.finditer(text):
+            named.setdefault(Decimal(match[0].replace(",", "")), match[0])
+    for value, written in named.items():
+        if value in found:
+            path, line = found[value]
+            warnings.append(f"the rule names {written}, which {path}:{line} also states; a rule says what every "
+                            "later draft must do, so if it holds this draft's figure, reword it in place with "
+                            "the user or keep the correction as an edit")
+    return warnings
+
+
+def add_review_rule(root, area, severity, rule, fix, pattern=None, scope=None, package=None, *,
+                    confirmed=False, today=None) -> dict:
     """Append rule R-<area>-NNN, numbered after every ID the area has used, creating the file if absent.
 
-    A scope is written only when given; a rule without one is checked line by line."""
+    Refuses unless confirmed, the user having said yes to keeping the correction as a standing rule. A
+    scope is written only when given; a rule without one is checked line by line. A package,
+    <investigation>/<package>, must name an existing package and keeps the rule for it alone. warnings
+    lists numbers the rule shares with a draft (rule_number_warnings); they never refuse."""
     root = Path(root)
     path = root / REVIEW_RULES
+    if not confirmed:
+        return {"added": None, "refused": "ask the user first whether later drafts should be checked for this "
+                                          "correction, and pass --confirmed once they say yes"}
+    if package is not None and not _package_dir(root, *package.split("/")).is_dir():
+        return {"added": None, "refused": f"no package at deliveries/{package}; --package names "
+                                          "<investigation>/<package>"}
     try:
         parsed = _read_rules(root)
     except (OSError, UnicodeError) as error:
@@ -4127,6 +4257,7 @@ def add_review_rule(root, area, severity, rule, fix, pattern=None, scope=None, *
     rule_id = f"R-{area}-{number:03d}"
     day = today or datetime.now().astimezone().date().isoformat()
     scoped = f"- Scope: {scope}\n" if scope else ""
+    scoped += f"- Package: {package}\n" if package else ""
     entry = (f"## {rule_id}\n\n- Severity: {severity}\n- Rule: {rule}\n"
              f"- Pattern: {f'`{pattern}`' if pattern else 'none'}\n{scoped}- Fix: {fix}\n- Added: {day}\n")
     existing = path.read_text(encoding="utf-8-sig") if parsed is not None else ""
@@ -4135,7 +4266,7 @@ def add_review_rule(root, area, severity, rule, fix, pattern=None, scope=None, *
     path.parent.mkdir(parents=True, exist_ok=True)
     _write_text(path, existing.rstrip("\n") + "\n\n" + entry)
     return {"added": rule_id, "rules_file": REVIEW_RULES, "created": parsed is None,
-            "rules": len(rules) + 1}
+            "rules": len(rules) + 1, "warnings": rule_number_warnings(root, (rule, fix), package)}
 
 
 def cli_review_rules(root: Path, argv: list[str]) -> int:
@@ -4148,12 +4279,13 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
     actions = parser.add_subparsers(dest="action", required=True, metavar="{check,add}")
     check = actions.add_parser(
         "check", formatter_class=raw, help="list every rule with the draft lines its pattern matches",
-        description="List every review rule with the lines of the draft's findings.md, methodology.md, and "
-                    "methodology-note.md when the draft holds it, that its pattern matches. Writes nothing.",
+        description="List every review rule that holds for the package, a rule kept for another package left "
+                    "out, with the lines of the draft's findings.md, methodology.md, and methodology-note.md "
+                    "when the draft holds it, that its pattern matches. Writes nothing.",
         epilog="Prints one JSON line.\nEach rules row has id, severity, and status: matched (with matches, "
                "at most 20, and more_matches beyond), no match, no pattern (judge the rule by reading), "
                "retired, or unchecked (its problem is listed). A row has scope when the rule's is slide or "
-               "document.\nA line rule's match is one line: file, line, and text. A slide rule's match is "
+               "document, and package when the rule is kept for this package.\nA line rule's match is one line: file, line, and text. A slide rule's match is "
                "one slide, in methodology.md and the note one section, under a #, ##, or ### heading as the "
                "file renders: file, heading (null before the first), the heading's line, and lines, each line "
                "and text. A document rule's match is one file: file and lines. A match lists at most 20 "
@@ -4164,10 +4296,13 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
     add = actions.add_parser(
         "add", formatter_class=raw, help="append the next numbered rule",
         description=f"Append a rule to {REVIEW_RULES}, creating the file when absent, as R-<area>-NNN: the "
-                    "number after every one the area has used, retired rules included.",
-        epilog="Prints one JSON line: added (the new ID), rules_file, created, and rules (the count).\nRefuses, "
-               "writing nothing, when the rule file has problems that `review-rules check` lists.\nExit 0 "
-               "added; 1 refused; 2 unusable arguments.")
+                    "number after every one the area has used, retired rules included. Only with --confirmed: "
+                    "the user said yes to keeping the correction as a standing rule.",
+        epilog="Prints one JSON line: added (the new ID), rules_file, created, rules (the count), and warnings: "
+               "each number the rule or fix names that a draft's narratives also state (the --package draft, "
+               "else every draft), which still adds the rule.\nRefuses, writing nothing, without --confirmed, "
+               "when --package names no package, or when the rule file has problems that `review-rules check` "
+               "lists.\nExit 0 added; 1 refused; 2 unusable arguments.")
     add.add_argument("--area", required=True, help="what the rule governs, lowercase words joined by '-', "
                                                    "the last not all digits, such as periods or "
                                                    "metric-definitions")
@@ -4182,6 +4317,10 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
                           "rather than per line: line (the default, written only when given), slide (one "
                           "slide, in methodology.md and the note one section under a #, ##, or ### heading), "
                           "or document (one file)")
+    add.add_argument("--package", metavar="INVESTIGATION/PACKAGE",
+                     help="keep the rule for this package alone (default: every package)")
+    add.add_argument("--confirmed", action="store_true",
+                     help="the user said yes to keeping the correction as a rule later drafts are checked for")
     args = parser.parse_args(argv)
     if args.action == "check":
         report = check_review_rules(Path(root), _simple(args.investigation, "investigation"),
@@ -4205,8 +4344,10 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
             add.error(f"--{name} is not valid UTF-8")
     if args.pattern is not None and (problem := _pattern_problem(args.pattern)):
         add.error(f"--pattern {problem}")
+    if args.package is not None and not _RULE_PACKAGE.fullmatch(args.package):
+        add.error(f"--package must be <investigation>/<package>, each a simple name: {args.package!r}")
     report = add_review_rule(Path(root), args.area, args.severity, args.rule.strip(), args.fix.strip(),
-                             args.pattern, args.scope)
+                             args.pattern, args.scope, args.package, confirmed=args.confirmed)
     _print(report)
     return 0 if report["added"] else 1
 
@@ -4222,9 +4363,14 @@ STARTED = "started.json"
 _KINDS = ("full", "scoped")
 # What a review reads, in the order the fingerprint hashes it, and each one's file in the snapshot; then
 # each represented result's evidence file the manifest's results name, by its path, in sorted order.
+# The brief is keyed brief.md and read from the investigation; its questions and Audience set what a review checks.
+# The glossary and source register are read whole, as step 3's readability and source-series checks read them.
+BRIEF = "brief.md"
+GLOSSARY = "foundation/glossary.md"
+SOURCES = "foundation/sources.md"
 _REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.md",
-                  METHODOLOGY_NOTE: METHODOLOGY_NOTE, REVIEW_RULES: "review-rules.md",
-                  "revalidation_flags": "revalidation_flags.json"}
+                  METHODOLOGY_NOTE: METHODOLOGY_NOTE, BRIEF: BRIEF, REVIEW_RULES: "review-rules.md",
+                  GLOSSARY: "glossary.md", SOURCES: "sources.md", "revalidation_flags": "revalidation_flags.json"}
 # show's whole JSON line, as printed, stays within one read tool result (16,000 characters by default).
 _READ_LIMIT = 16000
 _SUMMARY = re.compile(r"review( \(scoped\))?: (?:(clean)|([0-9]+) violations? \(([0-9]+) errors?\), "
@@ -4253,21 +4399,56 @@ def _reviewed_flags(record):
             if isinstance(flag, dict) else flag for flag in flags]
 
 
+def _package_rules(data, investigation, package):
+    """The rule file's bytes without the sections of rules kept for another package, so adding or changing
+    one leaves this package's review current, or None when no rule holds for this package, as for an absent
+    file. A file that does not decode or parse cleanly is kept whole, so any change to it still counts."""
+    try:
+        rules, problems = parse_review_rules([line.removesuffix("\r")
+                                              for line in data.decode("utf-8-sig").split("\n")])
+    except UnicodeError:
+        return data
+    if problems:
+        return data
+    if not any(_for_package(rule, investigation, package) for rule in rules):
+        return None
+    lines = data.split(b"\n")
+    # A sound file holds only rule headings after its first rule, so a section runs to the next one; the
+    # last runs to the end of the file, its final newline included, so a rule appended for another package
+    # leaves these bytes exactly as they were.
+    ends = [rule["line"] - 1 for rule in rules[1:]] + [len(lines)]
+    foreign = [(rule["line"] - 1, end) for rule, end in zip(rules, ends)
+               if not _for_package(rule, investigation, package)]
+    if not foreign:
+        return data
+    kept, last = [], 0
+    for start, end in foreign:
+        kept += lines[last:start]
+        last = end
+    kept += lines[last:]
+    return b"\n".join(kept) + (b"\n" if last == len(lines) and kept and kept[-1] != b"" else b"")
+
+
 def review_inputs(root, investigation, package) -> dict:
-    """{input: bytes, or None when absent} for exactly what a review reads: the three narratives, the rule
-    file, the reduced revalidation_flags as indented JSON, and each evidence file the manifest's results
-    name, which step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a
-    directory included."""
+    """{input: bytes, or None when absent} for exactly what a review reads: the three narratives, the
+    investigation's brief.md, the rule file without rules kept for another package (_package_rules), the
+    glossary and source register whole, the reduced revalidation_flags as indented JSON, and each evidence
+    file the manifest's results name, which step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a directory
+    included."""
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     paths = {name: draft / name for name in NARRATIVES + (METHODOLOGY_NOTE,)}
+    paths[BRIEF] = root / "investigations" / investigation / BRIEF
     paths[REVIEW_RULES] = root / REVIEW_RULES
+    paths[GLOSSARY], paths[SOURCES] = root / GLOSSARY, root / SOURCES
     inputs = {}
     for name, path in paths.items():
         try:
             inputs[name] = path.read_bytes()
         except FileNotFoundError:
             inputs[name] = None
+    if inputs[REVIEW_RULES] is not None:
+        inputs[REVIEW_RULES] = _package_rules(inputs[REVIEW_RULES], investigation, package)
     record, flags = {}, None
     try:
         record = _read_json(draft / MANIFEST)
@@ -4512,8 +4693,11 @@ def review_receipt(root, investigation, package) -> dict:
             before = (directory / "snapshot" / _stored(name)).read_bytes()
         except OSError:
             before = None
+        # The rule file is diffed as the review reads it, so its line numbers count only this package's rules.
         label = f"{draft}/{MANIFEST} revalidation_flags" if name == "revalidation_flags" else \
-            f"{draft}/{name}" if name in _REVIEW_INPUTS and name != REVIEW_RULES else name
+            f"investigations/{investigation}/{BRIEF}" if name == BRIEF else \
+            f"{REVIEW_RULES} without rules kept for another package" if name == REVIEW_RULES else \
+            f"{draft}/{name}" if name in _REVIEW_INPUTS and not name.startswith("foundation/") else name
         pieces += difflib.unified_diff(_diff_text(before), _diff_text(current.get(name)),
                                        f"reviewed {label}", label)
     # Cut against what the rest of the printed line leaves, each line counted as JSON encodes it, so a quote
@@ -4556,8 +4740,10 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
     record = actions.add_parser(
         "record", formatter_class=raw, help="record a review's report and what it read",
         description="Record the report of a review begun with start: snapshot the draft's findings.md, "
-                    "methodology.md, methodology-note.md when present, foundation/review-rules.md when present, "
-                    "and the manifest's revalidation_flags (finding, reason, represented_in, and whether the "
+                    "methodology.md, methodology-note.md when present, the investigation's brief.md when present, "
+                    "foundation/glossary.md and foundation/sources.md when present, "
+                    "foundation/review-rules.md when present without rules kept for another package, and the "
+                    "manifest's revalidation_flags (finding, reason, represented_in, and whether the "
                     "disposition is omit) and each evidence file its results name, and write receipt.json with "
                     "a SHA-256 fingerprint of them, the report verbatim, passed, and accepted. Each record "
                     "replaces the previous one and consumes the start.",
@@ -4592,9 +4778,11 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
         epilog="Prints one JSON line: status (none: no record; current: it passed and nothing it read has "
                "changed; stale: something it read has changed; failed: nothing has changed, but it did not "
                "pass), kind, recorded_at, accepted, report (the prior report), changed (each input whose content "
-               f"differs), diff (a unified diff of each from the reviewed copy to the current file, its + line "
-               f"numbers the current file's, cut so the printed line stays within {_READ_LIMIT} characters, with "
-               "diff_cut counting what was cut), and errors.\nExit 0 unless errors is not empty.")
+               "differs; brief.md is the investigation's brief, an evidence file is named by its path), diff (a "
+               "unified diff of each from the reviewed copy to the current file, its + line numbers the current "
+               "file's, the rule file's counting only this package's rules, cut so the printed line stays "
+               f"within {_READ_LIMIT} characters, with diff_cut counting what was cut), and errors.\n"
+               "Exit 0 unless errors is not empty.")
     _package_arguments(show)
     args = parser.parse_args(argv)
     investigation, package = _simple(args.investigation, "investigation"), _simple(args.package, "package")

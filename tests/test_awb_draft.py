@@ -85,6 +85,7 @@
 # test_check_draft_skips_negated_causal_wording: does not test what caused them passes check-draft's claims; drove the increase on the same slide is still a row.
 # test_methodology_note_limitations_section_is_not_read_for_claims: causal wording under the note's ## Limitations, its ### sections included, gives no claims row; the same sentence under another section does.
 # test_methodology_note_is_checked_with_rows_naming_it: a clean methodology-note.md passes and joins the inventory; an internal name, an untraced number, causal wording above the strongest represented claim, and an HTML block in it fail check-draft and release with rows naming the file; without it check-draft reports exactly what it did before.
+# test_note_over_the_recorded_length_is_an_informational_row: a methodology-note.md more than 10% over the brief's `Methods note length: about <n> words`, counted as it renders, is a note_length row in both modes that never fails the check; at 10% over, with no recorded length, no brief, or no note there is none; a length line in another form, or two lengths, is a row naming the brief's line.
 # test_check_draft_counts_main_and_appendix_slides: slides counts the main sequence, title included, and the appendix apart; How we know under ## Appendix passes.
 # test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section; an appendix finding slide is held to its claim strength.
 # test_appendix_how_we_know_and_limitations_wording_is_not_read: with only an association result represented, causal wording on How we know and Limitations under ## Appendix gives no claims row, and the same wording on an appendix finding slide is refused.
@@ -3349,6 +3350,60 @@ def test_methodology_note_limitations_section_is_not_read_for_claims(project, ca
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and [(row["section"], row["phrase"]) for row in report["claims"]] == [
         ("Exclusions", "attributable to"), ("Coverage", "due to"), ("Contacts", "drives")]
+
+
+def note_of(words):
+    """A note of `words` rendered words: a three-word title and a bold paragraph, with a comment that renders
+    no words."""
+    body = " ".join(["word"] * (words - 4))
+    return f"# How we counted\n\n<!-- many hidden words here -->\n\n**{body}** and\n"
+
+
+@pytest.mark.parametrize("brief, words, rows", [
+    ("Methods note length: about 100 words\n", 111, [{"words": 111, "recorded": 100}]),
+    ("- Methods note length: about 100 words.\n", 111, [{"words": 111, "recorded": 100}]),
+    ("Methods note length: about 100 words\n", 110, []),  # 10% over is within the length
+    ("The board wants one page.\n", 400, []),  # no recorded length, no row
+    (None, 400, []),  # no brief
+    ("template", 400, []),  # the shipped brief template's guidance records no length
+    ("Methods note length: one page\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+    ("**Methods note length:** about 500 words\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+    ("Methods note length: about 500 words\nMethods note length: about 400 words\n", 30,
+     [{"file": "investigations/inv/brief.md", "line": 6}]),
+    # A numbered list marker is read like a bulleted one (review probes).
+    ("1. Methods note length: about 100 words\n", 111, [{"words": 111, "recorded": 100}]),
+    ("1) Methods note length: about 100 words\n", 111, [{"words": 111, "recorded": 100}]),
+    # Other spellings are reported, never read as no preference.
+    ("> Methods note length: about 100 words\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+    ("| Methods note length | about 100 words |\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+    ("Methodology note length: about 100 words\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+])
+def test_note_over_the_recorded_length_is_an_informational_row(project, capsys, brief, words, rows):
+    if brief == "template":
+        write(project, "investigations/inv/brief.md",
+              (SKILLS / "awb-init/assets/workbench/investigation/brief.md").read_text())
+    elif brief is not None:
+        write(project, "investigations/inv/brief.md", "# Investigation brief\n\n## Audience\n\n" + brief)
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["note_length"] == [] and report["passed"]  # no note, no row
+    write(project / "deliveries/inv/pkg/draft", "methodology-note.md", note_of(words))
+    for argv in ((), ("--verify-only",)):
+        code, report = run(project, capsys, "check-draft", "inv", "pkg", *argv)
+        assert code == 0 and report["passed"], report  # informational: it never fails the check
+        assert [{key: row[key] for key in expected} for row, expected in zip(report["note_length"], rows)] == rows
+        assert len(report["note_length"]) == len(rows)
+    if rows and "words" in rows[0]:
+        assert report["note_length"][0]["file"] == "methodology-note.md"
+        assert "investigations/inv/brief.md:5 records" in report["note_length"][0]["problem"]
+
+
+def test_note_length_skips_a_fence_language_label(project, capsys):
+    # 110 rendered words and a labelled fence stay within about 100 words; the label is fenced code.
+    write(project, "investigations/inv/brief.md", "# Brief\n\nMethods note length: about 100 words\n")
+    write(project / "deliveries/inv/pkg/draft", "methodology-note.md",
+          note_of(110) + "\n```python\nprint(1)\n```\n")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["note_length"] == [], report["note_length"]
 
 
 def test_check_draft_counts_main_and_appendix_slides(project, capsys):
