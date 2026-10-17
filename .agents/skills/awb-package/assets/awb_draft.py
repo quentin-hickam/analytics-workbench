@@ -3900,9 +3900,11 @@ _REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.m
 _READ_LIMIT = 16000
 _SUMMARY = re.compile(r"review( \(scoped\))?: (?:(clean)|([0-9]+) violations? \(([0-9]+) errors?\), "
                       r"([0-9]+) narrative problems?, ([0-9]+) command problems?)\.?")
-# A row may be bulleted or numbered; review_summary strips backticks around it, as around the last line.
-_VIOLATION_ROW = re.compile(r"(?:(?:[-*+]|[0-9]+[.)])\s+)?R-\S+ violation (error|warning)(?=\s)")
-_NARRATIVE_ROW = re.compile(r"(?:(?:[-*+]|[0-9]+[.)])\s+)?narrative\s")
+# A row may be bulleted or numbered, with backticks around it inside or outside the marker; review_summary
+# strips both before matching, as it strips backticks around the last line.
+_ROW_MARKER = re.compile(r"^(?:[-*+]|[0-9]+[.)])\s+")
+_VIOLATION_ROW = re.compile(r"R-\S+ violation (error|warning)(?=\s)")
+_NARRATIVE_ROW = re.compile(r"narrative\s")
 _SUMMARY_FORM = ("`review: clean`, or `review: <v> violations (<e> error), <n> narrative problems, <c> command "
                  "problems`, opening `review (scoped):` for a scoped review")
 NO_REVIEW = "no passed review of this draft: run the review in awb-package's references/review.md"
@@ -3993,8 +3995,9 @@ def review_summary(text, kind, accepted) -> tuple:
         return None, "the report's last line counts more error violations than violations"
     if match[2] and accepted:
         return None, "a clean review has nothing to accept; record it without --accept"
-    rows = Counter(row[1] for row in map(_VIOLATION_ROW.match, lines[:-1]) if row)
-    narrative_rows = sum(1 for line in lines[:-1] if _NARRATIVE_ROW.match(line))
+    body = [_ROW_MARKER.sub("", line, count=1).strip("`").strip() for line in lines[:-1]]
+    rows = Counter(row[1] for row in map(_VIOLATION_ROW.match, body) if row)
+    narrative_rows = sum(1 for line in body if _NARRATIVE_ROW.match(line))
     if rows["error"] > errors or rows["warning"] > violations - errors or narrative_rows > narrative:
         return None, (f"the report lists {rows['error']} error and {rows['warning']} warning violations and "
                       f"{narrative_rows} narrative problems, more than its last line counts")

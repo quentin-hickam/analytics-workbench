@@ -33,7 +33,7 @@
 # test_scoped_record_needs_a_prior_record: a scoped report with no record to scope against is refused.
 # test_represented_results_evidence_is_what_the_review_read: each evidence file the manifest's results name is snapshotted; a changed or dropped one shows stale, named by its path, with its diff.
 # test_an_error_violation_or_command_problem_cannot_be_accepted: an --accept never passes a report counting an error violation or a command problem.
-# test_unusable_report_is_refused_and_writes_nothing: an empty report, a last line that does not parse or is not last, a --kind its opening contradicts, more errors than violations, and rows the last line undercounts, backticked or numbered rows included, are refused, writing nothing and leaving an earlier record as it was.
+# test_unusable_report_is_refused_and_writes_nothing: an empty report, a last line that does not parse or is not last, a --kind its opening contradicts, more errors than violations, and rows the last line undercounts, backticked or numbered rows included, in backticks inside or outside the marker, are refused, writing nothing and leaving an earlier record as it was.
 # test_clean_review_takes_no_acceptance: --accept on a clean report is refused.
 # test_summary_line_probes: backticks, a closing period, singular words, and bulleted rows read the same; the counts decide passed.
 # test_snapshot_sits_beside_the_draft_and_is_replaced: the snapshot holds exactly what a review reads, under the package's review/, never in draft/, and each record replaces it, a removed note included.
@@ -755,6 +755,10 @@ def test_an_error_violation_or_command_problem_cannot_be_accepted(project, capsy
     ('`R-periods-001 violation error findings.md:3 "partial month"`\n`review: clean`\n', "full", "more than its"),
     ('1. R-periods-001 violation error findings.md:3 "partial month"\nreview: clean\n', "full", "more than its"),
     ('2) narrative findings.md:3 "x" overstated\nreview: clean\n', "full", "more than its"),
+    # A bulleted or numbered row in backticks inside its marker counts too.
+    ('- `R-periods-001 violation error findings.md:3 "partial month"`\nreview: clean\n', "full", "more than its"),
+    ('1. `narrative findings.md:3 "x" overstated`\nreview: clean\n', "full", "more than its"),
+    ('`- R-periods-001 violation error findings.md:3 "partial month"`\nreview: clean\n', "full", "more than its"),
 ])
 def test_unusable_report_is_refused_and_writes_nothing(project, capsys, report, kind, refusal):
     before = snapshot(project)
