@@ -1054,6 +1054,40 @@ def test_run_template_refuses_shared_sql_reading_an_undeclared_file(project, tmp
     assert done.stderr == f"investigations/inv/views/01_screen.sql reads {outside}, outside the project; copy it into the project\n"
 
 
+def test_run_template_refuses_shared_sql_reading_a_glob_or_folder_outside_a_publication(project):
+    pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    install_run_template(project)
+    write(project, ".gitignore", b"*.pyc\n")
+    write(project, "investigations/inv/exclusions/a.csv", b"n\n1\n")
+    write(project, "investigations/inv/queries/r1.sql", b"select n from screened order by n\n")
+    code = b'code = ["exclusions/a.csv"]\n'
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS.replace(b"[results.r1]\n", b"[results.r1]\n" + code).replace(b"[results.r2]\n", b"[results.r2]\n" + code))
+    run = [sys.executable, str(project / "investigations/inv/run.py")]
+    screen = "create view screened as select n from orders where n not in (select n from read_csv({}));\n"
+    # The round-3 closure repro: with every file the glob matches in code, a file added later would
+    # change every result unrecorded, so a glob or folder outside a publication is refused, as code
+    # refuses a folder.
+    for literal in ("investigations/inv/exclusions/*.csv", "investigations/inv/exclusions"):
+        write(project, "investigations/inv/views/01_screen.sql", screen.format(f"'{literal}'").encode())
+        done = subprocess.run(run, capture_output=True, text=True)
+        assert done.returncode == 2 and done.stdout == "", done.stdout + done.stderr
+        assert done.stderr == (
+            f"investigations/inv/views/01_screen.sql reads investigations/inv/exclusions/a.csv through the glob or "
+            f"folder '{literal}', outside a publication: evidence would miss a file added to it later, so read each "
+            f"file by its own path, listed in every result's code, or publish them\n")
+        assert not (project / "investigations/inv/evidence").exists()
+    # Each file by its own path runs; a word without "/" naming no file, such as a regex, is not a path,
+    # and a folder outside the project, such as a separator, is not walked.
+    write(project, "investigations/inv/views/01_screen.sql",
+          (screen.format("['investigations/inv/exclusions/a.csv']").rstrip(";\n")
+           + " and regexp_matches(n::varchar, '.*') and len(string_split('a/b', '/')) = 2;\n").encode())
+    done = subprocess.run(run + ["r1"], capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (project / "investigations/inv/results/r1.csv").read_text() == "n\n0\n2\n"
+
+
 def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(project):
     pytest.importorskip("duckdb")
     pytest.importorskip("pandas")

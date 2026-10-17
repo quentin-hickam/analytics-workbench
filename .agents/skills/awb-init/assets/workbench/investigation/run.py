@@ -6,9 +6,9 @@ produces every result in settings.toml. It refuses to run, exiting 2, while a wa
 cannot name its files, or its table lacks its question, lists code that is not files in the project
 or parameters that are not names, names views that are not view files, or declares answers the
 question ledger does not hold as data questions, or while its shared SQL reads a file directly that
-is neither a publication nor in its code (unrecorded_reads()), and exits 1 when the ledger cannot be
-read. For each result it runs the result's saved queries in one session of canonical views and
-this folder's views/*.sql, the investigation's shared SQL, on one thread so a rerun repeats
+is neither a publication nor, by its own path, in its code (unrecorded_reads()), and exits 1 when the
+ledger cannot be read. For each result it runs the result's saved queries in one session of
+canonical views and this folder's views/*.sql, the investigation's shared SQL, on one thread so a rerun repeats
 floating-point sums exactly; it validates the result, saves the table and its profile
 under results/, records evidence under evidence/, writes its state.md findings row, and prints one
 compact JSON line with the paths, failed and unassessed checks, and what it did to the row, with
@@ -159,15 +159,22 @@ _TOKEN = re.compile(r"'((?:[^']|'')*)'|--[^\n]*|/\*.*?\*/|\"(?:[^\"]|\"\")*\"", 
 
 
 def unrecorded_reads(results, wanted):
-    """Each file a shared SQL string literal names in the project that a wanted result's evidence would
-    miss: one neither under a data/parquet/<dataset>/<publication>/ path the literal names nor in that
-    result's code. A path built at run time, or a directory, is not checked."""
+    """Each file a shared SQL string literal reads that a wanted result's evidence would miss, under the
+    accepted input references/provenance.md states: a literal naming one file must be in every wanted
+    result's code, and a glob or project folder may match files only under a
+    data/parquet/<dataset>/<publication>/ path it names, since evidence would miss a file added later."""
     problems = set()
     for view in investigation_views(ROOT, NAME):
         for literal in filter(None, (m.group(1) for m in _TOKEN.finditer((ROOT / view).read_text()))):
             literal = literal.replace("''", "'")
+            target = os.path.normpath(os.path.join(ROOT, literal))
+            if "://" in literal or ("/" not in literal and not os.path.isfile(target)):
+                continue  # a URL, or a word such as a regex or a value
             publications = re.findall(r"data/parquet/[^/\s'\"]+/[^/\s'\"*]+/", literal)
-            for path in glob.glob(os.path.join(ROOT, literal), recursive=True) if "://" not in literal else []:
+            # DuckDB reads every file in a folder it is given.
+            folder = os.path.isdir(target) and Path(target).is_relative_to(ROOT)
+            unpublished = []
+            for path in glob.glob(os.path.join(target, "**") if folder else target, recursive=True):
                 file = Path(os.path.normpath(path))
                 if not file.is_file():
                     continue
@@ -175,8 +182,15 @@ def unrecorded_reads(results, wanted):
                     problems.add(f"{view} reads {literal}, outside the project; copy it into the project")
                     continue
                 path = file.relative_to(ROOT).as_posix()
-                if any(path.startswith(publication) for publication in publications):
-                    continue  # recorded as a publication of the view
+                if not any(path.startswith(publication) for publication in publications):
+                    unpublished.append(path)  # else recorded as a publication of the view
+            if unpublished and (folder or re.search(r"[*?[]", literal)):
+                problems.add(f"{view} reads {', '.join(sorted(unpublished)[:3])}{', ...' * (len(unpublished) > 3)} "
+                             f"through the glob or folder '{literal}', outside a publication: evidence would miss "
+                             f"a file added to it later, so read each file by its own path, listed in every result's "
+                             f"code, or publish them")
+                continue
+            for path in unpublished:
                 missing = [result_id for result_id in wanted if path not in {
                     posixpath.normpath(f"investigations/{NAME}/{c}") for c in results[result_id].get("code", [])}]
                 if missing:
