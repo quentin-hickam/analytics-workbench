@@ -470,6 +470,11 @@ def test_reports_use_plain_words_not_ids():
     clean = ' '.join(section((ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8'),
                              '## Report').split())
     assert 'the recorded issues in plain words, their quality IDs kept in the files' in clean
+    status = ' '.join(section((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8'),
+                              '## Report').split())
+    assert "without its keys or their question and result IDs" in status
+    assert "report that question's text and status" in status and 'report the ID' not in status
+    assert 'list each `provisional` question by its text' in status
 
 
 COMMIT_GUARDS = ('already suggested a commit this session', 'at most once a session')
@@ -524,7 +529,7 @@ def test_scoping_counts_a_decision_as_one_choice():
                                  '## 2. Interview').split())
     assert 'at most four' in interview
     assert ('A decision is one choice: never number unrelated choices under one item; '
-            'ask the rest in a second round.') in interview
+            'make each its own decision, and ask any beyond four in a second round.') in interview
 
 
 def test_commit_preference_is_a_readme_line_the_rules_follow():

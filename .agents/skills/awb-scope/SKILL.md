@@ -22,7 +22,7 @@ An expansion of the same ask to a population containing the original group is a 
 
 Cover the business question, population or scope, the decision it supports or an exploratory purpose, usefulness criteria, and material unknowns. Record any reader the user describes in the brief's Audience section; `awb-package` asks for it when a package needs it.
 
-**Pace by dependency.** Settle the choices that constrain others first. Ask a decision alone when its answer shapes the next question; ask decisions at the same level together, at most four, each with a recommended answer and its reason. A decision is one choice: never number unrelated choices under one item; ask the rest in a second round. In a rescope, carry settled answers forward and ask only about the decisions the change reopens.
+**Pace by dependency.** Settle the choices that constrain others first. Ask a decision alone when its answer shapes the next question; ask decisions at the same level together, at most four, each with a recommended answer and its reason. A decision is one choice: never number unrelated choices under one item; make each its own decision, and ask any beyond four in a second round. In a rescope, carry settled answers forward and ask only about the decisions the change reopens.
 
 **Follow up before moving on.** When an answer is vague, hedged, or conflicts with an earlier one, restate it as a concrete case, such as "so a customer who downgrades but keeps paying has not churned?", and ask the user to confirm or correct it. Leave no answer recorded in a form two analysts could read differently.
 
