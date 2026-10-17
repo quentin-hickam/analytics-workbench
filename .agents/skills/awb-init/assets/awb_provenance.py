@@ -1650,7 +1650,7 @@ def _finding_warnings(root, investigation, result_id, text, evidence_path):
             continue
         warnings.append(f'warning: {result_id}: "{asserted.group(0)}" asserts a reconciliation or a completed '
                         "check that no passing check in its evidence records; state the check, with any "
-                        "tolerance set before the data was seen, in the detail of a passing values or "
+                        "tolerance the brief or the result's settings record, in the detail of a passing values or "
                         f"metrics judgment in [results.{result_id}.validation] and rerun, or reword")
     return warnings
 
@@ -2091,27 +2091,28 @@ def _status_map(entries):
 
 
 # The derived display statuses of an answered data question: resting on a flagged or superseded finding,
-# or on findings none of which is promoted yet.
+# on findings none of which is promoted yet, or both.
 AWAITING_RECHECK = "answered (awaiting recheck)"
 PROVISIONAL_ANSWER = "answered (provisional)"
+PROVISIONAL_RECHECK = "answered (provisional, awaiting recheck)"
 
 
 def question_status(entry, findings):
-    """Display only: any flagged or superseded answering finding needs recheck, even with settled peers;
-    otherwise, with no answering finding supported, the answer is provisional until one is promoted.
+    """Display only: any flagged or superseded answering finding needs recheck, even with settled peers; the
+    answer is provisional while no answering finding is supported or was supported before its flag.
 
     Statuses come from the closed _finding_statuses reading. Missing findings are reported by the evidence checks;
-    they do not assert a flag, and a missing row counts as not promoted. A person's answer and non-answered
-    questions keep stored status.
+    they do not assert a flag, and a missing row counts as not promoted. Known limit: a superseded finding
+    records no prior status, so it never counts as promoted. A person's answer and non-answered questions keep
+    stored status.
     """
     if entry["status"] != "answered" or entry["answerer"] != "data":
         return entry["status"]
     unsettled = {"superseded", _FLAGGED, *(f"{_FLAGGED} (was {s})" for s in _STATUSES)}
+    promoted = any(findings.get(r) in ("supported", f"{_FLAGGED} (was supported)") for r in entry["results"])
     if any(findings.get(r) in unsettled for r in entry["results"]):
-        return AWAITING_RECHECK
-    if not any(findings.get(r) == "supported" for r in entry["results"]):
-        return PROVISIONAL_ANSWER
-    return entry["status"]
+        return AWAITING_RECHECK if promoted else PROVISIONAL_RECHECK
+    return entry["status"] if promoted else PROVISIONAL_ANSWER
 
 
 def add_question(project_root, investigation: str, text: str, *, kind: str, answerer: str, origin: str,
@@ -2507,7 +2508,8 @@ def state_view(project_root, investigation: str) -> str:
         out.append("==> questions the findings answer, by result <==\n" + "\n".join(questions) + "\n")
     try:
         ledger = question_lines(root, investigation, show_audience=False) + question_lines(
-            root, investigation, (AWAITING_RECHECK, PROVISIONAL_ANSWER), show_audience=False)
+            root, investigation, (AWAITING_RECHECK, PROVISIONAL_ANSWER, PROVISIONAL_RECHECK),
+            show_audience=False)
     except StateError as error:
         ledger = [f"warning: {error}"]
     if ledger:

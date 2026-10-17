@@ -79,7 +79,7 @@ AWB_COMMANDS = {"land": (), "retain": (), "publish": (), "sql": (), "profile": (
                 "state": ("finding", "render", "flag", "issues", "next", "switch"),
                 "questions": ("list", "add", "answer", "status", "edit", "render"),
                 "stale": (), "export": (), "review-rules": ("check", "add"),
-                "review-receipt": ("record", "show"), "check-draft": (),
+                "review-receipt": ("start", "record", "show"), "check-draft": (),
                 "release": (), "copy-releases": ()}
 HELP_SCRIPTS = ("status", "eda-scan", "clean-scan", "clean-record", "install")
 
@@ -185,8 +185,8 @@ TOOLS = [
         "package", "Build package draft",
         "Write a package draft's exports and manifest. command export: chart and dataset files, a --chart's "
         "@first=<n> or @where=<column>=<value> row selection included, and producing state; review-receipt: "
-        "record a draft review (`record`, the report on stdin with `--report -`); check-draft: run "
-        "every draft check, write START-HERE.md, and rewrite the manifest inventory (the read "
+        "mark a draft review launched (`start`) and record it (`record`, the report on stdin with `--report -`); "
+        "check-draft: run every draft check, write START-HERE.md, and rewrite the manifest inventory (the read "
         "tool's check-draft verifies without writing).",
         ("export", "review-receipt", "check-draft"), stdin=True),
     _write_tool(

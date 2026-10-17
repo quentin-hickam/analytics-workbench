@@ -63,7 +63,7 @@ Connect the findings to the decision or exploratory purpose. Keep recommendation
 
 **Headline:** <why the answer can be trusted, in one sentence>
 
-Give the method in plain language: the definitions the answer depends on; the sources, described by owner, content, and period; each exclusion and analytical choice, described by its effect on the population or result; and the validation performed, in plain terms ("every month's total matches the finance ledger exactly"). Put what the audience needs on the slide and the rest in the notes, a check's tolerance included, stated only when it was set before the data was seen.
+Give the method in plain language: the definitions the answer depends on; the sources, described by owner, content, and period; each exclusion and analytical choice, described by its effect on the population or result; and the validation performed, in plain terms ("every month's total matches the finance ledger exactly"). Put what the audience needs on the slide and the rest in the notes, a check's tolerance included, stated only when the brief or the result's settings recorded it before the result, as `methodology.md` cites; a tolerance chosen after seeing the result is not a tolerance.
 
 ## Limitations and open caveats
 
@@ -79,7 +79,7 @@ List the source limitations, assumptions, and unresolved issues that limit inter
 
 **Headline:** <what remains unanswered for the decision>
 
-List exactly the unanswered `must` ledger questions and those marked `show`, one per top-level bullet, using each question's exact `audience` wording when set, otherwise its question `text`, with no question IDs or extra commentary. Set audience wording in the ledger before packaging when the text is not in the audience's words, and show that wording with the headlines for approval. Normal inline Markdown formatting is allowed; nested bullets are not. Include open and parked questions and answered data questions displaying **answered (awaiting recheck)** because any answering finding is flagged or superseded. Declined or superseded questions are set aside and excluded. Omit the whole slide when no required questions remain. Include every required question even when there are more than five, and report that count.
+List exactly the unanswered `must` ledger questions and those marked `show`, one per top-level bullet, using each question's exact `audience` wording when set, otherwise its question `text`, with no question IDs or extra commentary. Set audience wording in the ledger before packaging when the text is not in the audience's words, and show that wording with the headlines for approval. Normal inline Markdown formatting is allowed; nested bullets are not. Include open and parked questions and answered data questions displaying **answered (awaiting recheck)** or **answered (provisional, awaiting recheck)** because any answering finding is flagged or superseded. Declined or superseded questions are set aside and excluded. Omit the whole slide when no required questions remain. Include every required question even when there are more than five, and report that count.
 
 **Notes:** <why the unanswered questions matter to the decision>
 

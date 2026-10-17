@@ -438,12 +438,14 @@ def test_status_collector_reads_the_ledger(project):
     provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "region view corrected"}])
     questions = status.collect(project)["active"]["questions"]
     # The user asked one question, the root; the stakeholder's definition and the decision serve it.
-    assert questions == {"counts": {"answered (awaiting recheck)": 1, "open": 1, "declined": 1},
-                         "roots": {"answered (awaiting recheck)": 1},
+    # r1 was never promoted, so the recheck is of a provisional answer: listed under both, counted provisional.
+    line = "Q-001 answered (provisional, awaiting recheck) [data, analytical] Does churn differ by region? " \
+        "-> r1 (revalidation-needed (was provisional))"
+    assert questions == {"counts": {"answered (provisional, awaiting recheck)": 1, "open": 1, "declined": 1},
+                         "roots": {"answered (provisional, awaiting recheck)": 1},
                          "must_subquestions": {"open": 1}, "open_by_answerer": {"stakeholder": 1},
                          "open": ["Q-002 [stakeholder, context] Which churn definition does finance use?"],
-                         "awaiting_recheck": ["Q-001 answered (awaiting recheck) [data, analytical] Does churn differ by region? -> r1 (revalidation-needed (was provisional))"],
-                         "provisional": []}
+                         "awaiting_recheck": [line], "provisional": [line]}
     (project / INV / "questions.json").write_text('{"schema": "awb-questions/1", "questions": [1]}')
     result = status.collect(project)
     assert result["active"]["questions"] is None
@@ -643,8 +645,9 @@ def test_cli_derives_awaiting_recheck_and_refreshes_render(project, capsys, find
     else:
         provenance.update_findings(project, "churn", ["r1"], status="superseded", reason="new scope")
     out = cli(project, capsys, "list", "--all")
-    assert out[0] == 0 and "Q-001 answered (awaiting recheck)" in out[1]
-    assert "| answered (awaiting recheck) |" in (project / INV / "questions.md").read_text()
+    # Neither answering finding was ever promoted, so the recheck is of a provisional answer.
+    assert out[0] == 0 and "Q-001 answered (provisional, awaiting recheck)" in out[1]
+    assert "| answered (provisional, awaiting recheck) |" in (project / INV / "questions.md").read_text()
     assert (project / INV / "questions.json").read_bytes() == saved
     assert cli(project, capsys, "render")[1] == "questions.md matches questions.json\n"
     # Finding changes keep the generated view current, so an ordinary ledger write is safe.
