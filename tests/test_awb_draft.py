@@ -18,7 +18,7 @@
 # test_questions_check_refuses_a_commented_question: the issue's probe, a question only inside an HTML comment, fails check-draft's questions; a manifest question with inline markup matches as it renders.
 # test_questions_check_leaves_out_image_text: a question only in an image's text, a linked image's included, or split by an image, with text or without, does not match, nor does one in an image's text that holds an autolink (an email's too), a link whose target or title has a bracket, or, after an escaped backslash or backtick, a code span with a bracket, or in an image after an escaped backslash, or whose target nests or escapes parentheses or escapes a quote in its title; one in a link's text, in prose beside an image or after its text, in a code span showing an image's syntax, after an escaped backslash or backtick too, after an escaped !, beside an unclosed ![ whose brackets a link takes, or in a reference image, which never resolves, matches.
 # test_other_checks_still_read_image_text: the names scan and the shared reading keep an image's text, so a name in it is a findings row.
-# test_check_draft_help_and_references_agree_on_the_rendered_reading: the check-draft help text, helpers.md, and the comment above _view name numbers as the only check that does not read the rendered view, and state that it skips only the comments that view drops; the help and helpers.md state how questions are read, image text left out.
+# test_check_draft_help_and_references_agree_on_the_rendered_reading: the check-draft help text, helpers.md, and the comment above _view name numbers as the only check that does not read the rendered view; numbers-and-evidence.md states that it skips only the comments that view drops; the help and helpers.md state how questions are read, image text left out.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
 # test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
@@ -604,7 +604,8 @@ def test_check_draft_help_and_references_agree_on_the_rendered_reading(project, 
     assert "Every draft check but `numbers` reads" in helpers and "`questions` rows" in helpers
     assert "A question only in a comment, in fenced code, or in an image's text does not count" in helpers
     assert "a question cannot run across an image" in helpers
-    assert "A comment is what the reading above drops" in helpers
+    numbers = " ".join((SKILLS / "awb-package/references/numbers-and-evidence.md").read_text().split())
+    assert "A comment is what the [helper reading](helpers.md) drops" in numbers
     source = ASSETS["src/packaging/draft.py"].read_text()
     assert "# Every draft check but numbers reads the narratives (findings.md, methodology.md, and methodology-note.md" in source
 

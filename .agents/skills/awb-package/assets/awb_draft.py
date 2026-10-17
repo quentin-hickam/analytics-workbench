@@ -1374,7 +1374,7 @@ NARRATIVES = ("findings.md", "methodology.md")
 # Reading fails safe: a number is skipped only in one of the contexts below, each of which marks it as no
 # quantity; every other number is read, so a doubtful one becomes a row the author clears by rewording or
 # by allowing it. check_numbers also skips the accepted **Claim strength:** lines it is given (`claim_lines`),
-# whose numbers repeat the record. references/helpers.md states the same list, those lines last.
+# whose numbers repeat the record. references/numbers-and-evidence.md states the same list, those lines last.
 _MONTH = (r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
           r"|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?")
 _DAY = r"(?:3[01]|[12][0-9]|0?[1-9])"
@@ -1751,7 +1751,7 @@ def check_numbers(path: str | os.PathLike, values, *, allowed=(), claim_lines=()
     `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
     text is written around it, matched on the text the number is read from, so any whitespace or a line
     wrap matches a space: a bare `40` covers every 40, and `Week 23` only that 23. A number is skipped
-    only in a context references/helpers.md lists; every other number is read. `claim_lines` are the line
+    only in a context references/numbers-and-evidence.md lists; every other number is read. `claim_lines` are the line
     numbers of the **Claim strength:** lines the claims check accepts (`_claim_review`): each repeats a
     state.md Claim cell, so its numbers trace to the record.
     """
