@@ -123,7 +123,7 @@ The workflow must embed an analytics-specific domain-modeling discipline: challe
 
 A new investigation, a sharpening of its question, and a consequential scope change use a self-contained interview in `awb-scope`; `awb-init` only collects the first question and hands it over. Follow the decisions that depend on each scope or purpose choice:
 
-- ask in dependency order: a decision whose answer shapes the next question alone, and decisions at the same level together, at most four, each with a recommended answer and each one choice, unrelated choices going to a second round;
+- ask in dependency order: a decision whose answer shapes the next question alone, and decisions at the same level together, at most four, each with a recommended answer and each one choice, unrelated choices made separate decisions and any beyond four going to a second round;
 - follow up a vague, hedged, or conflicting answer at once, restated as a concrete case, before moving on;
 - push on what makes an answer usable: the measure's and population's definitions, the comparison that gives a number meaning, the result that would change the decision, and what is already believed;
 - carry settled answers forward, and in a rescope ask only about the decisions the change reopens;

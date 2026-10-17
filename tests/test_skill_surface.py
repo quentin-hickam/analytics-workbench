@@ -489,7 +489,7 @@ def test_scoping_counts_a_decision_as_one_choice():
                                  '## 2. Interview').split())
     assert 'at most four' in interview
     assert ('A decision is one choice: never number unrelated choices under one item; '
-            'ask the rest in a second round.') in interview
+            'make each its own decision, and ask any beyond four in a second round.') in interview
 
 
 def test_commit_preference_is_a_readme_line_the_rules_follow():

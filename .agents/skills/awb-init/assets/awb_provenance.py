@@ -2464,7 +2464,7 @@ def _readme_pointer(root):
 
 def state_view(project_root, investigation: str) -> str:
     """The resume view: brief.md and state.md verbatim, the question each row's evidence records, the
-    ledger's open questions and answers awaiting recheck, then a warning
+    ledger's open questions, answers awaiting recheck, and provisional answers, then a warning
     per row with missing evidence."""
     root = Path(project_root).resolve()
     base = root / "investigations" / investigation
@@ -2572,7 +2572,7 @@ def cli_state(root: Path, argv: list[str]) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=actions[action] if action else
         "Show an investigation for resuming: brief.md and state.md verbatim, the question each finding's "
-        "evidence records, the question ledger's open questions and answers awaiting recheck, "
+        "evidence records, the question ledger's open questions, answers awaiting recheck, and provisional answers, "
         "and a warning for each finding whose evidence file is missing. Changes nothing. Uses README's Active investigation line unless "
         "--investigation is given; with no active investigation it lists the investigations.",
         epilog=epilog[action] + _STATE_EXIT)
