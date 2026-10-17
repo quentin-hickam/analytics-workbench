@@ -27,7 +27,8 @@
 # views = ["foundation/views/01_orders.sql"]  # optional: the view files it reads, project-relative, each a
 #                        # .sql file in foundation/views/ or this folder's views/; replaces detection, for a
 #                        # producer that reads views its queries do not name. Shared SQL in views/ loads in
-#                        # every result's session after the foundation views and is every result's code.
+#                        # every result's session after the foundation views and is every result's code;
+#                        # evidence records it, and the views it reads, whatever this lists.
 #
 # Validation spec for validate(): static checks here, run-time counts from the result's producer.
 #   required_columns = [names that must exist]

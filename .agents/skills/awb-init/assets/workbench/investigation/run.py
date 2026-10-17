@@ -22,6 +22,7 @@ so adding a result never edits this file; put reusable operations in src/. Requi
 
 import importlib.util
 import json
+import posixpath
 import re
 import sys
 import traceback
@@ -127,10 +128,13 @@ def produce_result(connection, result_id, config, parameters):
     table, profile_path = output / f"{result_id}.csv", output / f"{result_id}.profile.json"
     frame.to_csv(table, index=False)
     profile_path.write_text(json.dumps(profile(frame), indent=2) + "\n")
-    # Settings `views` overrides detection when a result reads views its queries do not name. The
-    # shared SQL is producing code for every result, so the foundation views it reads are recorded too.
-    views = config.get("views") or views_read(
-        ROOT, [HERE / query for query in queries] + [ROOT / path for path in investigation_views(ROOT, NAME)])
+    # Settings `views` replaces detection from the queries when a result reads views they do not name.
+    # Every session loads the shared SQL, so its files and the foundation views they read are always
+    # recorded as views, with the publications those read.
+    shared = investigation_views(ROOT, NAME)
+    named = config.get("views") or views_read(ROOT, [HERE / query for query in queries])
+    views = sorted({posixpath.normpath(path) for path in named} | set(shared)
+                   | set(views_read(ROOT, [ROOT / path for path in shared])))
     evidence = record_evidence(ROOT, NAME, result_id, views=views, settings_path=SETTINGS, checks=checks,
                                parameters=scoped)
     # Writes findings and renders the row; failure before findings are saved removes this evidence.

@@ -55,7 +55,8 @@
 # test_result_problems_refuses_views_that_are_not_view_files: a views entry must be a project-relative .sql file directly under foundation/views/ or the investigation's views/; a logical view name, a missing file, a non-.sql file, a nested or outside path, an absolute path, and a non-list are refused, naming the entry.
 # test_result_problems_accepts_view_files_and_refuses_a_non_list: a foundation view file, written with ./ or not, and a file in the investigation's views/ pass; views that is not a list of non-empty strings is refused with or without the folder.
 # test_run_template_refuses_a_views_entry_that_is_not_a_file: run.py exits 2 naming a views entry that is a view's logical name, before opening a session or writing anything; without duckdb.
-# test_run_template_loads_shared_views_on_one_thread: run.py's session loads investigations/<name>/views/*.sql after the foundation views, in name order, on one thread; a producer imports a helper module from the investigation folder by name; evidence records the shared SQL as producing code and the foundation view it reads; an edit to the shared SQL stales the result.
+# test_run_template_loads_shared_views_on_one_thread: run.py's session loads investigations/<name>/views/*.sql after the foundation views, in name order, on one thread; a producer imports a helper module from the investigation folder by name; evidence records the shared SQL as producing code and as views, with the foundation view it reads; an edit to the shared SQL stales the result.
+# test_run_template_records_shared_views_whatever_views_says: each shared SQL file, the foundation views it reads, and a publication it reads directly are recorded as views and inputs even when the result's settings set views, which replaces only detection from its queries; a change to that foundation view or that publication stales the result.
 # test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: prior_result checks the state before unlink; the run.py template records a result and writes its state.md row, keeps it on an identical rerun, and refuses before touching evidence when state.md is missing or drifts; a run failing after the table is rewritten leaves no evidence.
 
 import hashlib
@@ -968,11 +969,50 @@ def test_run_template_loads_shared_views_on_one_thread(project):
     evidence = json.loads((project / "investigations/inv/evidence/r1.json").read_text())
     assert {"investigations/inv/views/01_screen.sql", "investigations/inv/views/02_top.sql",
             "investigations/inv/helpers.py"} <= set(evidence["producing_paths"])
-    # The query names only the shared view; the foundation view it reads is recorded through it.
-    assert [view["path"] for view in evidence["views"]] == ["foundation/views/orders.sql"]
+    # The query names only the shared view; the shared files and the foundation view they read are views.
+    assert [view["path"] for view in evidence["views"]] == [
+        "foundation/views/orders.sql", "investigations/inv/views/01_screen.sql", "investigations/inv/views/02_top.sql"]
     assert outcomes(project) == ["pass"] * 5
     write(project, "investigations/inv/views/01_screen.sql", b"create view screened as select n from orders;\n")
     assert outcomes(project)[:2] != ["pass", "pass"]
+
+
+def test_run_template_records_shared_views_whatever_views_says(project):
+    duckdb = pytest.importorskip("duckdb")
+    pytest.importorskip("pandas")
+    install_run_template(project)
+    # A real publication, so a shared view can read it directly.
+    part = project / "data/parquet/orders/p1/part-0.parquet"
+    duckdb.connect().execute(f"copy (select range as n from range(3)) to '{part}' (format parquet)")
+    publication = json.loads((project / "data/parquet/orders/p1/publication.json").read_text())
+    publication["files"] = [{"path": "part-0.parquet", "bytes": part.stat().st_size,
+                             "sha256": hashlib.sha256(part.read_bytes()).hexdigest()}]
+    write(project, "data/parquet/orders/p1/publication.json", json.dumps(publication).encode())
+    write(project, "foundation/views/customers.sql", b"create view customers as select 1 as id;\n")
+    write(project, "investigations/inv/views/01_screen.sql", b"create view screened as select n from orders where n > 0;\n")
+    write(project, "investigations/inv/views/02_raw.sql",
+          b"create view raw as select n from read_parquet('data/parquet/orders/p1/*.parquet');\n")
+    write(project, "investigations/inv/queries/r1.sql", b"select n from screened order by n\n")
+    # An explicit views setting replaces detection from the queries, never the shared SQL's views.
+    write(project, "investigations/inv/settings.toml",
+          SETTINGS.replace(b"[results.r1]\n", b'[results.r1]\nviews = ["./foundation/views/customers.sql"]\n'))
+    done = subprocess.run([sys.executable, str(project / "investigations/inv/run.py"), "r1"],
+                          capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    evidence = json.loads((project / "investigations/inv/evidence/r1.json").read_text())
+    views = {view["path"]: view["publications"] for view in evidence["views"]}
+    assert views == {"foundation/views/customers.sql": [], "foundation/views/orders.sql": [],
+                     "investigations/inv/views/01_screen.sql": [],
+                     "investigations/inv/views/02_raw.sql": ["data/parquet/orders/p1"]}
+    assert [p["path"] for p in evidence["publications"]] == ["data/parquet/orders/p1"]
+    assert outcomes(project) == ["pass"] * 5
+    original = (project / "foundation/views/orders.sql").read_bytes()
+    write(project, "foundation/views/orders.sql", b"create view orders as select range * 100 as n from range(3);\n")
+    assert outcomes(project)[2] == "fail"
+    write(project, "foundation/views/orders.sql", original)
+    publication["conversion_commit"] = "another"
+    write(project, "data/parquet/orders/p1/publication.json", json.dumps(publication).encode())
+    assert outcomes(project)[3] == "fail"
 
 
 def test_run_template_records_evidence_and_drops_it_before_rewriting_the_table(project):

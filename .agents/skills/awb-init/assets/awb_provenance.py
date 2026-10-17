@@ -1617,13 +1617,14 @@ def _notes(caveat):
 
 
 # Wording that asserts a reconciliation or a completed check, matched case-insensitively as whole words,
-# in two kinds: a reconciliation, sum(s|med|ming) to, add(s|ed|ing) up to, or
+# in three kinds: a sum, sum(s|med|ming) to or add(s|ed|ing) up to; a reconciliation,
 # reconcile(s|d)/reconciling/reconciliation; and a completed check, checked or verified every, each, or
 # all. A passing check whose name or detail uses wording of the same kind records it, so a scope judgment
-# "Checked all date filters" never backs "sums to".
+# "Checked all date filters" never backs "sums to", nor a reconcile() row count "regions sum to the total".
 _ASSERTS_KINDS = (
-    re.compile(r"(?<![\w-])(?:(?:sums?|summed|summing)\s+to|(?:adds?|added|adding)\s+up\s+to"
-               r"|reconcil(?:e|es|ed|ing|iation))(?![\w-])", re.IGNORECASE),
+    re.compile(r"(?<![\w-])(?:(?:sums?|summed|summing)\s+to|(?:adds?|added|adding)\s+up\s+to)(?![\w-])",
+               re.IGNORECASE),
+    re.compile(r"(?<![\w-])reconcil(?:e|es|ed|ing|iation)(?![\w-])", re.IGNORECASE),
     re.compile(r"(?<![\w-])(?:checked|verified)\s+(?:every|each|all)(?![\w-])", re.IGNORECASE),
 )
 
@@ -2582,8 +2583,8 @@ def cli_state(root: Path, argv: list[str]) -> int:
                    "reconciliation or a completed check (sum, sums, summed, or summing to; add, adds, added, or "
                    "adding up to; reconcile, reconciles, reconciled, reconciling, or reconciliation; checked or "
                    "verified every, each, or all; any case, as whole words) that no passing check's name or "
-                   "detail records with wording of the same kind: reconciliation wording for a reconciliation, "
-                   "checked or verified wording for a completed check. A values or metrics judgment in [results.<id>.validation] whose detail states "
+                   "detail records with wording of the same kind: sum wording for a sum, reconciliation wording for a "
+                   "reconciliation, checked or verified wording for a completed check. A values or metrics judgment in [results.<id>.validation] whose detail states "
                    "the check records it. Warnings print first.\n",
         "render": "Prints discarded disk rows; without findings.json the table renders empty.\n",
         "flag": "Validates every flag before writing. --check writes nothing. Only a rerun clears a flag.\n",
