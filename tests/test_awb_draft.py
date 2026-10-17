@@ -1975,7 +1975,7 @@ def sha(path):
 
 def test_receipt_name_matches_the_installer():
     installer = load(SKILLS / "awb-init/scripts/install_helpers.py", "installer_receipt")
-    assert load(ASSETS["src/packaging/draft.py"], "draft_receipt").RECEIPT == installer.RECEIPT
+    assert load(ASSETS["src/packaging/draft.py"], "draft_receipt").INSTALL_RECEIPT == installer.RECEIPT
 
 
 def test_an_edited_helper_is_drift_that_release_refuses_until_confirmed(project, capsys):

@@ -2635,7 +2635,7 @@ def _write_start_here(draft, investigation, package):
 
 # awb-init's install_helpers.py writes it: each project path it installed or replaced -> that file's SHA-256,
 # taken with CRLF read as LF as _digest takes it, so a checkout that converts line endings is no drift.
-RECEIPT = ".awb-receipt.json"
+INSTALL_RECEIPT = ".awb-receipt.json"
 # The receipt paths whose files gate a release: the helpers and the package formats.
 _GATING = ("src/", "package-format/")
 
@@ -2653,13 +2653,13 @@ def helper_drift(root) -> list[dict]:
     records: {"file", "status", "sha256", "recorded"}, status changed, missing (sha256 null), or unreadable.
     No receipt, or a file it does not record, gives no row; an unreadable receipt is itself a row, so a gate
     edited past the receipt is never silently passed."""
-    path = Path(root) / RECEIPT
+    path = Path(root) / INSTALL_RECEIPT
     try:
         receipt = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
         if not isinstance(receipt, dict) or not all(isinstance(v, str) for v in receipt.values()):
             raise ValueError
     except (OSError, ValueError):
-        return [{"file": RECEIPT, "status": "unreadable", "sha256": _digest(path)[0], "recorded": None}]
+        return [{"file": INSTALL_RECEIPT, "status": "unreadable", "sha256": _digest(path)[0], "recorded": None}]
     rows = []
     for name, recorded in sorted(receipt.items()):
         digest, status = _digest(Path(root) / name) if name.startswith(_GATING) else (recorded, None)
