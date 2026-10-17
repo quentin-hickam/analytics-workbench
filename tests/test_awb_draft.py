@@ -1797,6 +1797,8 @@ def test_release_manifest_lists_runtime_per_result(project, capsys):
     (evidence / "r-002.json").write_text(json.dumps(second))
     run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
     run(project, capsys, "check-draft", "inv", "pkg")
+    # The rewritten evidence is what the review read, so each rerun is reviewed again before its release.
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["released"] and report["provenance_gaps"] == [
         {"field": "results[1].runtime.unread_requirements[0]",
@@ -1805,6 +1807,7 @@ def test_release_manifest_lists_runtime_per_result(project, capsys):
     (evidence / "r-002.json").write_text(json.dumps(second))
     run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
     run(project, capsys, "check-draft", "inv", "pkg")
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["provenance_gaps"] == [
         {"field": "results[1].runtime", "reason": "evidence lacks runtime"}]
@@ -1899,9 +1902,9 @@ def test_release_requires_a_current_review_receipt(project, capsys):
     assert report["review"] == {"status": "stale", "changed": ["findings.md"]}
 
     # A scoped review that passes completes the release, and its acceptances travel with it.
-    scoped = draft.record_review(project, "inv", "pkg", "scoped", failing.replace("review:", "review (scoped):"),
-                                 accepted, now="2026-10-16T12:00:00+00:00")
-    assert scoped["passed"]
+    scoped = failing.replace("review:", "review (scoped):")
+    assert not draft.record_review(project, "inv", "pkg", "scoped", scoped, now="2026-10-16T12:00:00+00:00")["passed"]
+    assert draft.record_review(project, "inv", "pkg", "scoped", scoped, accepted)["passed"]
     assert run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")[1]["review"]["status"] == "current"
     code, report = run(project, capsys, "release", "inv", "pkg")
     review = {"kind": "scoped", "recorded_at": "2026-10-16T12:00:00+00:00", "accepted": accepted}
@@ -1909,6 +1912,17 @@ def test_release_requires_a_current_review_receipt(project, capsys):
     assert manifest(project, "released/001")["review"] == review and "review" not in manifest(project)
     # The record sits beside the draft, so the release does not copy it.
     assert (project / "deliveries/inv/pkg/review/receipt.json").is_file() and not (released / "001/review").exists()
+
+    # A rerun that changes a represented result's evidence, its checks included, makes the review stale, so the
+    # narratives' claims citing that result are reviewed again before the next release.
+    evidence = project / "investigations/inv/evidence/r-001.json"
+    record = json.loads(evidence.read_text())
+    evidence.write_text(json.dumps({**record, "checks": [{"name": "reconciliation", "outcome": "fail",
+                                                          "detail": "Totals differ"}]}, indent=2) + "\n")
+    stale = {"status": "stale", "changed": ["investigations/inv/evidence/r-001.json"]}
+    assert run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")[1]["review"] == stale
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == NO_REVIEW and report["review"] == stale
 
 
 def test_copy_releases_copies_compares_and_never_overwrites(project, capsys, tmp_path_factory):
