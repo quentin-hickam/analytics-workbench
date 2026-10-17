@@ -2007,6 +2007,7 @@ def test_an_edited_helper_is_drift_that_release_refuses_until_confirmed(project,
     set_manifest(project, helper_drift_confirmed=[{"file": "src/packaging/draft.py", "sha256": sha(helper),
                                                    "reason": "The user approved the adapted outline check."}])
     run(project, capsys, "check-draft", "inv", "pkg")
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["released"], report
     # A later edit is a new hash, which the earlier confirmation does not cover.
