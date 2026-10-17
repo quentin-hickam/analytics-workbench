@@ -304,6 +304,14 @@ def test_declared_lineage_keeps_the_scanned_datasets_own_order(tmp_path):
     assert record["options"]["lineage"] == ["file", "sheet", "sheet_row"]
     assert {k: keys(record)[k]["count"] for k in keys(record) if k.startswith("duplicate-rows")} == {
         "duplicate-rows:across-parts": 4, "duplicate-rows": 1}
+    # A key may hold @, as sales@2025 does; a view or file of that name keeps it whole.
+    write(tmp_path, "foundation/datasets.toml", '[datasets.budget]\nlineage = ["sheet", "sheet_row"]\n\n'
+          '[datasets."sales@2025"]\nlineage = ["file", "sheet", "sheet_row"]\n'
+          '[datasets.sales]\nlineage = ["sheet", "sheet_row"]\n')
+    write(tmp_path, "data/sales@2025.csv", "file,sheet,sheet_row,amount\nA,Data,1,7\nA,Data,2,7\nB,Data,1,7\n")
+    stem, _ = scanner.scan(tmp_path, "data/sales@2025.csv", today=TODAY)
+    assert stem["options"]["lineage"] == ["file", "sheet", "sheet_row"]
+    assert keys(stem)["duplicate-rows:across-parts"]["count"] == 1 and keys(stem)["duplicate-rows"]["count"] == 1
 
 
 def test_duplicate_rows_split_follows_cross_part_correction(tmp_path):

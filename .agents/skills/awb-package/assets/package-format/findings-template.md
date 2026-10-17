@@ -63,7 +63,7 @@ Connect the findings to the decision or exploratory purpose. Keep recommendation
 
 **Headline:** <why the answer can be trusted, in one sentence>
 
-Give the method in plain language: the definitions the answer depends on; the sources, described by owner, content, and period; each exclusion and analytical choice, described by its effect on the population or result; and the validation performed. Put what the audience needs on the slide and the rest in the notes, following the package contract’s **Writing rules**.
+Give the method in plain language: the definitions the answer depends on; the sources, described by owner, content, and period; each exclusion and analytical choice, described by its effect on the population or result; and the validation performed. Put what the audience needs on the slide and the rest in the notes, following the package contract's **Writing rules**.
 
 ## Limitations and open caveats
 

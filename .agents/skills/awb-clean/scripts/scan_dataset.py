@@ -150,7 +150,8 @@ def _connect(root, need_views):
 
 
 def _file_relation(path):
-    """Return (relation SQL, kind, default name) for a data file or directory."""
+    """Return (relation SQL, kind, default name, dataset) for a data file or directory; a publication's or
+    acquisition's dataset is its parent directory, a file's its stem."""
     if path.is_file():
         files, directory = [path], path.parent
     else:
@@ -164,10 +165,10 @@ def _file_relation(path):
         raise ValueError(f"name one data file; {path} holds mixed or unsupported formats")
     relation = READERS[files[0].suffix.lower()].format(files="[" + ", ".join(lit(p) for p in files) + "]")
     if (directory / "publication.json").is_file():
-        return relation, "publication", f"{directory.parent.name}@{directory.name}"
+        return relation, "publication", f"{directory.parent.name}@{directory.name}", directory.parent.name
     if (directory / "provenance.json").is_file():
-        return relation, "acquisition", f"{directory.parent.name}@{directory.name}"
-    return relation, "file", path.stem
+        return relation, "acquisition", f"{directory.parent.name}@{directory.name}", directory.parent.name
+    return relation, "file", path.stem, path.stem
 
 
 def _newest_publication(directory):
@@ -184,28 +185,30 @@ def _newest_publication(directory):
 
 
 def _resolve(root, connection, dataset):
-    """Return {relation, kind, label, path, name} for a view, dataset, or path."""
+    """Return {relation, kind, label, path, name, dataset} for a view, dataset, or path; dataset is the key
+    its foundation/datasets.toml entry would have."""
     path = Path(dataset)
     full = path if path.is_absolute() else root / path
     relative = os.path.relpath(full, root)
     if full.exists():
-        relation, kind, name = _file_relation(full)
+        relation, kind, name, key = _file_relation(full)
         return {"relation": relation, "kind": kind, "label": f"{kind} {relative}",
-                "path": relative, "name": name}
+                "path": relative, "name": name, "dataset": key}
     names = {row[0].lower(): row[0] for row in connection.execute(
         "SELECT view_name FROM duckdb_views() WHERE NOT internal "
         "UNION ALL SELECT table_name FROM duckdb_tables()").fetchall()}
     if dataset.lower() in names:
         view = names[dataset.lower()]
-        return {"relation": q(view), "kind": "view", "label": f"view {view}", "path": None, "name": view}
+        return {"relation": q(view), "kind": "view", "label": f"view {view}", "path": None, "name": view,
+                "dataset": view}
     publications = root / "data/parquet" / dataset
     if publications.is_dir():
         newest = _newest_publication(publications)
         if newest is not None:
-            relation, kind, name = _file_relation(newest)
+            relation, kind, name, _ = _file_relation(newest)
             relative = os.path.relpath(newest, root)
             return {"relation": relation, "kind": kind, "label": f"{kind} {relative}",
-                    "path": relative, "name": name}
+                    "path": relative, "name": name, "dataset": dataset}
     raise ValueError(f"no view, dataset, or path named {dataset!r}")
 
 
@@ -778,8 +781,7 @@ def scan(project_root, dataset, *, keys=(), refs=(), ranges=(), columns=None, li
         elif previous:
             options["lineage"] = old.get("lineage", [])
         else:
-            # A publication or acquisition is named <dataset>@<directory>; its declaration is the dataset's.
-            options["lineage"] = declared_lineage(root, target["name"].split("@")[0])
+            options["lineage"] = declared_lineage(root, target["dataset"])
         today = (today or date.today()).isoformat()
         worker = Scan(connection, target, {**options, "root": root, "explicit_lineage": list(lineage or [])}, today)
         row_count, info, candidate_keys, null_patterns = worker.run()
