@@ -290,7 +290,7 @@ def test_status_offers_a_headline_preview_for_provisional_findings():
     # The skill that shows the headlines carries the promotion, which a bounded revision may not read in the template.
     package = ' '.join((ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8').split())
     assert ("Promote each provisional finding behind an approved headline with "
-            "`python3 src/awb.py state finding <result-id> --status supported`.") in package
+            "`python3 src/awb.py state finding <result-id> --status supported --reason \"<why>\"`.") in package
 
 
 def test_status_reports_findings_by_question_every_caveat_and_plain_freshness():

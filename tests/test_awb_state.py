@@ -28,11 +28,13 @@
 # test_finding_text_warns_on_reconciliation_no_check_records: "sums to", "reconciles", "checked every", or "verified each" wording warns, naming a values or metrics judgment as the place to record the check, unless a passing check's name or detail uses wording of the same kind (sum, add up, or reconcile wording backs only such wording; checked or verified wording backs only such wording), so an unrelated "Checked all date filters" scope judgment does not back "sums to"; a failing check does not back it; the row is still written.
 # test_finding_text_with_unreadable_evidence_warns_and_writes: --text on a row whose evidence is not JSON, or not a JSON object, warns that nothing was checked and still writes.
 # test_caveat_splits_notes_outside_brackets: --caveat splits at each ; outside parentheses and square brackets, either closer closes the innermost open bracket, a closer with no opener and an unclosed bracket with no ; after it are text, a ; after an unclosed bracket is refused writing nothing, and --help says so.
+# test_package_promotion_command_runs: the promotion command awb-package's headline checkpoint gives, filled in, promotes a provisional finding; without --reason it is refused.
 
 from datetime import date
 import importlib.util
 import json
 import re
+import shlex
 import os
 from pathlib import Path
 import shutil
@@ -844,3 +846,17 @@ def test_caveat_splits_notes_outside_brackets(project, capsys, caveat, notes):
         assert json.loads(text(project, f"{INV}/findings.json"))["findings"][0]["notes"] == notes
     code, out, _ = run(project, capsys, "finding", "--help")
     assert code == 0 and "';' outside parentheses and square brackets separates notes" in " ".join(out.split())
+
+
+def test_package_promotion_command_runs(project, capsys):
+    produce(project, "r1")
+    skill = " ".join((ROOT / ".agents/skills/awb-package/SKILL.md").read_text(encoding="utf-8").split())
+    command = re.search(r"behind an approved headline with `python3 src/awb\.py state ([^`]+)`", skill)[1]
+    argv = [{"<result-id>": "r1", "<why>": "The user approved its headline."}.get(word, word)
+            for word in shlex.split(command)]
+    code, out, _ = run(project, capsys, *argv)
+    assert code == 0 and "| supported |" in out
+    produce(project, "r2")
+    bare = [{"r1": "r2"}.get(word, word) for word in argv if word not in ("--reason", "The user approved its headline.")]
+    code, _, err = run(project, capsys, *bare)
+    assert code == 2 and "--reason is required" in err
