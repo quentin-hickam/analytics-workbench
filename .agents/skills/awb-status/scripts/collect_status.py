@@ -98,8 +98,11 @@ def collect(root, *, probe_upstream=False):
 
         roots counts the questions with no parent, which awb-scope keeps for the user's own, and
         must_subquestions the must questions under them, each by displayed status, apart from the
-        totals in counts. None when the investigation has no questions.json. Findings statuses come
-        from state.md's table.
+        totals in counts. by_question gives each root with its findings by status, a finding counting
+        under a root when its result answers the root or any question under it, and
+        findings_without_question the findings no question's results name; both counts are null when
+        the findings table is unreadable. None when the investigation has no questions.json. Findings
+        statuses come from state.md's table.
         """
         path = investigation / "questions.json"
         if not path.exists():
@@ -137,6 +140,28 @@ def collect(root, *, probe_upstream=False):
                      if q in provisional else q["status"] for q in questions}
         open_questions = [q for q in questions if q["status"] == "open"]
 
+        children = {}
+        for q in questions:
+            children.setdefault(q["parent"], []).append(q)
+
+        def results_under(question, seen):
+            found = set(question["results"])
+            for child in children.get(question["id"], []):
+                if child["id"] not in seen:
+                    seen.add(child["id"])
+                    found |= results_under(child, seen)
+            return found
+
+        rows = [(FINDING_STATUSES.get(row["Status"], row["Status"]),
+                 set(re.findall(r"evidence/([A-Za-z0-9][A-Za-z0-9._-]*)\.json", row["Evidence"]))) for row in findings or []]
+        by_question, linked = [], set()
+        for q in questions:
+            if not q["parent"]:
+                results = results_under(q, {q["id"]})
+                linked |= results
+                by_question.append({"id": q["id"], "text": q["text"], "status": displayed[q["id"]], "origin": q.get("origin"),
+                                    "findings": None if findings is None else dict(Counter(s for s, ids in rows if ids & results))})
+
         def answered(listed):
             return [f"{q['id']} {displayed[q['id']]} [{q['answerer']}, {q['kind']}] {q['text']} -> "
                     + "; ".join(f"{r} ({statuses.get(r, 'no findings row')})" for r in q["results"]) for q in listed]
@@ -147,7 +172,8 @@ def collect(root, *, probe_upstream=False):
                                                   if q["parent"] and q["priority"] == "must")),
                 "open_by_answerer": dict(Counter(q["answerer"] for q in open_questions)),
                 "open": [f"{q['id']} [{q['answerer']}, {q['kind']}] {q['text']}" for q in open_questions],
-                "awaiting_recheck": answered(recheck), "provisional": answered(provisional)}
+                "awaiting_recheck": answered(recheck), "provisional": answered(provisional), "by_question": by_question,
+                "findings_without_question": None if findings is None else dict(Counter(s for s, ids in rows if not ids & linked))}
 
     def table(text, columns, path):
         if text is None:
@@ -163,12 +189,15 @@ def collect(root, *, probe_upstream=False):
         return [dict(zip(columns, row)) for row in rows[2:]]
 
     def iso_date(value, path):
+        """Last updated as a date, or as a datetime when it records a time with its UTC offset, as state writers do."""
         try:
-            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value or ""):
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value or ""):
+                return date.fromisoformat(value)
+            if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})", value or ""):
                 raise ValueError
-            return date.fromisoformat(value)
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
-            uncertain(path, "Last updated is not an ISO calendar date")
+            uncertain(path, "Last updated is not an ISO date, or a time with its UTC offset")
             return None
 
     def local_path(value):
@@ -236,6 +265,9 @@ def collect(root, *, probe_upstream=False):
         result["active"] = {"name": slug, "last_updated": updated, "counts": dict(counts) if findings is not None else None, "findings": visible_findings if findings is not None else None,
                             "question": section(brief, "Business question", brief_path), "material_unknowns": section(brief, "Material unknowns", brief_path),
                             "unresolved_issues": section(state, "Unresolved issues", state_path), "next_steps": section(state, "Next steps", state_path)}
+        # Every finding's caveat, flagged or not, so a report never calls nothing open while one remains.
+        result["active"]["caveats"] = None if findings is None else [
+            {"finding": f["finding"], "status": f["status"], "caveat": f["reason"]} for f in visible_findings if f["reason"]]
         result["active"]["questions"] = ledger(investigation, findings)
     others = []
     investigations_path = root / "investigations"
@@ -908,7 +940,7 @@ def git_status(root, slug, state_date, uncertain):
         if "R" in code or "C" in code:
             changed.append(next(chunks, ""))
     changed = [p[len(project_prefix):] for p in changed if p.startswith(project_prefix)]
-    result = {"available": True, "has_commits": has_head, "uncommitted_paths": len(set(changed)), "mtime_date_basis": "host local timezone; Git dates use recorded commit timezone"}
+    result = {"available": True, "has_commits": has_head, "uncommitted_paths": len(set(changed)), "mtime_date_basis": "host local timezone; latest_commit_date uses the recorded commit timezone"}
     if not has_head:
         result["commit_comparison"] = "no commits yet; all work uncommitted"
     if not slug:
@@ -917,13 +949,14 @@ def git_status(root, slug, state_date, uncertain):
     # The state and the question ledger, a record of its own that state.md does not hold, never date
     # the state: ledger writes alone leave it current.
     exempt = [prefix + name for name in ("state.md", "questions.json", "questions.md")]
-    dates = []
-    missing = []
+    # Each change is (time, path, exact). An exact time is the file's mtime; otherwise it is the time of
+    # the latest commit recording the file, which bounds the change from above.
+    changes, missing, uncommitted = [], [], set()
     for name in sorted(set(changed)):
         if name.startswith(prefix) and name not in exempt:
-            path = root / name
+            uncommitted.add(name)
             try:
-                dates.append((date.fromtimestamp(path.stat().st_mtime), name))
+                changes.append((modified(root / name), name, True))
             except OSError:
                 missing.append(name)
     if missing:
@@ -932,23 +965,98 @@ def git_status(root, slug, state_date, uncertain):
             uncertain(root / name, "Uncommitted change lacks a readable mtime (for example deletion); state date check uncertain")
     if has_head:
         repo_prefix = project_prefix + prefix
-        log = git("log", "-1", "--format=%cs", "--", ":(top,literal)" + repo_prefix, *(":(top,exclude,literal)" + project_prefix + name for name in exempt))
-        if log.returncode:
+        paths = ("--", ":(top,literal)" + repo_prefix, *(":(top,exclude,literal)" + project_prefix + name for name in exempt))
+        log = git("log", "-1", "--format=%cs", *paths)
+        committed = git("-c", "core.quotePath=false", "log", "--format=%x01%ct", "--name-only", *paths)
+        if log.returncode or committed.returncode:
             uncertain(root / prefix, "Cannot read Git commit date")
         elif log.stdout.strip():
-            commit_date = date.fromisoformat(log.stdout.strip())
-            result["latest_commit_date"] = commit_date.isoformat()
-            dates.append((commit_date, "latest investigation commit"))
-    if dates:
-        newest, source = max(dates)
-        result["latest_change"] = {"date": newest.isoformat(), "source": source}
-        if state_date:
-            difference = (newest - state_date).days
-            result["days_after_state"] = difference
-            result["state_status"] = "out of date" if difference > 0 else "indeterminate at date precision" if difference == 0 else "unknown" if missing else "up to date"
-    if "state_status" not in result:
+            result["latest_commit_date"] = date.fromisoformat(log.stdout.strip()).isoformat()
+            latest = {}
+            for line in committed.stdout.splitlines():
+                if line.startswith("\x01"):
+                    commit_time = int(line[1:])
+                elif line.startswith('"'):  # A path Git quotes is not read back: only its commit's time dates it.
+                    latest[line] = max(latest.get(line, commit_time), commit_time)
+                elif line and line.startswith(project_prefix) and line[len(project_prefix):] not in uncommitted:
+                    name = line[len(project_prefix):]
+                    latest[name] = max(latest.get(name, commit_time), commit_time)
+            for name, commit_time in sorted(latest.items()):
+                # A clean file's mtime is its change time unless it postdates the commit, as after a
+                # checkout rewrote it; a quoted, deleted, or rewritten file has only the commit's time.
+                # A commit merged or pulled in carries the time it was made elsewhere, not when it arrived.
+                try:
+                    mtime = modified(root / name)
+                except OSError:
+                    mtime = None
+                if mtime is not None and int(mtime.timestamp()) <= commit_time:
+                    changes.append((mtime, name, True))
+                else:
+                    changes.append((datetime.fromtimestamp(commit_time).astimezone(), name, False))
+    changes = [change for change in changes if not run_output(root, prefix, change[1])]
+    if state_date is None or not changes and not missing:
         result["state_status"] = "unknown" if missing or state_date is None else "no newer dated change found"
+        return result
+    stamped = isinstance(state_date, datetime)
+    state_day = state_date.astimezone().date() if stamped else state_date
+
+    def order(change):
+        """after, before, or unknown, against Last updated: a change in its second, or with a bare date on its day, is not after."""
+        when, _, exact = change
+        if stamped:
+            return ("after" if int(when.timestamp()) > state_date.timestamp() else "before") if exact else \
+                "before" if when <= state_date else "unknown"
+        if when.date() < state_day:
+            return "before"
+        return "after" if exact and when.date() > state_day else "unknown"
+
+    ordered = {"after": [], "before": [], "unknown": []}
+    for change in changes:
+        ordered[order(change)].append(change)
+    if ordered["after"]:
+        result["state_status"] = "out of date"
+        newest = max(ordered["after"])
+        result["days_after_state"] = (newest[0].date() - state_day).days
+    elif missing:
+        result["state_status"] = "unknown"
+        newest = max(changes) if changes else None
+    elif ordered["unknown"]:
+        newest = max(ordered["unknown"])
+        result["state_status"] = "saved the same day as the latest change" if not stamped and newest[0].date() == state_day \
+            else "saved before a later commit, which does not record when its changes were made"
+    else:
+        result["state_status"] = "up to date"
+        newest = max(changes)
+    if newest:
+        result["latest_change"] = {"date": newest[0].date().isoformat(), "time": newest[0].isoformat(timespec="seconds"),
+                                   "source": newest[1]}
     return result
+
+
+def run_output(root, prefix, name):
+    """Whether name is a result's evidence, table, or profile whose evidence is no older than its table and profile.
+
+    run.py writes a result's table and profile, then its evidence, then its finding, which stamps the
+    state, or leaves it as it is when the table, checks, and settings are unchanged (kept). Outputs
+    whose evidence followed them were therefore followed by that finding write, so they never date
+    the state; a failed finding write removes the evidence, and a later edit to the table postdates it.
+    """
+    result_id = r"([A-Za-z0-9][A-Za-z0-9._-]*?)"
+    match = re.fullmatch(re.escape(prefix) + rf"(?:evidence/{result_id}\.json|results/{result_id}(?:\.profile\.json|\.csv))", name)
+    if not match:
+        return False
+    base, result_id = root / prefix, match[1] or match[2]
+    outputs = [base / "results" / f"{result_id}.csv", base / "results" / f"{result_id}.profile.json"]
+    try:
+        evidence = (base / "evidence" / f"{result_id}.json").stat().st_mtime
+        return outputs[0].exists() and all(evidence >= path.stat().st_mtime for path in outputs if path.exists())
+    except OSError:
+        return False
+
+
+def modified(path):
+    """A file's mtime as a local datetime with its UTC offset."""
+    return datetime.fromtimestamp(path.stat().st_mtime).astimezone()
 
 
 def main():

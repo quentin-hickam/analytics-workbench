@@ -567,7 +567,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
         batches.setdefault(flag["investigation"], []).append({"result": flag["result"], "reason": fill(flag["reason"])})
     for investigation, batch in batches.items():
         try:
-            preview = provenance.flag_findings(root, investigation, batch, check=True, today=day)
+            preview = provenance.flag_findings(root, investigation, batch, check=True)
         except (ValueError, OSError) as error:
             raise RecordError(str(error)) from error
         rows.extend(preview.get("rows", []))
@@ -616,7 +616,7 @@ def record(project_root, scan_name, decisions, *, dry_run=False, today=None):
                 replace(relative, partial)
             phases.append("A")
             for investigation, batch in batches.items():
-                outcome = provenance.flag_findings(root, investigation, batch, today=day)
+                outcome = provenance.flag_findings(root, investigation, batch)
                 flagged_investigations.append(investigation)
                 if outcome["flags"]:
                     written += [f"investigations/{investigation}/findings.json", f"investigations/{investigation}/state.md"]

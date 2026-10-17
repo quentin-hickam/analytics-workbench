@@ -47,7 +47,7 @@ An inquiry into a business question, with its own scope, analytical choices, pro
 An investigation's `run.py`, the thin entry point that composes shared operations under the investigation's settings and produces, validates, and records its results in one run. A result that needs more than its query has a producer module, `producers/<result-id>.py`, which the run script loads by result ID.
 
 **Finding**:
-A validated result an investigation records as a row of `state.md`, with a status, a claim strength, and a link to its result evidence. The row is rendered from the investigation's `findings.json`, which the provenance helper alone writes. Exploration notes are recorded separately and are not findings.
+A validated result an investigation records as a row of `state.md`, with a status, a claim strength, and a link to its result evidence. The row is rendered from the investigation's `findings.json`, which the provenance helper alone writes. The agent promotes a provisional finding to supported once its checks are recorded and the user approves its headline or text. Exploration notes are recorded separately and are not findings.
 
 **Claim strength**:
 The strongest wording a finding supports: descriptive, association, or causal. Causal requires a stated design basis, an experiment or an identified natural experiment; exploration supports association at most. A delivered narrative never words a finding above it.

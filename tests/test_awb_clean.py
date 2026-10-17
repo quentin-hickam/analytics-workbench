@@ -375,7 +375,8 @@ def test_record_writes_quality_catalog_and_flags_in_one_call(tmp_path, monkeypat
     text = state.read_text()
     assert "| Sales leads growth | [r-003](evidence/r-003.json) | revalidation-needed (was supported) | association | DQ-001 merges department labels |" in text
     assert "| Age is stable | [r-004](evidence/r-004.json) | provisional | descriptive | |" in text
-    assert "Last updated: 2026-10-09" in text
+    # The state records the time it was written, not the decisions' date.
+    assert re.search(r"\nLast updated: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d\n", text)
 
 
 def test_record_updates_recorded_issue_and_continues_numbering(tmp_path):
