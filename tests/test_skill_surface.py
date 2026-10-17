@@ -574,9 +574,9 @@ def test_status_reports_git_unavailable_with_its_impact():
 
 def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     # The review holds a checked or reconciliation sentence to a recorded result or check, pairing with the
-    # warning state finding gives, and the package contract tells the writer so; a re-review after repairs may
-    # be scoped, judging rules added or changed since in full, but never the last one before the request's
-    # final check-draft or the one that completes it, and release always runs the full review.
+    # warning state finding gives, and the package contract tells the writer so; every review after a draft's
+    # first is scoped against the helper's receipt, judging rules added or changed since in full, and a scoped
+    # review that passes completes a request or a release.
     def read(path):
         return ' '.join((ROOT / '.agents/skills' / path).read_text(encoding='utf-8').split())
 
@@ -593,40 +593,57 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     assert 'asserts a reconciliation or a completed check' in review and 'asserts a reconciliation or a completed' \
         in provenance
     assert 'Report every violation and narrative problem in this one pass, quoting each' in review
-    assert 'settle everything it reports, as above, before the review runs again' in review
-    assert ('Within one `awb-package` request, the review run again after repairs may be a scoped re-review: '
-            'give the reviewer the prior report and a diff') in review
-    assert ('a full review is still required before the request\'s final `check-draft`, and `awb-release` always '
-            'runs the full review') in review
-    assert '`review (scoped):`' in review
-    # The draft is outside Git, so the diff is taken against a copy kept when the prior review was launched,
-    # and with no copy the next review is full; a slide or document rule is judged on each slide or file a
-    # changed line falls in.
-    assert '`diff -u <copy> <current file>`' in review and 'Git-ignored `deliveries/` folder' in review
-    # The scoped diff is made against the prior review's copy before that copy is replaced; replacing it first
-    # would leave an empty diff.
-    diff_at = review.index('For a scoped re-review, first make the diff against the copy the prior review left')
-    copy_at = review.index('Then, for every review `awb-package` launches, full or scoped, and after any scoped '
-                           'diff is made, copy those files to the scratch folder, replacing the copy an earlier '
-                           'review left')
-    assert diff_at < copy_at
-    assert 'whenever `awb-package` launches a review, first copy' not in review
-    assert 'When no copy of what the prior review read was kept, the next review is a full one' in review
-    assert 'for a `slide` or `document` rule, on each slide or file that holds one' in review
     assert 'the caller settles them all before the next review' in review
+    assert '`review (scoped):`' in review
+    assert 'for a `slide` or `document` rule, on each slide or file that holds one' in review
     assert ('judge each rule added or changed since, as the diff of `foundation/review-rules.md` shows, against '
             'every narrative in full') in review
-    assert ('Only a full review, whose last line opens `review:`, can complete a request or a release; a scoped '
-            're-review, whose last line opens `review (scoped):`, never does') in review
-    assert 'for a scoped re-review, the prior report and the diff' in review
+    assert 'the lines in the other narratives that state the same claims as a changed line' in review
     assert '`slide` rule' in review and '`document` rule' in review
-    assert 'scoped re-review' in package and 'the last review before the final `check-draft` is a full one' in package
-    assert 'the last review is a full review, passed and not stale' in package
+    # A scoped re-review completes a request or a release; the hand-kept scratch copy is gone.
+    assert 'never does' not in review and 'never complete' not in review
+    assert 'A passed review completes a request or a release, full or scoped' in review
+    assert 'scratch folder' not in review and '`diff -u <copy> <current file>`' not in review
+    assert 'a full review is still required' not in review
+    # The helper keeps the record: every review is recorded before any file changes, and later ones are scoped.
+    assert ('Record every review as soon as it returns, before changing any file: run `review-receipt record '
+            '<investigation> <package> --kind full|scoped --report -` through the `package` tool') in review
+    assert ('The first review of a draft, or any while `show` reports `none`, is full; every later one is scoped '
+            'against the receipt, unless the user asks for a full one') in review
+    # The user may accept a narrative problem with a reason, as a warning; the rounds are capped.
+    assert ('the user accepted, with a reason, every `warning` violation and narrative problem it reports') in review
+    assert '--accept "<file>:<line> <quote>: <the user\'s reason>"' in review
+    assert ('When a second review in one request still reports problems, stop repairing and start no third review '
+            'in that request unless the user asks') in review
+    # A problem on an unchanged line is marked and goes to the user rather than restarting the loop.
+    assert '(unchanged since the prior review)' in review and 'why the earlier pass missed it' in review
+    assert 'Take a problem marked `(unchanged since the prior review)` to the user rather than repairing it' in review
+    # Package is done on a passed review of the final files, full or scoped.
+    assert 'its `review` row is `current`' in package
+    assert 'the last review before the final `check-draft` is a full one' not in package
+    assert 'the last review is a full review' not in package
     contract = read('awb-package/references/package-contract.md')
     assert ('A sentence asserting that something was checked or verified, reconciles, sums or adds up to, or matches '
             'cites the check that establishes it') in contract
-    assert 'Run the full read-only review' in release and 'never a scoped re-review' in release
+    assert 'never a scoped re-review' not in release and 'no earlier report is kept' not in release
     assert 'one pass' in reviewer and 'scoped' in reviewer and 'the evidence a narrative cites' in reviewer
+    assert '`awb/read` with `command: "review-receipt"`' in reviewer
+
+
+def test_release_reuses_a_matching_receipt_and_shows_its_repairs():
+    release = ' '.join((ROOT / '.agents/skills/awb-release/SKILL.md').read_text(encoding='utf-8').split())
+    step = release[release.index('## 2. Review'):release.index('## 3. Release')]
+    # A receipt that still matches is reused; a changed draft is reviewed scoped against it.
+    assert 'A matching receipt, `current`, needs no review' in step
+    assert ('When it is `stale` or `failed`, run the scoped read-only review in [awb-package\'s '
+            'references/review.md](../awb-package/references/review.md) against it, or the full one when it is '
+            '`none`') in step
+    assert step.index('`python3 src/awb.py review-receipt show <investigation> <package>`') < step.index('scoped')
+    assert step.index('through the `read` tool') < step.index('python3 src/awb.py review-receipt show')
+    # A repair made for the release is shown before release runs.
+    assert ('after it, show the user the changed slides and wait for their yes before running `release`, unless '
+            'they said to release without seeing it') in step
+    assert '`no passed review of this draft`' in release
 
 
 README = ROOT / 'README.md'

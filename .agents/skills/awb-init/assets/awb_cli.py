@@ -51,6 +51,9 @@ COMMANDS = {
     "review-rules": ("packaging/draft.py", "cli_review_rules",
                      "check: list each review rule with the draft lines its pattern matches, writing nothing; "
                      "add: append the next numbered rule from a user's correction"),
+    "review-receipt": ("packaging/draft.py", "cli_review_receipt",
+                       "start: mark a draft review launched; record: keep its report and a snapshot of what "
+                       "it read; show: compare that record with the draft now, writing nothing"),
     "check-draft": ("packaging/draft.py", "cli_check_draft",
                     "run every mechanical draft check, including narrative numbers against recorded results "
                     "and state.md's current flags, write START-HERE.md, and rewrite the manifest inventory; "
@@ -90,9 +93,9 @@ def main(argv=None):
         print(f"{name} needs src/{relative}, which this project lacks; install the workbench helpers "
               "with the awb-init skill's scripts/install_helpers.py", file=sys.stderr)
         return 2
-    if name == "review-rules":
-        # The read-only review's `review-rules check` must leave the project untouched, so loading its
-        # helper writes no __pycache__. The flag is process-wide, so other commands keep Python's cache
+    if name in ("review-rules", "review-receipt"):
+        # The read-only review's `review-rules check` and `review-receipt show` must leave the project
+        # untouched, so loading their helper writes no __pycache__. The flag is process-wide, so other commands keep Python's cache
         # (git ignores __pycache__/): turned off for them, every call would recompile pandas and duckdb
         # wherever they were installed without bytecode.
         sys.dont_write_bytecode = True

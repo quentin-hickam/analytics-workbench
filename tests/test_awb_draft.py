@@ -83,6 +83,7 @@
 # test_presentation_order_is_no_provenance_gap: a presentation_order heading that starts with Unknown is no release provenance gap, as allowed_numbers is not.
 # test_storyline_orders_main_and_appendix_findings_each_by_the_ledger: main and appendix finding slides are ranked separately, the appendix numbering on.
 # test_open_questions_follows_how_we_know_when_limitations_is_in_the_appendix: with Limitations under ## Appendix, Open questions passes after How we know and fails before it.
+# test_release_requires_a_current_review_receipt: check-draft reports the review's status and changed in both modes without changing passed; release refuses, creating nothing, with no receipt, a failed one, or a stale one, naming the status and changed inputs; a passed scoped review with an accepted problem releases, and the released manifest alone records its kind, time, and acceptances.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage at <location>/<investigation>/<package>/<n>/; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
 
 import hashlib
@@ -252,6 +253,13 @@ def run(project, capsys, *argv):
     cli = load(project / "src/awb.py", "awb_cli_fixture")
     code = cli.main(list(argv))
     return code, json.loads(capsys.readouterr().out)
+
+
+def reviewed(project):
+    """Record a clean full review of the draft as it stands, which release requires."""
+    draft = load(project / "src/packaging/draft.py", "draft_reviewed")
+    assert draft.start_review(project, "inv", "pkg", "full")["started"]
+    assert draft.record_review(project, "inv", "pkg", "full", "review: clean\n")["passed"]
 
 
 def manifest(project, where="draft"):
@@ -1714,6 +1722,7 @@ def test_release_reports_fields_for_the_report(project, capsys):
               "text": "Late orders in the west await revalidation", "sub": ["Their dates are being corrected"]}]
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0, report
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["verify"] == [] and report["datasets"] == ["datasets/late.csv"]
     assert report["dispositions"] == [{**FLAG, "represented_in": ["chart 1"],
@@ -1728,6 +1737,10 @@ def test_release_reports_fields_for_the_report(project, capsys):
     assert code == 0 and report["release_number"] == "002" and report["dispositions"][0]["new"] is False
     assert report["open_caveats"] == slide + [{**FLAG, "represented_in": ["chart 1"]}]
     set_flags(project, [{**FLAG, "represented_in": ["chart 1"], "disposition": "omit"}])
+    # Omitting a flag changes what the review judges, so the draft is reviewed again before it releases.
+    assert run(project, capsys, "release", "inv", "pkg")[1]["review"] == {"status": "stale",
+                                                                          "changed": ["revalidation_flags"]}
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     # An omitted flag is no caveat, but the slide's caveats remain open.
     assert code == 0 and report["dispositions"][0]["new"] is True and report["open_caveats"] == slide
@@ -1782,6 +1795,7 @@ def test_release_manifest_lists_runtime_per_result(project, capsys):
     code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
     assert code == 0 and report["written"]
     run(project, capsys, "check-draft", "inv", "pkg")
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["released"] and report["provenance_gaps"] == []
     assert [(r["result_id"], r["runtime"]) for r in manifest(project, "released/001")["results"]] == [
@@ -1790,6 +1804,8 @@ def test_release_manifest_lists_runtime_per_result(project, capsys):
     (evidence / "r-002.json").write_text(json.dumps(second))
     run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
     run(project, capsys, "check-draft", "inv", "pkg")
+    # The rewritten evidence is what the review read, so each rerun is reviewed again before its release.
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["released"] and report["provenance_gaps"] == [
         {"field": "results[1].runtime.unread_requirements[0]",
@@ -1798,6 +1814,7 @@ def test_release_manifest_lists_runtime_per_result(project, capsys):
     (evidence / "r-002.json").write_text(json.dumps(second))
     run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
     run(project, capsys, "check-draft", "inv", "pkg")
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["provenance_gaps"] == [
         {"field": "results[1].runtime", "reason": "evidence lacks runtime"}]
@@ -1816,6 +1833,7 @@ def test_release_numbers_stamps_and_copies_to_storage(project, capsys, tmp_path_
     for number in ("001", "003"):
         (project / f"deliveries/inv/pkg/released/{number}").mkdir(parents=True)
     (project / "deliveries/inv/pkg/released/notes").mkdir()
+    reviewed(project)
     draft_before = manifest(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["released"] and report["release_number"] == "004"
@@ -1837,6 +1855,7 @@ def test_release_storage_conflict_and_instructions(project, capsys, tmp_path_fac
     readme = project / "README.md"
     original = readme.read_text()
     run(project, capsys, "check-draft", "inv", "pkg")
+    reviewed(project)
     readme.write_text(original.replace("not yet recorded", str(store)))
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 1 and report["released"] and report["storage"]["status"] == "conflict"
@@ -1860,8 +1879,64 @@ def test_release_storage_conflict_and_instructions(project, capsys, tmp_path_fac
         "copy deliveries/inv/pkg/released/004/ to https://example.invalid/sites/team/inv/pkg/004/")
 
 
+NO_REVIEW = "no passed review of this draft: run the review in awb-package's references/review.md"
+
+
+def test_release_requires_a_current_review_receipt(project, capsys):
+    draft = load(project / "src/packaging/draft.py", "draft_release_review")
+    # check-draft reports the review without counting it: passed stays the mechanical verdict.
+    for argv in (("check-draft", "inv", "pkg"), ("check-draft", "inv", "pkg", "--verify-only")):
+        code, report = run(project, capsys, *argv)
+        assert code == 0 and report["passed"] and report["review"] == {"status": "none", "changed": []}
+    released = project / "deliveries/inv/pkg/released"
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == NO_REVIEW and report["review"] == {"status": "none", "changed": []}
+    assert not released.exists()
+
+    failing = "review: 0 violations (0 error), 1 narrative problems, 0 command problems\n"
+    assert draft.start_review(project, "inv", "pkg", "full")["started"]
+    assert draft.record_review(project, "inv", "pkg", "full", failing)["passed"] is False
+    assert run(project, capsys, "check-draft", "inv", "pkg")[1]["review"]["status"] == "failed"
+    assert run(project, capsys, "release", "inv", "pkg")[1]["review"] == {"status": "failed", "changed": []}
+
+    accepted = ['findings.md:12 "rose": the user accepts the wording for this audience']
+    assert draft.record_review(project, "inv", "pkg", "full", failing, accepted)["passed"]
+    path = project / "deliveries/inv/pkg/draft/findings.md"
+    path.write_text(path.read_text() + "\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["review"] == {"status": "stale", "changed": ["findings.md"]}
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == NO_REVIEW and not released.exists()
+    assert report["review"] == {"status": "stale", "changed": ["findings.md"]}
+
+    # A scoped review that passes completes the release, and its acceptances travel with it.
+    scoped = failing.replace("review:", "review (scoped):")
+    assert draft.start_review(project, "inv", "pkg", "scoped")["started"]
+    assert not draft.record_review(project, "inv", "pkg", "scoped", scoped, now="2026-10-16T12:00:00+00:00")["passed"]
+    assert draft.record_review(project, "inv", "pkg", "scoped", scoped, accepted)["passed"]
+    assert run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")[1]["review"]["status"] == "current"
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    review = {"kind": "scoped", "recorded_at": "2026-10-16T12:00:00+00:00", "accepted": accepted}
+    assert code == 0 and report["released"] and report["review"] == review
+    assert manifest(project, "released/001")["review"] == review and "review" not in manifest(project)
+    # The record sits beside the draft, so the release does not copy it.
+    assert (project / "deliveries/inv/pkg/review/receipt.json").is_file() and not (released / "001/review").exists()
+
+    # A rerun that changes a represented result's evidence, its checks included, makes the review stale, so the
+    # narratives' claims citing that result are reviewed again before the next release.
+    evidence = project / "investigations/inv/evidence/r-001.json"
+    record = json.loads(evidence.read_text())
+    evidence.write_text(json.dumps({**record, "checks": [{"name": "reconciliation", "outcome": "fail",
+                                                          "detail": "Totals differ"}]}, indent=2) + "\n")
+    stale = {"status": "stale", "changed": ["investigations/inv/evidence/r-001.json"]}
+    assert run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")[1]["review"] == stale
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == NO_REVIEW and report["review"] == stale
+
+
 def test_copy_releases_copies_compares_and_never_overwrites(project, capsys, tmp_path_factory):
     run(project, capsys, "check-draft", "inv", "pkg")
+    reviewed(project)
     for _ in range(2):
         code, report = run(project, capsys, "release", "inv", "pkg")
         assert code == 0 and report["storage"]["status"] == "unrecorded"

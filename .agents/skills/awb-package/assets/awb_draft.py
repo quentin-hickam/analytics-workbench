@@ -6,17 +6,22 @@ awb-init's installer places this file at `src/packaging/draft.py`. `src/awb.py` 
         [--dataset NAME=RESULT[:COLUMNS]]... [--no-datasets] [--result RESULT]... [--round COLUMN=PLACES]...
     python3 src/awb.py review-rules check <investigation> <package>
     python3 src/awb.py review-rules add --area AREA --severity error|warning --rule TEXT --fix TEXT [--pattern REGEX] [--scope line|slide|document]
+    python3 src/awb.py review-receipt start <investigation> <package> --kind full|scoped
+    python3 src/awb.py review-receipt record <investigation> <package> --kind full|scoped --report FILE|- [--accept TEXT]...
+    python3 src/awb.py review-receipt show <investigation> <package>
     python3 src/awb.py check-draft <investigation> <package> [--verify-only]
     python3 src/awb.py release <investigation> <package>
     python3 src/awb.py copy-releases <investigation> [<package>]
 
 Each prints one line of JSON. The manifest is the draft's `manifest.json`; chart and dataset files
-are CSV; review rules live in `foundation/review-rules.md`. Standard library only; `export` also needs the project's `src/provenance.py`.
+are CSV; review rules live in `foundation/review-rules.md`, and the last review's record in the package's
+`review/`, beside `draft/`. Standard library only; `export` also needs the project's `src/provenance.py`.
 """
 
 import argparse
 import bisect
 import csv
+import difflib
 import hashlib
 import html
 import importlib.util
@@ -26,6 +31,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import unicodedata
 from collections import Counter, namedtuple
 from datetime import datetime
@@ -2705,7 +2711,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
               "numbers": None, "numbers_problems": [], "inventory": None, "verify": None,
               "flag_entries": None, "unmatched_flags": None, "draft_markers": None, "start_here": None,
               "helper_drift": [{**row, "confirmed": False} for row in helper_drift(root)],
-              "errors": [], "passed": False}
+              "review": None, "errors": [], "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
         return report
@@ -2844,6 +2850,9 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     for row in report["helper_drift"]:
         row["confirmed"] = (row["file"], row["sha256"]) in confirmed
 
+    # Informational: the last review against these files, read after any write above, as release reads it.
+    review = review_receipt(root, investigation, package)
+    report["review"] = {"status": review["status"], "changed": review["changed"]}
     report["passed"] = _structure_passed(report) and report["unmatched_flags"] == []
     return report
 
@@ -2928,6 +2937,9 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "verbatim within one paragraph or heading as it renders, the question read as written or rendered the "
                "same way: a code span counts, and a question in a comment, fenced code, or an image's text does "
                "not count, nor does one running across an image.\n"
+               "review is the last recorded review against these files, as review-receipt show gives its status "
+               "(none, current, stale, or failed) and changed; it is informational, and release refuses unless "
+               "it is current.\n"
                "draft_markers lists, as where, line, marker, and text, the word draft or the phrase working copy "
                "or not a numbered release, any case, whole words, in the title, subtitle, a slide heading or "
                "**Headline:**, or the title slide's notes; it is informational, since a release copies the draft "
@@ -3954,6 +3966,417 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
     return 0 if report["added"] else 1
 
 
+# ---------------------------------------------------------------- review receipt
+
+# The record of the last review, beside draft/ so it is never inventoried or released.
+REVIEW_DIR = "review"
+RECEIPT = "receipt.json"
+# What start saw as the reviewer was launched, which the next record binds the report to, and the digest of
+# each report that does not pass and was refused because the draft changed after its start, carried by start.
+STARTED = "started.json"
+_KINDS = ("full", "scoped")
+# What a review reads, in the order the fingerprint hashes it, and each one's file in the snapshot; then
+# each represented result's evidence file the manifest's results name, by its path, in sorted order.
+_REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.md",
+                  METHODOLOGY_NOTE: METHODOLOGY_NOTE, REVIEW_RULES: "review-rules.md",
+                  "revalidation_flags": "revalidation_flags.json"}
+# show's whole JSON line, as printed, stays within one read tool result (16,000 characters by default).
+_READ_LIMIT = 16000
+_SUMMARY = re.compile(r"review( \(scoped\))?: (?:(clean)|([0-9]+) violations? \(([0-9]+) errors?\), "
+                      r"([0-9]+) narrative problems?, ([0-9]+) command problems?)\.?")
+# A row may be bulleted or numbered, with backticks around it inside or outside the marker; review_summary
+# strips both before matching, as it strips backticks around the last line.
+_ROW_MARKER = re.compile(r"^(?:[-*+]|[0-9]+[.)])\s+")
+_VIOLATION_ROW = re.compile(r"R-\S+ violation (error|warning)(?=\s)")
+_NARRATIVE_ROW = re.compile(r"narrative\s")
+_SUMMARY_FORM = ("`review: clean`, or `review: <v> violations (<e> error), <n> narrative problems, <c> command "
+                 "problems`, opening `review (scoped):` for a scoped review")
+NO_REVIEW = "no passed review of this draft: run the review in awb-package's references/review.md"
+_NEW_REVIEW = "run review-receipt start, launch a new reviewer, and record the report it returns"
+
+
+def _reviewed_flags(record):
+    """The manifest's revalidation_flags reduced to what makes a review stale: each entry's finding, reason,
+    represented_in, and whether its disposition is omit. Anything else, such as release_with_caveat recorded
+    at release, leaves a review current; an entry that is not an object, or a value that is not a list, is
+    kept whole, so any change to it counts."""
+    flags = record.get("revalidation_flags")
+    if not isinstance(flags, list):
+        return flags
+    return [{"finding": flag.get("finding"), "reason": flag.get("reason"),
+             "represented_in": flag.get("represented_in"), "omit": flag.get("disposition") == "omit"}
+            if isinstance(flag, dict) else flag for flag in flags]
+
+
+def review_inputs(root, investigation, package) -> dict:
+    """{input: bytes, or None when absent} for exactly what a review reads: the three narratives, the rule
+    file, the reduced revalidation_flags as indented JSON, and each evidence file the manifest's results
+    name, which step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a
+    directory included."""
+    root = Path(root)
+    draft = _package_dir(root, investigation, package) / "draft"
+    paths = {name: draft / name for name in NARRATIVES + (METHODOLOGY_NOTE,)}
+    paths[REVIEW_RULES] = root / REVIEW_RULES
+    inputs = {}
+    for name, path in paths.items():
+        try:
+            inputs[name] = path.read_bytes()
+        except FileNotFoundError:
+            inputs[name] = None
+    record, flags = {}, None
+    try:
+        record = _read_json(draft / MANIFEST)
+        flags = _reviewed_flags(record)
+    except FileNotFoundError:
+        flags = {"manifest": "absent"}
+    except (OSError, ValueError):
+        flags = {"manifest": "unreadable"}
+    inputs["revalidation_flags"] = (json.dumps(flags, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    results = record.get("results") if isinstance(record.get("results"), list) else []
+    evidence = {entry["evidence"] for entry in results if isinstance(entry, dict)
+                and isinstance(entry.get("evidence"), str) and entry["evidence"] not in ("", *_REVIEW_INPUTS)}
+    for name in sorted(evidence):
+        try:
+            inputs[name] = (root / name).read_bytes()
+        except FileNotFoundError:
+            inputs[name] = None
+    return inputs
+
+
+def _stored(name):
+    """An input's file in the snapshot; an evidence path is stored under a name derived from it."""
+    return _REVIEW_INPUTS.get(name) or f"evidence/{hashlib.sha256(name.encode()).hexdigest()[:16]}.json"
+
+
+def _digests(inputs):
+    return {name: hashlib.sha256(data).hexdigest() if data is not None else "absent"
+            for name, data in inputs.items()}
+
+
+def _fingerprint(digests):
+    return hashlib.sha256("".join(f"{name}\0{digest}\n" for name, digest in digests.items()).encode()).hexdigest()
+
+
+def review_summary(text, kind, accepted) -> tuple:
+    """(passed, refusal) from a review report: its last non-blank line, as review.md's Brief step 4 writes it.
+
+    passed is True when the line is clean, or when it counts no error violation and no command problem and
+    accepted holds one entry for each warning violation and narrative problem it counts. A refusal names a
+    report no record may rest on: a last line that does not parse, a kind it does not open with, more error
+    than violations, a clean line given acceptances, or a body listing more violation or narrative rows of a
+    kind than the last line counts, so a report that undercounts its own rows never passes."""
+    lines = [line.strip().strip("`").strip() for line in text.splitlines() if line.strip().strip("`").strip()]
+    if not lines:
+        return None, "the report is empty"
+    last = lines[-1]
+    match = _SUMMARY.fullmatch(last)
+    if not match:
+        return None, f"the report's last line is not {_SUMMARY_FORM}: {last[:200]!r}"
+    if bool(match[1]) != (kind == "scoped"):
+        opens = "review (scoped):" if match[1] else "review:"
+        return None, f"--kind {kind} does not match the report's last line, which opens {opens}"
+    violations, errors, narrative, command = (0, 0, 0, 0) if match[2] else map(int, match.group(3, 4, 5, 6))
+    if errors > violations:
+        return None, "the report's last line counts more error violations than violations"
+    if match[2] and accepted:
+        return None, "a clean review has nothing to accept; record it without --accept"
+    body = [_ROW_MARKER.sub("", line, count=1).strip("`").strip() for line in lines[:-1]]
+    rows = Counter(row[1] for row in map(_VIOLATION_ROW.match, body) if row)
+    narrative_rows = sum(1 for line in body if _NARRATIVE_ROW.match(line))
+    if rows["error"] > errors or rows["warning"] > violations - errors or narrative_rows > narrative:
+        return None, (f"the report lists {rows['error']} error and {rows['warning']} warning violations and "
+                      f"{narrative_rows} narrative problems, more than its last line counts")
+    return errors == 0 and command == 0 and len(accepted) == violations - errors + narrative, None
+
+
+def _no_draft(root, package_dir):
+    if not (package_dir / "draft").is_dir():
+        return f"no draft at {_rel(root, package_dir / 'draft')}; create it with awb-package"
+    return None
+
+
+def start_review(root, investigation, package, kind) -> dict:
+    """Mark a review launched: write review/started.json with its kind and the digest of each input the
+    reviewer will read, so the next record binds its report to what the reviewer read, not to the draft at
+    record time, and carries the reports refused under an earlier start. A scoped start needs a recorded
+    review; a refusal writes nothing."""
+    root = Path(root)
+    package_dir = _package_dir(root, investigation, package)
+    if refusal := _no_draft(root, package_dir):
+        return {"started": False, "refused": refusal}
+    if kind == "scoped" and review_receipt(root, investigation, package)["status"] == "none":
+        return {"started": False, "refused": "no recorded review to scope against; the review is full"}
+    try:
+        earlier = _read_json(package_dir / REVIEW_DIR / STARTED)
+        earlier = earlier.get("earlier", []) + earlier.get("refused", [])
+    except (OSError, ValueError, AttributeError, TypeError):
+        earlier = []
+    try:
+        digests = _digests(review_inputs(root, investigation, package))
+        (package_dir / REVIEW_DIR).mkdir(exist_ok=True)
+        _write_json(package_dir / REVIEW_DIR / STARTED, {"kind": kind, "inputs": digests, "earlier": earlier})
+    except OSError as error:
+        return {"started": False, "refused": f"the draft cannot be read or the start written: {error}"}
+    return {"started": True, "kind": kind}
+
+
+def record_review(root, investigation, package, kind, text, accepted=(), *, now=None) -> dict:
+    """Record a review started with start_review: snapshot what it read under
+    deliveries/<investigation>/<package>/review/ and write receipt.json, replacing the previous record and
+    consuming the start. A report that does not pass is recorded too, so the next review can be scoped
+    against it. Refused, writing nothing, for an unusable report, with no start of this kind, or when an
+    input differs from what start saw, since the reviewer did not read that change; such a report that does
+    not pass is noted in started.json, which is all that refusal writes.
+
+    A report that does not pass is also refused when it is the one recorded, accepted or not, and an input
+    has changed since (show reports stale), or when it was refused for a change under an earlier
+    start: a report in hand never covers an edit. A new reviewer returning the same words is refused too; a
+    report that passes, such as a clean one, is not checked, since the Brief fixes its words.
+
+    With accepted, the report must be the one already recorded, of the same kind, with nothing it read
+    changed since (show reports current or failed): only accepted and passed change, and the snapshot stays
+    the one the review read, so an edit made before the acceptances is never counted as reviewed."""
+    root = Path(root)
+    package_dir = _package_dir(root, investigation, package)
+    if refusal := _no_draft(root, package_dir):
+        return {"recorded": False, "refused": refusal}
+    accepted = list(accepted)
+    passed, refusal = review_summary(text, kind, accepted)
+    if refusal:
+        return {"recorded": False, "refused": refusal}
+    directory = package_dir / REVIEW_DIR
+    if accepted:
+        prior = review_receipt(root, investigation, package)
+        if prior["report"] != text or prior["kind"] != kind:
+            return {"recorded": False, "refused": (
+                f"--accept amends the report already recorded (show reports {prior['status']}), and this is another "
+                "report: record it without --accept first")}
+        if prior["status"] not in ("current", "failed"):
+            return {"recorded": False, "refused": (
+                f"--accept amends the report already recorded while nothing it read has changed (show reports "
+                f"{prior['status']}), so this report cannot be recorded again, with --accept or without: "
+                f"{_NEW_REVIEW}, then record that report again with --accept")}
+        try:
+            receipt = _read_json(directory / RECEIPT)
+            _write_json(directory / RECEIPT, {**receipt, "passed": passed, "accepted": accepted})
+        except (OSError, ValueError) as error:
+            return {"recorded": False, "refused": f"{_rel(root, directory)}: {error}"}
+        return {"recorded": True, "receipt": _rel(root, directory / RECEIPT), "kind": kind, "passed": passed,
+                "accepted": accepted}
+    try:
+        started = _read_json(directory / STARTED)
+    except (OSError, ValueError):
+        started = {}
+    if not isinstance(started, dict) or started.get("kind") != kind:
+        return {"recorded": False, "refused": f"no {kind} review started: run review-receipt start --kind "
+                                              f"{kind} right before launching the reviewer"}
+    try:
+        inputs = review_inputs(root, investigation, package)
+    except OSError as error:
+        return {"recorded": False, "refused": f"the draft cannot be read: {error}"}
+    digests = _digests(inputs)
+    report_digest = hashlib.sha256(text.encode()).hexdigest()
+    if digests != started.get("inputs"):
+        if not passed and report_digest not in started.get("refused", []):
+            try:
+                _write_json(directory / STARTED, {**started, "refused": started.get("refused", []) + [report_digest]})
+            except OSError:
+                pass
+        return {"recorded": False, "refused": "the draft changed after the review started, so the reviewer did not "
+                                              f"read the change and this report cannot be recorded: {_NEW_REVIEW}"}
+    try:
+        prior = _read_json(directory / RECEIPT)
+    except (OSError, ValueError):
+        prior = {}
+    if not passed and (report_digest in started.get("earlier", []) or isinstance(prior, dict) and prior.get(
+            "report") == text and prior.get("inputs") != digests):
+        return {"recorded": False, "refused": "this report was read against an earlier draft, refused or recorded "
+                                              f"before a change, so it cannot be recorded: {_NEW_REVIEW}"}
+    snapshot = directory / "snapshot"
+    try:
+        # The old receipt goes first, so an interrupted record leaves none, and the next review is full.
+        (directory / RECEIPT).unlink(missing_ok=True)
+        if snapshot.exists():
+            shutil.rmtree(snapshot)
+        snapshot.mkdir(parents=True)
+        for name, data in inputs.items():
+            if data is not None:
+                (snapshot / _stored(name)).parent.mkdir(exist_ok=True)
+                (snapshot / _stored(name)).write_bytes(data)
+        receipt = {"recorded_at": now or _now(), "kind": kind, "fingerprint": _fingerprint(digests),
+                   "inputs": digests, "report": text, "passed": passed, "accepted": accepted}
+        _write_json(directory / RECEIPT, receipt)
+        (directory / STARTED).unlink()
+    except OSError as error:
+        return {"recorded": False, "refused": f"{_rel(root, directory)}: {error}"}
+    return {"recorded": True, "receipt": _rel(root, directory / RECEIPT), "kind": kind, "passed": passed,
+            "accepted": accepted}
+
+
+def _diff_text(data):
+    """Lines split at \\n alone, so hunk line numbers are the ones grep -n gives."""
+    if data is None:
+        return []
+    text = data.decode("utf-8", "replace").removeprefix("﻿")
+    parts = text.split("\n")
+    return [part + "\n" for part in parts[:-1]] + ([parts[-1] + "\n"] if parts[-1] else [])
+
+
+def review_receipt(root, investigation, package) -> dict:
+    """The last review's record against the draft now; writes nothing.
+
+    status is none (no receipt), current (it passed and nothing it read has changed), stale (something it
+    read has changed), or failed (nothing changed, but it did not pass). changed names each input whose
+    content differs, and diff is a unified diff of each from what the review read to the current file, cut
+    so the printed line stays within _READ_LIMIT characters, with diff_cut counting the rest."""
+    root = Path(root)
+    directory = _package_dir(root, investigation, package) / REVIEW_DIR
+    report = {"status": "none", "kind": None, "recorded_at": None, "accepted": [], "report": None,
+              "changed": [], "diff": "", "diff_cut": 0, "errors": []}
+    try:
+        receipt = _read_json(directory / RECEIPT)
+    except FileNotFoundError:
+        return report
+    except (OSError, ValueError) as error:
+        report["errors"].append(f"{_rel(root, directory / RECEIPT)}: {error}")
+        return report
+    inputs_seen = receipt.get("inputs")
+    if receipt.get("kind") not in _KINDS or not isinstance(receipt.get("passed"), bool) \
+            or not isinstance(inputs_seen, dict) or not isinstance(receipt.get("accepted"), list):
+        report["errors"].append(f"{_rel(root, directory / RECEIPT)}: not a review receipt; record the review again")
+        return report
+    report.update(kind=receipt["kind"], recorded_at=receipt.get("recorded_at"), accepted=receipt["accepted"],
+                  report=receipt.get("report"))
+    try:
+        current = review_inputs(root, investigation, package)
+    except OSError as error:
+        report["status"] = "stale"
+        report["errors"].append(f"the draft cannot be read: {error}")
+        return report
+    digests = _digests(current)
+    report["changed"] = [name for name in list(digests) + [n for n in inputs_seen if n not in digests]
+                         if digests.get(name) != inputs_seen.get(name)]
+    if report["changed"] or _fingerprint(digests) != receipt.get("fingerprint"):
+        report["status"] = "stale"
+    else:
+        report["status"] = "current" if receipt["passed"] else "failed"
+    draft = _rel(root, _package_dir(root, investigation, package) / "draft")
+    pieces = []
+    for name in report["changed"]:
+        try:
+            before = (directory / "snapshot" / _stored(name)).read_bytes()
+        except OSError:
+            before = None
+        label = f"{draft}/{MANIFEST} revalidation_flags" if name == "revalidation_flags" else \
+            f"{draft}/{name}" if name in _REVIEW_INPUTS and name != REVIEW_RULES else name
+        pieces += difflib.unified_diff(_diff_text(before), _diff_text(current.get(name)),
+                                       f"reviewed {label}", label)
+    # Cut against what the rest of the printed line leaves, each line counted as JSON encodes it, so a quote
+    # or newline counts twice and a curly quote six times. A prior report too long to leave room cuts it all.
+    budget = _READ_LIMIT - 200 - len(json.dumps(report))
+    kept = 0
+    for line in pieces:
+        budget -= len(json.dumps(line)) - 2
+        if budget < 0:
+            break
+        kept += 1
+    diff = "".join(pieces)
+    if kept < len(pieces):
+        report["diff_cut"] = len(diff) - len("".join(pieces[:kept]))
+        diff = "".join(pieces[:kept]) + f"[... {report['diff_cut']} characters cut; read each changed file in full ...]\n"
+    report["diff"] = diff
+    return report
+
+
+def cli_review_receipt(root: Path, argv: list[str]) -> int:
+    raw = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(
+        prog="awb.py review-receipt", formatter_class=raw,
+        description="Start a draft review, record it with a snapshot of what it read, or show the last one "
+                    "against the draft now.",
+        epilog="The record is deliveries/<investigation>/<package>/review/, beside draft/, so it is never "
+               "inventoried or released.\nRun `awb.py review-receipt <subcommand> --help` for its arguments, "
+               "output, and exit status.")
+    actions = parser.add_subparsers(dest="action", required=True, metavar="{start,record,show}")
+    start = actions.add_parser(
+        "start", formatter_class=raw, help="mark a review launched, right before starting the reviewer",
+        description="Mark a review launched: write review/started.json with its kind and a SHA-256 digest of "
+                    "each input record snapshots. Run it right before starting the reviewer; the next record "
+                    "binds its report to these inputs. It carries the reports an earlier start's record refused.",
+        epilog="Prints one JSON line: started and kind.\nRefuses, writing nothing, when the package has no draft "
+               "or --kind scoped has no recorded review to scope against.\nExit 0 started; 1 refused; 2 "
+               "unusable arguments.")
+    _package_arguments(start)
+    start.add_argument("--kind", required=True, choices=_KINDS, help="full, or scoped against the last record")
+    record = actions.add_parser(
+        "record", formatter_class=raw, help="record a review's report and what it read",
+        description="Record the report of a review begun with start: snapshot the draft's findings.md, "
+                    "methodology.md, methodology-note.md when present, foundation/review-rules.md when present, "
+                    "and the manifest's revalidation_flags (finding, reason, represented_in, and whether the "
+                    "disposition is omit) and each evidence file its results name, and write receipt.json with "
+                    "a SHA-256 fingerprint of them, the report verbatim, passed, and accepted. Each record "
+                    "replaces the previous one and consumes the start.",
+        epilog=f"The report's last line is {_SUMMARY_FORM}. passed is true when it is clean, or when it counts no "
+               "error violation and no command problem and --accept is given once for each warning violation "
+               "and narrative problem it counts. A report that does not pass is recorded with passed false.\n"
+               "Without --accept, a start of the same --kind must come first, with nothing it saw changed "
+               "since. A report in hand never covers an edit: after any change to what it read, run start, launch "
+               "a new reviewer, and record the report it returns.\n"
+               "With --accept, the report must be the one already recorded, with nothing it read changed since: "
+               "only accepted and passed change, and the snapshot stays the one the review read.\n"
+               "Prints one JSON line: recorded, receipt, kind, passed, and accepted.\nRefuses, writing nothing, "
+               "when the last line does not parse, --kind disagrees with its opening, it counts more errors than "
+               "violations, a clean report is given --accept, the report lists more violation or narrative "
+               "rows than its last line counts, no review of this --kind was started, the draft changed after "
+               "start, --accept comes with another report or after a change, or a report that does not pass is "
+               "the recorded one after a change, or one refused for a change under an "
+               "earlier start. A report that does not pass refused for a change after start is noted in "
+               "started.json, all that refusal writes; a new reviewer returning the same words is refused too.\n"
+               "Exit 0 recorded; 1 refused; "
+               "2 unusable arguments.")
+    _package_arguments(record)
+    record.add_argument("--kind", required=True, choices=_KINDS, help="full, or scoped against the last record")
+    record.add_argument("--report", required=True,
+                        help="the reviewer's report file, project-relative or absolute, or - for standard input")
+    record.add_argument("--accept", action="append", default=[], metavar="TEXT",
+                        help='a problem the user accepted, as "<file>:<line> <quote>: <the user\'s reason>"; '
+                             "once per accepted warning violation or narrative problem")
+    show = actions.add_parser(
+        "show", formatter_class=raw, help="compare the last record with the draft now, writing nothing",
+        description="Compare the last recorded review with the draft now. Writes nothing.",
+        epilog="Prints one JSON line: status (none: no record; current: it passed and nothing it read has "
+               "changed; stale: something it read has changed; failed: nothing has changed, but it did not "
+               "pass), kind, recorded_at, accepted, report (the prior report), changed (each input whose content "
+               f"differs), diff (a unified diff of each from the reviewed copy to the current file, its + line "
+               f"numbers the current file's, cut so the printed line stays within {_READ_LIMIT} characters, with "
+               "diff_cut counting what was cut), and errors.\nExit 0 unless errors is not empty.")
+    _package_arguments(show)
+    args = parser.parse_args(argv)
+    investigation, package = _simple(args.investigation, "investigation"), _simple(args.package, "package")
+    if args.action == "show":
+        report = review_receipt(Path(root), investigation, package)
+        _print(report)
+        return 1 if report["errors"] else 0
+    if args.action == "start":
+        report = start_review(Path(root), investigation, package, args.kind)
+        _print(report)
+        return 0 if report["started"] else 1
+    for text in args.accept:
+        if not text.strip() or text.splitlines() != [text]:
+            record.error("--accept must be one non-blank line")
+    try:
+        if args.report == "-":
+            text = sys.stdin.read()
+        else:
+            path = Path(args.report).expanduser()
+            text = (path if path.is_absolute() else Path(root) / path).read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        record.error(f"--report: {error}")
+    report = record_review(Path(root), investigation, package, args.kind, text, [a.strip() for a in args.accept])
+    _print(report)
+    return 0 if report["recorded"] else 1
+
+
 # ---------------------------------------------------------------- release
 
 def disposition_problems(record: dict) -> list[dict]:
@@ -4144,7 +4567,8 @@ _STORAGE_FAILURES = {"conflict", "copy failed", "mismatch"}
 
 
 def release(root, investigation, package) -> dict:
-    """Verify the draft, copy it to the next numbered release, stamp it, and copy it to storage."""
+    """Verify the draft and its review receipt, copy it to the next numbered release, stamp it with the
+    review it passed, and copy it to storage."""
     root = Path(root)
     package_dir = _package_dir(root, investigation, package)
     check_report = check_draft(root, investigation, package, verify_only=True)
@@ -4166,6 +4590,11 @@ def release(root, investigation, package) -> dict:
         report["unmatched_flags"] = check_report["unmatched_flags"]
         report["dispositions"] = problems
         return report
+    review = review_receipt(root, investigation, package)
+    if review["status"] != "current":
+        report["refused"] = NO_REVIEW
+        report["review"] = {"status": review["status"], "changed": review["changed"]}
+        return report
 
     released = package_dir / "released"
     existing = [p for p in released.iterdir() if p.is_dir() and p.name.isascii() and p.name.isdigit()] \
@@ -4182,14 +4611,15 @@ def release(root, investigation, package) -> dict:
     try:
         shutil.copytree(package_dir / "draft", staging)
         record.update({"status": "release", "release_number": number, "released_at": _now(),
-                       "prior_release": f"released/{prior.name}" if prior else "none"})
+                       "prior_release": f"released/{prior.name}" if prior else "none",
+                       "review": {key: review[key] for key in ("kind", "recorded_at", "accepted")}})
         _write_json(staging / MANIFEST, record)
         os.rename(staging, target)
     finally:
         if staging.exists():
             shutil.rmtree(staging)
     report.update(released=True, release=_rel(root, target), release_number=number,
-                  released_at=record["released_at"], prior_release=record["prior_release"],
+                  released_at=record["released_at"], prior_release=record["prior_release"], review=record["review"],
                   verify=verify(target, record["inventory"]),
                   datasets=record.get("dataset_selection", {"unknown": "dataset_selection is not recorded"}),
                   dispositions=release_dispositions(record, prior_record),
@@ -4206,11 +4636,12 @@ def cli_release(root: Path, argv: list[str]) -> int:
         description="Copy a draft that passes check-draft --verify-only, with every flagged finding "
                     "recorded and disposed, to the next numbered release and to release storage.",
         epilog="Prints one JSON line.\nRefuses, creating nothing, while a check-draft helper_drift row is "
-               "unconfirmed, listing those rows as helper_drift, and unless check-draft --verify-only passes and "
-               "every represented revalidation_flags entry is omit or release_with_caveat; a flag refusal "
-               "lists unmatched_flags and dispositions. Its draft_markers rows do not refuse: run check-draft "
+               "unconfirmed, listing those rows as helper_drift, and unless check-draft --verify-only passes, "
+               "every represented revalidation_flags entry is omit or release_with_caveat, and review-receipt "
+               "show reports current; a flag refusal lists unmatched_flags and dispositions, and a review "
+               "refusal the review's status and changed. Its draft_markers rows do not refuse: run check-draft "
                "--verify-only first to show them.\nOn success it prints the report fields: datasets, "
-               "dispositions (new: absent from the prior release's manifest), open_caveats, provenance_gaps, "
+               "review (the passed review's kind, recorded_at, and accepted problems, which the released manifest records too), dispositions (new: absent from the prior release's manifest), open_caveats, provenance_gaps, "
                "checkout_only_acquisitions, verify (the local copy), and storage.\nopen_caveats lists the open "
                "caveats the release carries, new or carried forward: the headline and then each bullet of the deck's "
                "Limitations and open caveats and Open questions slides, wherever they stand, as slide, line, "
