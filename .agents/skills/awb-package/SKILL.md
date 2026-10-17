@@ -13,7 +13,7 @@ Packaging **serializes** recorded results: it reuses recorded evidence, exports,
 
 1. **Establish** the investigation, package name, dataset selection, and Audience.
 2. **Gather** the record on the read path the change needs.
-3. **Write** a first pass of `findings.md` with its chart specifications, `methodology.md`, and any `methodology-note.md`, passing the headline checkpoint in its mode.
+3. **Write** a first pass of `findings.md` under the contract's **Writing rules**, with chart specifications, `methodology.md`, and any `methodology-note.md`, passing the headline checkpoint.
 4. **Export the files and provenance** with `export` on every revision, which creates the draft folder; then fill in the display names and paste the `methodology_lines`, in that order, and review the flags.
 5. **Review** the narratives with a read-only reviewer against every review rule.
 6. **Check** last with `check-draft`, until done.
@@ -70,13 +70,13 @@ Write the draft at the contract's paths, or revise the same files: a first pass,
 2. Give each listed column without a display name one from the glossary: fill its `display_stub` under `[columns]` in `foundation/display.toml`, and paste its `round_stub` under `[round]`, replacing each `""` with the places the slide's number format shows, unquoted, such as `"share" = 1`. List fractions the slide shows as percents in `[percent]`'s `columns = [...]`, and name a column that means something else in another result under `[results."<id>".columns]`; a result whose column of that name already holds percents lists its own percent columns, even none, under `[results."<id>".percent]`. Fix any blank name or places it reports in place, and rerun. For each `label_warnings` column, confirm its name suits every result it labels, or name it for one result. **Data:** lines and dataset headers use these names.
 3. Paste its `methodology_lines` into `methodology.md`, and repeat each of its `questions` verbatim in the methodology section of the finding that result supports.
 4. For a revision that only adds caveats and keeps the exported files, pass only `--result`, once for every represented result; omit `--chart`, `--dataset`, and `--no-datasets`. A `check-draft` `charts` row that asks to rerun export needs the full export, with every `--chart`.
-5. When `export` reports `exports_blocked`, stop and report it. When it reports missing evidence it writes nothing; stop, or rerun and restore, as **Missing evidence** in [helpers](references/helpers.md) says. Commit nothing on the user's behalf to make provenance look clean.
+5. When `export` reports `exports_blocked`, stop and report it. When it reports missing evidence it writes nothing; stop, or rerun and restore, as **Missing evidence** in [numbers and evidence](references/numbers-and-evidence.md#missing-evidence) says. Commit nothing on the user's behalf to make provenance look clean.
 
 `export` records each flag's finding and reason and lists `flags_pending`. Review every flag's `represented_in` against the revised draft and fill pending places per the contract; then for any represented flag whose disposition is still `none`, ask the user to revalidate, omit, or release with the caveat, and record the answer, `none` until there is one.
 
 ## 5. Review
 
-Once the narratives and flags are complete, run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against the brief, every rule in `foundation/review-rules.md`, and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it, right after `review-receipt start`. Record and act on its report as that file's **After the review** says; the first review of a draft is full, and later ones are scoped against the recorded one.
+Run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against the brief's definitions and questions, every rule in `foundation/review-rules.md`, and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it, right after `review-receipt start`. Record and act on its report as that file's **After the review** says; the first review of a draft is full, and later ones are scoped against the recorded one.
 
 ## 6. Check
 
@@ -86,7 +86,7 @@ A `numbers` row is a number no represented result records; its `problem` names t
 
 1. It comes from a recorded result the draft relies on but `export` was not given: rerun `export` passing that result too. `allowed_numbers` never stands in for representing a result.
 2. A represented result records it at another value or precision: rewrite it from the recorded value. In another unit than its chart or dataset column, such as gigatonnes for megatonnes, it traces once that column has a `[scale]` divisor in `foundation/display.toml` and `export` reruns.
-3. It is not a quantity, such as a date, a comparison year, a chart number, or a tool version: the check reports any number whose context leaves it in doubt, so reword where a context [helpers](references/helpers.md) lists would mark it, such as a comma after a date or year; otherwise, or when the records support it from elsewhere, such as an earlier release, a `history.md` entry, or a result's question `methodology.md` repeats, list it in the manifest's `allowed_numbers` as `package-format/manifest-template.md` describes.
+3. It is not a quantity, such as a date, a comparison year, a chart number, or a tool version: the check reports any number whose context leaves it in doubt, so reword where a context [numbers and evidence](references/numbers-and-evidence.md#numbers) lists would mark it, such as a comma after a date or year; otherwise, or when the records support it from elsewhere, such as an earlier release, a `history.md` entry, or a result's question `methodology.md` repeats, list it in the manifest's `allowed_numbers` as `package-format/manifest-template.md` describes.
 4. It is computed from results that none records: only separately authorized analysis records it; until then, leave it out.
 
 **Done** when `check-draft` prints `passed: true` on the final files and its `review` row is `current`, a passed review, full or scoped, of these files, which checks what `check-draft` cannot. Any edit after `check-draft` reruns it. Report its outcome.

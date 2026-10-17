@@ -299,6 +299,7 @@ def test_missing_packages_get_an_install_command(project, monkeypatch):
         if name == "duckdb":
             raise ImportError(name)
     monkeypatch.setattr(installer.importlib, "import_module", import_module)
+    monkeypatch.setattr(installer, "_has_pip", lambda: True)
     result = installer.install(project, check=True)
     assert result["packages"]["duckdb"] == "missing" and result["packages"]["pandas"] == "ok"
     assert result["install"] == f"{sys.executable} -m pip install duckdb"
@@ -338,6 +339,7 @@ def test_uv_environment_without_pip_gets_a_uv_hint(project, tmp_path, monkeypatc
     monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
     venv = tmp_path / "uv-venv"
     venv.mkdir()
+    monkeypatch.setattr(sys, "prefix", str(venv))
     (venv / "pyvenv.cfg").write_text("home = /usr/bin\nimplementation = CPython\nuv = 0.5.1\n")
     python = str(venv / "bin/python")
     assert installer._pip_install(python, str(venv)) == f"uv pip install --python {python}"

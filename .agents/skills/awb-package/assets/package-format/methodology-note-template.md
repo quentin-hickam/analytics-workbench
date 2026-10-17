@@ -26,7 +26,7 @@ The terms the answer depends on, in the glossary's business terms, with any depa
 
 ## Method
 
-How the numbers were produced, in plain steps, and the checks that confirm them, such as "every month's total matches the finance ledger exactly", with no tolerance.
+How the numbers were produced, in plain steps, and the checks that confirm them, under the package contract’s **Writing rules**.
 
 ## Exclusions
 

@@ -1374,7 +1374,7 @@ NARRATIVES = ("findings.md", "methodology.md")
 # Reading fails safe: a number is skipped only in one of the contexts below, each of which marks it as no
 # quantity; every other number is read, so a doubtful one becomes a row the author clears by rewording or
 # by allowing it. check_numbers also skips the accepted **Claim strength:** lines it is given (`claim_lines`),
-# whose numbers repeat the record. references/helpers.md states the same list, those lines last.
+# whose numbers repeat the record. references/numbers-and-evidence.md states the same list, those lines last.
 _MONTH = (r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
           r"|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?")
 _DAY = r"(?:3[01]|[12][0-9]|0?[1-9])"
@@ -1751,7 +1751,7 @@ def check_numbers(path: str | os.PathLike, values, *, allowed=(), claim_lines=()
     `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
     text is written around it, matched on the text the number is read from, so any whitespace or a line
     wrap matches a space: a bare `40` covers every 40, and `Week 23` only that 23. A number is skipped
-    only in a context references/helpers.md lists; every other number is read. `claim_lines` are the line
+    only in a context references/numbers-and-evidence.md lists; every other number is read. `claim_lines` are the line
     numbers of the **Claim strength:** lines the claims check accepts (`_claim_review`): each repeats a
     state.md Claim cell, so its numbers trace to the record.
     """
@@ -4486,7 +4486,7 @@ RECEIPT = "receipt.json"
 STARTED = "started.json"
 _KINDS = ("full", "scoped")
 # What a review reads, in the order the fingerprint hashes it, and each one's file in the snapshot; then
-# each evidence file the manifest's results name and each scan methodology.md names by its foundation/scans/
+# each evidence file the manifest's results name and each scan or saved query methodology.md names by its
 # path, which step 3 reads beside a cited quality ID, by its path, in sorted order.
 # The brief is keyed brief.md and read from the investigation; its questions and Audience set what a review checks.
 # The glossary, source register, and quality record are read whole, as step 3's readability, source-series,
@@ -4496,6 +4496,7 @@ GLOSSARY = "foundation/glossary.md"
 SOURCES = "foundation/sources.md"
 QUALITY = "foundation/quality.md"
 _SCAN_PATH = re.compile(r"foundation/scans/[A-Za-z0-9][A-Za-z0-9._@-]*\.json")
+_QUERY_PATH = re.compile(r"(?:[A-Za-z0-9][A-Za-z0-9._@-]*/)*[A-Za-z0-9][A-Za-z0-9._@-]*\.sql\b", re.IGNORECASE)
 _REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.md",
                   METHODOLOGY_NOTE: METHODOLOGY_NOTE, BRIEF: BRIEF, REVIEW_RULES: "review-rules.md",
                   GLOSSARY: "glossary.md", SOURCES: "sources.md", QUALITY: "quality.md",
@@ -4562,7 +4563,7 @@ def review_inputs(root, investigation, package) -> dict:
     """{input: bytes, or None when absent} for exactly what a review reads: the three narratives, the
     investigation's brief.md, the rule file without rules kept for another package (_package_rules), the
     glossary, source register, and quality record whole, the reduced revalidation_flags as indented JSON, and
-    each evidence file the manifest's results name or scan methodology.md names by its foundation/scans/
+    each evidence file the manifest's results name or scan or saved query methodology.md names by its
     path, which step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a
     directory included."""
     root = Path(root)
@@ -4591,7 +4592,9 @@ def review_inputs(root, investigation, package) -> dict:
     results = record.get("results") if isinstance(record.get("results"), list) else []
     evidence = {entry["evidence"] for entry in results if isinstance(entry, dict)
                 and isinstance(entry.get("evidence"), str) and entry["evidence"] not in ("", *_REVIEW_INPUTS)}
-    evidence.update(_SCAN_PATH.findall((inputs["methodology.md"] or b"").decode("utf-8", "replace")))
+    methodology = (inputs["methodology.md"] or b"").decode("utf-8", "replace")
+    evidence.update(_SCAN_PATH.findall(methodology))
+    evidence.update(_QUERY_PATH.findall(methodology))
     for name in sorted(evidence):
         try:
             inputs[name] = (root / name).read_bytes()
@@ -4875,8 +4878,8 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
                     "foundation/glossary.md, foundation/sources.md, and foundation/quality.md when present, "
                     "foundation/review-rules.md when present without rules kept for another package, and the "
                     "manifest's revalidation_flags (finding, reason, represented_in, and whether the "
-                    "disposition is omit), each evidence file its results name, and each scan methodology.md names "
-                    "by its foundation/scans/<name>.json path, and write receipt.json with "
+                    "disposition is omit), each evidence file its results name, and each scan or saved query "
+                    "methodology.md names by its path, and write receipt.json with "
                     "a SHA-256 fingerprint of them, the report verbatim, passed, and accepted. Each record "
                     "replaces the previous one and consumes the start.",
         epilog=f"The report's last line is {_SUMMARY_FORM}. passed is true when it is clean, or when it counts no "
