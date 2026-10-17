@@ -21,6 +21,7 @@
 # test_a_state_written_after_the_latest_change_on_the_same_day_is_up_to_date: a timestamped state orders changes by time, a change in its own second not after it, a Z time read as an instant.
 # test_a_state_time_without_its_offset_or_malformed_is_uncertain: a time without its offset, a space separator, fractional seconds, an impossible hour, or prose is an uncertainty and leaves the status unknown.
 # test_committed_changes_are_ordered_by_their_own_times: a commit after the state does not date its changes; a file rewritten after its commit, or deleted, has only the commit's time and leaves the order unknown in plain words; one committed before the state is not after it.
+# test_a_committed_path_git_quotes_is_dated_only_by_its_commit: a committed path Git prints quoted is dated by its commit alone, so a commit after the state leaves the order unknown.
 # test_findings_are_grouped_by_question: each root counts the findings answering it or a question under it by status, with its origin; findings no question names, under a missing parent or without an evidence link, are counted apart.
 # test_unreadable_findings_leave_the_counts_by_question_unknown: an unreadable findings table makes the counts by question and the caveats null, never empty.
 # test_every_findings_caveat_is_reported: every finding with a caveat cell is listed with it, flagged or not, check segments included.
@@ -459,6 +460,23 @@ def test_committed_changes_are_ordered_by_their_own_times(workbench):
     os.utime(workbench / "investigations/churn/brief.md", (saved.timestamp() + 900, saved.timestamp() + 900))
     commit(saved.timestamp() + 200)
     assert status.collect(workbench)["git"]["state_status"] == "up to date"
+
+
+def test_a_committed_path_git_quotes_is_dated_only_by_its_commit(workbench):
+    datetime = __import__("datetime").datetime
+    saved = datetime(2026, 10, 1, 15).astimezone()
+    stamp_state(workbench, saved)
+    git(workbench, "init")
+    write(workbench, 'investigations/churn/a"b.sql', "select 1")
+    set_mtimes(workbench, saved.timestamp() - 3600)
+    when = datetime.fromtimestamp(saved.timestamp() + 60).astimezone().isoformat()
+    git(workbench, "add", "-A")
+    git(workbench, "-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-qm", "work",
+        env={**os.environ, "GIT_AUTHOR_DATE": when, "GIT_COMMITTER_DATE": when})
+    # Its own mtime would place it before the state, but the quoted name is never read back, so the order is unknown.
+    result = status.collect(workbench)["git"]
+    assert result["state_status"] == "saved before a later commit, which does not record when its changes were made"
+    assert result["latest_change"]["source"].startswith('"')
 
 
 def test_acquisitions_and_storage_risks(workbench):

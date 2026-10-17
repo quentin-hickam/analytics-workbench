@@ -925,6 +925,8 @@ def git_status(root, slug, state_date, uncertain):
             for line in committed.stdout.splitlines():
                 if line.startswith("\x01"):
                     commit_time = int(line[1:])
+                elif line.startswith('"'):  # A path Git quotes is not read back: only its commit's time dates it.
+                    latest[line] = max(latest.get(line, commit_time), commit_time)
                 elif line and line.startswith(project_prefix) and line[len(project_prefix):] not in uncommitted:
                     name = line[len(project_prefix):]
                     latest[name] = max(latest.get(name, commit_time), commit_time)
