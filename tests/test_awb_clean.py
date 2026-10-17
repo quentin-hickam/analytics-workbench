@@ -4,7 +4,7 @@
 # test_text_dates_and_codes_are_typed_conservatively: a day-first text date column is typed by its one covering format, an all-ambiguous one is reported, and leading-zero codes stay text.
 # test_rescan_reports_delta_with_stable_ids_and_inherited_options: a rescan after a correction view reports before and after counts by issue, keeps ids, and reuses the baseline's options.
 # test_duplicate_rows_leave_lineage_columns_out_of_the_match: two sheets' copies split into across-part rows and remaining repeats when --lineage leaves their sheet and sheet_row values out of the match; examples keep lineage first, and explicit, declared and inherited lineage, tomli fallback and invalid-column refusals retain their behavior.
-# test_declared_lineage_keeps_the_scanned_datasets_own_order: a dataset's own lineage declaration keeps its order, so its part column comes first; a dataset with none falls back to every declared column.
+# test_declared_lineage_keeps_the_scanned_datasets_own_order: a dataset's own lineage declaration keeps its order, so its part column comes first, for a scan of its publication too; a dataset with none falls back to every declared column.
 # test_duplicate_rows_split_follows_cross_part_correction: repeats within the first part and copies in later parts split as the correction view keeps and drops them, their counts sum to the former combined count, separate quality rows and hashed links retain independent statuses, missing links rebuild from their full markers, and a corrected-view rescan resolves only the across-part issue.
 # test_duplicate_rows_without_lineage_keep_one_issue: exact repeats with no lineage produce only duplicate-rows.
 # test_duplicate_rows_use_the_first_lineage_column_as_the_part: changing lineage order changes which part's repeats remain.
@@ -290,6 +290,20 @@ def test_declared_lineage_keeps_the_scanned_datasets_own_order(tmp_path):
     # The first lineage column is the part, so a dataset's own declaration wins over the merged list.
     assert scanner.declared_lineage(tmp_path, "sales") == ["file", "sheet", "sheet_row"]
     assert scanner.declared_lineage(tmp_path, "other") == ["sheet", "sheet_row", "file"]
+    # A publication scan, named sales@p1, uses the sales declaration too, so copies across files stay cross-part.
+    duckdb = pytest.importorskip("duckdb")
+    publication = tmp_path / "data/parquet/sales/p1"
+    publication.mkdir(parents=True)
+    (publication / "publication.json").write_text('{"converted_at": "2026-10-17T00:00:00Z"}')
+    rows = [("A.xlsx", "Data", n, 7) for n in (1, 2)] + [("B.xlsx", "Data", n, 7) for n in (1, 2, 3)] + [("C.xlsx", "Data", 1, 7)]
+    with duckdb.connect() as db:
+        db.execute("CREATE TABLE t (file VARCHAR, sheet VARCHAR, sheet_row INTEGER, amount INTEGER)")
+        db.executemany("INSERT INTO t VALUES (?, ?, ?, ?)", rows)
+        db.execute(f"COPY t TO '{publication / 'part-0.parquet'}' (FORMAT parquet)")
+    record, _ = scanner.scan(tmp_path, "sales", today=TODAY)
+    assert record["options"]["lineage"] == ["file", "sheet", "sheet_row"]
+    assert {k: keys(record)[k]["count"] for k in keys(record) if k.startswith("duplicate-rows")} == {
+        "duplicate-rows:across-parts": 4, "duplicate-rows": 1}
 
 
 def test_duplicate_rows_split_follows_cross_part_correction(tmp_path):

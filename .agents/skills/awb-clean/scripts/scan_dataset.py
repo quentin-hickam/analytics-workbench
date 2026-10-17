@@ -778,7 +778,8 @@ def scan(project_root, dataset, *, keys=(), refs=(), ranges=(), columns=None, li
         elif previous:
             options["lineage"] = old.get("lineage", [])
         else:
-            options["lineage"] = declared_lineage(root, target["name"])
+            # A publication or acquisition is named <dataset>@<directory>; its declaration is the dataset's.
+            options["lineage"] = declared_lineage(root, target["name"].split("@")[0])
         today = (today or date.today()).isoformat()
         worker = Scan(connection, target, {**options, "root": root, "explicit_lineage": list(lineage or [])}, today)
         row_count, info, candidate_keys, null_patterns = worker.run()
