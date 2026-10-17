@@ -591,7 +591,8 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
             'in that request unless the user asks') in review
     # A problem on an unchanged line is marked and goes to the user rather than restarting the loop.
     assert '(unchanged since the prior review)' in review and 'why the earlier pass missed it' in review
-    assert 'Take a problem marked `(unchanged since the prior review)` to the user rather than repairing it' in review
+    assert ('Take a problem marked `(unchanged since the prior review)`, or a conflict between two rules, to the '
+            'user rather than repairing it') in review
     # Package is done on a passed review of the final files, full or scoped.
     assert 'its `review` row is `current`' in package
     assert 'the last review before the final `check-draft` is a full one' not in package
@@ -602,6 +603,57 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     assert 'never a scoped re-review' not in release and 'no earlier report is kept' not in release
     assert 'one pass' in reviewer and 'scoped' in reviewer and 'the evidence a narrative cites' in reviewer
     assert '`awb/read` with `command: "review-receipt"`' in reviewer
+
+
+def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
+    # The review reads the brief and checks it; tolerances stay off slides; a rule is the user's to keep.
+    def read(path):
+        return ' '.join((ROOT / '.agents/skills' / path).read_text(encoding='utf-8').split())
+
+    review = read('awb-package/references/review.md')
+    steps = review[review.index('1. Run that command.'):review.index('4. Report exactly this')]
+    step3 = steps[steps.index('3. Check what no command checks'):]
+    assert '`brief.md`' in steps[:steps.index('2. Judge')]
+    assert 'against `brief.md`: every part of its **Business question**' in step3
+    assert 'is answered in a slide\'s headline, bullets, or chart, not only in its **Notes:**' in step3
+    assert 'how a source builds a series' in step3 and '`foundation/sources.md`' in step3
+    # Citation forms for a checked sentence, and the narrowed tolerance rule.
+    assert 'a result ID, an evidence path, or a foundation quality ID (`DQ-NNN`) with the scan its row cites' in step3
+    assert 'with its tolerance' not in review
+    assert 'A tolerance is stated only for a check that had one set before the data was seen' in step3
+    assert 'an exact check says "exactly" or "every row"' in step3
+    assert 'A tolerance chosen after the result was seen is not a tolerance' in step3
+    # Readability is a closed list, quoted like every step 3 problem.
+    assert 'readability, only these' in step3 and '`foundation/glossary.md`' in step3
+    assert 'a precision the brief\'s **Audience** states' in step3 and 'outside **Implications**' in step3
+    # Rule precedence, and a conflict goes to the user.
+    assert 'the `error` rule wins and the line passes the `warning` one' in steps
+    assert 'or a conflict between two rules, to the user rather than repairing it' in review
+
+    # No template example puts a tolerance on a slide or in the note.
+    for path in ('awb-package/assets/package-format/findings-template.md',
+                 'awb-package/assets/package-format/methodology-note-template.md'):
+        text = read(path)
+        assert not re.search(r'within [0-9.]+ ?%', text) and '0.5%' not in text, path
+    for path in ('awb-package/references/package-contract.md', 'awb-init/assets/workbench/workbench-guides/analysis.md',
+                 'awb-init/references/provenance.md'):
+        assert 'with its tolerance' not in read(path), path
+    assert 'set before the data was seen' in read('awb-package/references/package-contract.md')
+
+    # Asking the user comes before recording a rule, in review.md and the skill's first step.
+    rule = review[review.index('When the user corrects a draft while reviewing it'):]
+    assert rule.index('ask the user before repairing') < rule.index('Only on their yes, record the rule') \
+        < rule.index('review-rules add --confirmed')
+    assert 'saying in plain words what would be checked' in rule and '--package <investigation>/<package>' in rule
+    assert 'An `error` rule wins over a `warning` rule it conflicts with' in rule
+    package = read('awb-package/SKILL.md')
+    establish = package[package.index('## 1. Establish'):package.index('## 2. Gather')]
+    assert 'first ask the user whether later drafts should be checked for it' in establish
+    assert 'record it as a review rule only on their yes' in establish
+    # A methods note length is recorded in one form that check-draft reads.
+    brief = read('awb-init/assets/workbench/investigation/brief.md')
+    assert '`Methods note length: about <n> words`' in brief and 'Methods note length' in establish
+    assert '`note_length`' in package[package.index('## 6. Check'):package.index('## 7. Report')]
 
 
 def test_release_reuses_a_matching_receipt_and_shows_its_repairs():

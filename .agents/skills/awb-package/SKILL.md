@@ -19,13 +19,13 @@ Packaging **serializes** recorded results: it reuses recorded evidence, exports,
 
 ## 1. Establish
 
-Identify the investigation and package. When the request corrects a draft the user is reviewing, record the correction as a review rule first when later drafts could repeat it, as [references/review.md](references/review.md) says under **After the review**. When the request could refer to more than one investigation, ask which before changing package files. Use the package name the user gives; otherwise reuse the existing package's name, or derive a short, stable one from the investigation and a purpose word and report it. Keep one package per investigation unless another has an independent scope or delivery schedule.
+Identify the investigation and package. When the request corrects a draft the user is reviewing and later drafts could repeat the correction, first ask the user whether later drafts should be checked for it, saying in plain words what would be checked, and record it as a review rule only on their yes, as [references/review.md](references/review.md) says under **After the review**. When the request could refer to more than one investigation, ask which before changing package files. Use the package name the user gives; otherwise reuse the existing package's name, or derive a short, stable one from the investigation and a purpose word and report it. Keep one package per investigation unless another has an independent scope or delivery schedule.
 
 From the project root, install the missing shared formats with README's `Project interpreter`: `python3 <awb-init skill directory>/scripts/install_helpers.py . --package-formats`, which preserves existing files and records what it installs in `.awb-receipt.json`.
 
 For a new package, ask which audience-facing datasets to include and explicitly offer **none**; there is no default export set. A revision inherits the selection in the current manifest unless the user changes it or it no longer fits the package scope; when it no longer fits, explain why and ask for a new selection before exporting.
 
-Read the **Audience** section of the investigation's `brief.md`: who will see or present the deck, what they already know, the decision they own, the terms they use, and any deck length or checkpoint mode. When it is missing or blank, ask the user, then record the answer there (adding the section after **Purpose** when absent) as record maintenance, as you do a length (such as about 8 slides) or checkpoint mode the user states. When it or the request mentions a methods note, ask whether the audience needs `methodology-note.md`.
+Read the **Audience** section of the investigation's `brief.md`: who will see or present the deck, what they already know, the decision they own, the terms they use, and any deck length or checkpoint mode. When it is missing or blank, ask the user, then record the answer there (adding the section after **Purpose** when absent) as record maintenance, as you do a deck length (such as about 8 slides), a precision, a methods note length in the template's `Methods note length: about <n> words` form, or a checkpoint mode the user states. When it or the request mentions a methods note, ask whether the audience needs `methodology-note.md`.
 
 ## 2. Gather the record
 
@@ -71,11 +71,11 @@ Run `python3 src/awb.py export <investigation> <package> --chart <result>[:<colu
 
 ## 5. Review
 
-Once the narratives and flags are complete, run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against every rule in `foundation/review-rules.md` and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it. Record and act on its report as that file's **After the review** says; the first review of a draft is full, and later ones are scoped against the recorded one.
+Once the narratives and flags are complete, run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against the brief, every rule in `foundation/review-rules.md`, and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it. Record and act on its report as that file's **After the review** says; the first review of a draft is full, and later ones are scoped against the recorded one.
 
 ## 6. Check
 
-Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it.
+Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it. A `note_length` row is a methods note over the length the brief records: shorten the note, or tell the user its word count against that length.
 
 A `numbers` row is a number no represented result records. A `numbers` row on a `methodology.md` **Claim strength:** line that the `claims` check refuses clears once that `claims` row is repaired, so repair that row first and never list its numbers in `allowed_numbers`. Repair any other `numbers` row by the first of these that fits:
 
