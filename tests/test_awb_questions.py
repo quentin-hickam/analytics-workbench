@@ -443,7 +443,10 @@ def test_status_collector_reads_the_ledger(project):
                          "must_subquestions": {"open": 1}, "open_by_answerer": {"stakeholder": 1},
                          "open": ["Q-002 [stakeholder, context] Which churn definition does finance use?"],
                          "awaiting_recheck": ["Q-001 answered (awaiting recheck) [data, analytical] Does churn differ by region? -> r1 (revalidation-needed (was provisional))"],
-                         "provisional": []}
+                         "provisional": [],
+                         "by_question": [{"id": "Q-001", "text": "Does churn differ by region?", "origin": "scope",
+                                          "status": "answered (awaiting recheck)", "findings": {"revalidation-needed": 1}}],
+                         "findings_without_question": {}}
     (project / INV / "questions.json").write_text('{"schema": "awb-questions/1", "questions": [1]}')
     result = status.collect(project)
     assert result["active"]["questions"] is None

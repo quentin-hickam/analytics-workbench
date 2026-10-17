@@ -1088,7 +1088,7 @@ class _State(_Record):
         updated = [i for i, line in enumerate(self.lines) if line.startswith("Last updated:")]
         if len(updated) != 1:
             raise StateError(f"{self.label}: {'no' if not updated else 'repeated'} 'Last updated:' line")
-        self.updated = updated[0]
+        self.updated, self.touched = updated[0], False
         self.locate(strict)
 
     def locate(self, strict=True):
@@ -1124,9 +1124,14 @@ class _State(_Record):
         index = self.linked.get(result_id)
         return None if index is None else (index, _cells(self.lines[index]))
 
-    def touch(self, today):
+    def touch(self):
+        """Set Last updated; _commit stamps it again just before writing this record, after the records written with it."""
+        self.touched = True
+        self.stamp()
+
+    def stamp(self):
         line = self.lines[self.updated]
-        self.lines[self.updated] = f"Last updated: {today}" + line[len(_bare(line)):]
+        self.lines[self.updated] = f"Last updated: {_stamp()}" + line[len(_bare(line)):]
 
     def items(self, title):
         """A list section's items as (first line, end line, text), continuation lines included."""
@@ -1148,6 +1153,11 @@ class _State(_Record):
 
 def _today():
     return datetime.now().date().isoformat()
+
+
+def _stamp():
+    """The local time to the second with its UTC offset, which status orders against later file changes."""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 @contextmanager
@@ -1176,15 +1186,20 @@ def _signals_deferred():
 
 
 def _commit(records, *, replaced=None, prior_rows=()):
-    """Prepare all temporary files, then replace records in order with signals deferred."""
+    """Prepare all temporary files, then replace records in order with signals deferred.
+
+    A touched state's temporary file is written last and stamped just before, so no record written
+    with it is newer than its Last updated (a temporary file's mtime survives the replace).
+    """
     replaced = [] if replaced is None else replaced
-    temporaries, current = [], records[0]
+    temporaries = [record.path.with_name(f".{record.path.name}.{os.getpid()}.tmp") for record in records]
+    current = records[0]
     try:
-        for record in records:
-            current = record
-            temporary = record.path.with_name(f".{record.path.name}.{os.getpid()}.tmp")
-            temporaries.append(temporary)
-            with open(temporary, "w", encoding="utf-8", newline="") as stream:
+        for index in sorted(range(len(records)), key=lambda i: getattr(records[i], "touched", False)):
+            current = record = records[index]
+            if getattr(record, "touched", False):
+                record.stamp()
+            with open(temporaries[index], "w", encoding="utf-8", newline="") as stream:
                 stream.write("".join(record.lines))
         with _signals_deferred():
             for record, temporary in zip(records, temporaries):
@@ -1366,7 +1381,7 @@ def _has_reason(flag_reason, reason):
     return f"; {reason}; " in f"; {flag_reason}; "
 
 
-def flag_findings(project_root, investigation, flags, *, check=False, today=None) -> dict:
+def flag_findings(project_root, investigation, flags, *, check=False) -> dict:
     """Validate a whole batch, then flag findings without a history entry."""
     if not isinstance(flags, list) or any(not isinstance(f, dict) or set(f) != {"result", "reason"}
             or not all(isinstance(f[k], str) and f[k].strip() for k in f) for f in flags):
@@ -1392,7 +1407,7 @@ def flag_findings(project_root, investigation, flags, *, check=False, today=None
             rows.append(_row(_finding_cells(entry)))
         if changed:
             findings.changed = True
-            findings.state.touch(today or _today())
+            findings.state.touch()
         return {"flags": changed, "unchanged": unchanged, "rows": rows}
     return _write_findings(Path(project_root).resolve(), investigation, mutate, check=check)
 
@@ -1531,7 +1546,7 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
                     today, result_id, old, _finding_cells(entry), exact, flag_reason, prior["citation"]))
         findings.history, findings.changed = history, True
         findings.prior_rows = [_row(old)] if old else []
-        findings.state.touch(today)
+        findings.state.touch()
         return {"action": action, "status": entry["status"], "claim": entry["claim"], "history": history is not None}
 
     try:
@@ -1781,7 +1796,7 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
                 entry["notes_checks"] = entry["checks_caveat"]
             if claim is not None:
                 entry["claim"], entry["claim_basis"] = claim, basis
-        state.touch(today)
+        state.touch()
         findings.history, findings.changed = history, True
         findings.prior_rows = [_row(old) for _, _, old, _, _ in changes]
         return {"rows": [_row(cells) for *_, cells, _ in changes], "unchanged": unchanged, "warnings": warnings,
@@ -1789,8 +1804,7 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
     return _write_findings(root, investigation, mutate)
 
 
-def edit_list(project_root, investigation: str, which: str, *, add: list[str] = (), drop: list[str] = (),
-              today: str | None = None) -> dict:
+def edit_list(project_root, investigation: str, which: str, *, add: list[str] = (), drop: list[str] = ()) -> dict:
     """Add and drop Unresolved issues (`issues`) or Next steps (`next`) items in one write.
 
     A drop is the item's number in the list or a case-sensitive substring of exactly one item,
@@ -1837,7 +1851,7 @@ def edit_list(project_root, investigation: str, which: str, *, add: list[str] = 
             del state.lines[position:value]
         else:
             state.insert(position, value)
-    state.touch(today or _today())
+    state.touch()
     _commit([state])
     return {"added": added, "dropped": [item[2] for item in chosen]}
 

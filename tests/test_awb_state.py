@@ -18,7 +18,8 @@
 # test_lists_above_the_table_leave_it_intact: issues and next steps placed before Current findings are edited without touching the table, and later findings writes keep it whole.
 # test_render_recovers_malformed_and_stray_rows: render replaces an unescaped pipe, a duplicate row, and a row cut off below the table, which writers refuse as drift.
 # test_flags_validate_and_are_idempotent: batches validate before writes, check migrates only in memory, duplicate reasons keep all records byte-identical, and a rerun keeps notes, drops the flag reason, and names only the reason in history.
-# test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helpers write.
+# test_parsers_read_written_files: collect_status and finding_rows read the files the state command and run.py's helpers write, and finds the state they leave up to date.
+# test_last_updated_is_stamped_after_the_records_written_with_it: a state write stamps Last updated, a local time with its offset, after writing the findings and history files it replaces with it.
 # test_claim_strength_is_recorded_and_guarded: a new row is association; --claim causal needs an experiment or natural-experiment basis and a reason; a claim change writes history; a rerun keeps the claim; a flagged finding's claim can only be lowered.
 # test_absent_claim_strength_is_refused: a findings.json entry without a valid claim strength makes every writer and the drift check refuse, writing nothing.
 # test_finding_text_warns_on_numbers_its_result_does_not_record: with src/packaging/draft.py, --text or --status supported warns on each number the result's table, profile, checks, and settings do not record, still writing; a recorded number at another precision traces; without draft.py nothing is read; a draft.py that does not load is named.
@@ -182,7 +183,7 @@ def test_show_prints_each_findings_question(project, capsys):
 def test_run_rows_are_added_kept_and_refreshed(project):
     assert produce(project, "r1") == {"action": "added", "status": "provisional", "claim": "association", "history": False}
     row = "| <state the finding from r1> | [r1](evidence/r1.json) | provisional | association | |"
-    assert row in text(project, STATE) and f"Last updated: {TODAY}" in text(project, STATE)
+    assert row in text(project, STATE) and re.search(rf"\nLast updated: {TODAY}T\d\d:\d\d:\d\d[+-]\d\d:\d\d\n", text(project, STATE))
     assert produce(project, "r2", checks=GAPS)["action"] == "added"
     assert "| provisional | association | failed checks: columns; not assessed: joins |" in text(project, STATE)
 
@@ -373,7 +374,7 @@ def test_issues_and_next_edit_lists_in_one_call(project, capsys):
     assert text(project, STATE).endswith("Keep this a short list.\n- Profile tenure\n")
     assert run(project, capsys, "next", "--drop", "1")[0] == 0
     assert run(project, capsys, "issues", "--drop", "Q3", "--drop", "Tenure")[0] == 0
-    assert text(project, STATE) == original.replace("2026-09-01", TODAY)
+    assert re.sub(r"(?m)^Last updated: \S+$", "Last updated: 2026-09-01", text(project, STATE)) == original
 
     (project / STATE).write_text(original.replace("Keep this a short list.\n\n## Next",
                                                   "Keep this a short list.\n\n1. First\n   continued\n\n## Next"))
@@ -429,7 +430,8 @@ def test_malformed_records_write_nothing(project, capsys, record, old, new):
         path.unlink()
         commands = [["finding", "r1", "--status", "superseded", "--reason", "x"]]
     else:
-        old, new = old.replace("2026-09-01", TODAY), new.replace("2026-09-01\n", f"{TODAY}\n", 1)
+        stamp = re.search(r"(?m)^Last updated: (\S+)$", text(project, STATE))[1]
+        old, new = old.replace("2026-09-01", stamp), new.replace("2026-09-01\n", f"{stamp}\n", 1)
         assert old in path.read_text()
         path.write_text(path.read_text().replace(old, new, 1))
         lists = [["issues", "--add", "x"]] if "Unresolved" in old else [["next", "--add", "x"]]
@@ -454,7 +456,9 @@ def test_parsers_read_written_files(project, capsys):
     result = status.collect(project)
     assert not [u for u in result["uncertainties"] if u["path"] == STATE]
     active = result["active"]
-    assert active["last_updated"] == TODAY
+    assert re.fullmatch(rf"{TODAY}T\d\d:\d\d:\d\d[+-]\d\d:\d\d", active["last_updated"])
+    # Every record these writes left uncommitted predates the state's Last updated.
+    assert result["git"]["state_status"] == "up to date"
     assert active["counts"] == {"supported": 1, "provisional": 2}
     assert {"finding": r"Churn \| rose", "status": "supported", "claim": "association", "reason": ""} in active["findings"]
     assert "- Q3 coverage gap" in active["unresolved_issues"] and "- Explore shifts" in active["next_steps"]
@@ -462,6 +466,18 @@ def test_parsers_read_written_files(project, capsys):
     assert sorted(found) == ["r1", "r2", "r3"] and all(len(rows) == 1 for rows in found.values())
     assert found["r2"] == ["| <state the finding from r2> | [r2](evidence/r2.json) | provisional | association | "
                            "failed checks: columns; not assessed: joins |"]
+
+
+def test_last_updated_is_stamped_after_the_records_written_with_it(project, capsys, monkeypatch):
+    # findings.json and history.md are written with state.md; a stamp taken before them would make the
+    # state look older than its own write.
+    produce(project, "r1")
+    stamps, stamp = [], provenance._stamp
+    monkeypatch.setattr(provenance, "_stamp", lambda: stamps.append(__import__("time").time()) or stamp())
+    assert run(project, capsys, "finding", "r1", "--text", "Churn rose", "--status", "supported",
+               "--reason", "Checked.")[0] == 0
+    assert stamps and all((project / INV / name).stat().st_mtime <= stamps[-1] for name in ("findings.json", "history.md"))
+    assert f"Last updated: {stamp()[:10]}T" in text(project, STATE)
 
 
 @pytest.mark.parametrize("writer", ["record", "update", "flag", "prior"])
@@ -540,7 +556,7 @@ def test_flags_validate_and_are_idempotent(project, capsys, monkeypatch):
     assert snapshot(project) == before
     provenance.flag_findings(project, "churn", flags)
     before = snapshot(project)
-    assert provenance.flag_findings(project, "churn", flags, today="2099-01-01") == {
+    assert provenance.flag_findings(project, "churn", flags) == {
         "flags": [], "unchanged": ["r1"], "rows": []}
     assert snapshot(project) == before
     provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-005"}])
