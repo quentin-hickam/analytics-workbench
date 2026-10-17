@@ -11,7 +11,7 @@ A workspace containing a shared data foundation and investigations that use it; 
 The shared data, reusable definitions, and knowledge about data preparation and quality available to investigations within a project.
 
 **Canonical data**:
-The shared, authoritative representation of source data under documented preparation rules. Canonical status does not imply that the data is free of limitations or suitable for every investigation.
+The shared, authoritative representation of source data under documented preparation rules. Canonical data may retain limitations: missing periods, including gaps inside a series, are unreported, never zero; assumption-based filling is an illustrative scenario, never a bound.
 
 **Landed data**:
 Source records durably captured independently of the canonical analytical store, with provenance linking them to their acquisition. Landed data is the input to preparation, not an assertion of cleanliness or analytical fitness.

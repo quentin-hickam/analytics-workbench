@@ -725,8 +725,10 @@ def test_analysis_states_the_threshold_rule_and_the_standard_checks():
     assert ("A threshold, minimum, or exclusion the brief does not settle is the user's decision: propose it to "
             "the user before looking at which rows lead, and say so when you propose one after seeing results.") in add
     assert "with every filtered population reconciled by `reconcile()`" in add
-    assert ("For a series summed over a period, also count the periods each entity in scope has data for, since a "
-            "sum hides missing periods: a count below the period length is a caveat on the finding.") in add
+    assert ("For a series summed over a period, list each entity's missing periods, inside its series too, "
+            'as a caveat: "unreported in <periods>; sums cover reported periods only", never zero; '
+            "filling gaps by assumption gives an illustrative scenario, never a bound.") in add
+    assert 'a count below the period length' not in add
     assert "Save full precision in result queries and round only for display." in add
     assert "result sessions run DuckDB on one thread" in add
     assert "the investigation's `views/*.sql`" in add and "(`import helpers` for `helpers.py`)" in add
@@ -738,7 +740,9 @@ def test_analysis_states_the_threshold_rule_and_the_standard_checks():
     explore = ' '.join((ROOT / '.agents/skills/awb-explore/SKILL.md').read_text(encoding='utf-8').split())
     assert ("A question-specific exclusion, threshold, or minimum the brief does not settle is the user's decision: "
             "propose it before looking at which rows lead, say so when you propose one after seeing results") in explore
-    assert "count in a follow-up the periods each entity in scope has data for" in explore
+    assert ("list in a follow-up the periods each entity in scope lacks, mid-series too, and record them under "
+            "Unresolved issues and in any quality.md row as unreported, never zero, so the finding on that sum "
+            "carries the caveat") in explore
     contract = ' '.join((ROOT / '.agents/skills/awb-package/references/package-contract.md').read_text(encoding='utf-8').split())
     assert ("A validation check recorded as not assessed stays out of `findings.md` and the methodology note unless "
             "the user should act on it.") in contract
