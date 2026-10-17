@@ -284,9 +284,13 @@ def test_status_offers_a_headline_preview_for_provisional_findings():
     template = ' '.join((ROOT / '.agents/skills/awb-init/assets/workbench/investigation/state.md')
                         .read_text(encoding='utf-8').split())
     assert ("The agent promotes a provisional finding to supported with `python3 src/awb.py state finding` once its "
-            "checks are understood and recorded and the user has approved its headline or text, such as at the slide "
-            "headline preview") in template
+            "checks are understood and recorded and the user has approved its headline or text, such as at awb-package's "
+            "slide headline preview") in template
     assert "to be promoted again once the user approves its text as rerun" in template
+    # The skill that shows the headlines carries the promotion, which a bounded revision may not read in the template.
+    package = ' '.join((ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8').split())
+    assert ("Promote each provisional finding behind an approved headline with "
+            "`python3 src/awb.py state finding <result-id> --status supported`.") in package
 
 
 def test_status_reports_findings_by_question_every_caveat_and_plain_freshness():

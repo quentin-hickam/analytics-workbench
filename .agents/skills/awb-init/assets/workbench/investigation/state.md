@@ -7,7 +7,7 @@ Last updated: <!-- use an ISO date -->
 | Finding | Evidence | Status | Claim | Revalidation reason or caveat |
 | --- | --- | --- | --- | --- |
 
-Status is provisional, supported, superseded, or, for a flagged finding, `revalidation-needed` with its prior status visible, as in `revalidation-needed (was supported)`. The agent promotes a provisional finding to supported with `python3 src/awb.py state finding` once its checks are understood and recorded and the user has approved its headline or text, such as at the slide headline preview; until then, a question it answers counts as provisional. A rerun that changes a supported finding's result returns it to provisional, to be promoted again once the user approves its text as rerun.
+Status is provisional, supported, superseded, or, for a flagged finding, `revalidation-needed` with its prior status visible, as in `revalidation-needed (was supported)`. The agent promotes a provisional finding to supported with `python3 src/awb.py state finding` once its checks are understood and recorded and the user has approved its headline or text, such as at awb-package's slide headline preview; until then, a question it answers counts as provisional. A rerun that changes a supported finding's result returns it to provisional, to be promoted again once the user approves its text as rerun.
 
 Claim is the strongest wording the finding supports: `descriptive` (what the data shows), `association` (measures move together), or `causal` with its design basis, an experiment or an identified natural experiment, as in `causal (experiment: randomized price test, March 2026)`.
 
