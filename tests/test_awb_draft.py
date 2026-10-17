@@ -24,7 +24,7 @@
 # test_check_numbers_skips_a_doi: a DOI, 10. with a four- to nine-digit registrant code, a slash, and a suffix, is skipped whole after doi: or DOI, in a doi.org link, or bare when its suffix holds a letter and a digit, ending at whitespace or a , or ; before a digit; a shorter registrant code, no slash, a bare suffix without a letter or a digit, as in 10.2500/litre, 10.2500/1000, or 10.12345/67.8, and a number glued after a DOI by , or ; are read.
 # test_provenance_gaps_are_unknown_objects_and_unread_requirements: an {"unknown": reason} object and an unread requirements line are gaps; a settings value or column name such as unknown_pickup, or a string starting with unknown, is not.
 # test_check_numbers_reads_ordinary_notation: the issue's probes: 54.8/57.6 traces when both values are recorded, each half traced alone; 18:00 and December 2011 is give no row; an untraced figure still does.
-# test_numbers_rows_name_the_rule_that_applied: each numbers row's problem names why its number did not trace (no recorded value, joined digits, a recorded value on its rounding edge, or a year-like count) and points to allowed_numbers.
+# test_numbers_rows_name_the_rule_that_applied: each numbers row's problem names why its number did not trace (no recorded value, joined digits, a recorded value on its rounding's upper edge, or a year-like count) and points to allowed_numbers.
 # test_check_numbers_allowed_phrases_and_precision: an allowed phrase covers only the number it is written around, a bare allowed text every occurrence; a row's text copied exactly covers its number after a line wrap or extra spaces; a number traces at every written digit beyond 28 significant digits and not one unit of a further place outside its rounding.
 # test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's or a path's digits add nothing; evidence text and parsed settings content add scaled and scientific values a narrative can write in full, without dates, booleans, or the settings file's size.
 # test_recorded_values_keep_every_json_digit: profile and evidence fractions keep every written digit, so the exact narrative value traces and a value one digit off does not.
@@ -44,7 +44,7 @@
 # test_per_result_display_names_override_the_global_ones: [results."<id>".columns] and .values name one result's columns and values over the global names, a per-result value table replacing the global one whole; another key under a result, or a percent table of another shape, is refused.
 # test_a_per_result_percent_list_replaces_the_global_one: [results."<id>".percent] lists one result's percent columns in place of [percent], so a column already holding percents in one result is not scaled again; the manifest records each file's list and check-draft reapplies it.
 # test_export_scale_needs_places_when_its_quotient_is_unrounded: a divisor whose quotient shows more than four places needs [round] places, listed with round_stub, and the methodology line states the division before the rounding.
-# test_export_scale_divides_records_and_traces: a [scale] divisor divides a column's number cells before percent scaling and rounding, in charts and datasets, is recorded in their manifest entries and methodology lines, is refused when not { divide = <a positive number> }, and makes a narrative number written in the scaled unit trace; check-draft refuses an entry whose divisor differs from display.toml.
+# test_export_scale_divides_records_and_traces: a [scale] divisor divides a column's number cells before percent scaling and rounding, in charts and datasets, is recorded in their manifest entries and methodology lines, is refused when not { divide = <a positive number> }, and makes a narrative number written in the scaled unit trace, one export rounded half up onto its shown digit included; check-draft refuses an entry whose divisor differs from display.toml.
 # test_export_warns_on_a_fraction_rounded_in_its_query: a [percent] column shown to fewer than two places whose saved fractions have exactly four places is a precision_warnings row, the files still written; full precision, or two places shown, gives none.
 # test_export_warns_on_a_value_code_no_cell_holds: a [values] code no exported saved table holds is a value_warnings row naming the table when a cell differs from it only in case, such as true where pandas saved True, naming that cell, or when no code of its table matches any cell; a shared table's code these results leave out, and codes the tables hold, give none.
 # test_confirmed_columns_silence_their_label_warning: a column under [confirmed] columns gives no label_warnings row, other columns still do, and a malformed [confirmed] is refused.
@@ -635,8 +635,8 @@ YEAR_COUNT = ("read as a count: a year is skipped only after a month name, alone
               f"such as in or since where its period ends; reword it, such as ending the date with a comma, {ALLOW}")
 JOINED = ("digits joined by dots, commas, slashes, or colons read as one number with no single value, so it never "
           f"traces; write each number apart, {ALLOW}")
-ON_EDGE = ("a recorded value lies exactly on the edge of this number's rounding, as when a value the query rounded "
-           f"is rounded again, so it does not trace; save the result at full precision, {ALLOW}")
+ON_EDGE = ("a recorded value lies exactly on the upper edge of this number's rounding, which rounds half up, as export "
+           f"rounds, to the next digit, so it does not trace; write the number as it rounds half up, {ALLOW}")
 
 
 def test_check_draft_traces_narrative_numbers(project, capsys):
@@ -815,9 +815,12 @@ REVIEWED_PROBES = [
     ("Dec 2011 sales", []), ("Dec. 2011 sales", []), ("September 2011 sales", []), ("Sept 2011 sales", ["2011"]),
     ("december 2011 sales", ["2011"]), ("(2019)", []), ("(Smith, 2019)", ["2019"]), ("(2019 orders)", ["2019"]),
     ("orders(2019)", ["2019"]), ("Dec 2011/2012 sales", ["2011", "2012"]),
-    # A recorded value on the edge of a number's rounding does not trace: 0.5245 rounds to 52.5% only once rounded again.
-    ("Share was 52.5%.", ["52.5%"], {"values": ["0.5245"]}), ("Share was 52.4%.", ["52.4%"], {"values": ["0.5245"]}),
+    # A number traces to the values that round half up to it, as export rounds: its lower edge included, its upper
+    # edge not. 1250 / 1000 shown to one place, and 13 of 80 as a percent, are the review's probes.
+    ("Share was 52.5%.", [], {"values": ["0.5245"]}), ("Share was 52.4%.", ["52.4%"], {"values": ["0.5245"]}),
+    ("Share was 52.5%.", ["52.5%"], {"values": ["0.5255"]}),
     ("Share was 52.45%.", [], {"values": ["0.5245"]}), ("Share was 52%.", [], {"values": ["0.5245"]}),
+    ("West changed by 1.3 Gt.", [], {"values": ["1.25"]}), ("Share was 16.3%.", [], {"values": ["0.1625"]}),
 ]
 
 
@@ -896,7 +899,7 @@ def test_numbers_rows_name_the_rule_that_applied(tmp_path):
     draft = load(ASSETS["src/packaging/draft.py"], "draft_rules")
     path = tmp_path / "methodology.md"
     path.write_text("About 40 stores.\nOpened at 9:30 daily.\nShare was 52.5%.\nWe reviewed 1950 orders.\n")
-    assert [(row["text"], row["problem"]) for row in draft.check_numbers(path, [Decimal("0.5245")])] == [
+    assert [(row["text"], row["problem"]) for row in draft.check_numbers(path, [Decimal("0.5255")])] == [
         ("40", NOT_RECORDED), ("9:30", JOINED), ("52.5%", ON_EDGE), ("1950", YEAR_COUNT)]
     assert all("allowed_numbers" in problem for problem in draft._UNTRACED.values())
 
@@ -1435,6 +1438,14 @@ def test_export_scale_divides_records_and_traces(project, capsys):
     values, problems = draft_module.recorded_values(project, "inv", [{"result_id": "r-001"}], [("r-001", "n", 4)])
     assert problems == [] and {Decimal("2.5"), Decimal("2")} <= set(values)
     assert draft_module.recorded_scales(record) == [("r-001", "n", 4)]
+    # A value export rounds half up onto the digit it shows traces to that digit: 10 / 8 = 1.25 is written 1.3.
+    write(project, "foundation/display.toml", DISPLAY + "n = 1\n\n[scale]\nn = { divide = 8 }\n")
+    run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "cases=r-001")
+    assert (draft / "charts/chart-1.csv").read_text().startswith("Region,Cases\nWest,1.3\n")
+    write(draft, "methodology.md", METHODOLOGY + "\nWest averaged 1.3 cases a week.\n")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["numbers"] == [], report
+    write(draft, "methodology.md", METHODOLOGY + "\nWest averaged 2.5 cases a week.\n")
     # Without the divisor the same number traces to nothing.
     write(project, "foundation/display.toml", DISPLAY)
     run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "cases=r-001")

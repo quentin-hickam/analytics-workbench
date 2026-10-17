@@ -1648,10 +1648,10 @@ def allowed_numbers(record: dict) -> tuple[set, list[str]]:
     return texts, problems
 
 
-def _within(values, low, high, *, edges=False):
-    """Whether a value lies strictly between low and high, or, with edges, on either one too."""
-    index = (bisect.bisect_left if edges else bisect.bisect_right)(values, low)
-    return index < len(values) and (values[index] <= high if edges else values[index] < high)
+def _within(values, low, high):
+    """Whether a value lies on low or above it and strictly below high: what rounds half up into the window."""
+    index = bisect.bisect_left(values, low)
+    return index < len(values) and values[index] < high
 
 
 # Why a numbers row's number traces to nothing, so the row names the rule that applied.
@@ -1659,8 +1659,8 @@ _ALLOW = "or list its text in the manifest's allowed_numbers with the reason"
 _UNTRACED = {
     "joined": "digits joined by dots, commas, slashes, or colons read as one number with no single value, so it "
               f"never traces; write each number apart, {_ALLOW}",
-    "edge": "a recorded value lies exactly on the edge of this number's rounding, as when a value the query "
-            f"rounded is rounded again, so it does not trace; save the result at full precision, {_ALLOW}",
+    "edge": "a recorded value lies exactly on the upper edge of this number's rounding, which rounds half up, as "
+            f"export rounds, to the next digit, so it does not trace; write the number as it rounds half up, {_ALLOW}",
     "year": "read as a count: a year is skipped only after a month name, alone in parentheses, or after a word "
             "such as in or since where its period ends; reword it, such as ending the date with a comma, "
             + _ALLOW,
@@ -1671,9 +1671,10 @@ _UNTRACED = {
 def _untraced(body, unit, values):
     """None when a number traces to a recorded value, else the _UNTRACED key naming why it does not.
 
-    Written to d places, the number stands for any value strictly within half a unit of its last place; a
-    value exactly on the edge is ambiguous, since rounding it again may move the last digit, so it does not
-    trace.
+    Written to d places, the number stands for any value that rounds half up to it, as export rounds (magnitudes,
+    so away from zero): from half a unit below its last place, that edge included, to strictly below half a unit
+    above. A value exactly on the upper edge rounds to the next digit, so it does not trace and gives "edge". A
+    value a query rounded to the lower edge does trace; export's precision_warnings reports that case.
     """
     if not _GROUPED.fullmatch(body):
         return "joined"  # 1,2,3, the decimal comma 21,3, 1/2/3, 9:30, and 1.234.567 have no one value
@@ -1690,7 +1691,8 @@ def _untraced(body, unit, values):
         return "value"  # an exponent too large to hold traces to nothing
     if any(_within(values, low, high) for low, high in windows):
         return None
-    if any(_within(values, low, high, edges=True) for low, high in windows):
+    if any((index := bisect.bisect_left(values, high)) < len(values) and values[index] == high
+           for _, high in windows):
         return "edge"
     return "year" if not unit and re.fullmatch(_YEAR, body) else "value"
 
@@ -2985,8 +2987,7 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "\nnumbers lists, as file, line, text, and problem (the rule that left it untraced, pointing to "
                "allowed_numbers), each number in findings.md, methodology.md, or "
                "methodology-note.md that no represented result's table, profile, check details, settings, or "
-               "recorded [scale] column divided by its divisor rounds to, a value on the edge of its rounding "
-               "excluded, and the manifest's allowed_numbers does not cover by its text or a phrase around it, reading "
+               "recorded [scale] column divided by its divisor rounds half up to, and the manifest's allowed_numbers does not cover by its text or a phrase around it, reading "
                "source lines without the comments and fenced code the rendered reading drops, so a <!-- in a code "
                "span, fenced code, or a link's target, or escaped, hides nothing, and skipping a methodology.md "
                "**Claim strength:** line the claims check accepts, whose numbers repeat state.md's Claim cell; "
