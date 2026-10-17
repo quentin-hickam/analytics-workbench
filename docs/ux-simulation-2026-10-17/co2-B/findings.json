@@ -1,0 +1,370 @@
+[
+  {
+    "id": "co2-B-01",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The first answers described China's and India's missing early years as counting as zero in the cumulative shares, and the correction then called an assumption-based sensitivity calculation a ceiling; the user caught both, and the same class of error appeared in the Oct 15 and Oct 16 co2-B runs.",
+    "evidence": "A2 ('Earlier years count as zero'), U3, A3 ('I also calculated a ceiling'), U4; SIMS/co2-B/storage/releases/co2-emissions-change/donor-deck/001/methodology.md lines 153-154; SIMS/co2-B/feedback/human.md pain point 1",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The analysis and explore guidance gives no prompt to state how missing years enter a cumulative sum before reporting one; any host would hit this."
+  },
+  {
+    "id": "co2-B-02",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The review's reconciliation and tolerance rules leave no acceptable wording for an approximate match (World equals countries plus bunkers; sums match OWID's cumulative_co2), so 4 of 9 first-round and 4 of 7 second-round problems were about this wording, and the agent deleted useful context to clear them.",
+    "evidence": "A4; review reports in SIMS/co2-B/relay/agent-004.jsonl; SIMS/co2-B/feedback/agent.md pain point 1; SIMS/co2-B/feedback/agent-notes.md turn 4",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The conflict is between rules in the released review procedure and package contract, independent of the host."
+  },
+  {
+    "id": "co2-B-03",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "The reviewer flagged the user's own approved headline wording ('45 countries cut CO2') as an overclaim, and the two-review cap sent this and other trivial edits back to the user as decisions, costing a round trip the user called disproportionate.",
+    "evidence": "A4 'Decisions for you' 1-3, U5; SIMS/co2-B/feedback/human.md pain point 2; SIMS/co2-B/feedback/agent.md pain point 2",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The review procedure's repair and stop rules drive the escalation on any host."
+  },
+  {
+    "id": "co2-B-04",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "Review coverage was incomplete and inconsistent: the drafting-turn reviews flagged 'cut' only in headlines, the next review raised three unchanged slide-4 lines, and the deck title 'Who has cut and who has grown CO2 emissions since 2000' passed every review.",
+    "evidence": "A5 first scoped review report (findings.md lines 42, 51, 52 'unchanged since the prior review') in SIMS/co2-B/relay/agent-005.jsonl; SIMS/co2-B/storage/releases/co2-emissions-change/donor-deck/001/findings.md line 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Fresh-reviewer variance under the released review procedure would occur on any host."
+  },
+  {
+    "id": "co2-B-05",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Meaning errors were left for the user to catch: the headline preview described consumption accounting as counting imports without exports, and the reviewed draft called a rising coal share of CO2 a shift in the energy mix, which passed both drafting-turn reviews.",
+    "evidence": "A3 slide 5 headline, U4; A4 draft (passed full and scoped review), U5; SIMS/co2-B/feedback/human.md pain point 3",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The review procedure does not check metric definitions against wording; a real user would have to catch these too."
+  },
+  {
+    "id": "co2-B-06",
+    "source": [
+      "user",
+      "agent"
+    ],
+    "summary": "Adding a review rule, even when the user asks for it at release time, makes the review stale and triggers another review before release, which users do not expect.",
+    "evidence": "U6, A6; SIMS/co2-B/human/notes.md turn 7; SIMS/co2-B/feedback/agent-notes.md turn 6; reviewloop: agent-006 1 scoped review, 1.0 min",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The review receipt's fingerprint includes review-rules.md by design in the release."
+  },
+  {
+    "id": "co2-B-07",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Interim narration and internal vocabulary reached the user ('That producer came out convoluted', 'unassessed join check', 'promote', 'mechanical checks', a 'spurious' warning about the number 2), burying results and decisions.",
+    "evidence": "A2, A4, A6; SIMS/co2-B/feedback/human.md pain point 4; SIMS/co2-B/human/notes.md turns 2-3, 7",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "An interactive Claude Code user sees the same interim messages; the skills shape the vocabulary."
+  },
+  {
+    "id": "co2-B-08",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The first results report named the top-ten rankings without values for most countries and left the coal eligibility count ambiguous (59 or 60), which cost a follow-up request.",
+    "evidence": "A2, U3, A3; SIMS/co2-B/feedback/human.md pain point 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The reporting guidance does not require complete values and denominators on the first pass."
+  },
+  {
+    "id": "co2-B-09",
+    "source": [
+      "agent"
+    ],
+    "summary": "Verify-only check-draft always reports passed=false ('manifest records no inventory list') before the first writing run, so a clean draft looks failed while iterating.",
+    "evidence": "SIMS/co2-B/feedback/agent.md pain point 3; SIMS/co2-B/relay/agent-004.jsonl",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the released read tool's behavior."
+  },
+  {
+    "id": "co2-B-10",
+    "source": [
+      "agent"
+    ],
+    "summary": "Export pastes the scale divisor ('divided by 1000000000') into methodology_lines, and check-draft's numbers check then rejects that number, so the agent had to hand-edit allowed_numbers in manifest.json.",
+    "evidence": "SIMS/co2-B/feedback/agent.md pain point 4; SIMS/co2-B/relay/agent-004.jsonl",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Two released helpers disagree with each other."
+  },
+  {
+    "id": "co2-B-11",
+    "source": [
+      "agent"
+    ],
+    "summary": "The headline checkpoint says to write .preview/headlines.md in the draft folder, but that folder is created only by export in a later step, so the agent created it by hand.",
+    "evidence": "SIMS/co2-B/feedback/agent.md pain point 5; SIMS/co2-B/project/deliveries/co2-emissions-change/donor-deck/draft/.preview/headlines.md",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is a step-order gap in the released awb-package skill. The preview file was correctly left out of release 001, an improvement on Oct 16."
+  },
+  {
+    "id": "co2-B-12",
+    "source": [
+      "agent"
+    ],
+    "summary": "Every new result starts at claim 'association', so the descriptive ranking and share results each needed an extra records call with a reason (six calls).",
+    "evidence": "SIMS/co2-B/feedback/agent.md pain point 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the released run and records default."
+  },
+  {
+    "id": "co2-B-13",
+    "source": [
+      "agent",
+      "user"
+    ],
+    "summary": "Join validation always comes back not_assessed for self-joins on the declared key; the rendered caveat repeats itself, and the user was shown an 'unassessed join check' with no practical meaning.",
+    "evidence": "A2; SIMS/co2-B/feedback/agent.md pain point 7; SIMS/co2-B/feedback/human.md section 3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the released validation spec and caveat rendering."
+  },
+  {
+    "id": "co2-B-14",
+    "source": [
+      "agent"
+    ],
+    "summary": "The EDA scan reported 142 anomalies on the wide country-year panel, almost all extreme values or high nulls explained by country size and historical sparseness, and it listed [parameters] keys as unread.",
+    "evidence": "SIMS/co2-B/feedback/agent.md pain point 8; SIMS/co2-B/project/investigations/co2-emissions-change/exploration/eda/owid_co2.json",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the released awb-explore scan."
+  },
+  {
+    "id": "co2-B-15",
+    "source": [
+      "agent",
+      "user"
+    ],
+    "summary": "records review-rules add warned 'the rule names 2' although the rule text contains no number, and the agent relayed the warning to the user.",
+    "evidence": "A6; SIMS/co2-B/feedback/agent.md pain point 9",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the released helper's number extraction."
+  },
+  {
+    "id": "co2-B-16",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-init references/landing.md mixes the land() signature with archive, spreadsheet and source-reference grammar, so finding the one needed signature is slow.",
+    "evidence": "SIMS/co2-B/feedback/agent.md pain point 10",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the released reference document."
+  },
+  {
+    "id": "co2-B-17",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-package says packaging only serializes, yet the user's request for full ranking tables needed a new result (q1-full-ranking), and a new result must reuse an existing question's wording, which fits poorly.",
+    "evidence": "U3, A3; SIMS/co2-B/feedback/agent.md section 2; SIMS/co2-B/project/investigations/co2-emissions-change/questions.md (Q-001 has two results)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is an ambiguity in the released skills."
+  },
+  {
+    "id": "co2-B-18",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The agent decided data-forced exclusions (Antarctica out, Kosovo in, Libya out) and the Q3 matched year before asking, then disclosed them, against guidance that unsettled exclusions are the user's decision; the guidance has no rule for immaterial, data-forced cases.",
+    "evidence": "A2; SIMS/co2-B/feedback/agent.md section 4; SIMS/co2-B/feedback/agent-notes.md turn 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The gap is in the released analysis and explore guidance."
+  },
+  {
+    "id": "co2-B-19",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-scope says to look facts up in source systems but also that scoping writes records only, leaving unclear whether a transient look at the codebook (nothing landed) is allowed.",
+    "evidence": "A1; SIMS/co2-B/feedback/agent-notes.md turn 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is an ambiguity in the released awb-scope skill."
+  },
+  {
+    "id": "co2-B-20",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-init step 1.3 asks to check directories above the project for CLAUDE.md, which clashed with the simulation's read boundaries.",
+    "evidence": "SIMS/co2-B/feedback/agent-notes.md turn 1",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The conflict exists only because of the simulation's read boundaries; on a normal host reading parent directories is fine."
+  },
+  {
+    "id": "co2-B-21",
+    "source": [
+      "agent"
+    ],
+    "summary": "The required end-of-reply status line counting the user's questions has no ledger to count on the first turn, so the agent improvised it.",
+    "evidence": "A1; SIMS/co2-B/feedback/agent.md section 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is a gap in the released AGENTS.md template."
+  },
+  {
+    "id": "co2-B-22",
+    "source": [
+      "agent"
+    ],
+    "summary": "The rule to ask about a review rule before repairing a correction that could recur blocks when the user has said to finish; the agent repaired first and offered the rule afterwards.",
+    "evidence": "U5, A5; SIMS/co2-B/feedback/agent.md sections 2 and 4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The tension is in the released review procedure."
+  },
+  {
+    "id": "co2-B-23",
+    "source": [
+      "agent"
+    ],
+    "summary": "The awb-package headline-checkpoint requirements are scattered across paragraphs, and reading the contract, templates, deck rules and review.md took about 10k tokens before any writing.",
+    "evidence": "SIMS/co2-B/feedback/agent.md sections 2 and 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "These are the released skill documents."
+  },
+  {
+    "id": "co2-B-24",
+    "source": [
+      "agent"
+    ],
+    "summary": "The status and check-draft outputs are large JSON that repeat full finding texts and ledger order on every call.",
+    "evidence": "SIMS/co2-B/feedback/agent.md section 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the released helper output format."
+  },
+  {
+    "id": "co2-B-25",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Commit talk appeared in five of six replies (suggestions in A2 and A5, status mentions in A1, A3 and A6), and release 001 was frozen from a repository with no commits after the user declined one, so its provenance is checksums only.",
+    "evidence": "A1-A6; SIMS/co2-B/feedback/human.md section 4; git log in SIMS/co2-B/project is empty",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The reminders come from the released skills' report templates; this persists from Oct 16 C-30 at lower intensity."
+  },
+  {
+    "id": "co2-B-26",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "With the awb MCP server connected, the agent still ran 13 helper calls through Bash (src/awb.py, run.py) against 57 MCP calls, against AGENTS.md's MCP-first rule, mainly to batch questions add and state calls.",
+    "evidence": "SIMS/co2-B/relay/agent-002.jsonl to agent-006.jsonl; SIMS/co2-B/feedback/agent.md section 4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "MCP does not support batching these records calls; a large improvement on Oct 16 (32 MCP against 83 CLI)."
+  },
+  {
+    "id": "co2-B-27",
+    "source": [
+      "user"
+    ],
+    "summary": "The README is long for a first-time analyst, gives no concrete example of how small an issue can trigger the review stop or that a new rule re-triggers review, and does not say how to interpret an 'unassessed join check'.",
+    "evidence": "SIMS/co2-B/feedback/human.md section 3; SIMS/co2-B/human/notes.md turn 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the released README."
+  },
+  {
+    "id": "co2-B-28",
+    "source": [
+      "user"
+    ],
+    "summary": "The agent announced a second scoping round for simple choices (ranking year, consumption scope, prior expectations) that could have carried recommendations in the first round.",
+    "evidence": "A1, U2; SIMS/co2-B/feedback/human.md section 4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "awb-scope's four-decisions-per-round cap pushes simple choices into another round."
+  },
+  {
+    "id": "co2-B-29",
+    "source": [
+      "referee",
+      "agent"
+    ],
+    "summary": "The Codex user's preamble ('I'll read BRIEF.md and README.md, then follow the simulation's response format.') was relayed as the first line of user message 1.",
+    "evidence": "U1 in SIMS/co2-B/transcript.md; SIMS/co2-B/relay/human-001.out.md; SIMS/co2-B/feedback/agent-notes.md turn 1",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is the user role breaking its output protocol; the relay passes every message from the role."
+  },
+  {
+    "id": "co2-B-30",
+    "source": [
+      "referee",
+      "agent"
+    ],
+    "summary": "The agent wrote the fetched OWID processing code to system /tmp, outside the simulation's allowed folders, before moving it into foundation/references, and ran a habitual git add -A that it then reset.",
+    "evidence": "SIMS/co2-B/relay/agent-003.jsonl (A3), SIMS/co2-B/relay/agent-002.jsonl (A2); SIMS/co2-B/feedback/agent.md section 3",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The /tmp boundary exists only in the simulation; no study content was exposed, and nothing was committed."
+  },
+  {
+    "id": "co2-B-31",
+    "source": [
+      "referee"
+    ],
+    "summary": "The persona volunteered every definition and the storage paths in U1, and its expectations in U2, which thinned the scoping interview to one round.",
+    "evidence": "U1, U2",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "Personas front-loading facts from their brief is a known study limit, kept for comparability with Oct 15."
+  },
+  {
+    "id": "co2-B-32",
+    "source": [
+      "referee"
+    ],
+    "summary": "The storage paths recorded in the project's README.md and foundation/sources.md (both tracked by Git) are the session scratchpad path, whose directory name encodes the real account's home path, so a commit would have carried the account username; the release and storage copies are clean.",
+    "evidence": "SIMS/co2-B/project/README.md, SIMS/co2-B/project/foundation/sources.md, deliveries/.../review/snapshot/sources.md, project/.venv (gitignored)",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The path comes from where the harness places the simulation and from the storage paths in the persona brief, not from the product."
+  }
+]

@@ -1,0 +1,415 @@
+[
+  {
+    "id": "retail-B-01",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "The agent removed 22,523 identical cross-sheet rows before asking, although the README says the user decides whether overlapping rows are copies unless the source confirms re-extraction; awb-clean let the agent decide.",
+    "evidence": "reply 2, msg 3; SIMS/retail-B/feedback/human.md pain point 2; SIMS/retail-B/feedback/agent.md item 9; SIMS/retail-B/project/foundation/quality.md (DQ-001)",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The README/awb-clean disagreement and the agent's self-decision would occur identically on a normal interactive host."
+  },
+  {
+    "id": "retail-B-02",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Plausible explanations reached the user as facts before any review: 'not product demand', 'Christmas closure', early cohorts pushing repeat rates up, and 'lean the budget towards retention'; the independent reviewer only runs at draft time.",
+    "evidence": "reply 3 (slide 3 headline), reply 4 (December check, Answer points), msgs 4-5; SIMS/retail-B/feedback/human.md pain point 1; SIMS/retail-B/human/notes.md turns 4-5",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The headline preview and chat answers are outside the package review on any host, so the same overclaims would reach a real user."
+  },
+  {
+    "id": "retail-B-03",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The imperative-sentence readability rule collided with the user's explicit request for a recommendation, forcing an awkward gerund Answer headline ('Recommendation: protecting key accounts, testing retention alongside acquisition; ...') into the released deck.",
+    "evidence": "reply 5; SIMS/retail-B/storage/releases/marketing-budget-evidence/leadership-deck/001/findings.md line 7; SIMS/retail-B/feedback/agent.md item 2",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The rule lives in the released package review guidance and applies regardless of host."
+  },
+  {
+    "id": "retail-B-04",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "The 'unchanged since prior review, take it to the user' rule escalated a citation-only error in the internal methodology.md, adding an approval gate before the 'checks pass' confirmation the user had asked for.",
+    "evidence": "reply 6, msg 7; SIMS/retail-B/feedback/human.md pain point 3; SIMS/retail-B/feedback/agent.md item 1; reviewloop.py agent-006",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The escalation rule is part of the released review procedure, not the simulation."
+  },
+  {
+    "id": "retail-B-05",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "The 15-word headline limit was not checked at the headline-preview stage, so a headline the user had approved resurfaced as a separate decision at check-draft.",
+    "evidence": "reply 3 (preview), reply 5 (decision 1), msg 6; SIMS/retail-B/feedback/human.md pain point 3; SIMS/retail-B/feedback/agent.md item 6; SIMS/retail-B/human/notes.md turn 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The preview step has no word-count helper in the release."
+  },
+  {
+    "id": "retail-B-06",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The first results message gave ranges and highlights instead of the complete 24-month revenue table and all 12 cohort rates the questions ask for, so the user had to request them.",
+    "evidence": "reply 3, msg 4; SIMS/retail-B/feedback/human.md pain point 4; SIMS/retail-B/human/notes.md turn 4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Agent reporting behaviour under the released skills, independent of host."
+  },
+  {
+    "id": "retail-B-07",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The draft replaced the agreed Year 1/Year 2/24-month reconciliation table with a bar chart dominated by product revenue, needing a correction round.",
+    "evidence": "reply 3 (promised table), reply 5 (chart 2 as bar), msg 6, reply 6; SIMS/retail-B/feedback/human.md pain point 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Agent drafting behaviour under awb-package, independent of host."
+  },
+  {
+    "id": "retail-B-08",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "Summing doubles left a -4.4e-06 reconciliation gap, so 'identified plus unidentified equals the total exactly' failed review with no practical tolerance path, and state.md still records 'reconciliation_gap 0' for customer concentration.",
+    "evidence": "reply 5 (review findings); SIMS/retail-B/project/investigations/marketing-budget-evidence/state.md; SIMS/retail-B/feedback/agent.md item 3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Money arithmetic and the tolerance rule are in the released helpers and guidance."
+  },
+  {
+    "id": "retail-B-09",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The first recommended net-revenue definition (products only) did not fit a company-total 'net revenue after cancellations' question and could have produced a misleading headline if accepted.",
+    "evidence": "reply 1 (definition 1), msg 2; SIMS/retail-B/feedback/human.md section 4; SIMS/retail-B/human/notes.md turn 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Agent recommendation under awb-scope, independent of host."
+  },
+  {
+    "id": "retail-B-10",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "Review rules can be scoped to one package or every package but not to an investigation; the agent applied the user's investigation-level wording checks globally.",
+    "evidence": "reply 6, msg 6; SIMS/retail-B/feedback/human.md pain point 6; SIMS/retail-B/feedback/agent.md item 10",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "A limitation of the released review-rules command."
+  },
+  {
+    "id": "retail-B-11",
+    "source": [
+      "agent"
+    ],
+    "summary": "Every result without a join carries a 'not assessed: joins' caveat, which awb-status then lists for every finding, adding noise.",
+    "evidence": "SIMS/retail-B/feedback/agent.md item 4; SIMS/retail-B/feedback/agent-notes.md turns 3-4; SIMS/retail-B/project/investigations/marketing-budget-evidence/state.md",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The settings template and validator have no not-applicable outcome for joins."
+  },
+  {
+    "id": "retail-B-12",
+    "source": [
+      "agent"
+    ],
+    "summary": "Changing a slide headline requires the identical methodology heading, and check-draft reports the one cause as four separate problem rows.",
+    "evidence": "reply 6 ('Forgot the matching methodology heading'); SIMS/retail-B/feedback/agent.md item 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "check-draft output format in the release."
+  },
+  {
+    "id": "retail-B-13",
+    "source": [
+      "agent"
+    ],
+    "summary": "The headline preview must be written inside the draft folder before export creates that folder, so the agent created it by hand.",
+    "evidence": "reply 3; SIMS/retail-B/feedback/agent.md item 7",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Step ordering in the released awb-package skill."
+  },
+  {
+    "id": "retail-B-14",
+    "source": [
+      "agent"
+    ],
+    "summary": "The clean scan's duplicate-rows issue mixes cross-sheet copies and within-sheet repeats in one issue key, leaving a partly corrected issue with an unclear status.",
+    "evidence": "reply 2; SIMS/retail-B/feedback/agent.md item 8; SIMS/retail-B/project/foundation/quality.md",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Issue granularity of the released scan helper."
+  },
+  {
+    "id": "retail-B-15",
+    "source": [
+      "agent"
+    ],
+    "summary": "export raises a precision warning on a genuinely four-decimal value (0.1875) on every run, with no way to confirm and silence it.",
+    "evidence": "SIMS/retail-B/feedback/agent.md item 11",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Behaviour of the released export helper."
+  },
+  {
+    "id": "retail-B-16",
+    "source": [
+      "agent"
+    ],
+    "summary": "check-draft returned passed: true while the review status was failed, which misleads if the flag is read alone (release does gate on the review).",
+    "evidence": "SIMS/retail-B/feedback/agent.md item 13; SIMS/retail-B/feedback/agent-notes.md turn 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Output semantics of the released check-draft command."
+  },
+  {
+    "id": "retail-B-17",
+    "source": [
+      "agent"
+    ],
+    "summary": "With 'commit as you go', results run before their code was committed need a commit, rerun and re-export sequence before packaging accepts them.",
+    "evidence": "SIMS/retail-B/feedback/agent.md item 12; SIMS/retail-B/feedback/agent-notes.md turn 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The uncommitted-changes check is in the released helpers."
+  },
+  {
+    "id": "retail-B-18",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "export and check-draft repeat large blocks (about 5k tokens per export, five exports), so packaging took 66% of agent time.",
+    "evidence": "SIMS/retail-B/feedback/agent.md section 5; reviewloop.py (packaging 24 of 36 min)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Output volume of the released helpers, independent of host."
+  },
+  {
+    "id": "retail-B-19",
+    "source": [
+      "agent"
+    ],
+    "summary": "No named home exists for a user's standing working preferences, so the agent invented a 'Project conventions' section in AGENTS.md.",
+    "evidence": "reply 7; SIMS/retail-B/feedback/agent.md section 2; SIMS/retail-B/project/AGENTS.md",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Gap in the released project templates."
+  },
+  {
+    "id": "retail-B-20",
+    "source": [
+      "user",
+      "agent"
+    ],
+    "summary": "'About 8 slides' became 9 main slides plus 2 appendix slides; whether the title slide counts is not stated up front.",
+    "evidence": "reply 3, reply 5; SIMS/retail-B/feedback/human.md section 3; SIMS/retail-B/feedback/agent.md section 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Counting convention in the released package contract and brief template."
+  },
+  {
+    "id": "retail-B-21",
+    "source": [
+      "user"
+    ],
+    "summary": "The README is long for a first-time commercial user, mixing installation and administration with the analyst guide.",
+    "evidence": "SIMS/retail-B/feedback/human.md section 3; SIMS/retail-B/human/notes.md turn 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The README is the released documentation."
+  },
+  {
+    "id": "retail-B-22",
+    "source": [
+      "user"
+    ],
+    "summary": "Thresholds were proposed after seeing the data (offer to adjust the £2,000 product threshold if the list looked wrong; £20k small-base flag chosen from an observed gap), contrary to the README's commitment.",
+    "evidence": "reply 1 (definition 4), reply 2 (decision 2); SIMS/retail-B/feedback/human.md section 3; SIMS/retail-B/human/notes.md turns 2-3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Agent behaviour under the released scoping guidance."
+  },
+  {
+    "id": "retail-B-23",
+    "source": [
+      "user"
+    ],
+    "summary": "The agent planned another audience question although the user had already given the audience and decision.",
+    "evidence": "reply 1 (closing paragraph); SIMS/retail-B/feedback/human.md section 4; SIMS/retail-B/human/notes.md turn 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Agent scoping behaviour, independent of host."
+  },
+  {
+    "id": "retail-B-24",
+    "source": [
+      "referee"
+    ],
+    "summary": "The cohort query counts only non-cancelled invoices with a product line of positive quantity and price, narrower than the stated 'separate purchase', and the released methodology note does not say so; a looser definition moves the January cohort from 368 to 383.",
+    "evidence": "SIMS/retail-B/project/investigations/marketing-budget-evidence/queries/repeat-within-90-days.sql; SIMS/retail-B/storage/releases/marketing-budget-evidence/leadership-deck/001/methodology-note.md; SIMS/retail-B/referee/q3b.py",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Disclosure of an analytical choice in the deliverable; would occur on any host."
+  },
+  {
+    "id": "retail-B-25",
+    "source": [
+      "user"
+    ],
+    "summary": "Replies were long, with repeated completion summaries and review mechanics (word counts, review rounds, record status) the user did not need.",
+    "evidence": "replies 4-6; SIMS/retail-B/feedback/human.md sections 4 and 7",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Reporting style under the released skills."
+  },
+  {
+    "id": "retail-B-26",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The Codex user leaked a preamble line into message 1 ('I'll read BRIEF.md and README.md, then follow the simulation's response format.').",
+    "evidence": "msg 1; SIMS/retail-B/feedback/agent-notes.md turn 1",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "A role breaking its output protocol; the relay passes messages verbatim."
+  },
+  {
+    "id": "retail-B-27",
+    "source": [
+      "referee"
+    ],
+    "summary": "The user settled every remaining definition and the next round's choices in message 2, thinning the scoping interview to one round.",
+    "evidence": "msg 2; reply 1",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "Persona briefs front-load facts, a known study limit kept for comparability."
+  },
+  {
+    "id": "retail-B-28",
+    "source": [
+      "referee"
+    ],
+    "summary": "The agent's Claude Code session files live under the real home directory, and a review subagent read one of its own tool-result spill files there.",
+    "evidence": "SIMS/retail-B/relay/agent-006.jsonl (scoped review subagent)",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "Caused by how the headless session's config directory is set up, not by the release."
+  },
+  {
+    "id": "retail-B-29",
+    "source": [
+      "referee"
+    ],
+    "summary": "The agent listed the simulation folder in turn 1, exposing the names of human/, relay/ and transcript.md, without reading them.",
+    "evidence": "SIMS/retail-B/relay/agent-001.jsonl",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The simulation places role folders next to the project; a real user's project has no such siblings."
+  },
+  {
+    "id": "retail-B-30",
+    "source": [
+      "referee"
+    ],
+    "summary": "The scratchpad directory name, which encodes the real home path and account name, was recorded as the storage location in the project README and sources ledger and committed, because the user supplied absolute storage paths.",
+    "evidence": "msg 1; SIMS/retail-B/project/README.md; SIMS/retail-B/project/foundation/sources.md",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The path comes from the simulation folder's name, not from the release."
+  },
+  {
+    "id": "retail-B-31",
+    "source": [
+      "agent"
+    ],
+    "summary": "Repeated 'changed on disk' notifications re-showed whole files and consumed tokens.",
+    "evidence": "SIMS/retail-B/feedback/agent.md section 5",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "A Claude Code harness behaviour, not the workbench."
+  },
+  {
+    "id": "retail-B-32",
+    "source": [
+      "agent"
+    ],
+    "summary": "Agent command mistakes cost retries: zsh does not word-split a command held in a variable, DuckDB rejects 'value' and 'share' as bare aliases, and QUALIFY cannot combine with GROUP BY ALL.",
+    "evidence": "reply 2, reply 3; SIMS/retail-B/feedback/agent.md section 3",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "Mostly the agent's own errors, though the skills' CLI fallback examples may assume a bash-like shell."
+  },
+  {
+    "id": "retail-B-33",
+    "source": [
+      "referee"
+    ],
+    "summary": "Package review overhead: 5 review rounds across three packaging and release requests, 18.1 min of user waiting and 29% of agent time in review tails; no request exceeded two rounds, so there was no perfectionism loop.",
+    "evidence": "reviewloop.py output; reply 5 (11.7 min), reply 6 (4.8 min), reply 7 (1.7 min)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Review cost is set by the released review procedure."
+  },
+  {
+    "id": "retail-B-34",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-init asks to check 'any directory above' the project for agent instruction files with no stopping point.",
+    "evidence": "reply 1; SIMS/retail-B/feedback/agent.md section 2; SIMS/retail-B/feedback/agent-notes.md turn 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Wording in the released awb-init skill."
+  },
+  {
+    "id": "retail-B-35",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-scope says to look facts up yourself but also that scoping writes records only and data work follows on request, so the agent relied on prior knowledge of the dataset.",
+    "evidence": "reply 1; SIMS/retail-B/feedback/agent.md section 2; SIMS/retail-B/feedback/agent-notes.md turn 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Tension in the released awb-scope skill."
+  },
+  {
+    "id": "retail-B-36",
+    "source": [
+      "agent"
+    ],
+    "summary": "Landing guidance does not say how to combine a fetched source with an archive, and committing conversion SQL before publish conflicts with the default 'Commits: on request', leaving the publication permanently marked uncommitted.",
+    "evidence": "reply 2; SIMS/retail-B/feedback/agent.md section 2; SIMS/retail-B/feedback/agent-notes.md turn 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Gaps in the released data and landing guides."
+  }
+]

@@ -1,0 +1,290 @@
+[
+  {
+    "id": "co2-A-01",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Default display precision was too high for the stated semi-technical donor audience (one-decimal million tonnes, two-decimal shares), costing a full correction round.",
+    "evidence": "m7, r6, r7; SIMS/co2-A/feedback/human.md #1; SIMS/co2-A/human/notes.md turn 7",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "Package export defaults and the headline checkpoint would produce the same precision for any real user with this brief."
+  },
+  {
+    "id": "co2-A-02",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "check-draft cannot trace presentation transforms (Mt to billion tonnes, approximate wording), so a cosmetic rounding request required a new recorded analytical result with seven validations.",
+    "evidence": "r7 (6.7 min); SIMS/co2-A/feedback/agent.md #1; SIMS/co2-A/project/investigations/emissions-and-country-focus/evidence/territorial-change-tonnes.json",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The number checker and result contract are shipped helpers; any host hits this when a user asks for rounded or rescaled wording."
+  },
+  {
+    "id": "co2-A-03",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The skill, template and guide reading load is heavy; combined reads were truncated and re-read, and the full-draft turn spent about 7 minutes before its first review.",
+    "evidence": "agent-001, agent-005, agent-006 logs; SIMS/co2-A/feedback/agent.md #2; reviewloop first review at 7.3 min of 10.4",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The length and spread of the released skills and package contract drive this on any host, though truncation limits vary by agent."
+  },
+  {
+    "id": "co2-A-04",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The agent linked the user to the agent-only awb-scope SKILL.md to justify asking scoping questions.",
+    "evidence": "r1; SIMS/co2-A/feedback/human.md #3; SIMS/co2-A/human/notes.md turn 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The agent cited its instruction file in user-facing text, which a real user would also see; the user did not open it."
+  },
+  {
+    "id": "co2-A-05",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Replies repeated content because interim narration and the final summary overlapped (the scoping questions twice, 'all five accepted' twice).",
+    "evidence": "r1, r3, r5; SIMS/co2-A/feedback/human.md #2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The relay shows interim messages as an interactive Codex session does, so a real user sees the same duplication."
+  },
+  {
+    "id": "co2-A-06",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The awb-status reply came back as prose without the one-screen layout or suggested next requests the user expected from the README.",
+    "evidence": "r5; SIMS/co2-A/feedback/human.md #5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This concerns how the status skill's output is presented to the user, independent of the harness."
+  },
+  {
+    "id": "co2-A-07",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "Workbench-internal vocabulary and result IDs leaked into chat and the headline preview ('cohort checks', 'shared dataset owid_co2', 'Primary result: territorial-change').",
+    "evidence": "r2, r5; SIMS/co2-A/project/deliveries/emissions-and-country-focus/donor-roundtable/draft/.preview/headlines.md; SIMS/co2-A/feedback/human.md #4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The preview template and skill wording put these labels in user-facing material."
+  },
+  {
+    "id": "co2-A-08",
+    "source": [
+      "user"
+    ],
+    "summary": "The headline preview the user must review is stored in a hidden .preview folder.",
+    "evidence": "r5; SIMS/co2-A/feedback/human.md #6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The folder location is set by the package workflow, not the harness."
+  },
+  {
+    "id": "co2-A-09",
+    "source": [
+      "user"
+    ],
+    "summary": "Links switched between absolute paths and relative paths that may not open from the user's terminal.",
+    "evidence": "r7; SIMS/co2-A/feedback/human.md #7",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "This may be Codex reply style rather than skill guidance; the skills' link conventions were not inspected."
+  },
+  {
+    "id": "co2-A-10",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "No materiality threshold was proposed for the Q2 'reduced emissions' count; the user had to ask for the at-least-5% version, costing an exchange.",
+    "evidence": "m4, r4; SIMS/co2-A/feedback/human.md section 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Scoping guidance determines whether such thresholds are proposed up front, on any host."
+  },
+  {
+    "id": "co2-A-11",
+    "source": [
+      "referee"
+    ],
+    "summary": "The chat said the Q2 chart used 'the same ten countries', but with the 38-country threshold four countries changed (Spain, Netherlands, Czechia, Belgium in place of Canada, Mexico, Australia, Poland); the slide text itself is correct.",
+    "evidence": "r6; SIMS/co2-A/storage/releases/emissions-and-country-focus/donor-roundtable/001/charts/chart-2.csv; findings.md Q2 slide",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The deliverable is right and the inaccuracy is in the model's chat summary, so it is unclear whether the skills contribute."
+  },
+  {
+    "id": "co2-A-12",
+    "source": [
+      "agent"
+    ],
+    "summary": "The MCP read tool advertises a shared settings field, but the profile command rejects it ('unknown arguments: settings').",
+    "evidence": "agent-003; SIMS/co2-A/feedback/harness-log.md; SIMS/co2-A/feedback/agent.md #4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is a mismatch in the shipped MCP schema and helper."
+  },
+  {
+    "id": "co2-A-13",
+    "source": [
+      "agent"
+    ],
+    "summary": "check-draft's name checker flagged the ordinary prose word 'coal-share' as leaked internal result ID.",
+    "evidence": "agent-006; SIMS/co2-A/feedback/agent.md #5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is a false positive in the shipped check-draft helper."
+  },
+  {
+    "id": "co2-A-14",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "Read-only check-draft preflight returns an error for expected lifecycle state (no inventory yet, stale receipt after edits), mixing expected steps with real defects and showing up as MCP failures.",
+    "evidence": "agent-006, agent-007; SIMS/co2-A/feedback/harness-log.md; SIMS/co2-A/feedback/agent.md #7",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The exit semantics belong to the shipped helper and MCP server."
+  },
+  {
+    "id": "co2-A-15",
+    "source": [
+      "agent"
+    ],
+    "summary": "Status reported state as out of date because history was one second newer, though all evidence was current.",
+    "evidence": "agent-005; SIMS/co2-A/feedback/agent.md #8",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This comes from the shipped status collector's timestamp logic."
+  },
+  {
+    "id": "co2-A-16",
+    "source": [
+      "agent"
+    ],
+    "summary": "The init-to-scope handoff requires the interview before investigation records exist, so a fully specified brief had to be parked in the project README.",
+    "evidence": "r1; SIMS/co2-A/feedback/agent.md #6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This sequencing is defined by the released init and scope skills."
+  },
+  {
+    "id": "co2-A-17",
+    "source": [
+      "agent"
+    ],
+    "summary": "The acquisition register needed manual completion of Restrictions, and acquisition prose stayed phrased as planned after retention succeeded.",
+    "evidence": "agent-002; SIMS/co2-A/feedback/agent.md #9",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the behavior of the landing and retention helpers."
+  },
+  {
+    "id": "co2-A-18",
+    "source": [
+      "agent",
+      "user"
+    ],
+    "summary": "The package produces a slide manuscript, chart CSVs and assembly instructions rather than a rendered PPTX, which adds work for the user before the deadline.",
+    "evidence": "r6, m9; SIMS/co2-A/feedback/agent.md #3; SIMS/co2-A/feedback/human.md section 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The package output scope is a product decision; the README states it, but the gap remains."
+  },
+  {
+    "id": "co2-A-19",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "'About 8 slides' became 10 assembled slides (8 main, 1 appendix, 1 divider) because of the required slide set and the builder's divider.",
+    "evidence": "r5; SIMS/co2-A/feedback/agent.md section 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The deck rules and builder divider are shipped package-format behavior; it was disclosed and the user accepted."
+  },
+  {
+    "id": "co2-A-20",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "The fresh full review flagged a donor-note tolerance phrase under a fine-grained editorial rule, forcing a second (scoped) review round of about 2 minutes; no perfectionism loop otherwise (at most 2 rounds per request).",
+    "evidence": "agent-006 review records at 8.4 and 9.3 min; kit/reviewloop.py output; SIMS/co2-A/feedback/agent.md section 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The review rule and the receipt workflow are part of the released package skill."
+  },
+  {
+    "id": "co2-A-21",
+    "source": [
+      "user"
+    ],
+    "summary": "The README is long, mixes install/MCP admin with analyst guidance, explains the two headline-checkpoint modes unclearly, and says nothing on display precision or whether cleaning is automatic.",
+    "evidence": "SIMS/co2-A/feedback/human.md section 3; SIMS/co2-A/human/notes.md turn 1",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This concerns the released README, the only user documentation."
+  },
+  {
+    "id": "co2-A-22",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "zsh heredocs failed because temp files could not be created, and git (xcrun) and pip could not write their caches in the sandbox.",
+    "evidence": "agent-001, agent-008; SIMS/co2-A/feedback/agent.md #10 and section 3",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is caused by the Codex workspace-write sandbox and simulated home, not by the release."
+  },
+  {
+    "id": "co2-A-23",
+    "source": [
+      "referee"
+    ],
+    "summary": "reviewloop.py counts 0 reviewer subagents because Codex logs only collab 'wait' items, not spawn items; three read-only reviewers actually ran.",
+    "evidence": "agent-006 (2 waits), agent-007 (1 wait); SIMS/co2-A/feedback/agent-notes.md",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is a measurement gap in the simulation kit's log parser."
+  },
+  {
+    "id": "co2-A-24",
+    "source": [
+      "referee"
+    ],
+    "summary": "The harness scratchpad path embeds the host account's name slug; because the user gave it as the storage location, it appears in the project README, foundation/sources.md, a review snapshot and compiled files (not in the release or storage).",
+    "evidence": "SIMS/co2-A/project/README.md; SIMS/co2-A/project/foundation/sources.md; deliveries/.../review/snapshot/sources.md",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This comes from where the harness places the simulation, not from the product."
+  },
+  {
+    "id": "co2-A-25",
+    "source": [
+      "referee"
+    ],
+    "summary": "The persona volunteered scope facts (the territorial definition, the country definition, the ISO/Kosovo concern) before the agent asked, which thinned the scoping interview.",
+    "evidence": "m2, m3",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is the known persona front-loading study limit, kept for comparability."
+  }
+]

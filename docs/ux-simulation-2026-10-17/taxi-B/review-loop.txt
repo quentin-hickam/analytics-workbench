@@ -1,0 +1,13 @@
+== taxi-B: 8 agent turns, 41 min; packaging turns 24 min (58%); from first review start to turn end 11 min (26%)
+   agent-001: 1.6 min starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0
+   agent-002: 5.8 min starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0
+   agent-003: 9.8 min starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0
+   agent-004: 4.0 min pkg starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0
+   agent-005: 13.4 min starts=2 (full,scoped) records=2 reviewers=2 rules=4 check-draft=3 tail=6.2
+      @10.4 review: 0 violations (0 error), 21 narrative problems, 0 command problems passed=False refused=False
+      @13.0 review (scoped): 0 violations (0 error), 2 narrative problems, 0 command problems passed=False refused=False
+   agent-006: 5.5 min starts=2 (scoped,scoped) records=2 reviewers=2 rules=6 check-draft=4 tail=4.6
+      @3.2 review (scoped): 1 violations (1 error), 3 narrative problems, 0 command problems passed=False refused=False
+      @5.1 review (scoped): clean passed=True refused=False
+   agent-007: 0.5 min rel starts=0 () records=0 reviewers=0 rules=0 check-draft=2 tail=0
+   agent-008: 0.7 min starts=1 (?) records=0 reviewers=0 rules=1 check-draft=1 tail=0.0

@@ -1,0 +1,13 @@
+== co2-A: 9 agent turns, 38 min; packaging turns 25 min (65%); from first review start to turn end 6 min (16%)
+   agent-001: 2.6 min pkg starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0
+   agent-002: 2.9 min starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0
+   agent-003: 6.9 min starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0
+   agent-004: 2.4 min starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0
+   agent-005: 4.4 min pkg starts=0 () records=0 reviewers=0 rules=0 check-draft=2 tail=0
+   agent-006: 10.4 min pkg starts=2 (full,scoped) records=2 reviewers=0 rules=1 check-draft=6 tail=3.1
+      @8.4 review: 0 violations (0 error), 1 narrative problems, 0 command problems passed=False refused=False
+      @9.3 review (scoped): clean passed=True refused=False
+   agent-007: 6.7 min pkg starts=1 (scoped) records=1 reviewers=0 rules=0 check-draft=4 tail=3.0
+      @4.9 review (scoped): clean passed=True refused=False
+   agent-008: 0.8 min rel starts=0 () records=0 reviewers=0 rules=0 check-draft=1 tail=0
+   agent-009: 1.2 min starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0

@@ -1,0 +1,236 @@
+[
+  {
+    "id": "taxi-B-01",
+    "source": ["user", "referee"],
+    "summary": "The agent presented untested explanations and labels as fact (timing errors, Long Island/Westchester destinations, Flex Fare, recording gap, 'no payment type' for an explicit 0), so the user had to separate observations from explanations repeatedly.",
+    "evidence": "Agent replies 1-4, user messages 3-5; SIMS/taxi-B/feedback/human.md pain points 1 and 3; SIMS/taxi-B/human/notes.md turns 2-5",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "Agent behaviour under the released skills on a normal host; nothing in the simulation caused the overclaiming."
+  },
+  {
+    "id": "taxi-B-02",
+    "source": ["user", "referee"],
+    "summary": "After seeing Bronx/Brooklyn zero-tip medians, the agent recommended excluding the vendor-1 rate-code-99 group from the primary tip figures and calling the remainder 'reliable', a post-hoc exclusion that could steer a public tipping position.",
+    "evidence": "Agent reply 3 (decision section), user message 4; SIMS/taxi-B/feedback/human.md pain point 2; ledger Q-011 in SIMS/taxi-B/project/investigations/airport-trips-and-tipping/questions.md",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "Analysis-judgment guidance in the released skills did not steer toward keeping the agreed population with a sensitivity check; a real user would see the same recommendation."
+  },
+  {
+    "id": "taxi-B-03",
+    "source": ["agent", "referee"],
+    "summary": "Package review is still strict about evidence form: the first full review raised 21 narrative problems, about 15 of them citation-form complaints (exact/every claims needing result IDs or scan paths, exploration-query DQ rows rejected, the record word 'flagged'), using 4 review rounds and about 11 minutes across two requests.",
+    "evidence": "Agent replies 5-6; SIMS/taxi-B/review-reports/agent-005-record01.txt, agent-005-record02.txt, agent-006-record01.txt; reviewloop output (packaging 24 of 41 agent minutes); SIMS/taxi-B/feedback/agent.md pain point 1",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The review rules and reviewer behaviour come from the released awb-package references, not from the harness."
+  },
+  {
+    "id": "taxi-B-04",
+    "source": ["user", "agent"],
+    "summary": "The second-review stop rule handed the user a two-word wording repair ('lack other fields' vs 'lack a passenger count') that only narrowed a claim.",
+    "evidence": "Agent reply 5 (decision section), user message 6; SIMS/taxi-B/feedback/human.md pain point 5; SIMS/taxi-B/feedback/agent.md section 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The stop-and-escalate rule is in the released review reference."
+  },
+  {
+    "id": "taxi-B-05",
+    "source": ["agent", "referee"],
+    "summary": "The reviewer demanded a recorded check for wording the user had asked for ('including flat fares'), so the agent reran a result only to record the check, which demoted a supported finding to provisional and forced re-promotion although the table was unchanged.",
+    "evidence": "Agent reply 6; SIMS/taxi-B/review-reports/agent-006-record01.txt; commits 01b0aa8 and 188dfc2 in SIMS/taxi-B/project; SIMS/taxi-B/feedback/agent.md pain point 3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Rerun-demotion and the evidence requirement are behaviours of the released run.py/provenance helpers and review reference."
+  },
+  {
+    "id": "taxi-B-06",
+    "source": ["agent", "referee"],
+    "summary": "A review rule added at the user's request ('never present code 0 as confirmed Flex Fare') immediately flagged the methodology's own sentence describing that rule as a violation.",
+    "evidence": "Agent reply 6; SIMS/taxi-B/review-reports/agent-006-record01.txt (R-payment-codes-001); SIMS/taxi-B/feedback/agent-notes.md turn 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Rule matching in the released review process does not exempt meta-statements about the rule."
+  },
+  {
+    "id": "taxi-B-07",
+    "source": ["agent", "referee"],
+    "summary": "The awb-status MCP response was truncated (5,233 characters cut into a /tmp overflow file), losing the question-roots section, which the agent rebuilt from questions list --all.",
+    "evidence": "Agent reply 4; tool result in SIMS/taxi-B/relay/agent-004.jsonl; SIMS/taxi-B/feedback/agent.md pain point 2",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The truncation comes from the released MCP server's output cap; the overflow file being unreadable came from the sim's path boundary, and a normal host might allow reading it."
+  },
+  {
+    "id": "taxi-B-08",
+    "source": ["user", "agent", "referee"],
+    "summary": "Guidance on looking at data before landing and before setting thresholds is inconsistent: the agent read inbox Parquet before landing and proposed the speed limit after seeing which rows it would catch, contrary to the README's promise that thresholds come first.",
+    "evidence": "Agent replies 1-2; SIMS/taxi-B/feedback/human.md section 3; SIMS/taxi-B/feedback/agent.md section 2; SIMS/taxi-B/feedback/agent-notes.md turns 1-2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "awb-scope ('look facts up yourself') and workbench-guides/data.md ('inspect records only from landed copies') conflict in the release itself."
+  },
+  {
+    "id": "taxi-B-09",
+    "source": ["user", "referee"],
+    "summary": "The agent marked Q1 and Q5 as 'should' priority in the ledger without asking the user, then used that label to justify moving them to the appendix.",
+    "evidence": "Ledger SIMS/taxi-B/project/investigations/airport-trips-and-tipping/questions.md (Q-001, Q-005 priority should); agent reply 4 headline proposal; SIMS/taxi-B/human/notes.md turn 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Priority assignment during scoping is part of the released awb-scope flow; the user never set priorities."
+  },
+  {
+    "id": "taxi-B-10",
+    "source": ["user", "agent"],
+    "summary": "The required slides (title, answer, how we know, limitations) leave only four finding slides in an 8-slide deck, forcing two of the five questions into the appendix.",
+    "evidence": "Agent reply 4 (headline proposal); SIMS/taxi-B/feedback/agent-notes.md turn 4; SIMS/taxi-B/human/notes.md turn 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Fixed required slides are part of the released package contract."
+  },
+  {
+    "id": "taxi-B-11",
+    "source": ["user", "referee"],
+    "summary": "The agent's closing line reported '5 answered, 0 open' while a user decision on the tip population (Q-011) was still pending, so 'answered' was unclear while definitions were being negotiated.",
+    "evidence": "Agent reply 3 closing line; SIMS/taxi-B/feedback/human.md section 3; SIMS/taxi-B/human/notes.md turn 4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The closing-line convention in the released AGENTS.md counts main questions only, hiding open decision sub-questions."
+  },
+  {
+    "id": "taxi-B-12",
+    "source": ["user"],
+    "summary": "The first answers were incomplete (the top-ten list named four zones; the tip and volume breakdowns were partial), so the user had to ask for full tables.",
+    "evidence": "Agent reply 3, user message 4, agent reply 4 tables; SIMS/taxi-B/feedback/human.md pain point 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Answer formatting by the agent under the released skills; not caused by the harness."
+  },
+  {
+    "id": "taxi-B-13",
+    "source": ["user", "referee"],
+    "summary": "Interim progress messages kept naming internal files and steps (state.md, ledger, display names, shared view) after the user asked for results-focused updates.",
+    "evidence": "Agent replies 2-6 opening lines; user message 3; SIMS/taxi-B/feedback/human.md pain point 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "An interactive user sees the same interim messages; the relay passes them verbatim as an interactive host would."
+  },
+  {
+    "id": "taxi-B-14",
+    "source": ["user", "referee"],
+    "summary": "The release chat said the outline and chart files go 'to the board', contradicting the released START-HERE.md, which sends them to the deck builder.",
+    "evidence": "Agent reply 7; SIMS/taxi-B/storage/releases/airport-trips-and-tipping/board-briefing/001/START-HERE.md; SIMS/taxi-B/feedback/human.md pain point 7",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The agent's release summary under the released awb-release skill; nothing in the harness caused it."
+  },
+  {
+    "id": "taxi-B-15",
+    "source": ["referee"],
+    "summary": "After release, state.md still listed 'Preview the slide headlines' as the next step and kept the airport wording 'JFK trips mostly pay the $70 median fare', which the reviewer had removed from the deck.",
+    "evidence": "SIMS/taxi-B/project/investigations/airport-trips-and-tipping/state.md (Next steps; airport-fares-durations finding); agent reply 7",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Neither awb-release nor awb-status refreshes or flags stale state records in the release."
+  },
+  {
+    "id": "taxi-B-16",
+    "source": ["agent", "referee"],
+    "summary": "The agent's edit to foundation/sources.md silently did nothing (the target string had changed after landing), leaving 'reference: not yet retained' for two turns; status did not flag it and only the package reviewer caught it.",
+    "evidence": "Agent replies 3-5; SIMS/taxi-B/feedback/agent.md section 3; SIMS/taxi-B/review-reports/agent-005-record01.txt",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Status in the release does not cross-check retained reference files against the sources record; the failed edit was the agent's own."
+  },
+  {
+    "id": "taxi-B-17",
+    "source": ["agent"],
+    "summary": "The joins validation check cannot apply to aggregate results, so all 11 results showed 'not assessed: joins' with the same caveat note.",
+    "evidence": "SIMS/taxi-B/project/investigations/airport-trips-and-tipping/state.md caveat column; SIMS/taxi-B/feedback/agent.md pain point 4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Behaviour of the released validation helper and its settings."
+  },
+  {
+    "id": "taxi-B-18",
+    "source": ["agent"],
+    "summary": "Helper ergonomics: no scaffold for a new investigation, one question per 'questions add' call, '@where' limited to one column in chart export, and a noisy number warning on review rules quoting 'payment code 0'.",
+    "evidence": "SIMS/taxi-B/feedback/agent.md pain points 5-8; SIMS/taxi-B/feedback/agent-notes.md turns 2, 5 and 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "All are limits of the released helpers and MCP tools."
+  },
+  {
+    "id": "taxi-B-19",
+    "source": ["agent"],
+    "summary": "Instructions have gaps: no answerer value for documentation lookups, no guidance on 'the user's words' for sub-questions the user never phrased, unclear whether the headline preview may be written before the first export, and long reference files (package contract about 2,900 words, helpers about 7,000 words).",
+    "evidence": "SIMS/taxi-B/feedback/agent.md section 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "These are gaps in the released skill references."
+  },
+  {
+    "id": "taxi-B-20",
+    "source": ["agent"],
+    "summary": "Release output's open_caveats repeats the limitations slide headline as a caveat line.",
+    "evidence": "Agent reply 7; SIMS/taxi-B/feedback/agent.md pain point 9",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Cosmetic behaviour of the released release tool."
+  },
+  {
+    "id": "taxi-B-21",
+    "source": ["user"],
+    "summary": "The agent asked permission to read the TLC dictionary URL even though the user had already asked it to verify the cash-tip rule against TLC documentation.",
+    "evidence": "Agent reply 2 (decision 3), user message 3; SIMS/taxi-B/feedback/human.md sections 4 and 7",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The sim's system-prompt boundary allows only user-given URLs, which forced the request; the agent said so ('I can only read web addresses you give me')."
+  },
+  {
+    "id": "taxi-B-22",
+    "source": ["referee"],
+    "summary": "The agent downloaded the TLC PDF with curl using a browser user-agent string; the persona says the site blocked downloads, but in the sim it returned 200, so whether the spoofed user-agent was needed is unknown.",
+    "evidence": "Agent reply 3; Bash call in SIMS/taxi-B/relay/agent-003.jsonl (HTTP 200, 148,556 bytes)",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "This is the agent's own choice, not skill guidance; the persona's 'blocked' premise is fictional, so the sim cannot show whether a real user would see it."
+  },
+  {
+    "id": "taxi-B-23",
+    "source": ["referee"],
+    "summary": "The Codex user's first message began with a stray preamble line ('I'll read BRIEF.md and README.md…'), and the persona front-loaded facts meant to be given only if asked (storage paths, cash-tip suspicion, headline preview), thinning the scoping interview.",
+    "evidence": "User message 1; SIMS/taxi-B/feedback/agent-notes.md turn 1",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "A role broke the output protocol, and front-loading is a known persona-study limit kept for comparability."
+  },
+  {
+    "id": "taxi-B-24",
+    "source": ["agent"],
+    "summary": "zsh shell gotchas in the agent's own commands ('=====' expansion; no word-splitting of a command held in a variable) cost retries.",
+    "evidence": "SIMS/taxi-B/feedback/agent.md section 3; SIMS/taxi-B/feedback/agent-notes.md turn 2",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "These are the agent's own quoting errors on the host's default shell; the release did not cause them, but a macOS user's host would show the same."
+  },
+  {
+    "id": "taxi-B-25",
+    "source": ["referee"],
+    "summary": "The sim root path embeds the host account's username in encoded form, and the agent wrote that absolute path into the project README, foundation/sources.md, .venv/pyvenv.cfg and git history.",
+    "evidence": "SIMS/taxi-B/project/README.md (storage lines), SIMS/taxi-B/project/foundation/sources.md, SIMS/taxi-B/project/.venv/pyvenv.cfg; git authors are all the example.com sim identity",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The harness placed the sim under a scratchpad path that encodes the home folder; the release only recorded the paths the user supplied."
+  },
+  {
+    "id": "taxi-B-26",
+    "source": ["referee"],
+    "summary": "reviewloop.py reports a false review start for the agent's feedback turn (agent-008), because the agent.md text it writes mentions 'review-receipt start'.",
+    "evidence": "reviewloop output line for agent-008; SIMS/taxi-B/relay/agent-008.jsonl (only a Write of feedback/agent.md)",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is a pattern-matching quirk in the kit's measurement script."
+  }
+]

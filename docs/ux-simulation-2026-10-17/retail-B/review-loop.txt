@@ -1,0 +1,14 @@
+== retail-B: 8 agent turns, 36 min; packaging turns 24 min (66%); from first review start to turn end 11 min (29%)
+   agent-001: 1.4 min starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0
+   agent-002: 7.8 min starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0
+   agent-003: 5.8 min pkg starts=0 () records=0 reviewers=0 rules=0 check-draft=0 tail=0
+   agent-004: 2.3 min starts=0 () records=0 reviewers=0 rules=1 check-draft=0 tail=0
+   agent-005: 11.7 min starts=2 (full,scoped) records=2 reviewers=2 rules=4 check-draft=5 tail=6.1
+      @8.4 review: 0 violations (0 error), 15 narrative problems, 0 command problems passed=False refused=False
+      @11.1 review (scoped): clean passed=True refused=False
+   agent-006: 4.8 min starts=2 (scoped,scoped) records=2 reviewers=2 rules=5 check-draft=3 tail=3.1
+      @3.2 review (scoped): 0 violations (0 error), 3 narrative problems, 0 command problems passed=False refused=False
+      @4.2 review (scoped): 0 violations (0 error), 1 narrative problems, 0 command problems passed=False refused=False
+   agent-007: 1.7 min rel starts=1 (scoped) records=1 reviewers=1 rules=2 check-draft=3 tail=1.4
+      @0.9 review (scoped): clean passed=True refused=False
+   agent-008: 0.7 min starts=0 () records=0 reviewers=0 rules=1 check-draft=1 tail=0

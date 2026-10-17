@@ -1,0 +1,173 @@
+[
+  {
+    "id": "retail-A-01",
+    "source": ["user", "agent", "referee"],
+    "summary": "awb-status counts 14 calculation-level findings, split into supported and provisional, for five business questions, which confused the user and cost a turn.",
+    "evidence": "reply 5, msg 6, reply 6; SIMS/retail-A/feedback/human.md (pain point 4); SIMS/retail-A/feedback/agent.md (rank 1)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The status collector and finding model are released skill and helper behaviour that any user would see."
+  },
+  {
+    "id": "retail-A-02",
+    "source": ["user", "referee"],
+    "summary": "The agent linked to and quoted its own SKILL.md instruction files as its reason for asking the user things.",
+    "evidence": "replies 1, 3, 6, 8; SIMS/retail-A/human/notes.md turns 2, 4, 7, 9; SIMS/retail-A/feedback/human.md (pain point 3)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The same agent with the same skills on an interactive host would cite them the same way, since nothing in the skills tells it not to."
+  },
+  {
+    "id": "retail-A-03",
+    "source": ["user", "referee"],
+    "summary": "Replies say everything twice: interim progress commentary, then a full summary of the same content, so the answers start halfway down.",
+    "evidence": "replies 2-9, worst in reply 4; SIMS/retail-A/feedback/human.md (pain point 2)",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "Interactive hosts also show interim messages, but the relay joins them into one block, which may make the repetition look worse than it would in a live UI."
+  },
+  {
+    "id": "retail-A-04",
+    "source": ["user", "agent", "referee"],
+    "summary": "The full draft named the public dataset repository and its creator as the source, and the user had to correct it to 'our order-system transaction export' before release.",
+    "evidence": "reply 7, msg 8, reply 8; SIMS/retail-A/human/notes.md turn 8; SIMS/retail-A/feedback/agent.md (rank 3)",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The conflict exists because the simulation asks the user to treat a public download as company data; a separate business source identity would still help, which the agent also suggested."
+  },
+  {
+    "id": "retail-A-05",
+    "source": ["user", "referee"],
+    "summary": "The release location and draft files were given as relative links, although the README says the agent reports the release copy's full path.",
+    "evidence": "replies 6-9 (reply 9: ../storage/releases/marketing-budget/leadership-budget/001/); SIMS/retail-A/human/README.md release section; SIMS/retail-A/feedback/human.md (pain point 5)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The release helper returned the exact destination, but the agent's report did not follow the README's promise, which any user would notice."
+  },
+  {
+    "id": "retail-A-06",
+    "source": ["user", "referee"],
+    "summary": "Workbench jargon leaked into chat: commit hashes, validation-check counts, 'stale', the interpreter path and missing upstream version headers.",
+    "evidence": "replies 1, 3, 4, 5; SIMS/retail-A/feedback/human.md (pain point 4)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "These terms come from the released skills' reporting conventions and would reach any non-technical user."
+  },
+  {
+    "id": "retail-A-07",
+    "source": ["user", "agent"],
+    "summary": "The future review-rule question came mid-reply, with three unexplained options and a skill quote, and the skill's 'ask before repairing' ordering conflicts with simply applying an already authorised correction.",
+    "evidence": "reply 8, msg 9; SIMS/retail-A/feedback/human.md (pain point 7); SIMS/retail-A/feedback/agent.md (rank 8)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The question and its timing are required by the released awb-package review instructions."
+  },
+  {
+    "id": "retail-A-08",
+    "source": ["user"],
+    "summary": "The agent asked whether manual and bank postings are customer charges or internal entries, which only IT could answer, though it then handled the user's business call well.",
+    "evidence": "reply 3, msg 4; SIMS/retail-A/feedback/human.md (pain point 6)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The awb-clean step asks the user to decide meaning-changing issues, and the README does not say 'I don't know, recommend something' is an acceptable answer."
+  },
+  {
+    "id": "retail-A-09",
+    "source": ["user", "referee"],
+    "summary": "The audience text says the retained repeated lines were 'confirmed by the e-commerce lead', turning the user's 'plausible' into a confirmation.",
+    "evidence": "reply 8 (How we know slide); SIMS/retail-A/feedback/human.md section 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is agent wording in the delivered package under the released skills, and a real user would see it."
+  },
+  {
+    "id": "retail-A-10",
+    "source": ["agent", "referee"],
+    "summary": "Packaging mechanics are heavy for the agent: a manifest of about 20k tokens, many format references, review receipt bookkeeping, a strict note-length line parser and a date-like acquisition ID flagged as an unrecorded number.",
+    "evidence": "reply 7; SIMS/retail-A/feedback/agent.md (ranks 2, 4, 6); SIMS/retail-A/feedback/agent-notes.md packaging sections; SIMS/retail-A/feedback/harness-log.md (awb/read check-draft failures)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The package contract, check-draft parser and manifest size belong to the release, though the user-visible cost this run was small (full draft in 8.7 min)."
+  },
+  {
+    "id": "retail-A-11",
+    "source": ["agent"],
+    "summary": "Large awb read state and status outputs were truncated to a cache file, and the cached JSON had an exit-status trailer that broke a plain JSON parse.",
+    "evidence": "reply 5; SIMS/retail-A/feedback/agent.md (rank 4, failure 10)",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "The output size is product behaviour, but the truncation and the trailer come from the Codex host's handling of large tool outputs."
+  },
+  {
+    "id": "retail-A-12",
+    "source": ["agent"],
+    "summary": "The findings template's required Title, Answer, methods and limitations slides plus five findings make nine slides, so the agent had to merge Q2 and Q3 to fit 'about eight', and a user-written 16-word headline exceeded the 15-word limit.",
+    "evidence": "replies 6-7; SIMS/retail-A/feedback/agent.md (rank 5)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The slide structure and the headline word limit are set by the released package format."
+  },
+  {
+    "id": "retail-A-13",
+    "source": ["agent"],
+    "summary": "The narrative review flagged an imperative inside a chart-builder instruction as an audience style violation.",
+    "evidence": "reply 7 (first full review, 3 narrative problems); SIMS/retail-A/feedback/agent.md (rank 7)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The review style rules in the released awb-package references do not separate builder specifications from audience prose."
+  },
+  {
+    "id": "retail-A-14",
+    "source": ["agent"],
+    "summary": "The awb-release report requirement made the agent restate every caveat when the user only asked where the delivered copy went.",
+    "evidence": "reply 9; SIMS/retail-A/feedback/agent.md (rank 9)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The report contents are prescribed by the released awb-release skill."
+  },
+  {
+    "id": "retail-A-15",
+    "source": ["referee"],
+    "summary": "Release 001 was frozen while the Q4 version B producer and queries, the review rules and the package formats were uncommitted; the manifest discloses this, but the user was not reminded at release.",
+    "evidence": "reply 9; SIMS/retail-A/storage/releases/marketing-budget/leadership-budget/001/manifest.json (producing_uncommitted_changes, packaging_uncommitted_changes); referee read-only git status",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Release gating and reporting are released helper and skill behaviour, and commits being on request is a README policy."
+  },
+  {
+    "id": "retail-A-16",
+    "source": ["agent"],
+    "summary": "In the Codex sandbox, zsh here-documents could not create temp files, and the xcrun and pip caches were unwritable.",
+    "evidence": "replies 1, 6; SIMS/retail-A/feedback/agent.md section 3 items 1-4",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "These are limits of the Codex workspace-write sandbox and the simulated home, not of the workbench."
+  },
+  {
+    "id": "retail-A-17",
+    "source": ["referee"],
+    "summary": "The user volunteered every persona fact in message 2 without being asked, which thinned the scoping interview.",
+    "evidence": "msg 2; SIMS/retail-A/human/BRIEF.md ('can tell the agent if it asks')",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is the known persona front-loading study limit, kept for comparability."
+  },
+  {
+    "id": "retail-A-18",
+    "source": ["referee"],
+    "summary": "reviewloop.py reports zero reviewer launches for the Codex agent because Codex JSON logs omit subagent spawns, and it counts the init turn as packaging because the agent read the awb-package skill then.",
+    "evidence": "SIMS/kit/reviewloop.py output for SIMS/retail-A; collab 'wait' items in relay/agent-007..009.jsonl; SIMS/retail-A/feedback/agent-notes.md packaging sections",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is a measurement gap in the simulation kit, not a product behaviour."
+  },
+  {
+    "id": "retail-A-19",
+    "source": ["referee"],
+    "summary": "The OS account name appears in committed project files only as part of the simulation's scratchpad storage path, and a third-party email sits inside the retained public dataset web page.",
+    "evidence": "SIMS/retail-A/project/README.md (storage lines); SIMS/retail-A/project/foundation/sources.md; SIMS/retail-A/project/foundation/references/online-retail-ii/uci-dataset-page.html",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The path comes from where the simulation runs and was supplied by the user, and the email is part of the public page the agent was asked to document."
+  }
+]

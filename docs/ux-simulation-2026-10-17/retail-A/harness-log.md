@@ -1,0 +1,24 @@
+- [2026-10-17T11:17:43Z] relay started; user=claude, agent=codex, caps={'human_messages': 45, 'hours': 8}
+- [2026-10-17T11:17:58Z] human (claude) human-001.jsonl: 0.3 min, 4 model turns, $0.16
+- [2026-10-17T11:19:56Z] agent (codex) agent-001.jsonl: 2.0 min, 4 messages, 3 MCP calls (0 failed), 1 commands exited non-zero
+- [2026-10-17T11:20:08Z] human (claude) human-002.jsonl: 0.2 min, 2 model turns, $0.05
+- [2026-10-17T11:23:10Z] agent (codex) agent-002.jsonl: 3.0 min, 4 messages, 26 MCP calls (0 failed), 2 commands exited non-zero
+- [2026-10-17T11:23:19Z] human (claude) human-003.jsonl: 0.2 min, 2 model turns, $0.04
+- [2026-10-17T11:35:28Z] agent (codex) agent-003.jsonl: 12.2 min, 8 messages, 50 MCP calls (0 failed), 1 commands exited non-zero
+- [2026-10-17T11:35:42Z] human (claude) human-004.jsonl: 0.2 min, 2 model turns, $0.06
+- [2026-10-17T11:53:10Z] agent (codex) agent-004.jsonl: 17.5 min, 6 messages, 42 MCP calls (0 failed), 0 commands exited non-zero
+- [2026-10-17T11:53:27Z] human (claude) human-005.jsonl: 0.3 min, 2 model turns, $0.07
+- [2026-10-17T11:59:45Z] agent (codex) agent-005.jsonl: 6.3 min, 4 messages, 20 MCP calls (0 failed), 1 commands exited non-zero
+- [2026-10-17T11:59:55Z] human (claude) human-006.jsonl: 0.2 min, 2 model turns, $0.05
+- [2026-10-17T12:06:10Z] agent (codex) agent-006.jsonl: 6.3 min, 3 messages, 14 MCP calls (0 failed), 1 commands exited non-zero
+- [2026-10-17T12:06:24Z] human (claude) human-007.jsonl: 0.2 min, 2 model turns, $0.06
+- [2026-10-17T12:15:06Z] agent (codex) agent-007.jsonl: 8.7 min, 5 messages, 20 MCP calls (2 failed), 0 commands exited non-zero; MCP failures: ['awb/read: None', 'awb/read: None']
+- [2026-10-17T12:15:31Z] human (claude) human-008.jsonl: 0.4 min, 5 model turns, $0.15
+- [2026-10-17T12:19:12Z] agent (codex) agent-008.jsonl: 3.7 min, 4 messages, 8 MCP calls (1 failed), 1 commands exited non-zero; MCP failures: ['awb/read: None']
+- [2026-10-17T12:19:21Z] human (claude) human-009.jsonl: 0.1 min, 2 model turns, $0.04
+- [2026-10-17T12:21:01Z] agent (codex) agent-009.jsonl: 1.7 min, 2 messages, 10 MCP calls (0 failed), 0 commands exited non-zero
+- [2026-10-17T12:21:14Z] human (claude) human-010.jsonl: 0.2 min, 3 model turns, $0.07
+- [2026-10-17T12:21:14Z] conversation ended: DONE after 10 user messages and 9 agent replies, 64 min
+- [2026-10-17T12:23:35Z] agent (codex) agent-010.jsonl: 2.4 min, 1 messages, 0 MCP calls (0 failed), 0 commands exited non-zero
+- [2026-10-17T12:24:08Z] human (claude) human-011.jsonl: 0.5 min, 2 model turns, $0.11
+- [2026-10-17T12:24:08Z] relay finished

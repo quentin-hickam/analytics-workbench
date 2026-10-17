@@ -1,0 +1,321 @@
+[
+  {
+    "id": "taxi-A-01",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The first-pass Q5 ranking had no minimum trip count and was led by zones with 1-13 trips; no support floor was proposed at the threshold signoff even though the README and the agent's own scoping records say thresholds come before leaders are seen.",
+    "evidence": "reply 3, reply 4, msg 5; SIMS/taxi-A/transcript.md; SIMS/taxi-A/feedback/human.md section 2 item 1; SIMS/taxi-A/feedback/agent-notes.md (scoping and answering entries)",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The skills and guides let a top-N rate ranking go out without a support floor; any interactive user asking a ranking question would hit this."
+  },
+  {
+    "id": "taxi-A-02",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The first-pass tipping answer led with 0% medians for the Bronx and Brooklyn and cited rate code 99 without defining it or offering the cleaner standard-rate population.",
+    "evidence": "reply 4, msg 5, reply 5; SIMS/taxi-A/feedback/human.md section 2 item 2",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "This is how the agent presented first-pass results under the released skills; the host played no part."
+  },
+  {
+    "id": "taxi-A-03",
+    "source": [
+      "user",
+      "agent",
+      "referee"
+    ],
+    "summary": "The package review contract requires visible audience content for every represented question, so the reviewer pushed an internal verification bullet onto the tipping slide and the user had to have it removed.",
+    "evidence": "reply 7, msg 8, reply 8; SIMS/taxi-A/feedback/agent.md section 1 item 1; SIMS/taxi-A/feedback/human.md section 6",
+    "severity": "major",
+    "tag": "product",
+    "tag_reason": "The rule comes from the shipped awb-package review references and fires the same way on any host."
+  },
+  {
+    "id": "taxi-A-04",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The agent linked and quoted its own SKILL.md files in chat to justify pausing for the user's decision.",
+    "evidence": "reply 1, reply 8; SIMS/taxi-A/feedback/human.md section 2 item 3; SIMS/taxi-A/human/notes.md turns 2 and 9",
+    "severity": "minor",
+    "tag": "unclear",
+    "tag_reason": "No awb skill text found requires citing the skill; it may come from the Codex host's own instructions about explaining why it stops."
+  },
+  {
+    "id": "taxi-A-05",
+    "source": [
+      "user"
+    ],
+    "summary": "awb-status came back as prose paragraphs, not the promised one-screen per-question view with suggested next requests, and its count of 'nine supported findings and two provisional reference calculations' could not be mapped to the five questions.",
+    "evidence": "msg 8, reply 8; SIMS/taxi-A/feedback/human.md section 2 item 4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The status skill's output format and the finding counts are product behavior on any host."
+  },
+  {
+    "id": "taxi-A-06",
+    "source": [
+      "user"
+    ],
+    "summary": "User-facing previews (headlines and the changed slides) were saved in a hidden .preview folder that Finder does not show.",
+    "evidence": "reply 6, reply 8; project/deliveries/trip-pattern-comparison/board-brief/draft/.preview/",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The preview location is set by awb-package."
+  },
+  {
+    "id": "taxi-A-07",
+    "source": [
+      "user"
+    ],
+    "summary": "Deck times defaulted to 24-hour format (18:00) for a non-technical board; 12-hour times came only after the user asked.",
+    "evidence": "reply 7, msg 8; SIMS/taxi-A/feedback/human.md section 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The default display format comes from the package formats and display mapping."
+  },
+  {
+    "id": "taxi-A-08",
+    "source": [
+      "user"
+    ],
+    "summary": "quality-proposal.md, handed to the user for review, was full of internal jargon: column names, question IDs, publication.json, canonical view and file paths.",
+    "evidence": "reply 3; project/investigations/trip-pattern-comparison/quality-proposal.md; SIMS/taxi-A/feedback/human.md section 2 item 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The review document's style follows the clean skill's templates and conventions."
+  },
+  {
+    "id": "taxi-A-09",
+    "source": [
+      "user",
+      "agent"
+    ],
+    "summary": "The README does not explain the landed, published (queryable) and screened data states, so the user had to ask whether the data was 'in' after setup had already copied the files.",
+    "evidence": "msg 3, reply 3; SIMS/taxi-A/feedback/human.md section 3; SIMS/taxi-A/feedback/agent.md section 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This gap is in the README and in stage reporting."
+  },
+  {
+    "id": "taxi-A-10",
+    "source": [
+      "agent",
+      "user"
+    ],
+    "summary": "The finding model has no reference-only role: superseding valid reference calculations marked the questions as awaiting recheck, and the workaround left two 'provisional' findings that then confused the user in awb-status.",
+    "evidence": "reply 5, reply 6, reply 8; SIMS/taxi-A/feedback/agent.md section 1 item 3",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is a gap in the helper state and question model."
+  },
+  {
+    "id": "taxi-A-11",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "package export with --no-datasets and no --chart deleted all five existing chart exports and their manifest entries (exit 1, two failed package calls); a full re-export recovered them.",
+    "evidence": "reply 7 (agent-007); SIMS/taxi-A/feedback/harness-log.md; SIMS/taxi-A/feedback/agent.md section 3 item 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The export semantics belong to the shipped helper; the agent's misuse only exposed a footgun any user's agent could hit."
+  },
+  {
+    "id": "taxi-A-12",
+    "source": [
+      "agent"
+    ],
+    "summary": "The chart selection grammar supports one @where condition, so selecting chart rows forced new recorded projection results (board-airports, board-rankings) during packaging.",
+    "evidence": "reply 7; SIMS/taxi-A/feedback/agent.md section 1 item 4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is a limit of the export interface in the released helpers."
+  },
+  {
+    "id": "taxi-A-13",
+    "source": [
+      "agent",
+      "referee"
+    ],
+    "summary": "Packaging instructions are large and spread across several files, so reads repeatedly truncated; the full-draft turn took 14.7 min, mostly assembly before the review, and packaging turns were 46% of agent reply time.",
+    "evidence": "reply 6-9; SIMS/taxi-A/feedback/agent.md section 1 item 5 and section 5; SIMS/kit/reviewloop.py output in orchestrator-report.md",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Instruction size and assembly steps come from the shipped awb-package skill and references, though Codex's read truncation adds to it."
+  },
+  {
+    "id": "taxi-A-14",
+    "source": [
+      "agent"
+    ],
+    "summary": "The numbers check flagged paired percentages, slash-joined times and some year contexts, forcing prose rewrites during packaging.",
+    "evidence": "reply 7; SIMS/taxi-A/feedback/agent.md section 1 item 6",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is check-draft behavior in the released helpers."
+  },
+  {
+    "id": "taxi-A-15",
+    "source": [
+      "agent"
+    ],
+    "summary": "Claim strength is inferred from the weakest cited result, and the first citation sets a section's primary result, so a verification citation and a reordered paragraph changed the slide's required claim and primary result.",
+    "evidence": "reply 7; SIMS/taxi-A/feedback/agent.md section 1 item 7",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is package contract and check-draft inference logic."
+  },
+  {
+    "id": "taxi-A-16",
+    "source": [
+      "agent"
+    ],
+    "summary": "check-draft can report passed:true while the review is stale, and the state/status outputs are long and repetitive.",
+    "evidence": "reply 7, reply 8; SIMS/taxi-A/feedback/agent.md section 1 item 8",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is the helper output design."
+  },
+  {
+    "id": "taxi-A-17",
+    "source": [
+      "agent",
+      "user"
+    ],
+    "summary": "The threshold guidance does not separate choices the user has delegated from those needing approval, so reply 5 first said it would wait for signoff on the 300-trip floor and then applied it.",
+    "evidence": "msg 5, reply 5; SIMS/taxi-A/feedback/agent.md section 1 item 9; SIMS/taxi-A/feedback/human.md section 4",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The ambiguity sits in awb-clean and the analysis guide's threshold rules."
+  },
+  {
+    "id": "taxi-A-18",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-scope has no investigation-create helper, so a fully supplied brief still needed several template copies, and the README served as temporary intake storage.",
+    "evidence": "reply 1, reply 2; SIMS/taxi-A/feedback/agent.md section 1 item 10",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is a gap in the scope skill's tooling."
+  },
+  {
+    "id": "taxi-A-19",
+    "source": [
+      "agent"
+    ],
+    "summary": "awb-release requires restating every open caveat even when the user only asked for the release path, after already reviewing those caveats.",
+    "evidence": "msg 9, reply 9; SIMS/taxi-A/feedback/agent.md section 2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The rule comes from awb-release's instructions."
+  },
+  {
+    "id": "taxi-A-20",
+    "source": [
+      "agent"
+    ],
+    "summary": "The deliverable is a builder kit (Markdown outline, chart CSVs, assembly instructions) rather than a rendered deck, and the one-page note has a word-count check but no page-layout check.",
+    "evidence": "reply 7; SIMS/taxi-A/storage/releases/trip-pattern-comparison/board-brief/001/; SIMS/taxi-A/feedback/agent.md section 1 item 13",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The package format is the release's design; the user accepted it, but expectations may differ."
+  },
+  {
+    "id": "taxi-A-21",
+    "source": [
+      "user",
+      "referee"
+    ],
+    "summary": "The first-pass Q1 reported a July Thursday decline without checking whether July 4 (a Thursday) explained it; the user raised it.",
+    "evidence": "reply 4, msg 5, reply 5",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is analysis completeness under the released skills, independent of the host."
+  },
+  {
+    "id": "taxi-A-22",
+    "source": [
+      "referee"
+    ],
+    "summary": "The January rank-10 position in the supported ranking is a tie: Briarwood/Jamaica Hills (371 trips) beats LaGuardia Airport (87,625 trips) by less than $0.001 per occupied hour, and the slide does not flag it.",
+    "evidence": "reply 5; SIMS/taxi-A/storage/releases/trip-pattern-comparison/board-brief/001/charts/chart-4.csv; SIMS/taxi-A/referee/spotcheck3.py",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "Neither the ranking validation nor the review flags near-ties at the cut line."
+  },
+  {
+    "id": "taxi-A-23",
+    "source": [
+      "referee"
+    ],
+    "summary": "Released findings.md has a double period ('27.65% at 6–7 p.m..') on the tipping slide that the format checks did not catch.",
+    "evidence": "SIMS/taxi-A/storage/releases/trip-pattern-comparison/board-brief/001/findings.md (tipping slide, hourly bullet)",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "The text went through the shipped package checks and review."
+  },
+  {
+    "id": "taxi-A-24",
+    "source": [
+      "agent"
+    ],
+    "summary": "Sandbox limits: here-documents could not create temp files, xcrun and pip temp/cache paths were unwritable, and curl got HTTP 403 from nyc.gov (the web reader worked).",
+    "evidence": "reply 1, reply 7; SIMS/taxi-A/feedback/agent.md section 3 items 1-3",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "These come from the Codex workspace-write sandbox and the simulated home, not the released skills."
+  },
+  {
+    "id": "taxi-A-25",
+    "source": [
+      "referee"
+    ],
+    "summary": "The persona front-loaded nearly all scope (audience, deliverable, exclusion policy, storage paths, dictionary facts) in msg 1, so the scoping interview shrank to two questions.",
+    "evidence": "msg 1, reply 1; SIMS/taxi-A/human/BRIEF.md",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is a known study limit: persona briefs list facts to give 'if it asks', and the user model volunteers them."
+  },
+  {
+    "id": "taxi-A-26",
+    "source": [
+      "referee"
+    ],
+    "summary": "The reviewer subagents' tool calls do not appear in the Codex event stream (only a collab 'wait' event), so the reviewers' isolation cannot be audited.",
+    "evidence": "SIMS/taxi-A/relay/agent-007.jsonl, SIMS/taxi-A/relay/agent-008.jsonl",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "This is a logging limit of non-interactive codex exec in the harness."
+  },
+  {
+    "id": "taxi-A-27",
+    "source": [
+      "referee"
+    ],
+    "summary": "The harness scratch-directory path embeds the OS account name, which spells the operator's personal name; the agent recorded that path as the storage location in project README.md, foundation/sources.md and the review snapshot's sources.md.",
+    "evidence": "project/README.md, project/foundation/sources.md, project/deliveries/trip-pattern-comparison/board-brief/review/snapshot/sources.md",
+    "severity": "minor",
+    "tag": "harness",
+    "tag_reason": "The path was chosen by the harness and handed to the persona; release 001 and the landed provenance do not contain it."
+  },
+  {
+    "id": "taxi-A-28",
+    "source": [
+      "user"
+    ],
+    "summary": "The README's 'What you will be asked' section is dense on day one, and the difference between a project and an investigation is unexplained.",
+    "evidence": "SIMS/taxi-A/feedback/human.md section 3; SIMS/taxi-A/human/notes.md turns 1-2",
+    "severity": "minor",
+    "tag": "product",
+    "tag_reason": "This is README content."
+  }
+]
