@@ -43,7 +43,7 @@ Package templates and `deliveries/` stay absent. If the user explicitly asks for
 
 ## 4. Hand off the question
 
-With the foundation in place, invoke the sibling [`awb-scope` skill](../awb-scope/SKILL.md) with the user's question. It interviews the user, creates the investigation's brief, state, history, run script, settings, and question ledger, and points the README's Active investigation line at it. When the hand-off shares a turn with setup, run `awb-scope`'s first interview round before it creates the investigation, asking it in this report. Without a question, leave that line at `none`.
+With the foundation in place, invoke the sibling [`awb-scope` skill](../awb-scope/SKILL.md) with the user's question. It interviews the user, creates the investigation's brief, state, history, run script, settings, and question ledger, and points the README's Active investigation line at it. When the hand-off shares a turn with setup, run `awb-scope`'s first interview round before it creates the investigation, asking it in this report, one choice per numbered decision. Without a question, leave that line at `none`.
 
 ## 5. Report
 
@@ -59,4 +59,4 @@ A repair report adds what [references/repair.md](references/repair.md) says to r
 
 For an `awb` server the host's MCP status does not list, offer in one line the host's registration command that `python3 <skill-directory>/scripts/install_helpers.py --mcp-config <host>` (`copilot`, `claude`, or `codex`) prints, run with a stable Python 3.10+ interpreter outside any project virtual environment, with any interpreter warning, and its printed entry and destination as the fallback; until then, helpers run as terminal commands the host may ask the user to approve. Leave running the command and merging user configuration to the user. If registered but unavailable, report the host's diagnostic instead.
 
-Unless README's `Code history` line says `none`, commit when the user asks or as its `Commits` line allows, and after a repair suggest committing it as one commit so it can be reviewed and reverted as a unit. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, the user's business question has gone to `awb-scope`, and the work has stopped short of packages and analysis the user has not requested.
+Unless README's `Code history` line says `none`, commit when the user asks or as its `Commits` line allows, and after a repair suggest committing it as one commit so it can be reviewed and reverted as a unit, unless you already suggested a commit this session. Initialization is complete when the project conventions are usable, foundation records exist for the knowledge already established, the user's business question has gone to `awb-scope`, and the work has stopped short of packages and analysis the user has not requested.

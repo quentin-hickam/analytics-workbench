@@ -94,6 +94,9 @@ An investigation's record of every question it has raised, answered or not, with
 **Awaiting recheck**:
 The derived display status `answered (awaiting recheck)` of an answered data question with at least one flagged or superseded answering finding. It is computed from the current findings each time it is shown; the question's stored status stays answered. It describes the question; in records a flagged finding itself is awaiting revalidation, though chat calls it awaiting recheck too.
 
+**Provisional answer**:
+The derived display status `answered (provisional)` of an answered data question none of whose answering findings is promoted to supported yet, and none flagged or superseded. Like awaiting recheck it is computed each time it is shown while the stored status stays answered; the turn footer and status count it as provisional, not answered.
+
 **Investigation state**:
 The current understanding of an investigation, including its active question, findings, unresolved issues, and next steps.
 
