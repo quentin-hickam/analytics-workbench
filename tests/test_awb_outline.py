@@ -15,7 +15,7 @@
 # test_a_supporting_citation_does_not_move_a_slide: a slide ranks by its primary result, the first its methodology section cites, so a supporting result answering a higher question moves nothing; ledger_order lists the derived order.
 # test_a_plain_word_is_no_citation_of_a_result_with_that_id: the bare word monthly cites nothing, a code span holding the ID alone and an evidence path cite, the first citation is primary; within one line a code span comes before a link target (known limit).
 # test_a_reworded_heading_keeps_its_presentation_order_slot: a slide whose heading changed keeps the recorded slug of its primary result, so the user's order still holds; a moved slide is reported by heading and slug.
-# test_slide_slugs: an exact heading keeps its slug; a reworded slide with another primary result, or sharing one with another reworded slide, takes a new slug; new slugs are ASCII, six words at most, numbered past a taken one; malformed or repeated recorded entries record nothing; a vanished slide's slug is dropped.
+# test_slide_slugs: an exact heading keeps its slug; a reworded slide citing no result, or with another primary result, or sharing one with another reworded slide, takes a new slug; new slugs are ASCII, six words at most, numbered past a taken one; malformed or repeated recorded entries record nothing; a vanished slide's slug is dropped.
 
 import importlib.util
 from pathlib import Path
@@ -619,6 +619,10 @@ def test_a_reworded_heading_keeps_its_presentation_order_slot(tmp_path):
     # Two reworded slides sharing the recorded primary result: neither takes it.
     ([("West one", "a"), ("West two", "a")], [{"slug": "kept", "heading": "West", "primary": "a"}],
      ["west-one", "west-two"]),
+    # A reworded slide citing no result takes a new slug: nothing tells it from a replaced slide.
+    ([("Coverage is still limited", None), ("West", "a")],
+     [{"slug": "coverage", "heading": "Coverage remains limited", "primary": "none"},
+      {"slug": "west", "heading": "West", "primary": "a"}], ["coverage-is-still-limited", "west"]),
     # A new slug never repeats one another slide holds, and takes the first six words, ASCII only.
     ([("Late claims", None), ("Late claims!", None)], None, ["late-claims", "late-claims-2"]),
     ([("Café claims in the west rose by 4% in June", None)], [], ["cafe-claims-in-the-west-rose"]),

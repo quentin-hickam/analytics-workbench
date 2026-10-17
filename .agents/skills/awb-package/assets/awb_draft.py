@@ -2419,9 +2419,11 @@ def slide_slugs(slides, recorded) -> tuple:
     its exact heading; otherwise, of the one recorded entry left with its primary result, when no other slide
     still unmatched has that primary result; otherwise it takes a new slug from its heading (`_slug`), numbered
     -2, -3, ... past a slug another slide holds. So a reworded heading keeps its slug while its primary result
-    stays, and a slug recorded for a slide no longer in the deck is dropped. Known limit: a slide both reworded and
-    given another primary result, or sharing its primary result with another reworded slide, takes a new slug,
-    which a presentation_order then reports as unlisted.
+    stays, and a slug recorded for a slide no longer in the deck is dropped. export and check-draft keep the
+    recorded entries while `heading_problems` lists a row, since a slide without its methodology section has no
+    primary result to match by. Known limit: a slide reworded while citing no result, reworded and given another
+    primary result, or sharing its primary result with another reworded slide, takes a new slug, which a
+    presentation_order then reports as unlisted; no result tells a reworded slide citing none from a replaced one.
     """
     entries, seen = [], set()
     for entry in recorded if isinstance(recorded, list) else []:
@@ -2880,6 +2882,8 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
                     record.get("presentation_order", "none"), record.get("slide_slugs"))
             except (OSError, ValueError, AttributeError) as error:
                 report["errors"].append(f"storyline check: {error}")
+        if report["headings"] != [] and isinstance(record.get("slide_slugs"), list):
+            slugs = record["slide_slugs"]  # kept until the headings agree (`slide_slugs`)
         if not verify_only:
             _write_start_here(draft, investigation, package)  # before the inventory, which then lists it
             rows = inventory(draft)
@@ -2964,7 +2968,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "it misses. ledger_order lists every finding slide in the derived order, as slug, heading, "
                "primary, question, and appendix, whatever presentation_order holds. A slide keeps its slug, "
                "recorded in the manifest's slide_slugs, across a reworded heading while its primary result stays; "
-               "without --verify-only, check-draft records each slide's current heading there. "
+               "without --verify-only, check-draft records each slide's current heading there once headings "
+               "lists nothing. "
                "unlinked_findings names slides with no declared ledger answer, which go last without a "
                "presentation_order; it is informational.\n"
                "open_questions lists presence, placement, and exact-question-bullet problems on Open questions; "
@@ -3584,8 +3589,9 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     if (draft / "findings.md").is_file() and (draft / "methodology.md").is_file():
         try:
             primaries = finding_primaries(draft, represented)
-            record["slide_slugs"] = slide_slugs([(slide["heading"], primary) for slide, primary in primaries],
-                                                record.get("slide_slugs"))[1]
+            if not (heading_problems(draft) and isinstance(record.get("slide_slugs"), list)):
+                record["slide_slugs"] = slide_slugs([(slide["heading"], primary) for slide, primary in primaries],
+                                                    record.get("slide_slugs"))[1]
         except (OSError, UnicodeError) as error:
             report["slide_slugs_error"] = str(error)
     _write_json(path, record)

@@ -81,6 +81,7 @@
 # test_presentation_order_decides_finding_order_when_set: absent or none leaves the ledger order; a non-ledger order of slide slugs the slides follow passes; an order missing a slide's slug, listing one twice, naming a slug no slide has, of headings rather than slugs, out of the slides' order, not a list, holding a blank entry, or recorded as JSON null fails storyline in both modes.
 # test_export_keeps_presentation_order: export keeps the hand-recorded presentation_order, and records and prints each finding slide's slug, heading, and primary result.
 # test_a_reworded_heading_keeps_its_presentation_order_slot: rewording a finding heading in both narratives keeps its slug and its presentation_order slot; check-draft records the new heading under the slug, which the next export keeps, and prints the derived ledger_order.
+# test_a_heading_reworded_in_findings_first_keeps_its_slug: while headings reports a finding heading without its methodology section, check-draft and export keep the recorded slugs, so the slide keeps its slug once methodology.md agrees.
 # test_presentation_order_is_no_provenance_gap: a presentation_order heading that starts with Unknown is no release provenance gap, as allowed_numbers is not.
 # test_storyline_orders_main_and_appendix_findings_each_by_the_ledger: main and appendix finding slides are ranked separately, the appendix numbering on.
 # test_open_questions_follows_how_we_know_when_limitations_is_in_the_appendix: with Limitations under ## Appendix, Open questions passes after How we know and fails before it.
@@ -3229,6 +3230,28 @@ def test_a_reworded_heading_keeps_its_presentation_order_slot(project, capsys):
     assert [(entry["slug"], entry["question"]) for entry in report["ledger_order"]] == [
         ("customer-rates-differ", "Q-003"), ("regional-rates-differ", "Q-002"), ("coverage-remains-limited", None)]
 
+
+
+def test_a_heading_reworded_in_findings_first_keeps_its_slug(project, capsys):
+    draft = ordered_deck(project, ORDER, SLUGS)
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    recorded = manifest(project)["slide_slugs"]
+
+    def reword(name, old, new):
+        (draft / name).write_text((draft / name).read_text().replace(old, new))
+
+    # Reworded in findings.md only: headings reports it, and neither check-draft nor export records a new slug.
+    reword("findings.md", "Regional rates differ", "Regions differ in their rates")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and [row["heading"] for row in report["headings"]] == ["Regions differ in their rates"]
+    assert manifest(project)["slide_slugs"] == recorded
+    run(project, capsys, "export", "inv", "pkg", "--result", "r-001", "--result", "r-002")
+    assert manifest(project)["slide_slugs"] == recorded
+    # Once methodology.md agrees, the slide keeps its slug by its primary result, and the order holds.
+    reword("methodology.md", "Regional rates differ", "Regions differ in their rates")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["storyline"] == [] and report["headings"] == [] and code == 0, report
+    assert [entry["slug"] for entry in manifest(project)["slide_slugs"]] == SLUGS
 
 def test_presentation_order_is_no_provenance_gap():
     draft = load(ASSETS["src/packaging/draft.py"], "draft_order_gaps")
