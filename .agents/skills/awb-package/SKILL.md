@@ -75,7 +75,7 @@ Once the narratives and flags are complete, run the review in [references/review
 
 ## 6. Check
 
-Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it.
+Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it; a long-headline `warning` row is asked about as the headline checkpoint says, never trimmed unasked.
 
 A `numbers` row is a number no represented result records. A `numbers` row on a `methodology.md` **Claim strength:** line that the `claims` check refuses clears once that `claims` row is repaired, so repair that row first and never list its numbers in `allowed_numbers`. Repair any other `numbers` row by the first of these that fits:
 
