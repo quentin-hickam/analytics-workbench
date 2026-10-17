@@ -18,7 +18,9 @@
 # test_commit_out_of_date_state_and_undated_deletion: a later commit makes the state out of date; a deleted file is an undated change.
 # test_ledger_writes_leave_the_state_current: a later questions.json or questions.md change, uncommitted or committed, leaves the state current; a later brief change does not.
 # test_acquisitions_and_storage_risks: checkout-only and blank retained copies count; a declined landed-data line reads none chosen.
-# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed unless a Notes clause opens with reference: directly followed by one of the two forms foundation/sources.md defines, a link in its stated grammar or a backticked location with its sha256, in plain text outside code, HTML, emphasis, strikethrough, links and brackets; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
+# test_sources_assessed_from_documentation_need_a_reference: a source whose Relevance and fitness begins from documentation is listed, with a reason, unless a Notes clause opens with reference: directly followed by one of the kept-copy forms foundation/sources.md defines, a link in its stated grammar or a backticked location with its sha256, in plain text outside code, HTML, emphasis, strikethrough, links and brackets; REFERENCE_PROBES holds every reviewer probe in both directions; a landed-records basis mentioning documentation later is not listed; an assessment without a leading basis is an uncertainty; an unsupported Sources table is null with an uncertainty.
+# test_an_access_note_is_a_known_limitation_not_a_missing_reference: a reference: clause giving `read at <URL> on <date>, not kept: <reason>` lists the source under documentation_access_notes and not documentation_without_reference; with a kept-copy form beside it the source is in neither; a malformed note (no date, no reason, no URL scheme, inside code) is listed as without reference.
+# test_reasons_say_why_a_source_lacks_a_reference: no reference: clause, a label followed by none of the forms (as `not yet retained`), a label that opens no plain-text clause, and reading stopped by raw HTML or emphasis each give their reason.
 # test_absent_project_and_unsafe_active_pointer: a missing project is not a workbench; an unsafe pointer is an uncertainty.
 # test_standard_active_state_pointer: link, path, and backticked pointer forms resolve to the investigation.
 # test_other_state_reader_stops_before_conclusions: another investigation's state is read only up to its first section.
@@ -37,6 +39,7 @@
 # test_a_host_that_times_out_is_not_requested_again: after a connect or read timeout, the remaining files at that host and port are unknown without a request, and other hosts, and the same host on another port, are still probed.
 # test_a_redirect_target_that_times_out_is_not_requested_again: through urllib's own redirect processing, the host that timed out after a redirect is the one suppressed, for direct and redirected requests alike, and the redirecting host is still requested.
 # test_status_without_probe_counts_probeable_files_and_sends_nothing: without --probe-upstream no request is made; only the probeable count is reported.
+# test_a_source_without_validators_is_reported_once_as_not_checkable: without the probe, a source whose latest files record an HTTP URL with no ETag or Last-Modified is named once under not_checkable, however many files or acquisitions; a source with validators, or with no URL, is not.
 # test_unreadable_provenance_is_an_uncertainty_and_leaves_the_count_unknown: a missing, unparseable, or malformed provenance.json, including any upstream field land() refuses (by land()'s own check: an invalid, hostless, bad-port, or credential-bearing URL among them) and a repeated file path, is named under uncertainties with or without the probe and makes probeable_files null, nothing is requested for it, the readable acquisitions are still probed, and partial acquisitions and stray files are skipped.
 # test_provenance_without_upstream_keys_counts_as_without_upstream: a file entry with no upstream key, or an upstream with no field set ({} or all null, which land() records as null), is valid and counts as without upstream.
 # test_unreadable_acquisition_inventory_is_unknown_not_zero: an unreadable data/raw or source directory is an uncertainty and makes probeable_files null, never zero.
@@ -88,7 +91,7 @@ def test_collect_standard_records_without_writes_or_other_conclusions(workbench)
     assert result["other_investigations"] == [{"name": "pricing", "last_updated": "2026-08-01"}]
     assert "PRIVATE CONCLUSION" not in json.dumps(result)
     assert result["acquisitions"] == {"count": 0, "without_retained_copy": 0}
-    assert result["sources"] == {"count": 0, "documentation_without_reference": []}
+    assert result["sources"] == {"count": 0, "documentation_without_reference": [], "documentation_access_notes": []}
     assert result["packages"] == []
     assert result["uncertainties"] == []
     assert before == {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in workbench.rglob("*") if p.is_file()}
@@ -467,15 +470,62 @@ def test_sources_assessed_from_documentation_need_a_reference(workbench):
         "| loose | Loose | x | y | z | not from documentation; from landed records | candidate | |"])
     path.write_text(path.read_text().replace("| --- | --- | --- | --- | --- | --- | --- | --- |\n", "| --- | --- | --- | --- | --- | --- | --- | --- |\n" + rows + "\n", 1))
     result = status.collect(workbench)
-    listed = result["sources"]["documentation_without_reference"]
+    listed = [entry["source"] for entry in result["sources"]["documentation_without_reference"]]
     assert [(source, source not in listed, origin) for source, _, _, origin in REFERENCE_PROBES] == [(source, counted, origin) for source, _, counted, origin in REFERENCE_PROBES]
-    assert result["sources"] == {"count": len(REFERENCE_PROBES) + 6, "documentation_without_reference": [source for source, _, counted, _ in REFERENCE_PROBES if not counted] + ["hr"]}
+    assert listed == [source for source, _, counted, _ in REFERENCE_PROBES if not counted] + ["hr"]
+    assert result["sources"]["count"] == len(REFERENCE_PROBES) + 6 and result["sources"]["documentation_access_notes"] == []
+    assert all(entry["reason"] for entry in result["sources"]["documentation_without_reference"])
     assert result["acquisitions"] == {"count": 0, "without_retained_copy": 0}
     assert result["uncertainties"] == [{"path": "foundation/sources.md", "reason": "Source loose: Relevance and fitness does not begin with its basis"}]
     path.write_text(path.read_text().replace("| Relevance and fitness |", "| Fitness |", 1))
     result = status.collect(workbench)
     assert result["sources"] is None
     assert [u["path"] for u in result["uncertainties"]] == ["foundation/sources.md"]
+
+
+def sources_with(root, notes):
+    """Write one from-documentation Sources row per (source, notes) pair."""
+    path = root / "foundation/sources.md"
+    rows = "\n".join(f"| {source} | X | x | y | z | from documentation: fit | candidate | {cell} |" for source, cell in notes)
+    path.write_text(path.read_text().replace("| --- | --- | --- | --- | --- | --- | --- | --- |\n", "| --- | --- | --- | --- | --- | --- | --- | --- |\n" + rows + "\n", 1))
+    return status.collect(root)["sources"]
+
+
+def test_an_access_note_is_a_known_limitation_not_a_missing_reference(workbench):
+    note = "reference: read at https://example.org/tlc/dictionary.pdf on 2026-10-16, not kept: the server refused downloads (HTTP 403)"
+    sources = sources_with(workbench, [
+        ("tlc", note),
+        ("angled", "Owner TLC; reference: read at <https://example.org/a b.pdf> on 2026-10-16, not kept: HTTP 403"),
+        ("angled-url", "reference: Read at <https://example.org/dictionary.pdf> on 2026-10-16, Not kept: HTTP 403"),
+        ("revised", note + "; dictionary revised 2024, after the 2019 data"),
+        ("both", note + "; reference: [codebook](references/both/codebook.pdf)"),
+        ("kept-first", f"reference: [codebook](references/kept-first/codebook.pdf); {note}"),
+        ("no-date", "reference: read at https://example.org/d.pdf, not kept: HTTP 403"),
+        ("no-reason", "reference: read at https://example.org/d.pdf on 2026-10-16, not kept:"),
+        ("no-scheme", "reference: read at example.org/d.pdf on 2026-10-16, not kept: HTTP 403"),
+        ("in-code", f"`{note}`"),
+        ("unlabelled", "read at https://example.org/d.pdf on 2026-10-16, not kept: HTTP 403"),
+    ])
+    assert sources["documentation_access_notes"] == ["tlc", "angled-url", "revised"]
+    listed = [entry["source"] for entry in sources["documentation_without_reference"]]
+    assert listed == ["angled", "no-date", "no-reason", "no-scheme", "in-code", "unlabelled"]
+
+
+def test_reasons_say_why_a_source_lacks_a_reference(workbench):
+    sources = sources_with(workbench, [
+        ("none", "owner confirmed"),
+        ("pending", "reference: not yet retained"),
+        ("negated", "no reference: vendor publishes none"),
+        ("html", "<b>Owner</b>; reference: [manual](references/html/manual.pdf)"),
+        ("emphasis", "**Owner**; reference: [manual](references/emphasis/manual.pdf). **Checked**"),
+    ])
+    assert {entry["source"]: entry["reason"] for entry in sources["documentation_without_reference"]} == {
+        "none": "Notes hold no reference: clause",
+        "pending": "what follows reference: is in none of the forms",
+        "negated": "reference: does not open a clause in plain text",
+        "html": "reading stopped at raw HTML before a reference in one of the forms",
+        "emphasis": "reading stopped at emphasis or strikethrough before a reference in one of the forms",
+    }
 
 
 def test_absent_project_and_unsafe_active_pointer(tmp_path, workbench):
@@ -907,6 +957,16 @@ def test_status_without_probe_counts_probeable_files_and_sends_nothing(workbench
     land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://example.test/a", "etag": '"v1"'},
                                               "b.csv": {"url": "s3://bucket/b", "version_id": "1"}})
     assert status.collect(workbench)["upstream"] == {"probeable_files": 1}
+
+
+def test_a_source_without_validators_is_reported_once_as_not_checkable(workbench, monkeypatch):
+    monkeypatch.setattr(status, "head_opener", refuse_network)
+    land_with_upstream(workbench, "batch-1", {"a.csv": {"url": "https://archive.example.test/a.zip"},
+                                              "b.csv": {"url": "https://archive.example.test/b.zip"}}, source="uci")
+    land_with_upstream(workbench, "batch-2", {"c.csv": {"url": "http://archive.example.test/c.zip"}}, source="uci")
+    land_with_upstream(workbench, "batch-1", {"d.csv": {"url": "https://example.test/d", "etag": '"v1"'}})
+    land_with_upstream(workbench, "batch-1", {"e.csv": {"url": "s3://bucket/e", "version_id": "1"}}, source="lake")
+    assert status.collect(workbench)["upstream"] == {"probeable_files": 1, "not_checkable": ["uci"]}
 
 
 @pytest.mark.parametrize("text, reason", [

@@ -30,7 +30,7 @@
 # test_read_list_holds_read_xlsx_and_its_plan_passes_without_the_extension: read_xlsx is on the read list as the excel extension's function, so a plan calling it passes the check while another extension's table function is refused; runs without the extension.
 # test_read_only_sql_without_the_excel_extension_says_how_to_install_it: without the excel extension, read_xlsx or FROM 'book.xlsx' in a query, or read_xlsx in a view file, fails on one line saying it is not installed and how to install it once without --read-only, writing nothing; skipped where the extension is installed.
 # test_read_only_sql_reads_a_landed_excel_file_through_a_view: with the excel extension installed, sql and profile --read-only read a landed .xlsx through a view and directly, loading the extension without installing it, also when no view loaded it before the configuration locked, refuse COPY to xlsx, and write nothing; skipped where the extension cannot be loaded.
-# test_cli_land_copies_files_retains_and_writes_ledger_rows: land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
+# test_cli_land_copies_files_retains_and_writes_ledger_rows: (and reports source_status_changed when it sets a candidate source's Status to acquired) land command copies files and directories byte for byte, retains them, writes the Acquisitions row and marks the source acquired.
 # test_cli_land_skips_unusable_retention_location: unrecorded, none chosen, unreachable and non-filesystem locations skip retention and record this checkout only.
 # test_cli_land_creates_a_missing_ledger_from_the_template: missing sources.md is written from the template with the row, reported as created.
 # test_sources_template_matches_the_installed_register: SOURCES_TEMPLATE is byte-equal to the shipped foundation/sources.md.
@@ -64,6 +64,10 @@
 # test_unreadable_or_missing_parquet_fails_every_declared_check: a file that is not Parquet, or no Parquet file, fails every declared check with ChecksFailed rather than a DuckDB error.
 # test_a_declaration_that_plans_no_check_needs_neither_duckdb_nor_parquet: empty check lists plan nothing, so publish needs no duckdb and no Parquet output.
 # test_cli_publish_records_declared_checks: the publish command records declared checks with its --check outcome, counts them in its output and catalog_row (one check passes, several pass), and prints failed_checks on refusal.
+# test_a_failed_publish_names_the_partial_folder_and_the_next_step: a refused publish prints the partial folder it left with a next_step saying to remove it before publishing again; a retry under the same ID is refused naming that folder, and publishes once it is removed; a refusal that leaves no partial prints no next_step.
+# test_a_line_break_inside_an_inline_table_is_translated: a datasets.toml whose inline table spans lines, or holds a comment, is refused with the subtable to write, named from the table header and key when both are found; a line break inside a string, an array spanning lines, and a missing comma keep the parser's message alone.
+# test_lineage_is_declared_beside_checks: [datasets.<name>] accepts a lineage list beside its checks table, which plans no check; a lineage that is not a list of distinct names is refused.
+# test_retain_says_once_that_an_unvalidated_upstream_cannot_be_checked: the retain that writes an acquisition's row prints upstream_check naming files whose HTTP URL came without an ETag or Last-Modified; an acquisition with a validator, a non-HTTP URL, or no URL gets none, and a later retain of the same acquisition does not repeat it.
 
 import hashlib
 import importlib.util
@@ -902,7 +906,8 @@ def test_cli_land_copies_files_retains_and_writes_ledger_rows(tmp_path, capsys):
     assert out == {"landed": "data/raw/orders/r1/", "files": 2, "bytes": 12,
                    "retention": {"destination": str(destination), "copied": True, "conflict": False,
                                  "matched": True, "discrepancies": []},
-                   "ledger": {"row": "added", "source_status": "acquired"}}
+                   "ledger": {"row": "added", "source_status": "acquired",
+                              "source_status_changed": "Sources row orders: Status candidate -> acquired"}}
     assert (acquired / "orders.csv").read_bytes() == b"id\r\n1\r\n2\r\n"
     assert (destination / "pages/1.json").read_bytes() == b"{}"
     provenance = json.loads((acquired / "provenance.json").read_text())
@@ -1613,3 +1618,94 @@ def test_cli_publish_records_declared_checks(tmp_path, capsys):
                       "--sql", "prep/orders.sql")
     assert status == 0
     assert "| 1 declared check in `foundation/datasets.toml` passes; nonzero row count |" in out["catalog_row"]
+
+
+def test_a_failed_publish_names_the_partial_folder_and_the_next_step(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    root = published_project(tmp_path, capsys)
+    declare(root, '[datasets.orders.checks]\nkey = ["amount"]\nrange = { doubled = { max = 30 } }\n')
+    argv = ["orders", "v1", "--from", "data/raw/orders/r1", "--sql", "prep/orders.sql"]
+    status, out = run(capsys, landing.cli_publish, root, *argv)
+    assert status == 1 and out["partial"] == "data/parquet/orders/v1.partial"
+    assert out["next_step"] == ("remove data/parquet/orders/v1.partial/ before publishing again: "
+                                "publish refuses while it exists")
+    declare(root, '[datasets.orders.checks]\nrange = { doubled = { min = 0 } }\n')
+    status, out = run(capsys, landing.cli_publish, root, *argv)
+    assert status == 1 and out["partial"] == "data/parquet/orders/v1.partial" and "next_step" in out
+    assert out["error"].startswith("FileExistsError: ") and out["error"].endswith(
+        "v1.partial is left from an earlier failed publish; remove it before publishing again")
+    shutil.rmtree(root / "data/parquet/orders/v1.partial")
+    status, out = run(capsys, landing.cli_publish, root, *argv)
+    assert status == 0 and out["published"] == "data/parquet/orders/v1/"
+    status, out = run(capsys, landing.cli_publish, root, *argv)
+    assert status == 1 and out["partial"] is None and "next_step" not in out
+
+
+@pytest.mark.parametrize("text, advice", [
+    ('[datasets.trips.checks]\ntypes = { trip_id = "BIGINT",\n  pickup = "TIMESTAMP" }\n', "[datasets.trips.checks.types]"),
+    ('[datasets.trips.checks]\ntypes = {\n  trip_id = "BIGINT" }\n', "[datasets.trips.checks.types]"),
+    ('[datasets.trips.checks]\ntypes = { trip_id = "BIGINT"\n}\n', "[datasets.trips.checks.types]"),
+    ('[datasets.trips.checks]\ntypes = { trip_id = "BIGINT", # the key\n pickup = "DATE" }\n', "[datasets.trips.checks.types]"),
+    ('[datasets.trips.checks]\nrange = { fare = { min = 0,\n max = 500 } }\n', "[datasets.trips.checks.range]"),
+    ('[datasets.trips.checks]\ntypes = { note = "{", trip_id = "BIGINT",\n pickup = "DATE" }\n', "[datasets.trips.checks.types]"),
+    ('types = { trip_id = "BIGINT",\n pickup = "DATE" }\n', "a subtable, such as [datasets.<name>.checks.types],"),
+    ('[datasets.trips.checks]\ntypes = { trip_id = "BIGINT" pickup = "DATE" }\n', None),
+    ('[datasets.trips.checks]\ncolumns = [\n  "trip_id",, ]\n', None),
+    ('[datasets.trips.checks]\ncolumns = ["{",\n  "trip_id" "x"]\n', None),
+    ('[datasets.trips.checks]\ncolumns = ["a"\n', None),
+])
+def test_a_line_break_inside_an_inline_table_is_translated(tmp_path, text, advice):
+    tomllib = pytest.importorskip("tomllib")
+    with pytest.raises(tomllib.TOMLDecodeError) as parsed:
+        tomllib.loads(text)
+    declare(tmp_path, text)
+    with pytest.raises(ValueError) as error:
+        landing.declared_checks(tmp_path, "trips")
+    message = str(error.value)
+    assert message.startswith("foundation/datasets.toml: ") and str(parsed.value) in message
+    if advice is None:
+        assert message == f"foundation/datasets.toml: {parsed.value}"
+    else:
+        assert "an inline table ({ ... }) must stay on one line in TOML" in message and advice in message
+
+
+def test_lineage_is_declared_beside_checks(tmp_path):
+    pytest.importorskip("tomllib")
+    declare(tmp_path, '[datasets.lines]\nlineage = ["sheet", "sheet_row"]\n\n[datasets.lines.checks]\nnot_null = ["sheet"]\n')
+    assert landing.declared_checks(tmp_path, "lines") == {"not_null": ["sheet"]}
+    declare(tmp_path, '[datasets.lines]\nlineage = ["sheet"]\n')
+    assert landing.declared_checks(tmp_path, "lines") == {}
+    for lineage in ('"sheet"', '[]', '["sheet", "sheet"]', '[""]', '[1]'):
+        declare(tmp_path, f'[datasets.lines]\nlineage = {lineage}\n')
+        with pytest.raises(ValueError, match=r"\[datasets.lines\]: lineage is malformed"):
+            landing.declared_checks(tmp_path, "lines")
+    declare(tmp_path, '[datasets.lines]\nlinage = ["sheet"]\n')
+    with pytest.raises(ValueError, match="holds only a checks table and a lineage list"):
+        landing.declared_checks(tmp_path, "lines")
+
+
+def test_retain_says_once_that_an_unvalidated_upstream_cannot_be_checked(tmp_path, capsys):
+    root = workbench(tmp_path / "project")
+    upstreams = {"r1": {"a.csv": {"url": "https://archive.example.test/a.zip"},
+                        "b.csv": {"url": "https://archive.example.test/b.zip", "etag": '"v1"'}},
+                 "r2": {"c.csv": {"url": "https://archive.example.test/c.zip", "last_modified": "Tue, 13 Oct 2026 08:00:00 GMT"}},
+                 "r3": {"d.csv": {"url": "s3://bucket/d.csv"}},
+                 "r4": {}}
+    for acquisition_id, upstream in upstreams.items():
+        names = list(upstream) or ["e.csv"]
+        landing.land(root, "orders", acquisition_id,
+                     lambda output, names=names: [(output / name).write_bytes(b"1") for name in names],
+                     request="fetch", upstream=upstream or None)
+    status, out = run(capsys, landing.cli_retain, root)
+    assert status == 0
+    checks = {report["acquisition"]: report.get("upstream_check") for report in out["acted_on"]}
+    assert checks == {"data/raw/orders/r1/": "not possible for a.csv: the server sent no ETag or Last-Modified, "
+                                             "so a later upstream change cannot be detected; tell the user once",
+                      "data/raw/orders/r2/": None, "data/raw/orders/r3/": None, "data/raw/orders/r4/": None}
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    readme = root / "README.md"
+    readme.write_text(readme.read_text().replace("kept at: not yet recorded", "kept at: ../storage", 1))
+    status, out = run(capsys, landing.cli_retain, root)
+    assert status == 0 and len(out["acted_on"]) == 4
+    assert not any("upstream_check" in report for report in out["acted_on"])
