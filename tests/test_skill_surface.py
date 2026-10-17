@@ -947,9 +947,12 @@ def test_agents_md_makes_the_awb_tools_the_first_route_for_helpers():
     assert commands.startswith('When the host offers the `awb` MCP server, use its tools for `awb.py` commands')
     assert ('Run helpers as black boxes through the `awb` tools, else as `python3 src/awb.py <command>`'
             in commands)
-    # Changing a helper or template that gates release needs the user's yes, asked in plain words.
-    assert ('change one gating release (`src/`, `package-format/`) only once the user, asked plainly, agrees'
-            in commands)
+    # Changing a shipped helper or package-format template needs the user's yes, asked in plain words;
+    # opening one to adapt or debug it is the rule awb-package's helpers.md states too.
+    assert ("open one's source only to adapt or debug it, and change shipped helpers or `package-format/` "
+            "templates only once the user, asked plainly, agrees" in commands)
+    helpers = (ROOT / '.agents/skills/awb-package/references/helpers.md').read_text(encoding='utf-8')
+    assert 'open its source only to adapt or debug it' in helpers
 
 
 HELPER_SKILLS = ('awb-package', 'awb-release', 'awb-status', 'awb-clean', 'awb-explore', 'awb-scope',

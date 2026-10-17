@@ -21,7 +21,7 @@ When the host offers the `awb` MCP server, use its tools for `awb.py` commands, 
 
 If a write tool is refused or unavailable, run its CLI command, keep using the tools that work, and say so once. Skill scripts run by path, never as `awb.py` commands.
 
-In every workbench command, `python3` means README's `Project interpreter`. Run helpers as black boxes through the `awb` tools, else as `python3 src/awb.py <command>`: open one's source only to debug it, and change one gating release (`src/`, `package-format/`) only once the user, asked plainly, agrees. Compute with `awb.py sql`, and counts, nulls, and distinct values with `awb.py profile`; save a query run twice as `investigations/<name>/exploration/<topic>.sql` and rerun it by path. Repair missing helpers or packages through `awb-init`.
+In every workbench command, `python3` means README's `Project interpreter`. Run helpers as black boxes through the `awb` tools, else as `python3 src/awb.py <command>`: open one's source only to adapt or debug it, and change shipped helpers or `package-format/` templates only once the user, asked plainly, agrees. Compute with `awb.py sql`, and counts, nulls, and distinct values with `awb.py profile`; save a query run twice as `investigations/<name>/exploration/<topic>.sql`; rerun it by path. `awb-init` repairs missing helpers or packages.
 
 ## Conversation
 
