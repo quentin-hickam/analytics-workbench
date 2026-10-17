@@ -47,6 +47,7 @@
 # test_brief_change_makes_a_review_stale: the investigation's brief.md is snapshotted with the review, and an edit to it shows stale with brief.md alone in changed and a diff labelled with its path.
 # test_source_register_or_glossary_change_makes_a_review_stale: foundation/sources.md and foundation/glossary.md are snapshotted with the review, and an edit to either, or its removal, shows stale with it alone in changed and a diff labelled with its path.
 # test_withdrawn_quality_observation_or_its_cited_scan_makes_a_review_stale: foundation/quality.md is snapshotted whole and each foundation/scans/<name>.json path methodology.md names as evidence; withdrawing a cited observation, rescanning the cited scan, or removing the record shows stale with it in changed, and a scan no narrative names leaves the review current.
+# test_a_cited_quality_rows_saved_query_makes_a_review_stale: each saved-query path methodology.md names beside a cited quality ID is snapshotted; editing it shows stale with its path and diff, and editing an uncited saved query leaves the review current.
 # test_show_reports_an_unreadable_receipt_and_bounds_the_diff: a long diff is cut so the printed line, a long prior report and typographic punctuation included, fits one read result, with a note counting the rest; an unreadable or malformed receipt is an error, exit 1, with status none.
 
 import importlib.util
@@ -1006,6 +1007,31 @@ def test_withdrawn_quality_observation_or_its_cited_scan_makes_a_review_stale(pr
     assert '+{"check": "fail"}' in out["diff"]
     quality.unlink()
     assert show(project, capsys)[1]["changed"] == ["foundation/quality.md", "foundation/scans/orders.json"]
+
+
+def test_a_cited_quality_rows_saved_query_makes_a_review_stale(project, capsys):
+    name = "investigations/inv/exploration/cash-tip-check.sql"
+    query = project / name
+    query.parent.mkdir(parents=True)
+    query.write_text("SELECT count(*) FROM trips WHERE payment_type = 2 AND tip_amount > 0;\n")
+    other = query.with_name("other-check.sql")
+    other.write_text("SELECT count(*) FROM trips;\n")
+    quality = project / "foundation/quality.md"
+    quality.parent.mkdir(parents=True, exist_ok=True)
+    quality.write_text("| ID | Observation and evidence | Status |\n|---|---|---|\n"
+                       f"| DQ-001 | Few cash trips record a tip; `{name}` | open |\n")
+    (project / DRAFT / "methodology.md").write_text(
+        METHODOLOGY + f"\nCash trips rarely record a tip (DQ-001; `{name}`).\n")
+    record(project, capsys, CLEAN)
+    assert show(project, capsys)[1]["status"] == "current"
+    other.write_text("SELECT count(*) FROM trips WHERE payment_type = 2;\n")
+    assert show(project, capsys)[1]["status"] == "current"
+    query.write_text("SELECT count(*) FROM trips WHERE payment_type = 2;\n")
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == [name]
+    assert f"--- reviewed {name}\n+++ {name}\n" in out["diff"]
+    assert "+SELECT count(*) FROM trips WHERE payment_type = 2;" in out["diff"]
+
 
 def test_show_reports_an_unreadable_receipt_and_bounds_the_diff(project, capsys):
     # A long prior report and typographic punctuation, which JSON prints six characters wide, still leave the

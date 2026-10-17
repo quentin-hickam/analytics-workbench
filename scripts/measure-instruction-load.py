@@ -16,6 +16,8 @@ ANALYSIS = SKILLS + 'awb-init/assets/workbench/workbench-guides/analysis.md'
 DATA = SKILLS + 'awb-init/assets/workbench/workbench-guides/data.md'
 CONTRACT = SKILLS + 'awb-package/references/package-contract.md'
 REVIEW = SKILLS + 'awb-package/references/review.md'
+HELPERS = SKILLS + 'awb-package/references/helpers.md'
+NUMBERS_AND_EVIDENCE = SKILLS + 'awb-package/references/numbers-and-evidence.md'
 
 
 def skill(name):
@@ -61,6 +63,9 @@ def main():
         'release_with_flag': ([AGENTS, skill('awb-release'), skill('awb-package')],
                               [AGENTS, skill('awb-release'), REVIEW, CONTRACT]),
         'narrative_revision': ([AGENTS, skill('awb-package')], [AGENTS, skill('awb-package'), CONTRACT, REVIEW]),
+        'package_number_or_missing_evidence': (
+            [AGENTS, skill('awb-package'), CONTRACT, REVIEW, HELPERS],
+            [AGENTS, skill('awb-package'), CONTRACT, REVIEW, NUMBERS_AND_EVIDENCE]),
         'clean': ([AGENTS], [AGENTS, skill('awb-clean')]),
         'eda': ([AGENTS], [AGENTS, skill('awb-explore')]),
         # Scoping left awb-init for awb-scope: a new project loads both, a later question only awb-scope.

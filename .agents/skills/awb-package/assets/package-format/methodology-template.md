@@ -14,7 +14,7 @@ This file is the internal reference for the analysis this package represents. It
 
 ## Scope and definitions
 
-Describe included and excluded populations, periods, local terminology, and material assumptions, with the settings keys that set them. Explain any departure from the shared glossary.
+Describe included and excluded populations, periods, local terminology, and material assumptions, with the settings keys that set them. Explain any departure from the shared glossary or the brief.
 
 ## Sources and data quality
 

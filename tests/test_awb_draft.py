@@ -18,7 +18,7 @@
 # test_questions_check_refuses_a_commented_question: the issue's probe, a question only inside an HTML comment, fails check-draft's questions; a manifest question with inline markup matches as it renders.
 # test_questions_check_leaves_out_image_text: a question only in an image's text, a linked image's included, or split by an image, with text or without, does not match, nor does one in an image's text that holds an autolink (an email's too), a link whose target or title has a bracket, or, after an escaped backslash or backtick, a code span with a bracket, or in an image after an escaped backslash, or whose target nests or escapes parentheses or escapes a quote in its title; one in a link's text, in prose beside an image or after its text, in a code span showing an image's syntax, after an escaped backslash or backtick too, after an escaped !, beside an unclosed ![ whose brackets a link takes, or in a reference image, which never resolves, matches.
 # test_other_checks_still_read_image_text: the names scan and the shared reading keep an image's text, so a name in it is a findings row.
-# test_check_draft_help_and_references_agree_on_the_rendered_reading: the check-draft help text, helpers.md, and the comment above _view name numbers as the only check that does not read the rendered view, and state that it skips only the comments that view drops; the help and helpers.md state how questions are read, image text left out.
+# test_check_draft_help_and_references_agree_on_the_rendered_reading: the check-draft help text, helpers.md, and the comment above _view name numbers as the only check that does not read the rendered view; numbers-and-evidence.md states that it skips only the comments that view drops; the help and helpers.md state how questions are read, image text left out.
 # test_check_draft_reports_unmatched_flags: in both modes, a finding state.md flags fails until the manifest records its exact finding and reason; a changed reason reopens it; no findings table is an error.
 # test_export_replaces_malformed_flag_entries_before_writing: an entry whose reason is not text matches no flag and is replaced by a fresh entry; the export writes files and manifest together.
 # test_check_draft_and_release_refuse_malformed_flag_entries: a missing revalidation_flags, a non-list value, an entry without text finding and reason, and [] or blank places fail check-draft's flag_entries, and release refuses on the check.
@@ -52,6 +52,7 @@
 # test_a_per_result_percent_list_replaces_the_global_one: [results."<id>".percent] lists one result's percent columns in place of [percent], so a column already holding percents in one result is not scaled again; the manifest records each file's list and check-draft reapplies it.
 # test_export_scale_needs_places_when_its_quotient_is_unrounded: a divisor whose quotient shows more than four places needs [round] places, listed with round_stub, and the methodology line states the division before the rounding.
 # test_export_scale_divides_records_and_traces: a [scale] divisor divides a column's number cells before percent scaling and rounding, in charts and datasets, is recorded in their manifest entries and methodology lines, is refused when not { divide = <a positive number> }, and makes a narrative number written in the scaled unit trace, one export rounded half up onto its shown digit included; check-draft refuses an entry whose divisor differs from display.toml.
+# test_export_prose_scale_keeps_files_in_the_recorded_unit: files = false keeps chart and dataset cells in their recorded unit, records prose_scale apart from scale, and traces about 8.6 billion against 8645.2; without it that number fails, while 22.5 thousand traces against 22523; check-draft refuses a mismatched prose divisor.
 # test_export_warns_on_a_fraction_rounded_in_its_query: a [percent] column shown to fewer than two places whose saved fractions have exactly four places is a precision_warnings row, the files still written; full precision, or two places shown, gives none.
 # test_export_warns_on_a_value_code_no_cell_holds: a [values] code no exported saved table holds is a value_warnings row naming the table when a cell differs from it only in case, such as true where pandas saved True, naming that cell, or when no code of its table matches any cell; a shared table's code these results leave out, and codes the tables hold, give none.
 # test_confirmed_columns_silence_their_label_warning: a column under [confirmed] columns gives no label_warnings row, other columns still do, and a malformed [confirmed] is refused.
@@ -604,7 +605,8 @@ def test_check_draft_help_and_references_agree_on_the_rendered_reading(project, 
     assert "Every draft check but `numbers` reads" in helpers and "`questions` rows" in helpers
     assert "A question only in a comment, in fenced code, or in an image's text does not count" in helpers
     assert "a question cannot run across an image" in helpers
-    assert "A comment is what the reading above drops" in helpers
+    numbers = " ".join((SKILLS / "awb-package/references/numbers-and-evidence.md").read_text().split())
+    assert "A comment is what the [helper reading](helpers.md) drops" in numbers
     source = ASSETS["src/packaging/draft.py"].read_text()
     assert "# Every draft check but numbers reads the narratives (findings.md, methodology.md, and methodology-note.md" in source
 
@@ -1342,7 +1344,7 @@ def test_export_gives_an_unrounded_float_column_a_round_gap_and_stub(project, ca
     chart = (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes()
     code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--dataset", "ages=r-001")
     assert code == 1 and not out["written"] and out["errors"] == [ROUND_GAP, ROUND_GAP]
-    # One line per column, ready to paste under [round] once each is filled from the slide's number format.
+    # One line per column, ready to paste under [round] once each is filled from the brief's precision.
     assert out["round_stub"] == '"mean_age" = ""' and "display_stub" not in out
     assert tomllib.loads(UNROUNDED_DISPLAY + "\n[round]\n" + out["round_stub"])["round"] == {"mean_age": ""}
     assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_bytes() == chart
@@ -1539,15 +1541,58 @@ def test_export_scale_divides_records_and_traces(project, capsys):
                                  "scale divisors other than foundation/display.toml gives; rerun export, which "
                                  "records them"}]
     for scale in ("n = 4", "n = { divide = 0 }", "n = { divide = true }", "n = { divide = -2 }",
-                  "n = { multiply = 4 }", 'n = { divide = "4" }'):
+                  "n = { multiply = 4 }", 'n = { divide = "4" }', 'n = { divide = 4, files = "false" }',
+                  "n = { divide = 4, files = 0 }", "n = { files = false }"):
         write(project, "foundation/display.toml", DISPLAY + f"\n[scale]\n{scale}\n")
         code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
         assert code == 1 and out["errors"] == [
-            "foundation/display.toml: [scale] n is not { divide = <a positive number> }"], scale
+            "foundation/display.toml: [scale] n is not { divide = <a positive number>, "
+            "files = <true or false, optional> }"], scale
     write(project, "foundation/display.toml", "scale = 4\n" + DISPLAY)
     code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
     assert code == 1 and out["errors"] == [
-        "foundation/display.toml: [scale] maps each column to { divide = <a positive number> }"]
+        "foundation/display.toml: [scale] maps each column to { divide = <a positive number>, "
+        "files = <true or false, optional> }"]
+
+
+def test_export_prose_scale_keeps_files_in_the_recorded_unit(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    write(draft, "findings.md", FINDINGS.replace("Closed late (%)", "Change (million tonnes)"))
+    write(project, "investigations/inv/results/r-001.csv", "region,change_mt,n\nW,8645.2,22523\n")
+    display = ('[columns]\nregion = "Region"\nchange_mt = "Change (million tonnes)"\nn = "Orders"\n')
+    write(project, "foundation/display.toml", display + '\n[scale]\nchange_mt = { divide = 1000, files = false }\n')
+    args = ("export", "inv", "pkg", "--chart", "r-001:region,change_mt", "--dataset", "changes=r-001")
+    code, out = run(project, capsys, *args)
+    assert code == 0 and out["written"], out
+    assert (draft / "charts/chart-1.csv").read_text() == "Region,Change (million tonnes)\nW,8645.2\n"
+    assert (draft / "datasets/changes.csv").read_text() == \
+        "Region,Change (million tonnes),Orders\nW,8645.2,22523\n"
+    record = manifest(project)
+    for entry in (record["charts"][0], record["dataset_selection"][0]):
+        assert entry["scale"] == {} and entry["prose_scale"] == {"change_mt": 1000}
+    assert "chart-1: prose <- r-001.change_mt, divided by 1000" in out["methodology_lines"]
+    write(draft, "methodology.md", METHODOLOGY +
+          "\nEmissions changed by about 8.6 billion tonnes. Orders reached 22.5 thousand.\n")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["numbers"] == [] and not any("manifest" in row["problem"] for row in report["charts"]), report
+    draft_module = load(ASSETS["src/packaging/draft.py"], "draft_prose_scale")
+    assert draft_module.recorded_scales(record) == [("r-001", "change_mt", 1000)]
+    set_manifest(project, charts=[{**record["charts"][0], "prose_scale": {"change_mt": 2000}}])
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert [row for row in report["charts"] if "manifest" in row["problem"]] == [{
+        "chart": "Chart 1", "problem": "the manifest's charts entry for chart-1.csv records prose scale "
+        "divisors other than foundation/display.toml gives; rerun export, which records them"}]
+    # Explicit true applies the divisor to the files, as the default does.
+    write(project, "foundation/display.toml", display + '\n[scale]\nchange_mt = { divide = 1000, files = true }\n')
+    _, out = run(project, capsys, *args)
+    assert out["written"] and (draft / "charts/chart-1.csv").read_text().endswith("W,8.6452\n")
+    assert manifest(project)["charts"][0]["scale"] == {"change_mt": 1000}
+    assert "prose_scale" not in manifest(project)["charts"][0]
+    # Removing the option and divisor leaves only the scale-word approximation traced.
+    write(project, "foundation/display.toml", display)
+    run(project, capsys, *args)
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert [row["text"] for row in report["numbers"]] == ["8.6 billion"]
 
 
 def test_export_scale_needs_places_when_its_quotient_is_unrounded(project, capsys):

@@ -253,6 +253,33 @@ def test_headline_checkpoint_states_the_word_limit_and_asks_before_trimming():
     assert 'a long-headline `warning` row is asked about as the headline checkpoint says, never trimmed unasked' in check
 
 
+def test_package_records_and_previews_audience_number_formats_and_prose_approximations():
+    brief = (ROOT / '.agents/skills/awb-init/assets/workbench/investigation/brief.md').read_text()
+    assert "Once the audience is named, always record precision and clock format: the user's choices, otherwise audience defaults." in brief
+    assert ('Unless the audience is recorded as technical, use whole numbers for large values, or one decimal '
+            'with a scale word (8.6 billion), one decimal '
+            "for shares and rates, and the audience's usual clock format.") in brief
+    assert 'when the user states them' not in brief
+    package = (ROOT / '.agents/skills/awb-package/SKILL.md').read_text()
+    establish = skill_section('.agents/skills/awb-package/SKILL.md', '## 1. Establish')
+    assert ("Record precision and clock format, using the [brief template](../awb-init/assets/workbench/investigation/"
+            "brief.md)'s audience defaults when unspecified") in establish
+    checkpoint = skill_section('.agents/skills/awb-package/SKILL.md', '### The headline checkpoint')
+    assert "With the headlines" in checkpoint and "state the brief's precision and clock format" in checkpoint
+    helpers = (ROOT / '.agents/skills/awb-package/references/helpers.md').read_text()
+    for text in (package, helpers):
+        assert "the places the brief's precision gives" in text
+        assert "the places the slide's number format shows" not in text
+        assert 'files = false' in text
+    assert 'prose-only divisors as `prose_scale`' in helpers
+    check = skill_section('.agents/skills/awb-package/SKILL.md', '## 6. Check')
+    assert 'use a scale word: "22.5 thousand" traces to 22,523' in check
+    assert 'It is computed from results that none records: only separately authorized analysis records it' in check
+    template = (ROOT / '.agents/skills/awb-package/assets/package-format/findings-template.md').read_text()
+    assert ("where rounded start and end values do not subtract to the shown change, the slide's **Notes:** "
+            'say changes were computed before rounding') in template
+
+
 def test_release_asks_the_user_to_confirm_helper_drift():
     release = skill_section('.agents/skills/awb-release/SKILL.md', '## 3. Release')
     assert '`helper_drift`' in release and 'ask the user' in release and '`helper_drift_confirmed`' in release
@@ -355,10 +382,11 @@ def test_package_steps_export_before_filling_names_and_keep_the_preview_out_of_t
     export = skill_section('.agents/skills/awb-package/SKILL.md', '## 4. Export the files and provenance')
     assert export.index('`display_stub`') < export.index('`methodology_lines`')
     assert 'Before writing, give each column' not in package
-    # The evidence-restoring procedure lives in helpers.md; the step points to it.
-    assert '**Missing evidence** in [helpers](references/helpers.md)' in export and 'restore them after each' not in export
-    helpers = (ROOT / '.agents/skills/awb-package/references/helpers.md').read_text(encoding='utf-8')
-    assert '\n## Missing evidence\n' in helpers and 'restore them after each' in helpers
+    # The evidence-restoring procedure lives in the smaller reference; the step points to it.
+    assert ('**Missing evidence** in [numbers and evidence](references/numbers-and-evidence.md#missing-evidence)'
+            in export and 'restore them after each' not in export)
+    evidence = (ROOT / '.agents/skills/awb-package/references/numbers-and-evidence.md').read_text(encoding='utf-8')
+    assert '\n## Missing evidence\n' in evidence and 'restore them after each' in ' '.join(evidence.split())
     # Step 4 is numbered sub-steps, not one paragraph.
     assert re.search(r'\n1\. Run `python3 src/awb.py export', package) and '\n5. When `export` reports' in package
     checkpoint = skill_section('.agents/skills/awb-package/SKILL.md', '### The headline checkpoint')
@@ -493,9 +521,7 @@ def test_first_pass_answers_keep_to_the_evidence():
     invariants = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Analytical invariants').split())
     # A saved query's figure is exploration until run.py records it as a result.
     assert "can become a finding; present other query output, saved queries' too, as exploration" in invariants
-    for rule in ('Record what the user recalls as their statement, not as confirmed',
-                 'name what a comparison leaves uncontrolled when a decision rests on it'):
-        assert rule in invariants
+    assert 'Name what a comparison leaves uncontrolled when a decision rests on it' in invariants
 
 
 def test_chat_claim_rules_sit_where_chat_is_written():
@@ -503,22 +529,48 @@ def test_chat_claim_rules_sit_where_chat_is_written():
     # reached chat while the rule sat among the analytical invariants; it moved, not duplicated.
     text = AGENTS.read_text(encoding='utf-8')
     conversation = ' '.join(section(text, '## Conversation').split())
-    assert 'Offer an untested explanation as a question.' in conversation
-    assert "Name every share's base and say when it changes." in conversation
-    assert 'untested explanation' not in ' '.join(section(text, '## Analytical invariants').split())
+    assert 'Offer an untested cause, label, or recollection as a question' in conversation
+    assert '("timing errors?", not "timing errors")' in conversation
+    assert "record recollections as the user's" in conversation
+    assert text.count('recollections') == 1 and text.count('recollection as a question') == 1
+    assert 'recalls' not in text
+    assert "Name codes by meaning, and every share's base and when it changes." in conversation
+    assert 'untested' not in ' '.join(section(text, '## Analytical invariants').split())
     # IDs stay in the records: no allowance for one beside plain text in chat.
     assert 'Records keep precise terms and IDs; chat uses plain words' in conversation
     assert 'may sit beside plain text' not in conversation
     # The headline checkpoint repeats the explanation rule and shows the figures chat has not.
     checkpoint = ' '.join(section((ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8'),
                                   '### The headline checkpoint').split())
-    assert "Offer an untested explanation as a question, never as a headline's claim." in checkpoint
+    assert 'Headlines claim only what results show: no untested cause or label, no exception dropped.' in checkpoint
     assert 'show them with the figures behind each headline that chat has not shown' in checkpoint
     # A duplicate row is a repeat to explain, its treatment proposed without a cause asserted.
     clean = ' '.join((ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8').split())
     assert 'landed twice' not in clean
-    assert '`duplicate-rows` are repeats to explain, not known copies: propose their treatment without ' \
+    assert 'Both duplicate issues are repeats to explain, not known copies: propose their treatment without ' \
            'asserting why they repeat.' in clean
+
+
+def test_cross_part_copies_need_the_user_or_source_to_call_them_reextracts():
+    clean = (ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8')
+    decide = ' '.join(section(clean, '## 2. Decide').split())
+    assert 'such as overlapping periods' not in clean
+    assert 'known to be re-extracts' not in clean
+    assert "when the user or source documentation says the parts are re-extracts" in decide
+    assert ("an overlap you observe, or what you already know of a dataset, is not the source saying so") in decide
+    assert "When `duplicate-rows:across-parts` spans more than two parts, count each pair's shared rows" in decide
+    assert "compare the counts with the issue's" not in decide
+    assert 'under a recorded grain with no lineage column in it (repeats then share one grain key)' in decide
+    assert "The user decides everything else" in decide
+    checks = (ROOT / '.agents/skills/awb-clean/references/checks.md').read_text(encoding='utf-8')
+    assert checks.count('first lineage column') == 1
+    assert 'counts rows outside each repeated group\'s minimum part' in checks
+    assert 'counts repeats beyond one in that part, or all repeats without lineage' in checks
+    landing = (ROOT / '.agents/skills/awb-init/references/landing.md').read_text(encoding='utf-8')
+    assert 'part column first, such as `sheet` and `sheet_row`' in landing
+    correction = (ROOT / '.agents/skills/awb-clean/references/correction-views.md').read_text(encoding='utf-8')
+    assert '**Cross-part copies (`duplicate-rows:across-parts`):**' in correction
+    assert '**Exact repeats (`duplicate-rows`), without lineage:**' in correction
 
 
 def test_footer_counts_a_provisional_answer_as_provisional():
@@ -723,8 +775,10 @@ def test_analysis_states_the_threshold_rule_and_the_standard_checks():
     assert ("A threshold, minimum, or exclusion the brief does not settle is the user's decision: propose it to "
             "the user before looking at which rows lead, and say so when you propose one after seeing results.") in add
     assert "with every filtered population reconciled by `reconcile()`" in add
-    assert ("For a series summed over a period, also count the periods each entity in scope has data for, since a "
-            "sum hides missing periods: a count below the period length is a caveat on the finding.") in add
+    assert ("For a series summed over a period, list each in-scope entity's missing periods, inside its series too, "
+            'as a caveat: "unreported in <periods>; sums cover reported periods only", never zero; '
+            "filling gaps by assumption gives an illustrative scenario, never a bound.") in add
+    assert 'a count below the period length' not in add
     assert "Save full precision in result queries and round only for display." in add
     assert "result sessions run DuckDB on one thread" in add
     assert "the investigation's `views/*.sql`" in add and "(`import helpers` for `helpers.py`)" in add
@@ -736,7 +790,9 @@ def test_analysis_states_the_threshold_rule_and_the_standard_checks():
     explore = ' '.join((ROOT / '.agents/skills/awb-explore/SKILL.md').read_text(encoding='utf-8').split())
     assert ("A question-specific exclusion, threshold, or minimum the brief does not settle is the user's decision: "
             "propose it before looking at which rows lead, say so when you propose one after seeing results") in explore
-    assert "count in a follow-up the periods each entity in scope has data for" in explore
+    assert ("list in a follow-up the periods each entity in scope lacks, mid-series too, and record them under "
+            "Unresolved issues and in any quality.md row as unreported, never zero, so the finding on that sum "
+            "carries the caveat") in explore
     contract = ' '.join((ROOT / '.agents/skills/awb-package/references/package-contract.md').read_text(encoding='utf-8').split())
     assert ("A validation check recorded as not assessed stays out of `findings.md` and the methodology note unless "
             "the user should act on it.") in contract
@@ -792,8 +848,8 @@ def test_status_reports_git_unavailable_with_its_impact():
 
 
 def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
-    # The review holds a checked or reconciliation sentence to a recorded result or check, pairing with the
-    # warning state finding gives, and the package contract tells the writer so; every review after a draft's
+    # The review holds a checked or reconciliation sentence to a recorded result or check, and the contract
+    # points the writer there; every review after a draft's
     # first is scoped against the helper's receipt, judging rules added or changed since in full, and a scoped
     # review that passes completes a request or a release.
     def read(path):
@@ -804,13 +860,14 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     release = read('awb-release/SKILL.md')
     reviewer = read('awb-package/assets/awb-package-reviewer.agent.md')
     provenance = read('awb-init/references/provenance.md')
+    contract = read('awb-package/references/package-contract.md')
 
-    assert ('asserts that something was checked or verified, reconciles, sums or adds up to, or matches cites the '
-            'recorded result or check that establishes it') in review
-    assert 'A sentence without one is a narrative problem' in review
-    assert '`awb.py state finding`' in review and 'pair' in review
-    assert 'asserts a reconciliation or a completed check' in review and 'asserts a reconciliation or a completed' \
-        in provenance
+    assert ('Every sentence asserting that something was checked or verified, reconciles, sums or adds up to, or '
+            'matches cites the recorded result or check that establishes it, covering all it asserts') in contract
+    assert "the contract's [Writing rules](package-contract.md#writing-rules) hold" in review
+    assert 'read the cited records to confirm each check establishes all the claim asserts' in review
+    assert '`awb.py state finding`' not in review
+    assert 'asserts a reconciliation or a completed' in provenance
     assert 'Report every violation and narrative problem in this one pass, quoting each' in review
     assert 'the caller settles them all before the next review' in review
     assert '`review (scoped):`' in review
@@ -832,19 +889,24 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     # The user may accept a narrative problem with a reason, as a warning; the rounds are capped.
     assert ('the user accepted, with a reason, every `warning` violation and narrative problem it reports') in review
     assert '--accept "<file>:<line> <quote>: <the user\'s reason>"' in review
-    assert ('When a second review in one request still reports problems, stop repairing and start no third review '
-            'in that request unless the user asks') in review
-    # A problem on an unchanged line is marked and goes to the user rather than restarting the loop.
-    assert '(unchanged since the prior review)' in review and 'why the earlier pass missed it' in review
-    assert ('Take a problem marked `(unchanged since the prior review)`, or a conflict between two rules, to the '
-            'user rather than repairing it') in review
+    assert ('When a second review in one request still reports problems, start no third review unless the user '
+            'asks') in review
+    # Routine repairs are reported at the cap; decisions and rule conflicts still go to the user.
+    assert '(unchanged since the prior review)' not in review and 'why the earlier pass missed it' not in review
+    assert 'Take a conflict between two rules to the user rather than repairing it' in review
+    assert ('At that stop, list the small repairs, those changing no number, no finding beyond narrowing to its '
+            'evidence, and no user-written or approved wording, in one plain note') in review
+    assert ("in one plain note saying the next request's scoped review checks them") in review
+    assert 'show the user each other problem in plain words with a recommended repair' in review
+    assert ("Make the small repairs now when no problem needs the user; otherwise make them with the user's answer, "
+            'after recording any acceptances with `--accept`') in review
     # Package is done on a passed review of the final files, full or scoped.
     assert 'its `review` row is `current`' in package
     assert 'the last review before the final `check-draft` is a full one' not in package
     assert 'the last review is a full review' not in package
     contract = read('awb-package/references/package-contract.md')
-    assert ('A sentence asserting that something was checked or verified, reconciles, sums or adds up to, or matches '
-            'cites the check that establishes it') in contract
+    assert 'check-citation item' not in contract
+    assert 'asserting that something was checked or verified' not in review
     assert 'never a scoped re-review' not in release and 'no earlier report is kept' not in release
     assert 'one pass' in reviewer and 'scoped' in reviewer and 'the evidence a narrative cites' in reviewer
     assert '`awb/read` with `command: "review-receipt"`' in reviewer
@@ -863,22 +925,38 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
     assert ('is answered in a slide\'s headline, bullets, or chart, or listed as unanswered on the **Open questions** '
             'or **Limitations and open caveats** slide, not only in a slide\'s **Notes:** or nowhere') in step3
     assert 'how a source builds a series' in step3 and '`foundation/sources.md`' in step3
-    # Citation forms for a checked sentence, and the narrowed tolerance rule.
-    assert ('a result ID, an evidence path, or a foundation quality ID (`DQ-NNN`) with the path of the scan its row '
-            'cites, `foundation/scans/<name>.json`') in step3
+    # Writing rules live in the contract; the reviewer checks the cited support and brief's definitions.
+    contract = read('awb-package/references/package-contract.md')
+    rules = contract[contract.index('## Writing rules'):contract.index('## Structural consistency')]
+    assert ('a result ID, an evidence path, or a foundation quality ID (`DQ-NNN`) with the path of the scan or '
+            'saved query its row cites') in rules
+    assert 'including a quality row and its scan or saved query' in step3
+    assert "the contract's [Writing rules](package-contract.md#writing-rules) hold" in step3
     assert 'with its tolerance' not in review
-    # The reviewer checks the record a tolerance comes from, not when it was chosen; the timing is writer guidance.
-    assert ('only one a record holds from before the result: `brief.md`, such as its **Usefulness criteria**, or the '
-            'result\'s settings') in step3 and '`methodology.md` cites that record' in step3
-    assert 'A tolerance no such record holds, one only in a judgment\'s `detail` included, is a problem' in step3
-    assert 'an exact check says "exactly" or "every row"' in step3 and 'before the data was seen' not in review
-    # Readability is a closed list, quoted like every step 3 problem.
-    assert 'readability, only these' in step3 and '`foundation/glossary.md`' in step3
-    assert 'a precision the brief\'s **Audience** states' in step3 and 'outside **Implications**' in step3
-    assert 'the brief\'s **Audience** does not record the audience as using it' in step3
+    assert ('Any narrative may say figures agree within rounding or within a stated difference when '
+            '`methodology.md` states the recorded difference and cites the result or judgment recording it') in rules
+    assert ("A tolerance number appears only in `methodology.md` or a slide's **Notes:**, and only one recorded "
+            "before the result in `brief.md` or the result's settings") in rules
+    assert '`methodology.md` cites that record' in rules
+    assert "one only in a judgment's `detail` included, is a problem" not in review + contract
+    assert 'Only an exact check says "exactly" or "every row"' in rules
+    assert 'before the data was seen' not in review
+    assert ('definitions, exclusion rules, metric names, and accounts of what a metric or check counts match '
+            "`brief.md`'s **Population and scope** and **Local terms or departures** and `methodology.md`'s "
+            'definitions, or `methodology.md` states the departure') in step3
+    assert 'a recorded check that establishes the claim' in step3
+    assert ('a verification-only part confirming another result may be answered in **Notes:** alone') in step3
+    assert 'record words ledger or disposition' in rules and 'ledger, flagged, or disposition' not in review + contract
+    assert 'Repair a true statement by citing its record or rewording it, not deleting it' in review
+    assert 'departure from the shared glossary or the brief' in read(
+        'awb-package/assets/package-format/methodology-template.md')
+    # Readability remains a closed list under Writing rules, quoted like every step 3 problem.
+    assert '`foundation/glossary.md`' in rules and 'first use in each' in rules
+    assert "the precision the brief's **Audience** states" in rules and 'Outside **Implications**' in rules
+    assert "unless the brief's **Audience** records the audience as using it" in rules
     # Rule precedence, and a conflict goes to the user.
     assert 'the `error` rule wins and the line passes the `warning` one' in steps
-    assert 'or a conflict between two rules, to the user rather than repairing it' in review
+    assert 'Take a conflict between two rules to the user rather than repairing it' in review
 
     # No template example puts a tolerance on a slide or in the note.
     for path in ('awb-package/assets/package-format/findings-template.md',
@@ -888,19 +966,20 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
     for path in ('awb-package/references/package-contract.md', 'awb-init/assets/workbench/workbench-guides/analysis.md',
                  'awb-init/references/provenance.md'):
         assert 'with its tolerance' not in read(path), path
-    assert 'a tolerance chosen after seeing the result is not one' in read('awb-package/references/package-contract.md')
-    assert "or the result's settings record it outside a judgment's `detail`" in read(
-        'awb-package/references/package-contract.md')
+    contract = read('awb-package/references/package-contract.md')
+    assert 'check-citation item' not in contract and 'A tolerance number' in rules
     # The glossary and source register the step 3 checks read make a review stale and scope a later one.
     assert ('the checks against `brief.md`, `foundation/glossary.md`, or `foundation/sources.md` when the diff '
             'changes it') in review
     assert ('once the narratives, `brief.md`, `foundation/glossary.md`, `foundation/sources.md`, '
             '`foundation/quality.md`, or `foundation/review-rules.md` change') in review
     # So does the quality record and each scan methodology.md cites by its path, which scope a later one.
-    assert 'or a scan `methodology.md` names by its `foundation/scans/` path changes' in review
+    assert 'or a scan or saved query `methodology.md` names by its path changes' in review
     assert 'every sentence citing a quality ID whose row the diff of `foundation/quality.md` changes' in review
-    assert 'a tolerance chosen after seeing the result is not a tolerance' in read(
-        'awb-package/assets/package-format/findings-template.md')
+    # Templates point to the list instead of repeating its tolerance rule.
+    for path in ('awb-package/assets/package-format/findings-template.md',
+                 'awb-package/assets/package-format/methodology-note-template.md'):
+        assert 'Writing rules' in read(path) and 'tolerance' not in read(path)
 
     # Asking the user comes before recording a rule, in review.md and the skill's first step.
     rule = review[review.index('When the user corrects a draft while reviewing it'):]
@@ -918,6 +997,29 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
     assert '`Methods note length: about <n> words`' in brief and 'Methods note length' in establish
     assert '`note_length`' in package[package.index('## 6. Check'):package.index('## 7. Report')]
 
+
+
+def test_package_writing_rules_are_one_short_list_read_before_drafting():
+    package = ROOT / '.agents/skills/awb-package'
+    contract = (package / 'references/package-contract.md').read_text(encoding='utf-8')
+    rules = section(contract, '## Writing rules')
+    lines = [line for line in rules.splitlines() if line.strip()]
+    assert lines and all(line.startswith('- ') for line in lines)
+    assert max(map(len, lines)) <= 400
+    all_text = '\n'.join(path.read_text(encoding='utf-8') for path in package.rglob('*.md'))
+    for rule in ('sentences in the imperative', 'record words ledger or disposition', 'first use in each',
+                 'Every sentence asserting that something was checked or verified',
+                 'Any narrative may say figures agree within rounding', 'A tolerance number appears only',
+                 'Only an exact check says "exactly" or "every row"'):
+        assert rules.count(rule) == 1, rule
+        assert all_text.count(rule) == 1, rule
+    skill = (package / 'SKILL.md').read_text(encoding='utf-8')
+    step3 = next(line for line in skill.splitlines() if line.startswith('3. **Write**'))
+    assert "contract's **Writing rules**" in step3
+    review = (package / 'references/review.md').read_text(encoding='utf-8')
+    assert '[Writing rules](package-contract.md#writing-rules)' in review
+    assert 'ledger, flagged, or disposition' not in review
+    assert 'first use' not in review and 'imperative' not in review
 
 def test_release_reuses_a_matching_receipt_and_shows_its_repairs():
     release = ' '.join((ROOT / '.agents/skills/awb-release/SKILL.md').read_text(encoding='utf-8').split())
@@ -1247,6 +1349,9 @@ def test_readme_says_what_the_analyst_gets_and_is_asked():
     assert 'which a **Supporting datasets** slide then describes' in what
     assert 'released/001/' in what and "reports the copy's full path" in what
     assert 'each later one reads only what changed since' in quick and 'When a second review' in quick
+    assert 'line unchanged since the last review' not in quick
+    assert 'makes small repairs that change no number' in quick and 'lists them in one note' in quick
+    assert 'any acceptances are recorded before repairs' in quick
     assert 'The draft is stable once' in quick
     assert 'about 500 to a page' in quick and 'more than 10% over it' in quick
     assert quick.count('unless you say to release without seeing them') == 2

@@ -16,7 +16,9 @@ Record the decision this analysis will support, or state that its purpose is exp
 
 Record who will read the package, what they already know, the decision they own, and the terms they use. Leave it blank until the user names the audience; packaging asks for it when it is missing.
 
-Record also, when the user states them, the precision numbers need (such as whole percents), a methods note length on its own line as `Methods note length: about <n> words` (one page is about 500), which `check-draft` compares with the note, a deck length (such as about 8 slides), and how they want to check a new storyline: **preview-and-wait**, the slide headlines before the draft is written, or **draft-then-review**, the full draft with its headlines marked provisional. Every later package reuses them, though a request that names a mode gets it, and one that supplies the storyline or asks for the full draft gets draft-then-review.
+Once the audience is named, always record precision and clock format: the user's choices, otherwise audience defaults. Unless the audience is recorded as technical, use whole numbers for large values, or one decimal with a scale word (8.6 billion), one decimal for shares and rates, and the audience's usual clock format.
+
+Record, when stated, the methods note length as `Methods note length: about <n> words` on its own line (one page is about 500), which `check-draft` compares with the note; the deck length (such as about 8 slides); and the storyline checkpoint mode: **preview-and-wait**, headlines before drafting, or **draft-then-review**, the full draft with provisional headlines. Later packages reuse these choices; a request naming a mode overrides the recorded one, and one supplying the storyline or requesting the full draft gets draft-then-review.
 
 ## Usefulness criteria
 

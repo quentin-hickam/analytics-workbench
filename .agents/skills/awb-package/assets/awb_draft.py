@@ -1374,7 +1374,7 @@ NARRATIVES = ("findings.md", "methodology.md")
 # Reading fails safe: a number is skipped only in one of the contexts below, each of which marks it as no
 # quantity; every other number is read, so a doubtful one becomes a row the author clears by rewording or
 # by allowing it. check_numbers also skips the accepted **Claim strength:** lines it is given (`claim_lines`),
-# whose numbers repeat the record. references/helpers.md states the same list, those lines last.
+# whose numbers repeat the record. references/numbers-and-evidence.md states the same list, those lines last.
 _MONTH = (r"\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?"
           r"|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?")
 _DAY = r"(?:3[01]|[12][0-9]|0?[1-9])"
@@ -1587,15 +1587,18 @@ def _read_exact_json(path):
 
 
 def recorded_scales(record: dict) -> list[tuple]:
-    """The [scale] divisors the manifest's charts and dataset_selection entries record, as (result_id, column,
-    divisor); a malformed entry records none, and the charts check reports it."""
+    """The file and prose divisors the manifest records, as (result_id, column, divisor)."""
     found = []
     for field in ("charts", "dataset_selection"):
         entries = record.get(field)
         for entry in entries if isinstance(entries, list) else ():
-            scale = entry.get("scale") if isinstance(entry, dict) else None
-            if isinstance(scale, dict) and isinstance(entry.get("result_id"), str):
-                found += [(entry["result_id"], column, divide) for column, divide in scale.items() if _divisor(divide)]
+            if not isinstance(entry, dict) or not isinstance(entry.get("result_id"), str):
+                continue
+            for scale_field in ("scale", "prose_scale"):
+                scale = entry.get(scale_field)
+                if isinstance(scale, dict):
+                    found += [(entry["result_id"], column, divide) for column, divide in scale.items()
+                              if _divisor(divide)]
     return list(dict.fromkeys(found))
 
 
@@ -1605,7 +1608,7 @@ def recorded_values(root, investigation, results, scales=()) -> tuple[list, list
     Each result contributes every cell of results/<id>.csv, the numbers in results/<id>.profile.json,
     and the numbers in its evidence's check details and settings. JSON numbers are read exactly as written.
     Each (result_id, column, divisor) of `scales` (`recorded_scales`) whose result is represented adds that
-    column's number cells divided by the divisor, the values its chart or dataset file shows before rounding.
+    column's number cells divided by the divisor, for its file or prose before rounding.
     """
     if not isinstance(results, list) or not all(
             isinstance(entry, dict) and isinstance(entry.get("result_id"), str)
@@ -1751,7 +1754,7 @@ def check_numbers(path: str | os.PathLike, values, *, allowed=(), claim_lines=()
     `values` are sorted magnitudes from recorded_values(). An `allowed` text covers a number wherever the
     text is written around it, matched on the text the number is read from, so any whitespace or a line
     wrap matches a space: a bare `40` covers every 40, and `Week 23` only that 23. A number is skipped
-    only in a context references/helpers.md lists; every other number is read. `claim_lines` are the line
+    only in a context references/numbers-and-evidence.md lists; every other number is read. `claim_lines` are the line
     numbers of the **Claim strength:** lines the claims check accepts (`_claim_review`): each repeats a
     state.md Claim cell, so its numbers trace to the record.
     """
@@ -2421,6 +2424,8 @@ def _chart_entry(entry):
                     for codes in entry["values"].values())
             and isinstance(entry.get("percent"), list) and all(isinstance(c, str) for c in entry["percent"])
             and isinstance(entry.get("scale"), dict) and all(_divisor(d) for d in entry["scale"].values())
+            and isinstance(entry.get("prose_scale", {}), dict)
+            and all(_divisor(d) for d in entry.get("prose_scale", {}).values())
             and isinstance(entry.get("round"), dict)
             and all(type(p) is int and 0 <= p <= _ROUND_LIMIT for p in entry["round"].values()))
 
@@ -2456,6 +2461,9 @@ def _display_difference(entry, saved, display):
     if entry["scale"] != {column: display["scale"][column] for column in entry["columns"]
                           if column in display["scale"]}:
         return "scale divisors"
+    if entry.get("prose_scale", {}) != {column: display["prose_scale"][column] for column in entry["columns"]
+                                       if column in display["prose_scale"]}:
+        return "prose scale divisors"
     return None
 
 
@@ -3419,23 +3427,26 @@ def _divisor(value):
 
 
 def _scale_from(value):
-    """The [scale] table: each column's divisor, from column = { divide = <a positive number> }."""
-    table = _table(value, "[scale] maps each column to { divide = <a positive number> }")
+    """The [scale] table's file and prose-only divisors; files defaults to true."""
+    form = "{ divide = <a positive number>, files = <true or false, optional> }"
+    table = _table(value, f"[scale] maps each column to {form}")
+    files, prose = {}, {}
     for column, entry in table.items():
-        if not (isinstance(entry, dict) and set(entry) == {"divide"} and _divisor(entry["divide"])):
-            raise ValueError(f"{_DISPLAY}: [scale] {column} is not {{ divide = <a positive number> }}")
-        table[column] = entry["divide"]
-    return table
+        if not (isinstance(entry, dict) and set(entry) <= {"divide", "files"}
+                and _divisor(entry.get("divide")) and type(entry.get("files", True)) is bool):
+            raise ValueError(f"{_DISPLAY}: [scale] {column} is not {form}")
+        (files if entry.get("files", True) else prose)[column] = entry["divide"]
+    return files, prose
 
 
 def display_names(root) -> dict:
-    """Return {columns, values, round, percent, scale, confirmed, results} from foundation/display.toml, empty
+    """Return {columns, values, round, percent, scale, prose_scale, confirmed, results} from display.toml, empty
     when it is absent.
 
     The file holds only [columns] (column: display name), [values.<column>] (coded value: label), [round]
     (column: decimal places), [percent] with one key, columns = [...] (columns whose fractions show 100 times
-    larger), [scale] (column = { divide = <a positive number> }, its values shown divided), [confirmed] with one
-    key, columns = [...] (shared names confirmed to fit every result they label, which label_collisions then
+    larger), [scale] (column = { divide = <a positive number> }, optional files = false divides prose only),
+    [confirmed] with one key, columns = [...] (shared names confirmed to fit every result they label, which label_collisions then
     leaves out), and [results."<result>"] tables holding columns, values, and percent tables, which replace the
     global ones for that result's files, a values table for its whole column and a percent table for every
     column. A result without a percent table has None there. Anything else raises ValueError. A name or a
@@ -3462,9 +3473,10 @@ def display_names(root) -> dict:
         own_columns, own_values = _labels_from(entry, where + ".")
         results[result_id] = {"columns": own_columns, "values": own_values,
                               "percent": _percent_from(entry["percent"], where + ".") if "percent" in entry else None}
+    scale, prose_scale = _scale_from(record.get("scale", {}))
     return {"columns": columns, "values": values,
             "round": _table(record.get("round", {}), "[round] maps each column to its decimal places"),
-            "percent": percent, "scale": _scale_from(record.get("scale", {})),
+            "percent": percent, "scale": scale, "prose_scale": prose_scale,
             "confirmed": _percent_from(record.get("confirmed", {"columns": []}), "[", "confirmed"),
             "results": results}
 
@@ -3698,6 +3710,8 @@ def _shape(root, investigation, result_id, columns, selection, display, rounding
     entry = {"result_id": result_id, "columns": chosen, "selection": selection,
              "headers": [names[c] for c in chosen], "values": used, "percent": percent, "scale": scale,
              "round": places}
+    if prose_scale := {c: display["prose_scale"][c] for c in chosen if c in display["prose_scale"]}:
+        entry["prose_scale"] = prose_scale
     return entry, _apply(table, entry), _sources(entry), []
 
 
@@ -3717,6 +3731,9 @@ def _sources(entry):
             [", times 100"] if column in entry["percent"] else []) + (
             [] if places is None else [f", rounded to {_rounded_to(places)}"])
         lines.append(f"{header} <- {result_id}.{column}{''.join(shaping)}")
+        if prose_divide := entry.get("prose_scale", {}).get(column):
+            divisor = format(Decimal(str(prose_divide)).normalize(), "f")
+            lines.append(f"prose <- {result_id}.{column}, divided by {divisor}")
     return lines
 
 
@@ -3800,7 +3817,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
         absent = [c for c in dict.fromkeys(gaps) if c not in display["columns"]]
         if absent:
             report["display_stub"] = "\n".join(f'{_toml_key(c)} = ""' for c in absent)
-        # Likewise under [round], each filled in with the decimal places the slide's number format shows.
+        # Likewise under [round], each filled in with the decimal places the brief's precision gives.
         if round_gaps:
             report["round_stub"] = "\n".join(f'{_toml_key(c)} = ""' for c in dict.fromkeys(round_gaps))
     else:
@@ -3884,7 +3901,8 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
             report["datasets"].append({"path": _rel(draft, dataset), "result_id": entry["result_id"]})
             selection.append({"path": _rel(draft, dataset), "result_id": entry["result_id"],
                               "columns": entry["columns"], "percent": entry["percent"], "scale": entry["scale"],
-                              "round": entry["round"]})
+                              "round": entry["round"],
+                              **({"prose_scale": entry["prose_scale"]} if "prose_scale" in entry else {})})
         if directory.is_dir() and not any(directory.iterdir()):
             directory.rmdir()
         record["dataset_selection"] = selection or "none"
@@ -3958,7 +3976,8 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "foundation/display.toml holds [columns] (column = display name), [values.<column>] (coded "
                "value = label, matching the saved text exactly, so True, not true), [round] (column = decimal places, 0 to 20), [percent] with columns = [...] "
                "(fractions shown 100 times larger, scaled exactly before rounding), [scale] (column = { divide = "
-               "<a positive number> }, values divided before percent scaling and rounding), [confirmed] with "
+               "<a positive number> } or { divide = <n>, files = false }, values divided before percent scaling and rounding; "
+               "files = false keeps files in their recorded unit and records prose_scale for tracing), [confirmed] with "
                "columns = [...] (shared names confirmed to fit every result), and [results.\"<result>\"] "
                "with columns, values, and percent tables that replace the global ones for that result, a values "
                "table for its whole column and a percent table for every column, so a column that already holds "
@@ -3971,7 +3990,7 @@ def cli_export(root: Path, argv: list[str]) -> int:
                f"a percent column's saved fraction may carry {UNROUNDED_PLACES + 2} (366.89000039169395 and "
                "1e-05 are; 21.3500, which is 21.35, is not); a column holding one needs places under [round] "
                "or --round, listed with round_stub, lines to paste under [round] once each \"\" is replaced "
-               "with the places the slide's number format shows, unquoted, such as \"share\" = 1.\nlabel_warnings "
+               "with the places the brief's precision gives, unquoted, such as \"share\" = 1.\nlabel_warnings "
                "lists each column whose [columns] name labels files from results with different questions "
                "and no [results.\"<result>\".columns] name, unless [confirmed] lists it; value_warnings lists each "
                "value code no cell of the saved tables it labels holds, when a cell differs from it only in case "
@@ -3981,7 +4000,7 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "The manifest's charts entries record each chart's result, columns, selection, headers, value "
                "labels used, percent columns, scale divisors, and places, which check-draft reapplies to verify "
                "the file; dataset_selection entries record each dataset's result, columns, percent columns, scale "
-               "divisors, and places.\n"
+               "divisors, and places; prose_scale records prose-only divisors in either entry.\n"
                "methodology_lines states each file's shaping for methodology.md: the rows a chart selects, then "
                "each header's source column with any division, percent scaling, and rounding.\n"
                "Writes nothing when an evidence file is "
@@ -4486,16 +4505,17 @@ RECEIPT = "receipt.json"
 STARTED = "started.json"
 _KINDS = ("full", "scoped")
 # What a review reads, in the order the fingerprint hashes it, and each one's file in the snapshot; then
-# each evidence file the manifest's results name and each scan methodology.md names by its foundation/scans/
+# each evidence file the manifest's results name and each scan or saved query methodology.md names by its
 # path, which step 3 reads beside a cited quality ID, by its path, in sorted order.
 # The brief is keyed brief.md and read from the investigation; its questions and Audience set what a review checks.
-# The glossary, source register, and quality record are read whole, as step 3's readability, source-series,
+# The glossary, source register, and quality record are read whole, as the contract's writing rules and step 3's source-series
 # and cited-check checks read them.
 BRIEF = "brief.md"
 GLOSSARY = "foundation/glossary.md"
 SOURCES = "foundation/sources.md"
 QUALITY = "foundation/quality.md"
 _SCAN_PATH = re.compile(r"foundation/scans/[A-Za-z0-9][A-Za-z0-9._@-]*\.json")
+_QUERY_PATH = re.compile(r"(?:[A-Za-z0-9][A-Za-z0-9._@-]*/)*[A-Za-z0-9][A-Za-z0-9._@-]*\.sql\b", re.IGNORECASE)
 _REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.md",
                   METHODOLOGY_NOTE: METHODOLOGY_NOTE, BRIEF: BRIEF, REVIEW_RULES: "review-rules.md",
                   GLOSSARY: "glossary.md", SOURCES: "sources.md", QUALITY: "quality.md",
@@ -4562,7 +4582,7 @@ def review_inputs(root, investigation, package) -> dict:
     """{input: bytes, or None when absent} for exactly what a review reads: the three narratives, the
     investigation's brief.md, the rule file without rules kept for another package (_package_rules), the
     glossary, source register, and quality record whole, the reduced revalidation_flags as indented JSON, and
-    each evidence file the manifest's results name or scan methodology.md names by its foundation/scans/
+    each evidence file the manifest's results name or scan or saved query methodology.md names by its
     path, which step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a
     directory included."""
     root = Path(root)
@@ -4591,7 +4611,9 @@ def review_inputs(root, investigation, package) -> dict:
     results = record.get("results") if isinstance(record.get("results"), list) else []
     evidence = {entry["evidence"] for entry in results if isinstance(entry, dict)
                 and isinstance(entry.get("evidence"), str) and entry["evidence"] not in ("", *_REVIEW_INPUTS)}
-    evidence.update(_SCAN_PATH.findall((inputs["methodology.md"] or b"").decode("utf-8", "replace")))
+    methodology = (inputs["methodology.md"] or b"").decode("utf-8", "replace")
+    evidence.update(_SCAN_PATH.findall(methodology))
+    evidence.update(_QUERY_PATH.findall(methodology))
     for name in sorted(evidence):
         try:
             inputs[name] = (root / name).read_bytes()
@@ -4875,8 +4897,8 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
                     "foundation/glossary.md, foundation/sources.md, and foundation/quality.md when present, "
                     "foundation/review-rules.md when present without rules kept for another package, and the "
                     "manifest's revalidation_flags (finding, reason, represented_in, and whether the "
-                    "disposition is omit), each evidence file its results name, and each scan methodology.md names "
-                    "by its foundation/scans/<name>.json path, and write receipt.json with "
+                    "disposition is omit), each evidence file its results name, and each scan or saved query "
+                    "methodology.md names by its path, and write receipt.json with "
                     "a SHA-256 fingerprint of them, the report verbatim, passed, and accepted. Each record "
                     "replaces the previous one and consumes the start.",
         epilog=f"The report's last line is {_SUMMARY_FORM}. passed is true when it is clean, or when it counts no "
