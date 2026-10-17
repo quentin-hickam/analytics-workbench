@@ -11,7 +11,7 @@
 # test_flag_the_draft_does_not_represent_needs_no_disposition: a flag recorded with represented_in "none" needs no disposition and blocks nothing.
 # test_malformed_flag_shape_leaves_counts_unknown: a missing or unknown disposition, empty or non-string places, or the per-place shape is malformed; counts are null.
 # test_malformed_manifest_requests_targeted_fallback: invalid manifests or timestamps name the manifest under uncertainties, with no mtime estimate.
-# test_a_preview_only_draft_reports_the_preview_not_a_missing_manifest: a draft holding only .preview/headlines.md reports draft_stage "headline preview awaiting approval" and no uncertainty; without the preview, a missing manifest is uncertain again.
+# test_a_preview_only_draft_reports_the_preview_not_a_missing_manifest: a draft holding only .preview/headlines.md reports draft_stage "headline preview written, not yet exported" and no uncertainty; without the preview, a missing manifest is uncertain again.
 # test_draft_without_manifest_json_is_an_uncertainty: a draft manifest in another format is not read; the draft is named under uncertainties.
 # test_unusable_release_manifest_is_uncertain: an absent, non-JSON, undated, or unreadable release manifest leaves released_at null and records one uncertainty.
 # test_unreadable_draft_manifest_is_unknown: an unreadable draft manifest leaves dates and counts null with an uncertainty.
@@ -256,7 +256,7 @@ def test_a_preview_only_draft_reports_the_preview_not_a_missing_manifest(workben
     write(workbench, "deliveries/churn/review/draft/.preview/headlines.md", "# Churn\n\n- West churn is highest\n")
     result = status.collect(workbench)
     entry = result["packages"][0]
-    assert entry["draft_stage"] == "headline preview awaiting approval" and entry["revised_at"] is None
+    assert entry["draft_stage"] == "headline preview written, not yet exported" and entry["revised_at"] is None
     assert result["uncertainties"] == []
     # Once export writes the manifest the draft is past the preview, and a missing manifest is uncertain again.
     (draft / ".preview/headlines.md").unlink()

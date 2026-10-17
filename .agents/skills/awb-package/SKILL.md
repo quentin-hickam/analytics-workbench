@@ -56,7 +56,7 @@ With the headlines, show the required questions as the slide words them, and say
 Write the draft at the contract's paths, or revise the same files; this is a first pass, finished once step 4 has run. A draft in an earlier format is rewritten whole in the current format on its next revision; releases stay frozen.
 
 - `findings.md` is the deck outline under the slide rules and translation rule in `package-format/findings-template.md`; its **Answer** slide is the executive summary.
-- Order finding slides by `presentation_order` when the manifest records one, otherwise under the contract's **Ledger storyline** rules, which also govern **Open questions**; slides the user agreed to move go under `## Appendix`. Report every finding with no linked ledger question, even though, without a `presentation_order`, its placement last passes the check.
+- Order finding slides by `presentation_order`, the slide slugs `ledger_order` lists, when the manifest records one, otherwise under the contract's **Ledger storyline** rules, which also govern **Open questions**; slides the user agreed to move go under `## Appendix`. Report every finding with no linked ledger question, even though, without a `presentation_order`, its placement last passes the check.
 - `methodology.md` follows `package-format/methodology-template.md` in the workbench's own vocabulary.
 - When the audience needs one, `methodology-note.md` follows `package-format/methodology-note-template.md`.
 - Copy `package-format/deck-rules.md` and `package-format/assembly/m365.md` into the draft unchanged, at the same paths under it.

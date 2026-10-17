@@ -497,7 +497,7 @@ def collect(root, *, probe_upstream=False):
             # A frozen release is read only for released_at.
             released = timestamp(manifest(latest, release=True), "released_at", latest / "manifest.json") if latest else None
             entry = {"name": directory.name, "draft_exists": draft.is_dir(),
-                     "draft_stage": "headline preview awaiting approval" if preview else None,
+                     "draft_stage": "headline preview written, not yet exported" if preview else None,
                      "revised_at": revised.isoformat() if revised else None,
                      "release_inventory_known": release_dirs is not None, "latest_release": latest.name if latest else None, "released_at": released.isoformat() if released else None,
                      "draft_vs_release": ("ahead" if revised > released else "same_or_older") if revised and released else None}
