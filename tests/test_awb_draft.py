@@ -3004,6 +3004,13 @@ def note_of(words):
     ("**Methods note length:** about 500 words\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
     ("Methods note length: about 500 words\nMethods note length: about 400 words\n", 30,
      [{"file": "investigations/inv/brief.md", "line": 6}]),
+    # A numbered list marker is read like a bulleted one (review probes).
+    ("1. Methods note length: about 100 words\n", 111, [{"words": 111, "recorded": 100}]),
+    ("1) Methods note length: about 100 words\n", 111, [{"words": 111, "recorded": 100}]),
+    # Other spellings are reported, never read as no preference.
+    ("> Methods note length: about 100 words\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+    ("| Methods note length | about 100 words |\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
+    ("Methodology note length: about 100 words\n", 30, [{"file": "investigations/inv/brief.md", "line": 5}]),
 ])
 def test_note_over_the_recorded_length_is_an_informational_row(project, capsys, brief, words, rows):
     if brief == "template":
@@ -3022,6 +3029,15 @@ def test_note_over_the_recorded_length_is_an_informational_row(project, capsys, 
     if rows and "words" in rows[0]:
         assert report["note_length"][0]["file"] == "methodology-note.md"
         assert "investigations/inv/brief.md:5 records" in report["note_length"][0]["problem"]
+
+
+def test_note_length_skips_a_fence_language_label(project, capsys):
+    # 110 rendered words and a labelled fence stay within about 100 words; the label is fenced code.
+    write(project, "investigations/inv/brief.md", "# Brief\n\nMethods note length: about 100 words\n")
+    write(project / "deliveries/inv/pkg/draft", "methodology-note.md",
+          note_of(110) + "\n```python\nprint(1)\n```\n")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert report["note_length"] == [], report["note_length"]
 
 
 def test_check_draft_counts_main_and_appendix_slides(project, capsys):

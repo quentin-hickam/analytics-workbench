@@ -2628,9 +2628,11 @@ def _write_start_here(draft, investigation, package):
 
 
 # The brief's Audience line that records a methods note length, in its one written form, and any line that
-# starts like it, so a length recorded in another form is reported rather than read as none.
-_NOTE_LENGTH = re.compile(r"(?:[-*+]\s+)?Methods note length: about ([0-9]+) words\.?")
-_NOTE_LENGTH_LIKE = re.compile(r"\s*(?:[-*+]\s+)?\**methods\s+note\s+length", re.IGNORECASE)
+# starts like it, after a list marker, `>`, `|`, or `**`, "methodology note" included, so a length recorded
+# in another form is reported rather than read as none.
+_NOTE_LENGTH = re.compile(r"(?:(?:[-*+]|[0-9]+[.)])\s+)?Methods note length: about ([0-9]+) words\.?")
+_NOTE_LENGTH_LIKE = re.compile(r"\s*(?:(?:[-*+>|]|[0-9]+[.)])\s*)*\**method(?:s|ology)\s+note\s+length",
+                               re.IGNORECASE)
 # How far the note may run over the recorded length before the row: 10%, as integer tenths.
 _NOTE_SLACK_TENTHS = 11
 
@@ -2664,7 +2666,7 @@ def note_length_problems(root, investigation, draft) -> list[dict]:
                      "problem": f"the brief records more than one methods note length: {sorted(lengths)}"})
     if len(lengths) == 1:
         (recorded, number), = lengths.items()
-        words = sum(_words(line.plain) for line in _read_view(note)[0])
+        words = sum(_words(line.plain) for line in _read_view(note)[0] if line.kind != "fence")
         if words * 10 > recorded * _NOTE_SLACK_TENTHS:
             rows.append({"file": METHODOLOGY_NOTE, "words": words, "recorded": recorded,
                          "problem": f"the note runs {words} words, more than 10% over the about {recorded} words "
@@ -3623,11 +3625,11 @@ _OTHER_BREAK = re.compile("[\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029]")
 _MATCH_CAP = 20
 _RULES_HEADER = """# Review rules
 
-Rules from the user's corrections to package drafts. The read-only package review checks every rule on \
-every draft; `python3 src/awb.py review-rules check <investigation> <package>` lists each rule with the \
-narrative lines its pattern matches.
+Rules from the user's corrections to package drafts. The read-only package review checks every rule that \
+holds for the draft's package; `python3 src/awb.py review-rules check <investigation> <package>` lists each \
+such rule with the narrative lines its pattern matches.
 
-Add a rule only with `python3 src/awb.py review-rules add`. A rule ID, `R-<area>-NNN`, is never \
+Add a rule only with `python3 src/awb.py review-rules add --confirmed`, after the user says yes to it. A rule ID, `R-<area>-NNN`, is never \
 renumbered, reused, or deleted: edit a rule's other fields in place, and retire a rule by setting its \
 severity to `retired`. A pattern is a Python regular expression in backticks, matched against each line \
 of the draft's `findings.md`, `methodology.md`, and `methodology-note.md` when it has one, or `none` when no \
@@ -4064,8 +4066,8 @@ def _reviewed_flags(record):
 
 def _package_rules(data, investigation, package):
     """The rule file's bytes without the sections of rules kept for another package, so adding or changing
-    one leaves this package's review current. A file that does not decode or parse cleanly is kept whole,
-    so any change to it still counts."""
+    one leaves this package's review current, or None when no rule holds for this package, as for an absent
+    file. A file that does not decode or parse cleanly is kept whole, so any change to it still counts."""
     try:
         rules, problems = parse_review_rules([line.removesuffix("\r")
                                               for line in data.decode("utf-8-sig").split("\n")])
@@ -4073,6 +4075,8 @@ def _package_rules(data, investigation, package):
         return data
     if problems:
         return data
+    if not any(_for_package(rule, investigation, package) for rule in rules):
+        return None
     lines = data.split(b"\n")
     # A sound file holds only rule headings after its first rule, so a section runs to the next one; the
     # last runs to the end of the file, its final newline included, so a rule appended for another package
@@ -4287,8 +4291,10 @@ def review_receipt(root, investigation, package) -> dict:
             before = (directory / "snapshot" / _stored(name)).read_bytes()
         except OSError:
             before = None
+        # The rule file is diffed as the review reads it, so its line numbers count only this package's rules.
         label = f"{draft}/{MANIFEST} revalidation_flags" if name == "revalidation_flags" else \
             f"investigations/{investigation}/{BRIEF}" if name == BRIEF else \
+            f"{REVIEW_RULES} without rules kept for another package" if name == REVIEW_RULES else \
             f"{draft}/{name}" if name in _REVIEW_INPUTS and name != REVIEW_RULES else name
         pieces += difflib.unified_diff(_diff_text(before), _diff_text(current.get(name)),
                                        f"reviewed {label}", label)
@@ -4351,9 +4357,11 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
         epilog="Prints one JSON line: status (none: no record; current: it passed and nothing it read has "
                "changed; stale: something it read has changed; failed: nothing has changed, but it did not "
                "pass), kind, recorded_at, accepted, report (the prior report), changed (each input whose content "
-               f"differs), diff (a unified diff of each from the reviewed copy to the current file, its + line "
-               f"numbers the current file's, cut so the printed line stays within {_READ_LIMIT} characters, with "
-               "diff_cut counting what was cut), and errors.\nExit 0 unless errors is not empty.")
+               "differs; brief.md is the investigation's brief, an evidence file is named by its path), diff (a "
+               "unified diff of each from the reviewed copy to the current file, its + line numbers the current "
+               "file's, the rule file's counting only this package's rules, cut so the printed line stays "
+               f"within {_READ_LIMIT} characters, with diff_cut counting what was cut), and errors.\n"
+               "Exit 0 unless errors is not empty.")
     _package_arguments(show)
     args = parser.parse_args(argv)
     investigation, package = _simple(args.investigation, "investigation"), _simple(args.package, "package")

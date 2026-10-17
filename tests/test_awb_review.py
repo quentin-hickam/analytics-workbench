@@ -643,6 +643,20 @@ def test_another_packages_rule_leaves_a_review_current(project, capsys):
     assert show(project, capsys)[1]["status"] == "stale"
 
 
+def test_a_rule_file_with_no_rule_for_the_package_reads_as_absent(project, capsys):
+    # No rule file, then one holding only another package's rule: the review stays current.
+    other_package(project)
+    record(project, capsys, CLEAN)
+    add(project, capsys, area="wording", package="inv/other")
+    assert show(project, capsys)[1]["status"] == "current"
+    assert not (project / "deliveries/inv/pkg/review/snapshot/review-rules.md").exists()
+    # The diff of the filtered file says its line numbers count only this package's rules.
+    add(project, capsys, area="numbers")
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == [RULES]
+    assert f"+++ {RULES} without rules kept for another package\n" in out["diff"]
+
+
 def test_package_and_release_invoke_the_read_only_review():
     package = (SKILLS / "awb-package/SKILL.md").read_text()
     release = (SKILLS / "awb-release/SKILL.md").read_text()
@@ -754,7 +768,7 @@ def test_receipt_after_a_clean_review_matches_until_what_it_read_changes(project
         code, out = show(project, capsys)
         assert code == 0 and out["status"] == "stale" and out["changed"] == [name], name
         # The diff runs from what the review read to the file now, labelled, with the current line numbers.
-        label = name if name == RULES else f"{DRAFT}/{name}"
+        label = f"{RULES} without rules kept for another package" if name == RULES else f"{DRAFT}/{name}"
         assert f"--- reviewed {label}\n+++ {label}\n" in out["diff"] and f"-{old}" in out["diff"]
         assert f"+{new}" in out["diff"]
         line = path.read_text().splitlines().index(new) + 1
