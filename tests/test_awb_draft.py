@@ -2848,7 +2848,8 @@ def test_check_draft_open_questions_rows(project, capsys, required, body, placem
     assert verified["open_questions"] == report["open_questions"]
 
 
-def test_open_questions_includes_parked_and_recheck_without_truncation(project, capsys):
+@pytest.mark.parametrize("promoted", [True, False])
+def test_open_questions_includes_parked_and_recheck_without_truncation(project, capsys, promoted):
     provenance = load(project / "src/provenance.py", "ledger_complete_fixture")
     questions = ["Which regions need review?", "Which period applies?", "Which owner decides?",
                  "Which population matters?", "Which definition applies?", "Which caveat matters?"]
@@ -2859,8 +2860,13 @@ def test_open_questions_includes_parked_and_recheck_without_truncation(project, 
     settings.write_text(settings.read_text().replace('[results.r-001]', '[results.r-001]\nanswers = ["Q-001"]'))
     provenance.answer_question(project, "inv", "Q-001", results=["r-001"])
     provenance.set_question(project, "inv", ["Q-002"], "parked", reason="Waiting on owner")
+    if not promoted:
+        write(project / "investigations/inv", "history.md", "# Investigation history\n")
+        provenance.update_findings(project, "inv", ["r-001"], status="provisional", reason="Not yet checked")
     provenance.flag_findings(project, "inv", [{"result": "r-001", "reason": "Changed input"}])
-    assert provenance.question_tree(project, "inv")[0]["display_status"] == "answered (awaiting recheck)"
+    # A recheck of a never-promoted answer is still required on the slide.
+    assert provenance.question_tree(project, "inv")[0]["display_status"] == (
+        "answered (awaiting recheck)" if promoted else "answered (provisional, awaiting recheck)")
     provenance.edit_question(project, "inv", "Q-001", audience="Which regions need review?")
     draft = project / "deliveries/inv/pkg/draft"
     record = manifest(project)

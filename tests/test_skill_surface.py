@@ -418,10 +418,12 @@ def test_chat_claim_rules_sit_where_chat_is_written():
 def test_footer_counts_a_provisional_answer_as_provisional():
     # "5 answered" while chat had shown only leaders: an answer resting on unpromoted findings is provisional.
     agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
-    assert 'counting `answered (provisional)` as provisional' in agents
+    # A flagged answer never promoted displays answered (provisional, awaiting recheck): provisional too.
+    assert 'counting any `provisional` answer as provisional' in agents
     assert '1 provisional' in footer_example(AGENTS.read_text(encoding='utf-8'))
     status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
-    assert 'Count `answered (provisional)`' in status and 'as provisional, not answered' in status
+    assert ('Count `answered (provisional)` and `answered (provisional, awaiting recheck)`' in status
+            and 'as provisional, not answered' in status)
 
 
 def test_reports_use_plain_words_not_ids():
@@ -582,7 +584,7 @@ def test_only_the_users_questions_are_roots():
     # The footer names the user's questions as the roots and counts them only when they changed.
     agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
     assert ("ends with one plain line: any change to the user's questions, the ledger's roots, "
-            "counting `answered (provisional)` as provisional, and the next step") in agents
+            "counting any `provisional` answer as provisional, and the next step") in agents
     status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
     assert 'lead with `roots`, the questions the user asked' in status
     assert 'Report `questions.counts`, the totals with every sub-question, only on request' in status
