@@ -22,7 +22,7 @@
 # test_cli_sql_reports_failures_on_one_line: SQL errors, failing view files and non-query SQL print one stderr line and return 1; a bad --out extension is a usage error.
 # test_sql_param_values_read_as_settings_values: a --param value is read as a one-line TOML value, so a date, number, boolean, quoted string, or array keeps its type, and other text, a value spanning lines included, is the string as given.
 # test_sql_param_refuses_what_a_query_cannot_name: a --param without =, or whose name is not letters, digits, and _, is a usage error.
-# test_cli_sql_binds_parameters_from_param_and_settings: with and without --read-only, --settings binds an investigation's [parameters] and --param wins over them, each statement getting only the names it uses with their types kept, writing nothing; a missing, unreadable, or misnamed settings investigation fails on one line, and a bad --param exits 2.
+# test_cli_sql_binds_parameters_from_param_and_settings: with and without --read-only, --settings binds an investigation's [parameters] and loads its views/*.sql, and --param wins over them, each statement getting only the names it uses with their types kept, writing nothing; a missing, unreadable, or misnamed settings investigation fails on one line, and a bad --param exits 2.
 # test_cli_sql_plan_failures_name_the_fix_and_keep_read_only: under --read-only, an unbound parameter, an ambiguous column, and another binder error return DuckDB's error on one line with its likely fix and never suggest dropping --read-only; without it, an unbound parameter gets the same fix; profile, which binds none, answers an unbound parameter with a fix it can take.
 # test_cli_sql_and_profile_report_a_missing_query_file: one line ending in .sql, in any case, relative or absolute, that names no file is a missing query file for sql and profile, and whitespace around one that names a file is ignored; SQL text over several lines or not ending in .sql still runs; a table named sql in a schema is the known limit.
 # test_cli_sql_read_only_runs_select_and_refuses_every_write: --read-only prints SELECT results and refuses COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, a setting PRAGMA, CALL, CREATE, and INSERT, and a SELECT calling a table function that writes (enable_profiling, enable_logging, checkpoint), directly or through a view, macro, subquery, or query(), and any call of query, query_table, json_execute_serialized_sql, or a table macro calling one (histogram_values, histogram) as a table function, however named or quoted, before any statement runs, and refuses --out, leaving the project unchanged; profile --read-only does the same; a read-only PRAGMA, SHOW, SUMMARIZE, PIVOT with IN, information_schema, a column or CTE named query, and the histogram() aggregate still run, through sql and profile.
@@ -580,8 +580,17 @@ def test_cli_sql_binds_parameters_from_param_and_settings(tmp_path, capsys):
     (tmp_path / "investigations/churn/settings.toml").write_text(
         "[parameters]\nfirst = 2\nlast = 3\nunused = 2026-01-01\n")
     (tmp_path / "queries/window.sql").write_text("SELECT id FROM orders WHERE id BETWEEN $first AND $last ORDER BY id;\n")
+    (tmp_path / "investigations/churn/views").mkdir()
+    (tmp_path / "investigations/churn/views/01_screened.sql").write_text(
+        "CREATE VIEW screened AS SELECT id FROM orders WHERE id > 1;\n")
     before = _files(tmp_path)
     for read_only in ([], ["--read-only"]):
+        # --settings also loads the investigation's shared views, which a session without it lacks
+        assert landing.cli_sql(tmp_path, read_only + ["--settings", "churn", "SELECT count(*) AS n FROM screened "
+                                                      "WHERE id <= $last"]) == 0
+        assert capsys.readouterr().out == "| n |\n|---|\n| 2 |\n1 of 1 rows shown\n"
+        assert landing.cli_sql(tmp_path, read_only + ["SELECT count(*) FROM screened"]) == 1
+        assert "screened" in capsys.readouterr().err
         # settings bind every name a statement uses, and --param wins over them
         assert landing.cli_sql(tmp_path, read_only + ["--settings", "churn", "queries/window.sql"]) == 0
         assert capsys.readouterr().out == "| id |\n|---|\n| 2 |\n| 3 |\n2 of 2 rows shown\n"

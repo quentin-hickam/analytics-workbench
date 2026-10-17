@@ -146,7 +146,7 @@ TOOLS = [
                     "description": "sql: values for the query's $name parameters, each written as after "
                                    "--param name= (2026-01-01 is a date, 5 an integer); they win over settings."},
          "settings": {"type": "string", "description": "sql: an investigation whose settings [parameters] the "
-                      "query binds."},
+                      "query binds and whose views/*.sql it loads."},
          "max_rows": {"type": "integer", "minimum": 1, "description": "profile: sample above this many rows."},
          "all": {"type": "boolean", "description": "questions: list every question."},
          "status": {"type": "array", "items": {"type": "string", "enum": list(QUESTION_STATUSES)},

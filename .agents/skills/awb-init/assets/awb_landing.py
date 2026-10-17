@@ -1690,7 +1690,8 @@ def cli_sql(root: Path, argv: list[str]) -> int:
                         help="bind $NAME to VALUE, read as a TOML value as settings are (2026-01-01 is a date, "
                              "5 an integer, other text a string); repeat for each; wins over --settings")
     parser.add_argument("--settings", metavar="INVESTIGATION",
-                        help="bind the [parameters] of investigations/INVESTIGATION/settings.toml")
+                        help="bind the [parameters] of investigations/INVESTIGATION/settings.toml and load its "
+                             "views/*.sql after the foundation views, as a result session does")
     parser.add_argument("--read-only", action="store_true",
                         help="write nothing: run only SELECT statements whose table functions read files or the "
                              "catalog and build no SQL from a string (query, query_table, the histogram table "
@@ -1708,7 +1709,7 @@ def cli_sql(root: Path, argv: list[str]) -> int:
         parser.error("--out must end in .csv or .parquet")
     try:
         parameters = {**(_settings_parameters(root, args.settings) if args.settings else {}), **dict(args.param)}
-        with session(root, read_only=args.read_only) as connection:
+        with session(root, read_only=args.read_only, investigation=args.settings) as connection:
             # sql() runs every statement and returns the last one's result, or None.
             text = _sql_argument(root, args.query)
             if args.read_only:
