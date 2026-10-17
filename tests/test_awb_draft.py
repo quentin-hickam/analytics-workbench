@@ -23,6 +23,8 @@
 # test_recorded_text_reviewed_probes: every recorded text probed in review records the magnitudes intended, and an extreme or non-finite cell records nothing or itself without crashing.
 # test_check_numbers_skips_a_doi: a DOI, 10. with a four- to nine-digit registrant code, a slash, and a suffix, is skipped whole after doi: or DOI, in a doi.org link, or bare when its suffix holds a letter and a digit, ending at whitespace or a , or ; before a digit; a shorter registrant code, no slash, a bare suffix without a letter or a digit, as in 10.2500/litre, 10.2500/1000, or 10.12345/67.8, and a number glued after a DOI by , or ; are read.
 # test_provenance_gaps_are_unknown_objects_and_unread_requirements: an {"unknown": reason} object and an unread requirements line are gaps; a settings value or column name such as unknown_pickup, or a string starting with unknown, is not.
+# test_check_numbers_reads_ordinary_notation: the issue's probes: 54.8/57.6 traces when both values are recorded, each half traced alone; 18:00 and December 2011 is give no row; an untraced figure still does.
+# test_numbers_rows_name_the_rule_that_applied: each numbers row's problem names why its number did not trace (no recorded value, joined digits, a recorded value on its rounding edge, or a year-like count) and points to allowed_numbers.
 # test_check_numbers_allowed_phrases_and_precision: an allowed phrase covers only the number it is written around, a bare allowed text every occurrence; a row's text copied exactly covers its number after a line wrap or extra spaces; a number traces at every written digit beyond 28 significant digits and not one unit of a further place outside its rounding.
 # test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's or a path's digits add nothing; evidence text and parsed settings content add scaled and scientific values a narrative can write in full, without dates, booleans, or the settings file's size.
 # test_recorded_values_keep_every_json_digit: profile and evidence fractions keep every written digit, so the exact narrative value traces and a value one digit off does not.
@@ -41,6 +43,11 @@
 # test_export_percent_scales_fractions_and_records_them: [percent] columns are scaled by 100 exactly from the saved text before rounding, in charts and datasets, and recorded in the manifest's charts and dataset_selection entries; a top-level list, a non-list, or another key under [percent] is refused.
 # test_per_result_display_names_override_the_global_ones: [results."<id>".columns] and .values name one result's columns and values over the global names, a per-result value table replacing the global one whole; another key under a result, or a percent table of another shape, is refused.
 # test_a_per_result_percent_list_replaces_the_global_one: [results."<id>".percent] lists one result's percent columns in place of [percent], so a column already holding percents in one result is not scaled again; the manifest records each file's list and check-draft reapplies it.
+# test_export_scale_needs_places_when_its_quotient_is_unrounded: a divisor whose quotient shows more than four places needs [round] places, listed with round_stub, and the methodology line states the division before the rounding.
+# test_export_scale_divides_records_and_traces: a [scale] divisor divides a column's number cells before percent scaling and rounding, in charts and datasets, is recorded in their manifest entries and methodology lines, is refused when not { divide = <a positive number> }, and makes a narrative number written in the scaled unit trace; check-draft refuses an entry whose divisor differs from display.toml.
+# test_export_warns_on_a_fraction_rounded_in_its_query: a [percent] column shown to fewer than two places whose saved fractions have exactly four places is a precision_warnings row, the files still written; full precision, or two places shown, gives none.
+# test_export_warns_on_a_value_code_no_cell_holds: a [values] code no exported saved table holds, such as true where pandas saved True, is a value_warnings row naming the table, with the near cell when only case differs; codes the tables hold give none.
+# test_confirmed_columns_silence_their_label_warning: a column under [confirmed] columns gives no label_warnings row, other columns still do, and a malformed [confirmed] is refused.
 # test_export_warns_when_one_name_labels_results_with_different_questions: a global [columns] name labeling files from results with different questions is a label_warnings row, the files still written; the same question or a per-result name gives none.
 # test_chart_selection_grammar_accepts / test_chart_selection_grammar_refuses: accepted and refused rows for --chart RESULT[:COLUMNS][@first=<n>|@where=<column>=<value>[,<value>]], each refusal naming the part that does not fit.
 # test_export_selects_chart_rows_and_records_the_selection: @first=10 writes the first 10 rows and @where the matching rows in table order, the manifest recording each selection; an unknown column, a value no row holds, or too many rows is an error, malformed syntax and a dataset selection exit 2, and nothing is written.
@@ -70,6 +77,9 @@
 # test_numbers_check_and_rendered_view_drop_the_same_comments: across a seeded corpus of 2,000 random narratives, link targets and escaped code spans among their pieces, the words the rendered view drops as comment are exactly those the numbers check's source lines blank, code spans aside, which it blanks by design, and the numbers check reads exactly the view's lines outside fenced code.
 # test_numbers_check_pairs_code_spans_across_the_paragraph: a number after a code span wrapped across lines, a span on a later line after it, is read, as the draft shows it; one inside a wrapped span is skipped; a span on one line keeps its result. A line opening with a span, all code, or ending a wrapped span still leaves a numbered line after it wrapping the paragraph, in a quote too, so its number is read.
 # test_an_allowed_text_quoting_a_code_span_covers_its_number: an allowed text holding a code span matches the line as written and covers its number.
+# test_negated_causal_phrases_are_no_claims: a causal phrase in a negated clause, under the closed grammar _NEGATOR, _CLAUSE_END, and _UNKNOWN declare, is skipped; a negator outside the clause or window, in a relative clause, or an intensifier such as not only leaves it a row.
+# test_check_draft_skips_negated_causal_wording: does not test what caused them passes check-draft's claims; drove the increase on the same slide is still a row.
+# test_methodology_note_limitations_section_is_not_read_for_claims: causal wording under the note's ## Limitations, its ### sections included, gives no claims row; the same sentence under another section does.
 # test_methodology_note_is_checked_with_rows_naming_it: a clean methodology-note.md passes and joins the inventory; an internal name, an untraced number, causal wording above the strongest represented claim, and an HTML block in it fail check-draft and release with rows naming the file; without it check-draft reports exactly what it did before.
 # test_check_draft_counts_main_and_appendix_slides: slides counts the main sequence, title included, and the appendix apart; How we know under ## Appendix passes.
 # test_appendix_slides_are_checked_like_main_slides: How we know under ## Appendix needs no methodology section; an appendix finding slide is held to its claim strength.
@@ -118,7 +128,7 @@ CHART_SPEC = "**Chart 1.** Horizontal bar: late share by region\n- **Data:** cat
 # The fixture's chart file as export records it: r-001's first row, its region labeled and its rate rounded whole.
 CHART_ENTRY = {"path": "charts/chart-1.csv", "result_id": "r-001", "columns": ["region", "late_rate"],
                "selection": {"first": 1}, "headers": ["Region", "Closed late (%)"],
-               "values": {"region": {"W": "West"}}, "percent": [], "round": {"late_rate": 0}}
+               "values": {"region": {"W": "West"}}, "percent": [], "scale": {}, "round": {"late_rate": 0}}
 # The display names and value labels CHART_ENTRY records.
 CHART_DISPLAY = '[columns]\nregion = "Region"\nlate_rate = "Closed late (%)"\n\n[values.region]\nW = "West"\n'
 # The required slides around the finding slides: the title and Answer open the deck, How we know and
@@ -618,6 +628,17 @@ TRACED = deck("""### Late orders rose in the west
 """).replace("# Order quality\n", "# Order quality, January to June 2026\n")
 
 
+# The problem a numbers row gives for each rule that leaves its number untraced.
+ALLOW = "or list its text in the manifest's allowed_numbers with the reason"
+NOT_RECORDED = f"no represented result records this number at its written precision; correct it, {ALLOW}"
+YEAR_COUNT = ("read as a count: a year is skipped only after a month name, alone in parentheses, or after a word "
+              f"such as in or since where its period ends; reword it, such as ending the date with a comma, {ALLOW}")
+JOINED = ("digits joined by dots, commas, slashes, or colons read as one number with no single value, so it never "
+          f"traces; write each number apart, {ALLOW}")
+ON_EDGE = ("a recorded value lies exactly on the edge of this number's rounding, as when a value the query rounded "
+           f"is rounded again, so it does not trace; save the result at full precision, {ALLOW}")
+
+
 def test_check_draft_traces_narrative_numbers(project, capsys):
     draft = project / "deliveries/inv/pkg/draft"
     write(project, "investigations/inv/results/r-001.profile.json", json.dumps(
@@ -634,8 +655,8 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
     # A number no represented result produced fails with its file and line, in both modes and at release.
     write(draft, "findings.md", TRACED.replace("21.3%", "23.1%"))
     write(draft, "methodology.md", METHODOLOGY + "\nAbout 40 stores.\n")
-    rows = [{"file": "findings.md", "line": 14, "text": "23.1%"},
-            {"file": "methodology.md", "line": 13, "text": "40"}]
+    rows = [{"file": "findings.md", "line": 14, "text": "23.1%", "problem": NOT_RECORDED},
+            {"file": "methodology.md", "line": 13, "text": "40", "problem": NOT_RECORDED}]
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"] and report["numbers"] == rows
     code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
@@ -653,7 +674,7 @@ def test_check_draft_traces_narrative_numbers(project, capsys):
     code, _ = run(project, capsys, "export", "inv", "pkg", "--result", "r-002")
     assert code == 0 and manifest(project)["allowed_numbers"] == allowed  # export keeps the hand-recorded field
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
-    assert code == 1 and {"file": "findings.md", "line": 14, "text": "2.7%"} in report["numbers"]
+    assert code == 1 and {"file": "findings.md", "line": 14, "text": "2.7%", "problem": NOT_RECORDED} in report["numbers"]
 
 
 def test_check_draft_reports_number_problems(project, capsys):
@@ -682,7 +703,7 @@ def test_check_draft_reports_number_problems(project, capsys):
 
 def test_check_numbers_reads_formats(tmp_path):
     draft = load(ASSETS["src/packaging/draft.py"], "draft_numbers")
-    values = sorted({Decimal(v) for v in ("21.349", "0.105", "0.15", "3", "4213000", "12480", "1240", "0.5")})
+    values = sorted({Decimal(v) for v in ("21.349", "0.1", "0.15", "3", "4213000", "12480", "1240", "0.5")})
     path = tmp_path / "findings.md"
     path.write_text("""# Orders, January to June 2026
 
@@ -694,15 +715,18 @@ def test_check_numbers_reads_formats(tmp_path):
 ```
 44
 ```
-- Untraced: 21.4%, 1,250, 4.3M, 16%, 2, 3/4 of stores, 14:05, and (2025).
-- Skipped: in 2026, Q3 2026, Charts 2 and 3, 9:30am, 9:30 a.m., June 5, June 5-7, 2026, Monday, June 5.
+- Untraced: 21.4%, 1,250, 4.3M, 16%, 2, 3/4 of stores, and 9:30.
+- Skipped: in 2026, Q3 2026, Charts 2 and 3, 9:30am, 9:30 a.m., June 5, June 5-7, 2026, Monday, June 5, 14:05, (2025).
 - Traced: 1.24e3, 4.213e6, 1.5e-1 and 5e-1. Untraced: a hash 12345e6, 1e-5, 1.5e6, June 77 orders, 1950 orders.
 """)
+    rule = {"9:30": JOINED, "1950": YEAR_COUNT}
     assert draft.check_numbers(path, values) == [
-        {"file": "findings.md", "line": 6, "text": "7"},
-        *({"file": "findings.md", "line": 11, "text": t} for t in ("21.4%", "1,250", "4.3M", "16%", "2", "3/4", "14:05", "2025")),
-        *({"file": "findings.md", "line": 13, "text": t} for t in ("12345e6", "1e-5", "1.5e6", "77", "1950"))]
-    assert draft.check_numbers(path, values, allowed={"7", "2", "16%", "1,250", "4.3M", "21.4%", "3/4", "14:05", "(2025)",
+        {"file": "findings.md", "line": 6, "text": "7", "problem": NOT_RECORDED},
+        *({"file": "findings.md", "line": 11, "text": t, "problem": rule.get(t, NOT_RECORDED)}
+          for t in ("21.4%", "1,250", "4.3M", "16%", "2", "4", "9:30")),
+        *({"file": "findings.md", "line": 13, "text": t, "problem": rule.get(t, NOT_RECORDED)}
+          for t in ("12345e6", "1e-5", "1.5e6", "77", "1950"))]
+    assert draft.check_numbers(path, values, allowed={"7", "2", "16%", "1,250", "4.3M", "21.4%", "4", "9:30",
                                                       "12345e6", "1e-5", "1.5e6", "77", "1950"}) == []
 
 
@@ -730,9 +754,9 @@ REVIEWED_PROBES = [
     ("in 2023, 2024 and 2025", []), ("We reviewed 1950 orders and 2,000 stores", ["1950", "2,000"]),
     ("an increase in 2000 orders", ["2000"]), ("between 1950 and 2000 stores were affected", ["1950", "2000"]),
     ("late 2000 orders were found", ["2000"]), ("in 2025 and 2026 orders", ["2025", "2026"]), ("mid-2025.", []),
-    ("In June 2026 orders were lost", ["2026"]), ("Q3 2025 revenue", ["2025"]), ("In Q3 2000 orders were late", ["2000"]),
+    ("In June 2026 orders were lost", []), ("Q3 2025 revenue", ["2025"]), ("In Q3 2000 orders were late", ["2000"]),
     ("Revenue fell in Q3 2025.", []), ("FY 2024 and 2025 orders", ["2024", "2025"]), ("FY 2024 and 2025.", []),
-    ("Late orders (2025) exceeded the target.", ["2025"]),
+    ("Late orders (2025) exceeded the target.", []),
     ("in 2000\norders were lost", ["2000"]),  # a line wrap continues the sentence
     ("Late orders rose 3 points over 2025.", ["3", "2025"]), ("compared with 2024", ["2024"]),
     ("the 2025 baseline", ["2025"]), ("2026 H1", ["2026"]), ("Week 23", ["23"]),
@@ -746,9 +770,9 @@ REVIEWED_PROBES = [
     ("- Orders rose\n  steadily to\n  77. Then fell.", ["77"]), ("- Orders rose to\n77. Then fell.", []),
     ("  1. Orders rose\n  2. Orders fell", []), ("- Orders\n  - rose\n  77. Then fell.", []), ("- Orders\n  1. rose", []),
     ("1. Orders rose\n   steadily\n2. Orders fell", []),
-    ("opened at 9:30am", []), ("opened at 14:05", ["14:05"]), ("a 1:20 ratio", ["1:20"]),
+    ("opened at 9:30am", []), ("opened at 14:05", []), ("a 1:20 ratio", ["1:20"]),
     ("-21.3%", ["21.3%"]), ("10–15 percent", ["10", "15 percent"]),
-    ("values 1,2,3 and 4, 5", ["1,2,3", "4", "5"]), ("21,3%", ["21,3%"]), ("3/4 of stores", ["3/4"]),
+    ("values 1,2,3 and 4, 5", ["1,2,3", "4", "5"]), ("21,3%", ["21,3%"]), ("3/4 of stores", ["3", "4"]),
     ("Total,77 orders were late.", ["77"]), ("Total, 77 orders were late.", ["77"]), ("Total;77", ["77"]),
     ("Total:77", ["77"]), ("(77 orders)", ["77"]), ("Rates: West,21.3%; East,2.7%.", ["21.3%", "2.7%"]),
     ("West/21.3%", ["21.3%"]), ("sentence.5 stores", ["5"]), ("_77 orders_", ["77"]), ("late_77", []),
@@ -781,6 +805,19 @@ REVIEWED_PROBES = [
     ("- Share was 18.2\n  percent.", [], {"values": [], "allowed": {"18.2 percent"}}),
     ("Share was 18.2\npercent this year.", ["18.2 percent"], {"values": [], "allowed": {"18.2"}}),
     ("Ran in Week\n23 of the year.", [], {"values": [], "allowed": {"Week 23"}}),
+    # Ordinary notation (issue #88): two numbers joined by one slash are two numbers, each traced; a 24-hour time;
+    # a year right after a month name, full or three letters, or alone in parentheses.
+    ("Zones 264/265 led.", [], {"values": ["264", "265"]}), ("Zones 264/266 led.", ["266"], {"values": ["264", "265"]}),
+    ("368/53.5% of orders", [], {"values": ["368", "0.535"]}), ("53.5%/368 of orders", ["53.5"], {"values": ["368", "0.535"]}),
+    ("1/2/3 of orders", ["1/2/3"]), ("1,240/1,300 orders", [], {"values": ["1240", "1300"]}),
+    ("at 00:00, 09:15, and 23:59", []), ("at 24:00", ["24:00"]), ("at 18:60", ["18:60"]), ("at 9:30 daily", ["9:30"]),
+    ("3,18:00", ["3,18:00"]), ("a 12:20 ratio", []),  # a ratio written as a 24-hour time reads as one
+    ("Dec 2011 sales", []), ("Dec. 2011 sales", []), ("September 2011 sales", []), ("Sept 2011 sales", ["2011"]),
+    ("december 2011 sales", ["2011"]), ("(2019)", []), ("(Smith, 2019)", ["2019"]), ("(2019 orders)", ["2019"]),
+    ("orders(2019)", ["2019"]), ("Dec 2011/2012 sales", ["2011", "2012"]),
+    # A recorded value on the edge of a number's rounding does not trace: 0.5245 rounds to 52.5% only once rounded again.
+    ("Share was 52.5%.", ["52.5%"], {"values": ["0.5245"]}), ("Share was 52.4%.", ["52.4%"], {"values": ["0.5245"]}),
+    ("Share was 52.45%.", [], {"values": ["0.5245"]}), ("Share was 52%.", [], {"values": ["0.5245"]}),
 ]
 
 
@@ -823,8 +860,8 @@ def test_check_numbers_skips_a_doi(tmp_path):
                     "Cost was 10.2500/1000 litres; ratio 10.12345/67.8 held.\n"
                     "See DOI 10.24432/C5CG6D,478 rows, and 10.24432/C5CG6D;12 more; cell 10.1016/j.cell.2009.01.002.\n")
     assert [(row["line"], row["text"]) for row in draft.check_numbers(path, [])] == [
-        (2, "10.123"), (2, "10.24432"), (2, "1.24432"), (3, "10.2500"), (4, "10.2500/1000"), (4, "10.12345/67.8"),
-        (5, "478"), (5, "12")]
+        (2, "10.123"), (2, "10.24432"), (2, "1.24432"), (3, "10.2500"), (4, "10.2500"), (4, "1000"), (4, "10.12345"),
+        (4, "67.8"), (5, "478"), (5, "12")]
 
 
 def test_provenance_gaps_are_unknown_objects_and_unread_requirements():
@@ -842,6 +879,26 @@ def test_provenance_gaps_are_unknown_objects_and_unread_requirements():
         {"field": "producing_commit", "reason": "not a git repository"},
         {"field": "results[0].runtime.unread_requirements[0]",
          "reason": "requirements not read, packages unrecorded: requirements.txt:2: -e ."}]
+
+
+def test_check_numbers_reads_ordinary_notation(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_notation")
+    path = tmp_path / "findings.md"
+    path.write_text("- Mean fares were 54.8/57.6 at 18:00 and 18:59.\n- December 2011 is the last month; 41 trips.\n")
+    values = sorted(Decimal(v) for v in ("54.8", "57.6"))
+    assert draft.check_numbers(path, values) == [
+        {"file": "findings.md", "line": 2, "text": "41", "problem": NOT_RECORDED}]
+    # Each half is traced alone, so a half no result records is still a row.
+    assert [(row["line"], row["text"]) for row in draft.check_numbers(path, values[:1])] == [(1, "57.6"), (2, "41")]
+
+
+def test_numbers_rows_name_the_rule_that_applied(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_rules")
+    path = tmp_path / "methodology.md"
+    path.write_text("About 40 stores.\nOpened at 9:30 daily.\nShare was 52.5%.\nWe reviewed 1950 orders.\n")
+    assert [(row["text"], row["problem"]) for row in draft.check_numbers(path, [Decimal("0.5245")])] == [
+        ("40", NOT_RECORDED), ("9:30", JOINED), ("52.5%", ON_EDGE), ("1950", YEAR_COUNT)]
+    assert all("allowed_numbers" in problem for problem in draft._UNTRACED.values())
 
 
 def test_check_numbers_allowed_phrases_and_precision(tmp_path):
@@ -1098,7 +1155,8 @@ def with_results(project):
 # What export records for --chart r-001:region,late_rate under DISPLAY.
 EXPORTED_CHART = {"path": "charts/chart-1.csv", "result_id": "r-001", "columns": ["region", "late_rate"],
                   "selection": "all", "headers": ["Region", "Closed late (%)"],
-                  "values": {"region": {"W": "West", "E": "East"}}, "percent": [], "round": {"late_rate": 1}}
+                  "values": {"region": {"W": "West", "E": "East"}}, "percent": [], "scale": {},
+                  "round": {"late_rate": 1}}
 
 
 def test_export_writes_charts_datasets_and_manifest(project, capsys):
@@ -1113,7 +1171,7 @@ def test_export_writes_charts_datasets_and_manifest(project, capsys):
     record = manifest(project)
     assert record["charts"] == [EXPORTED_CHART]
     assert record["dataset_selection"] == [{"path": "datasets/late-closures.csv", "result_id": "r-001",
-                                            "columns": ["region", "late_rate", "n"], "percent": [],
+                                            "columns": ["region", "late_rate", "n"], "percent": [], "scale": {},
                                             "round": {"late_rate": 1}}]
     assert [c["result_id"] for c in record["export_checks"]] == ["r-001"]
     assert all(len(c["comparisons"]) == 5 for c in record["export_checks"])
@@ -1271,7 +1329,7 @@ def test_export_percent_scales_fractions_and_records_them(project, capsys):
     assert (record["charts"][0]["percent"], record["charts"][0]["round"]) == (["share"], {"share": 1})
     assert "shares: Share (%) <- r-001.share, times 100, rounded to 1 decimal place" in out["methodology_lines"]
     assert record["dataset_selection"] == [{"path": "datasets/shares.csv", "result_id": "r-001",
-                                            "columns": ["region", "share"], "percent": ["share"],
+                                            "columns": ["region", "share"], "percent": ["share"], "scale": {},
                                             "round": {"share": 1}}]
     # Scaled exactly from the saved text: 0.21349 shows as 21.349, three places, so it needs no [round].
     write(project, "foundation/display.toml", display)
@@ -1290,7 +1348,7 @@ def test_export_percent_scales_fractions_and_records_them(project, capsys):
     code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
     assert code == 1 and out["errors"] == [
         "foundation/display.toml: unknown key 'percents'; the file holds only [columns], [values.<column>], "
-        "[round], [percent], and [results.\"<result>\"]"]
+        "[round], [percent], [scale], [confirmed], and [results.\"<result>\"]"]
 
 
 def test_per_result_display_names_override_the_global_ones(project, capsys):
@@ -1352,8 +1410,125 @@ def test_a_per_result_percent_list_replaces_the_global_one(project, capsys):
     assert (draft / "datasets/fractions.csv").read_text() == "Region,Share of claims (%)\nW,21.35\n"
 
 
-COLLISION = ("results answering different questions share this [columns] name; confirm it fits each, "
-             "or name the column for one result under [results.\"<result>\".columns]")
+COLLISION = ("results answering different questions share this [columns] name; confirm it fits each and list "
+             "the column under [confirmed] columns, or name the column for one result under "
+             "[results.\"<result>\".columns]")
+
+
+def test_export_scale_divides_records_and_traces(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    write(project, "foundation/display.toml", DISPLAY + "\n[scale]\nn = { divide = 4 }\n")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "cases=r-001")
+    assert out["written"], out
+    assert (draft / "charts/chart-1.csv").read_text() == "Region,Cases\nWest,2.5\nEast,2\n"
+    assert (draft / "datasets/cases.csv").read_text() == "Region,Closed late (%),Cases\nWest,21.3,2.5\nEast,2.7,2\n"
+    record = manifest(project)
+    assert record["charts"][0]["scale"] == {"n": 4} and record["dataset_selection"][0]["scale"] == {"n": 4}
+    assert "chart-1: Cases <- r-001.n, divided by 4" in out["methodology_lines"]
+    # A narrative number written in the scaled unit traces to the recorded value divided by the recorded divisor.
+    write(draft, "methodology.md", METHODOLOGY + "\nWest averaged 2.5 cases a week.\n")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    # The fixture's findings.md specifies another chart, so only the manifest rows of charts are compared below.
+    recorded = [row for row in report["charts"] if "manifest" in row["problem"]]
+    assert report["numbers"] == [] and recorded == [], report
+    draft_module = load(ASSETS["src/packaging/draft.py"], "draft_scale")
+    values, problems = draft_module.recorded_values(project, "inv", [{"result_id": "r-001"}], [("r-001", "n", 4)])
+    assert problems == [] and {Decimal("2.5"), Decimal("2")} <= set(values)
+    assert draft_module.recorded_scales(record) == [("r-001", "n", 4)]
+    # Without the divisor the same number traces to nothing.
+    write(project, "foundation/display.toml", DISPLAY)
+    run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "cases=r-001")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert [row["text"] for row in report["numbers"]] == ["2.5"]
+    # A divisor display.toml no longer gives is refused, as a header or label would be.
+    set_manifest(project, charts=[{**record["charts"][0], "scale": {"n": 5}}])
+    write(draft, "charts/chart-1.csv", "Region,Cases\nWest,2\nEast,1.6\n")
+    _, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert [row for row in report["charts"] if "manifest" in row["problem"]] == [{
+        "chart": "Chart 1", "problem": "the manifest's charts entry for chart-1.csv records "
+                                 "scale divisors other than foundation/display.toml gives; rerun export, which "
+                                 "records them"}]
+    for scale in ("n = 4", "n = { divide = 0 }", "n = { divide = true }", "n = { divide = -2 }",
+                  "n = { multiply = 4 }", 'n = { divide = "4" }'):
+        write(project, "foundation/display.toml", DISPLAY + f"\n[scale]\n{scale}\n")
+        code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+        assert code == 1 and out["errors"] == [
+            "foundation/display.toml: [scale] n is not { divide = <a positive number> }"], scale
+    write(project, "foundation/display.toml", "scale = 4\n" + DISPLAY)
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    assert code == 1 and out["errors"] == [
+        "foundation/display.toml: [scale] maps each column to { divide = <a positive number> }"]
+
+
+def test_export_scale_needs_places_when_its_quotient_is_unrounded(project, capsys):
+    write(project, "foundation/display.toml", DISPLAY + "\n[scale]\nn = { divide = 3 }\n")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--no-datasets")
+    assert code == 1 and not out["written"] and out["round_stub"] == '"n" = ""'
+    write(project, "foundation/display.toml", DISPLAY.replace("late_rate = 1", "late_rate = 1\nn = 1")
+          + "\n[scale]\nn = { divide = 3 }\n")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--no-datasets")
+    assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_text() == \
+        "Region,Cases\nWest,3.3\nEast,2.7\n"
+    assert "chart-1: Cases <- r-001.n, divided by 3, rounded to 1 decimal place" in out["methodology_lines"]
+
+
+PRECISION = ("its fractions are saved to exactly four decimal places, a sign the query rounded them, and shown as a "
+             "percent to 1 places they are rounded a second time, which can move the last digit; save the result at "
+             "full precision and round only under [round]")
+
+
+def test_export_warns_on_a_fraction_rounded_in_its_query(project, capsys):
+    # The issue's probe: 0.6315 saved by round(x, 4) shows as 63.2%, where the full value may give 63.1%.
+    write(project, "investigations/inv/results/r-001.csv", "region,share\nW,0.6315\nE,0.0268\n")
+    display = '[columns]\nregion = "Region"\nshare = "Share (%)"\n\n[percent]\ncolumns = ["share"]\n'
+    write(project, "foundation/display.toml", display + "\n[round]\nshare = 1\n")
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--dataset", "shares=r-001")
+    assert out["written"] and out["precision_warnings"] == [  # a warning: the files are written
+        {"result_id": "r-001", "column": "share", "example": "0.6315", "warning": PRECISION}]
+    assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_text() == "Region,Share (%)\nW,63.2\nE,2.7\n"
+    # Shown to two places nothing is rounded again, and fractions saved at full precision raise nothing.
+    write(project, "foundation/display.toml", display + "\n[round]\nshare = 2\n")
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    assert out["written"] and out["precision_warnings"] == []
+    write(project, "investigations/inv/results/r-001.csv", "region,share\nW,0.63149999\nE,0.02680005\n")
+    write(project, "foundation/display.toml", display + "\n[round]\nshare = 1\n")
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    assert out["written"] and out["precision_warnings"] == []
+
+
+def test_export_warns_on_a_value_code_no_cell_holds(project, capsys):
+    # The issue's probe: pandas saves a boolean as True, so a key true matches nothing.
+    write(project, "investigations/inv/results/r-001.csv", "region,large\nW,True\nE,False\n")
+    display = ('[columns]\nregion = "Region"\nlarge = "Large store"\n\n[values.region]\nW = "West"\nE = "East"\n'
+               'N = "North"\n\n[values.large]\ntrue = "Yes"\nFalse = "No"\n')
+    write(project, "foundation/display.toml", display)
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001", "--no-datasets")
+    unmatched = "no cell of the saved tables it labels holds this code; a code matches the saved text exactly"
+    assert out["written"] and out["value_warnings"] == [
+        {"table": "[values.region]", "code": "N", "warning": unmatched},
+        {"table": "[values.large]", "code": "true", "warning": unmatched + "; the table writes 'True'"}]
+    assert (project / "deliveries/inv/pkg/draft/charts/chart-1.csv").read_text() == \
+        "Region,Large store\nWest,True\nEast,No\n"
+    # A code another exported table holds is matched, even when this chart's rows leave it out.
+    write(project, "foundation/display.toml", display.replace("true", '"True"').replace('N = "North"\n', ""))
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001@first=1", "--no-datasets")
+    assert out["written"] and out["value_warnings"] == []
+
+
+def test_confirmed_columns_silence_their_label_warning(project, capsys):
+    with_results(project)
+    write(project, "investigations/inv/results/r-002.csv", "region,n\nW,4\n")
+    write(project, "foundation/display.toml", DISPLAY + '\n[confirmed]\ncolumns = ["region"]\n')
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "counts=r-002")
+    assert out["written"] and out["label_warnings"] == [
+        {"column": "n", "name": "Cases", "results": ["r-001", "r-002"], "warning": COLLISION}]
+    write(project, "foundation/display.toml", DISPLAY + '\n[confirmed]\ncolumns = ["region", "n"]\n')
+    _, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "counts=r-002")
+    assert out["written"] and out["label_warnings"] == []
+    write(project, "foundation/display.toml", DISPLAY + '\n[confirmed]\nregion = true\n')
+    code, out = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,n", "--dataset", "counts=r-002")
+    assert code == 1 and out["errors"] == [
+        "foundation/display.toml: [confirmed] holds one key, columns, a list of column names"]
 
 
 def test_export_warns_when_one_name_labels_results_with_different_questions(project, capsys):
@@ -1498,6 +1673,7 @@ def test_check_draft_refuses_a_chart_file_that_differs_from_its_selection(projec
     write(draft, "charts/chart-1.csv", "Region,Closed late (%)\nWest,35\n")
     for edit, part in [({"values": {"region": {"W": "West"}, "late_rate": {"21.349": "35"}}}, "value labels"),
                        ({"percent": ["late_rate"], "round": {"late_rate": 0}}, "percent columns"),
+                       ({"scale": {"late_rate": 10}}, "scale divisors"),
                        ({"headers": ["Region", "Closed late"]}, "headers")]:
         set_manifest(project, charts=[{**entry, **edit}])
         for argv in ((), ("--verify-only",)):
@@ -1510,8 +1686,8 @@ def test_check_draft_refuses_a_chart_file_that_differs_from_its_selection(projec
     set_manifest(project, charts=[{"path": "charts/chart-1.csv", "result_id": "r-001"}])
     _, report = run(project, capsys, "check-draft", "inv", "pkg")
     old_entry = [{"chart": "Chart 1", "problem": "the manifest's charts entry for chart-1.csv records no selection, "
-                  "columns, headers, value labels, percent, or rounding; rerun export with every --chart to record "
-                  "them (a --result-only export keeps this entry)"}]
+                  "columns, headers, value labels, percent, scale, or rounding; rerun export with every --chart to "
+                  "record them (a --result-only export keeps this entry)"}]
     assert report["charts"] == old_entry
     # A --result-only export, as a revision that only adds caveats runs, keeps the entry, so the row names the
     # full export that records it.
@@ -2006,6 +2182,51 @@ def test_check_draft_refuses_causal_wording_above_claim_strength(project, capsys
     assert code == 0 and report["passed"] and report["claims"] == [] and report["outline"] == []
 
 
+# Sentences on an Answer slide, and the causal phrases the claims check reads in them: a phrase in a negated clause
+# is skipped, under the closed grammar the helper declares above _CLAUSE_END.
+NEGATED_PROBES = [
+    ("The design does not test what caused them.", []), ("Discounts drove the increase.", ["drove"]),
+    ("The effect on repeat rates is unknown.", []), ("The data show patterns, not trends or causes.", []),
+    ("The impact of the change remains unclear.", []), ("The causes of the drop are not established.", []),
+    ("The rise is not due to weather.", []), ("The rise isn't attributable to price.", []),
+    ("We cannot say whether discounts drove sales.", []), ("There is no evidence that discounts drove sales.", []),
+    ("Without testing what caused them, we report shares.", []), ("Neither region drove it.", []),
+    ("Sales did not\nfall due to weather.", []),  # a wrapped line continues its clause
+    # Outside the grammar the phrase is still read: another clause, a relative clause, a negator five words back,
+    # an intensifier, a determiner, a noun phrase's relative clause, a verb's predicate, or another bullet.
+    ("The rise was not due to weather, but due to pricing.", ["due to"]),
+    ("The rise was not seasonal; discounts drove it.", ["drove"]),
+    ("Sales did not fall and discounts drove returns.", ["drove"]),
+    ("Customers who did not renew drove the drop.", ["drove"]),
+    ("Stores that never discounted drove the rise.", ["drove"]),
+    ("We did not see that the large western stores drove it.", ["drove"]),
+    ("Not only did discounts drive sales.", ["drive"]), ("Not just price drove it.", ["drove"]),
+    ("Stores with no discount drove the rise.", ["drove"]), ("Stores without a discount drove the rise.", ["drove"]),
+    ("Weather causes delays whose length is unknown.", ["causes"]), ("Discounts drove sales that are unknown.", ["drove"]),
+    ("- Sales did not fall\n- Discounts drove returns", ["drove"]),
+]
+
+
+def test_negated_causal_phrases_are_no_claims():
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_negated")
+    found = {}
+    for text, _ in NEGATED_PROBES:
+        view = draft._view("## Answer\n\n" + text + "\n")[0]
+        found[text] = [phrase for _, phrase, _ in draft._phrases(view, "prose", 2)]
+    assert found == dict(NEGATED_PROBES)
+
+
+def test_check_draft_skips_negated_causal_wording(project, capsys):
+    bullet = "- Late orders rose to 21%, a data-driven view."
+    claim_draft(project, DECK_FINDINGS.replace(bullet, "- The scan does not test what caused them."))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["claims"] == [], report
+    claim_draft(project, DECK_FINDINGS.replace(bullet, "- The scan does not test what caused them.\n"
+                                                       "- The new carrier drove the increase."))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and [(row["line"], row["phrase"]) for row in report["claims"]] == [(15, "drove")]
+
+
 CLEAN_FINDINGS = CLAIM_FINDINGS.replace("The new carrier drives the rise", "Late orders rose")
 # CLEAN_FINDINGS with every slide's notes and the chart's Data line, so the whole draft passes.
 DECK_FINDINGS = """# Order quality for the operations team
@@ -2461,18 +2682,21 @@ def test_numbers_skip_a_claim_strength_line_the_claims_check_accepts(project, ca
     claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace(
         DISCOUNT_CLAIM, f"**Claim strength:** {HOLDOUT}\nacross 77 stores"))
     report = run(project, capsys, "check-draft", "inv", "pkg")[1]
-    assert report["claims"] == [] and report["numbers"] == [{"file": "methodology.md", "line": 14, "text": "77"}]
+    assert report["claims"] == [] and report["numbers"] == [
+        {"file": "methodology.md", "line": 14, "text": "77", "problem": NOT_RECORDED}]
     # A line the claims check refuses keeps its numbers: another design, or the issue's line, which names no
     # experiment or natural experiment.
     for declared in (HOLDOUT.replace("Q3", "Q4"), "causal (randomized holdout of 2024 Q3, 50/50 split)"):
         claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace(DISCOUNT_CLAIM, f"**Claim strength:** {declared}"))
         code, report = run(project, capsys, "check-draft", "inv", "pkg")
         assert code == 1 and [row["section"] for row in report["claims"]] == [DISCOUNT]
-        assert report["numbers"] == [{"file": "methodology.md", "line": 13, "text": text} for text in ("2024", "50/50")]
+        assert report["numbers"] == [{"file": "methodology.md", "line": 13, "text": text, "problem": problem}
+                                     for text, problem in (("2024", YEAR_COUNT), ("50", NOT_RECORDED),
+                                                           ("50", NOT_RECORDED))]
     # Without the claims check's accepted lines, check_numbers reads every line.
     draft = load(project / "src/packaging/draft.py", "draft_claim_numbers")
     path = project / "deliveries/inv/pkg/draft/methodology.md"
-    assert [row["text"] for row in draft.check_numbers(path, [Decimal(4)])] == ["2024", "50/50"]
+    assert [row["text"] for row in draft.check_numbers(path, [Decimal(4)])] == ["2024", "50", "50"]
     assert draft.check_numbers(path, [Decimal(4)], claim_lines={13}) == []
 
 
@@ -2485,13 +2709,14 @@ def test_numbers_count_lines_as_the_claims_check_does_after_a_comment(project, c
                 .replace(DISCOUNT_CLAIM, f"{DISCOUNT_CLAIM}\nacross 77 stores"))
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and report["claims"] == []
-    assert report["numbers"] == [{"file": "methodology.md", "line": 16, "text": "77"}]
+    assert report["numbers"] == [{"file": "methodology.md", "line": 16, "text": "77", "problem": NOT_RECORDED}]
     write(project, "investigations/inv/state.md", STATE.format(status="supported", reason="").replace(
         "causal (experiment: randomized discount test)", HOLDOUT))
     claim_draft(project, DECK_FINDINGS, CLAIM_METHODOLOGY.replace("## Findings", comment)
                 .replace(DISCOUNT_CLAIM, f"**Claim strength:** {HOLDOUT}\nacross 77 stores"))
     report = run(project, capsys, "check-draft", "inv", "pkg")[1]
-    assert report["claims"] == [] and report["numbers"] == [{"file": "methodology.md", "line": 16, "text": "77"}]
+    assert report["claims"] == [] and report["numbers"] == [
+        {"file": "methodology.md", "line": 16, "text": "77", "problem": NOT_RECORDED}]
 
 
 # Where a <!-- stands around "Renewals fell 37% in Q3.", and the numbers check_numbers reports with no recorded value
@@ -2569,7 +2794,7 @@ def test_check_draft_reads_numbers_after_a_comment_marker_written_as_text(projec
     # The issue's first shape in methodology.md: release's mechanical check reports the untraced number.
     draft = project / "deliveries/inv/pkg/draft"
     write(draft, "methodology.md", METHODOLOGY + f"\nA note opens with `<!--`.\n\n{UNTRACED}\n\nIt closes with `-->`.\n")
-    rows = [{"file": "methodology.md", "line": 15, "text": "37%"}]
+    rows = [{"file": "methodology.md", "line": 15, "text": "37%", "problem": NOT_RECORDED}]
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and report["numbers"] == rows
     code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
@@ -2898,7 +3123,7 @@ def test_methodology_note_is_checked_with_rows_naming_it(project, capsys):
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 1 and not report["passed"]
     assert report["findings"] == [{"file": "methodology-note.md", "line": first, "kind": "name", "text": "orders_view"}]
-    assert report["numbers"] == [{"file": "methodology-note.md", "line": first + 1, "text": "40"}]
+    assert report["numbers"] == [{"file": "methodology-note.md", "line": first + 1, "text": "40", "problem": NOT_RECORDED}]
     assert report["claims"] == [{
         "file": "methodology-note.md", "line": first + 2, "section": "Method", "phrase": "drive",
         "claim": "association", "results": ["r-001"], "problem": "causal wording above the association claim "
@@ -2911,6 +3136,23 @@ def test_methodology_note_is_checked_with_rows_naming_it(project, capsys):
     (draft / "methodology-note.md").unlink()
     code, after = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and after == before
+
+
+def test_methodology_note_limitations_section_is_not_read_for_claims(project, capsys):
+    draft = project / "deliveries/inv/pkg/draft"
+    set_manifest(project, results=[{"result_id": "r-001", "evidence": "investigations/inv/evidence/r-001.json",
+                                    "question": QUESTIONS["r-001"]}])
+    caveats = ("\n## Limitations\n\n- Part of the rise is attributable to holiday volume.\n\n### Coverage\n\n"
+               "- June is short due to a feed outage.\n")
+    write(draft, "methodology-note.md", NOTE + caveats)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["claims"] == [], report
+    # The same sentence under another section is read, and so is a section after Limitations.
+    write(draft, "methodology-note.md", NOTE + caveats.replace("## Limitations", "## Exclusions")
+          + "\n## Limitations\n\n- Holiday weeks are in the period.\n\n## Contacts\n\n- Volume drives staffing.\n")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and [(row["section"], row["phrase"]) for row in report["claims"]] == [
+        ("Exclusions", "attributable to"), ("Coverage", "due to"), ("Contacts", "drives")]
 
 
 def test_check_draft_counts_main_and_appendix_slides(project, capsys):

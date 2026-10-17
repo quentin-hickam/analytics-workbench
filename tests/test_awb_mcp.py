@@ -9,6 +9,7 @@
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
 # test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, records words it and returns state finding's warning on a number the result does not record, read shows sql, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
 # test_package_export_passes_the_chart_selection_through: with DuckDB, the package tool passes export's --chart row selection to the helper unchanged: @first=1 writes one row and the manifest records it, and a malformed selection comes back as the helper's refusal with exit status 2.
+# test_package_export_returns_display_warnings: with DuckDB, the package tool's export shapes a file through display.toml's [scale] and returns value_warnings and precision_warnings, a [values] code no cell holds named, as the helper reports them.
 # test_read_sql_refuses_writes: read sql and profile refuse COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, CREATE, a SELECT calling enable_profiling with save_location or enable_logging with file storage, and a query() whose SQL differs between the plan check and the run, and write no file; read refuses arguments outside its command and help topics outside the helpers.
 # test_read_runs_the_histogram_aggregate_and_refuses_the_histogram_macro: read sql and profile run the histogram() aggregate, directly and from a view file, and refuse FROM histogram(...), the table macro that calls query_table, writing nothing.
 # test_read_queries_a_landed_excel_file_through_a_view: with the excel extension installed, read sql and profile query a landed .xlsx through a view and write nothing; skipped where the extension cannot be loaded.
@@ -398,6 +399,23 @@ def test_package_export_passes_the_chart_selection_through(workbench, connect):
                               args=["churn", "pkg", "--chart", "by-region@last=1", "--no-datasets"])
     assert error and "the row selection is not @first=<n>" in text and "exit status 2" in text
     assert (draft / "charts/chart-1.csv").read_text() == "Region,Orders\neast,1\n"
+
+
+@needs_duckdb
+def test_package_export_returns_display_warnings(workbench, connect):
+    client = connect(cwd=workbench)
+    text, error = client.call("run", investigation="churn", results=["by-region"])
+    assert not error, text
+    draft = workbench / "deliveries/churn/pkg/draft"
+    draft.mkdir(parents=True)
+    (workbench / "foundation/display.toml").write_text(
+        '[columns]\nregion = "Region"\norders = "Orders (tens)"\n\n[values.region]\nnorth = "North"\n\n'
+        '[scale]\norders = { divide = 10 }\n')
+    text, error = client.call("package", command="export", args=["churn", "pkg", "--chart", "by-region", "--no-datasets"])
+    assert (draft / "charts/chart-1.csv").read_text() == "Region,Orders (tens)\neast,0.1\nwest,0.2\n", text
+    report = json.loads(text[text.index("{"):text.rindex("}") + 1])
+    assert report["value_warnings"][0]["code"] == "north" and report["precision_warnings"] == []
+    assert json.loads((draft / "manifest.json").read_text())["charts"][0]["scale"] == {"orders": 10}
 
 
 @needs_duckdb
