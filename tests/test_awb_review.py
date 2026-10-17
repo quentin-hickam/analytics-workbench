@@ -939,7 +939,9 @@ def test_record_reads_the_report_from_stdin_and_checks_arguments(project, capsys
         assert run(project, capsys, "review-receipt", "record", "inv", "pkg", *argv)[0] == 2, argv
     assert snapshot(project) == before
     code, out = run(project, capsys, "review-receipt", "record", "inv", "absent", "--kind", "full", "--report", "-")
-    assert code == 1 and out["refused"] == "no draft at deliveries/inv/absent/draft; create it with awb-package"
+    # The refusal names the step that creates the draft, not the skill already running.
+    assert code == 1 and out["refused"] == ("no draft at deliveries/inv/absent/draft; write findings.md and "
+                                            "methodology.md there, then run export")
 
 
 def test_brief_change_makes_a_review_stale(project, capsys):
@@ -1040,7 +1042,8 @@ def test_scoped_start_needs_a_prior_record(project, capsys):
                                  "refused": "no recorded review to scope against; the review is full"}
     assert snapshot(project) == before
     code, out = run(project, capsys, "review-receipt", "start", "inv", "absent", "--kind", "full")
-    assert code == 1 and out["refused"] == "no draft at deliveries/inv/absent/draft; create it with awb-package"
+    assert code == 1 and out["refused"] == ("no draft at deliveries/inv/absent/draft; write findings.md and "
+                                            "methodology.md there, then run export")
     record(project, capsys, CLEAN)
     assert record(project, capsys, "review (scoped): clean\n", kind="scoped")[1]["passed"] is True
 

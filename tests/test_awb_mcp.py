@@ -9,7 +9,7 @@
 # test_read_check_draft_reports_helper_drift: read check-draft reports no helper_drift on a fresh setup, and a helper_drift row naming src/packaging/draft.py once it is edited.
 # test_records_round_trip: records adds a question, edits next steps, refuses a review rule without --confirmed, adds one with it and one with --scope and --package, flags through stdin, and runs clean-record, each writing its record.
 # test_review_receipt_round_trip: read review-receipt shows none, package review-receipt refuses a record with no start, starts a review, and records a report passed on stdin, and read then shows it stale with the diff and the prior report after an edit, writing nothing; its help topic resolves, and read requires the package.
-# test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit; read returns both changes while keeping its answer, and attempts to change answered question content or replace its answer are refused.
+# test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit, and sets and clears an open question's show flag; read returns each change while keeping its answer, and attempts to change answered question content or replace its answer are refused.
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
 # test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, records words it and returns state finding's warning on a number the result does not record, read shows sql, sql binding $name from params and settings, with params winning, and an unbound one's fix, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
 # test_shared_views_parameters_and_pre_commit_results_over_mcp: with DuckDB, run loads the investigation's views/*.sql into the result session, eda-scan reads a $name in [eda] where from [parameters], and read status lists a result run before the first commit once the repository has one, until run records it again.
@@ -419,6 +419,14 @@ def test_question_tree_metadata_round_trip(workbench, connect):
     assert ("  Q-003 answered [user, context, could; parent: Q-001] "
             "Which period should the plan cover? -> The next quarter (user) "
             "[audience: Which period matters for the decision?]") in text
+    # The show flag, separate from priority, puts a question on the Open questions slide; --no-show clears it.
+    text, error = client.call("records", command="questions", args=["edit", "Q-001", "--show"])
+    assert not error, text
+    assert "Q-001 open [user, decision, should, shown; parent: root]" in client.call("read", command="questions")[0]
+    text, error = client.call("records", command="questions", args=["edit", "Q-001", "--no-show"])
+    assert not error, text
+    text, error = client.call("read", command="questions", all=True)
+    assert not error and "Q-001 open [user, decision, should; parent: root]" in text, text
     for flag, value in (("--text", "A different question?"), ("--kind", "analytical"),
                         ("--answerer", "stakeholder"), ("--unblocks", "Another decision")):
         refusal, error = client.call("records", command="questions", args=[

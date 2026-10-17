@@ -62,4 +62,4 @@ An investigation without `questions.json` predates the ledger: move each item of
 
 ## 4. Report
 
-Summarize the investigation, what was settled, the records created or changed, and the open questions grouped by who answers them: those the user deferred, to take up through `awb-scope` when they choose, each stakeholder's to collect, and the data's for `awb-explore` or analysis. When few questions stay open or the user wants to widen the inquiry, suggest `awb-brainstorm`. Suggest `awb-status` for where things stand.
+Summarize the investigation, naming the folder created for it, `investigations/<slug>/`, what was settled, the records created or changed, and the open questions grouped by who answers them: those the user deferred, to take up through `awb-scope` when they choose, each stakeholder's to collect, and the data's for `awb-explore` or analysis. When few questions stay open or the user wants to widen the inquiry, suggest `awb-brainstorm`. Suggest `awb-status` for where things stand.
