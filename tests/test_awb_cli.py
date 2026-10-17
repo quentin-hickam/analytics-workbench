@@ -38,7 +38,7 @@ def test_help_lists_every_command(tmp_path, capsys):
         assert all(name in out for name in cli.COMMANDS)
         assert "<command> --help" in out and "Exit status" in out
     assert list(cli.COMMANDS) == ["land", "retain", "publish", "sql", "profile", "state", "questions", "stale",
-                                  "export", "review-rules", "check-draft", "release", "copy-releases"]
+                                  "export", "review-rules", "review-receipt", "check-draft", "release", "copy-releases"]
     assert "--result" in cli.COMMANDS["export"][2]
 
 

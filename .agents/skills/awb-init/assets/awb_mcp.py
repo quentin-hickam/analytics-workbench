@@ -10,11 +10,12 @@ The CLI therefore stays the one code path, and nothing here reimplements a helpe
 
 Tools:
   read     read-only (readOnlyHint): state, questions, sql, profile, stale, review-rules check,
-           check-draft --verify-only, status, eda-show, and help; built from fixed arguments
+           review-receipt show, check-draft --verify-only, status, eda-show, and help; built from fixed
+           arguments
   records  investigation and foundation records: state, questions, review-rules, clean-record
   data     land, retain, publish, sql, profile, eda-scan, clean-scan
   run      an investigation's run.py
-  package  export, check-draft
+  package  export, review-receipt, check-draft
   release  release, copy-releases; these also write to release storage outside the project
   setup    install_helpers.py; the only tool that accepts a folder without src/awb.py
 
@@ -77,7 +78,8 @@ QUESTION_STATUSES = ("open", "answered", "parked", "declined", "superseded")
 AWB_COMMANDS = {"land": (), "retain": (), "publish": (), "sql": (), "profile": (),
                 "state": ("finding", "render", "flag", "issues", "next", "switch"),
                 "questions": ("list", "add", "answer", "status", "edit", "render"),
-                "stale": (), "export": (), "review-rules": ("check", "add"), "check-draft": (),
+                "stale": (), "export": (), "review-rules": ("check", "add"),
+                "review-receipt": ("record", "show"), "check-draft": (),
                 "release": (), "copy-releases": ()}
 HELP_SCRIPTS = ("status", "eda-scan", "clean-scan", "clean-record", "install")
 
@@ -122,16 +124,19 @@ TOOLS = [
          "questions (ledger questions; open unless all or status), sql (run SELECT statements, given as a "
          "query file or SQL text in query, against the foundation views), profile (per-column summary of a "
          "view, query file, or SELECT in query), stale (findings whose evidence no longer matches), "
-         "review-rules (check a draft against the review rules), check-draft (verify a release candidate, "
+         "review-rules (check a draft against the review rules), review-receipt (the last draft review's "
+         "report and a diff of what changed since), check-draft (verify a release candidate, "
          "writing nothing), status (project status facts), eda-show (one section of a saved EDA scan of "
          "dataset), help (a command's arguments; topic names it, such as `questions add` or `eda-scan`)."),
      "inputSchema": {"type": "object", "additionalProperties": False, "required": ["command"], "properties": {
          "project": PROJECT,
          "command": {"type": "string", "enum": ["state", "questions", "sql", "profile", "stale", "review-rules",
-                                                "check-draft", "status", "eda-show", "help"]},
+                                                "review-receipt", "check-draft", "status", "eda-show", "help"]},
          "investigation": {"type": "string", "description": "Investigation name under investigations/; "
-                           "default README's active one. Required for review-rules and check-draft."},
-         "package": {"type": "string", "description": "Package name, for review-rules and check-draft."},
+                           "default README's active one. Required for review-rules, review-receipt, and "
+                           "check-draft."},
+         "package": {"type": "string", "description": "Package name, for review-rules, review-receipt, and "
+                                                      "check-draft."},
          "query": {"type": "string", "description": "sql and profile: a query file path (project-relative or "
                    "absolute) or SQL text; profile also takes a view name."},
          "limit": {"type": "integer", "minimum": 0, "description": "sql: rows to print (default 20)."},
@@ -179,10 +184,11 @@ TOOLS = [
     _write_tool(
         "package", "Build package draft",
         "Write a package draft's exports and manifest. command export: chart and dataset files, a --chart's "
-        "@first=<n> or @where=<column>=<value> row selection included, and producing state; check-draft: run "
+        "@first=<n> or @where=<column>=<value> row selection included, and producing state; review-receipt: "
+        "record a draft review (`record`, the report on stdin with `--report -`); check-draft: run "
         "every draft check, write START-HERE.md, and rewrite the manifest inventory (the read "
         "tool's check-draft verifies without writing).",
-        ("export", "check-draft")),
+        ("export", "review-receipt", "check-draft"), stdin=True),
     _write_tool(
         "release", "Release package",
         "Freeze a verified draft as the next numbered release, or copy existing releases to recorded "
@@ -352,11 +358,12 @@ def read_command(arguments, root):
     if command == "stale":
         _check_keys(arguments, ("command", "investigation"))
         return awb + ["stale"] + inv
-    if command in ("review-rules", "check-draft"):
+    if command in ("review-rules", "review-receipt", "check-draft"):
         _check_keys(arguments, ("command", "investigation", "package"))
         investigation = _string(arguments, "investigation", required=True, name=True)
         package = _string(arguments, "package", required=True, name=True)
-        fixed = ["review-rules", "check"] if command == "review-rules" else ["check-draft", "--verify-only"]
+        fixed = {"review-rules": ["review-rules", "check"], "review-receipt": ["review-receipt", "show"],
+                 "check-draft": ["check-draft", "--verify-only"]}[command]
         return awb + fixed + [investigation, package]
     if command == "status":
         _check_keys(arguments, ("command", "probe_upstream"))
@@ -404,7 +411,7 @@ def write_command(tool, arguments, root):
         argv += ["--package-formats"] * _flag(arguments, "package_formats")
         argv += [f"--replace={path}" for path in replace] + ["--remove-retired"] * _flag(arguments, "remove_retired")
         return argv + ["--", str(root)], None
-    _check_keys(arguments, ("command", "args", "stdin") if tool == "records" else ("command", "args"))
+    _check_keys(arguments, ("command", "args", "stdin") if tool in ("records", "package") else ("command", "args"))
     command = _string(arguments, "command", required=True)
     if command not in WRITE_COMMANDS[tool]:
         raise ToolError(f"{tool} command must be one of: {', '.join(WRITE_COMMANDS[tool])}")

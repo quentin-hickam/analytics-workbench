@@ -25,6 +25,17 @@
 # test_scope_field_accepted_and_refused_forms: Scope line, slide, or document is accepted; any other value, a blank one included, is a problem, the rule is unchecked, and add refuses until it is repaired.
 # test_repeated_scope_line_is_reported: a second Scope line in a rule is a problem at its line.
 # test_package_and_release_invoke_the_read_only_review: both skills link the review brief and run it before their final command; the brief has a fresh subagent review in every host with subagents, Codex included, and the writer review only where there are none; it limits the reviewer to reads, shell reads included, and the read-only command, running no command that writes, asks one line per rule, ends with a summary line counting violations, narrative problems, and command problems, any of which blocks, defines when a review is stale, and with AGENTS.md says which corrections become rules.
+# test_receipt_after_a_clean_review_matches_until_what_it_read_changes: show is none before any record; a clean full review records a receipt (fingerprint, report verbatim, passed) and shows current, writing nothing; an edit to either narrative, the rule file, an added methodology note, or a flag's represented_in shows stale with that input alone in changed and a labelled diff whose hunks carry the current file's line numbers; undoing the edit shows current again.
+# test_only_a_disposition_to_or_from_omit_makes_a_review_stale: release_with_caveat or revalidate leaves the review current, omit makes it stale, and an inventory rewrite leaves it current.
+# test_failed_review_is_recorded_and_shows_failed: a report with an error violation is recorded with passed false and shows failed with the prior report; a repair makes it stale, and a scoped review that passes makes it current.
+# test_accepted_narrative_problem_is_recorded_with_its_reason: a warning violation and a narrative problem, each accepted with the user's reason, pass and are recorded verbatim; fewer or more acceptances do not pass.
+# test_an_error_violation_or_command_problem_cannot_be_accepted: an --accept never passes a report counting an error violation or a command problem.
+# test_unusable_report_is_refused_and_writes_nothing: an empty report, a last line that does not parse or is not last, a --kind its opening contradicts, more errors than violations, and rows the last line undercounts are refused, writing nothing and leaving an earlier record as it was.
+# test_clean_review_takes_no_acceptance: --accept on a clean report is refused.
+# test_summary_line_probes: backticks, a closing period, singular words, and bulleted rows read the same; the counts decide passed.
+# test_snapshot_sits_beside_the_draft_and_is_replaced: the snapshot holds exactly what a review reads, under the package's review/, never in draft/, and each record replaces it, a removed note included.
+# test_record_reads_the_report_from_stdin_and_checks_arguments: --report - reads standard input; an unknown kind, a missing or unreadable report, and a blank or multi-line --accept exit 2 and write nothing; a missing draft is refused.
+# test_show_reports_an_unreadable_receipt_and_bounds_the_diff: a long diff is cut at the limit with a note counting the rest; an unreadable or malformed receipt is an error, exit 1, with status none.
 
 import importlib.util
 import json
@@ -576,3 +587,239 @@ def test_package_and_release_invoke_the_read_only_review():
 
     cli = load(SKILLS / "awb-init/assets/awb_cli.py", "awb_cli_commands")
     assert cli.COMMANDS["review-rules"][:2] == ("packaging/draft.py", "cli_review_rules")
+
+
+# ---------------------------------------------------------------- review receipt
+
+DRAFT = "deliveries/inv/pkg/draft"
+RECEIPT = "deliveries/inv/pkg/review/receipt.json"
+CLEAN = "R-periods-001 pass\nreview: clean\n"
+FLAGS = [{"finding": "F1", "reason": "dates corrected", "represented_in": ["chart 1"], "disposition": "none"}]
+WARNING_AND_NARRATIVE = (
+    'R-wording-001 violation warning findings.md:5 "users"\n'
+    'narrative methodology.md:5 "to the 12th" does not say which month\n'
+    "review: 1 violations (0 error), 1 narrative problems, 0 command problems\n")
+ACCEPTED = ['findings.md:5 "users": the audience calls them users',
+            'methodology.md:5 "to the 12th": the user says the slide names the month']
+
+
+def draft_module(project):
+    return load(project / "src/packaging/draft.py", "draft_receipt")
+
+
+def record(project, capsys, report, kind="full", accept=()):
+    path = project.parent / f"report-{project.name}.txt"
+    path.write_text(report)
+    argv = ["review-receipt", "record", "inv", "pkg", "--kind", kind, "--report", str(path)]
+    return run(project, capsys, *argv, *[f"--accept={text}" for text in accept])
+
+
+def show(project, capsys):
+    return run(project, capsys, "review-receipt", "show", "inv", "pkg")
+
+
+def with_manifest(project, flags=FLAGS):
+    (project / DRAFT / "manifest.json").write_text(json.dumps({"revalidation_flags": flags}))
+
+
+def test_receipt_after_a_clean_review_matches_until_what_it_read_changes(project, capsys):
+    assert show(project, capsys) == (0, {"status": "none", "kind": None, "recorded_at": None, "accepted": [],
+                                         "report": None, "changed": [], "diff": "", "diff_cut": 0, "errors": []})
+    with_manifest(project)
+    add(project, capsys)
+    code, out = record(project, capsys, CLEAN)
+    assert code == 0 and out == {"recorded": True, "receipt": RECEIPT, "kind": "full", "passed": True,
+                                 "accepted": []}
+    receipt = json.loads((project / RECEIPT).read_text())
+    assert receipt["report"] == CLEAN and receipt["passed"] is True and receipt["accepted"] == []
+    assert re.fullmatch(r"[0-9a-f]{64}", receipt["fingerprint"]) and receipt["kind"] == "full"
+    before = snapshot(project)
+    code, out = show(project, capsys)
+    assert code == 0 and out["status"] == "current" and out["changed"] == [] and out["diff"] == ""
+    assert out["report"] == CLEAN and out["kind"] == "full" and out["recorded_at"] == receipt["recorded_at"]
+    assert snapshot(project) == before  # show writes nothing
+
+    rules = project / RULES
+    edits = {
+        "findings.md": (project / DRAFT / "findings.md", "- Up on September.", "- Up on August."),
+        "methodology.md": (project / DRAFT / "methodology.md", "October to the 12th.", "October to the 13th."),
+        "foundation/review-rules.md": (rules, "- Rule: Compare only complete months.", "- Rule: Compare only full months."),
+    }
+    for name, (path, old, new) in edits.items():
+        original = path.read_text()
+        path.write_text(original.replace(old, new))
+        code, out = show(project, capsys)
+        assert code == 0 and out["status"] == "stale" and out["changed"] == [name], name
+        # The diff runs from what the review read to the file now, labelled, with the current line numbers.
+        label = name if name == RULES else f"{DRAFT}/{name}"
+        assert f"--- reviewed {label}\n+++ {label}\n" in out["diff"] and f"-{old}" in out["diff"]
+        assert f"+{new}" in out["diff"]
+        line = path.read_text().splitlines().index(new) + 1
+        assert re.search(rf"^@@ -\d+(?:,\d+)? \+{max(line - 3, 1)},", out["diff"], re.MULTILINE), out["diff"]
+        path.write_text(original)
+        assert show(project, capsys)[1]["status"] == "current"
+
+    note = project / DRAFT / "methodology-note.md"
+    note.write_text("# How we worked\n")
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == ["methodology-note.md"]
+    assert f"+++ {DRAFT}/methodology-note.md\n" in out["diff"] and "+# How we worked" in out["diff"]
+    note.unlink()
+
+    with_manifest(project, [{**FLAGS[0], "represented_in": ["chart 1", "Answer slide"]}])
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == ["revalidation_flags"]
+    assert f"+++ {DRAFT}/manifest.json revalidation_flags\n" in out["diff"] and '+      "Answer slide"' in out["diff"]
+
+
+@pytest.mark.parametrize("disposition, status", [
+    ("release_with_caveat", "current"), ("revalidate", "current"), ("omit", "stale")])
+def test_only_a_disposition_to_or_from_omit_makes_a_review_stale(project, capsys, disposition, status):
+    with_manifest(project)
+    record(project, capsys, CLEAN)
+    with_manifest(project, [{**FLAGS[0], "disposition": disposition}])
+    assert show(project, capsys)[1]["status"] == status
+    # The rest of the manifest is not what a review reads: an inventory rewrite leaves it current.
+    with_manifest(project, [{**FLAGS[0], "disposition": "omit"}])
+    record(project, capsys, CLEAN)
+    path = project / DRAFT / "manifest.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), "inventory": [{"path": "x"}], "revised_at": "t"}))
+    assert show(project, capsys)[1]["status"] == "current"
+    with_manifest(project, [{**FLAGS[0], "disposition": "none"}])
+    assert show(project, capsys)[1]["changed"] == ["revalidation_flags"]
+
+
+def test_failed_review_is_recorded_and_shows_failed(project, capsys):
+    report = 'R-periods-001 violation error findings.md:3 "partial month"\n' \
+             "review: 1 violations (1 error), 0 narrative problems, 0 command problems\n"
+    code, out = record(project, capsys, report)
+    assert code == 0 and out["recorded"] and out["passed"] is False
+    code, out = show(project, capsys)
+    assert code == 0 and out["status"] == "failed" and out["report"] == report and out["changed"] == []
+    # A repair makes it stale, which a scoped review against it settles.
+    path = project / DRAFT / "findings.md"
+    path.write_text(path.read_text().replace("partial month of ", ""))
+    assert show(project, capsys)[1]["status"] == "stale"
+    code, out = record(project, capsys, "R-periods-001 pass\nreview (scoped): clean\n", kind="scoped")
+    assert code == 0 and out["passed"] and show(project, capsys)[1] | {"recorded_at": None, "report": None} == {
+        "status": "current", "kind": "scoped", "recorded_at": None, "accepted": [], "report": None,
+        "changed": [], "diff": "", "diff_cut": 0, "errors": []}
+
+
+def test_accepted_narrative_problem_is_recorded_with_its_reason(project, capsys):
+    code, out = record(project, capsys, WARNING_AND_NARRATIVE, accept=ACCEPTED)
+    assert code == 0 and out["passed"] is True and out["accepted"] == ACCEPTED
+    assert json.loads((project / RECEIPT).read_text())["accepted"] == ACCEPTED
+    out = show(project, capsys)[1]
+    assert out["status"] == "current" and out["accepted"] == ACCEPTED
+    # Every warning violation and narrative problem needs one acceptance: fewer or more do not pass.
+    for accept in (ACCEPTED[:1], ACCEPTED + ["findings.md:6 \"x\": a third"]):
+        code, out = record(project, capsys, WARNING_AND_NARRATIVE, accept=accept)
+        assert code == 0 and out["passed"] is False and show(project, capsys)[1]["status"] == "failed"
+
+
+@pytest.mark.parametrize("report", [
+    'R-periods-001 violation error findings.md:3 "partial month"\n'
+    "review: 1 violations (1 error), 0 narrative problems, 0 command problems\n",
+    "command failed: no draft\nreview: 0 violations (0 error), 0 narrative problems, 1 command problems\n"])
+def test_an_error_violation_or_command_problem_cannot_be_accepted(project, capsys, report):
+    code, out = record(project, capsys, report, accept=['findings.md:3 "partial month": the user accepts it'])
+    assert code == 0 and out["passed"] is False
+
+
+@pytest.mark.parametrize("report, kind, refusal", [
+    ("", "full", "the report is empty"),
+    ("R-periods-001 pass\nLooks good to me.\n", "full", "the report's last line is not"),
+    ("review: 2 violations, 0 narrative problems\n", "full", "the report's last line is not"),
+    ("review: clean\nThanks!\n", "full", "the report's last line is not"),
+    ("review (scoped): clean\n", "full", "--kind full does not match the report's last line, which opens "
+                                         "review (scoped):"),
+    ("review: clean\n", "scoped", "--kind scoped does not match the report's last line, which opens review:"),
+    ("review: 1 violations (2 error), 0 narrative problems, 0 command problems\n", "full", "more error"),
+    ('R-periods-001 violation error findings.md:3 "partial month"\nreview: clean\n', "full", "more than its"),
+    ('R-wording-001 violation warning findings.md:5 "users"\n'
+     "review: 1 violations (1 error), 0 narrative problems, 0 command problems\n", "full", "more than its"),
+    ('narrative findings.md:3 "x" overstated\nnarrative findings.md:4 "y" overstated\n'
+     "review: 0 violations (0 error), 1 narrative problems, 0 command problems\n", "full", "more than its"),
+])
+def test_unusable_report_is_refused_and_writes_nothing(project, capsys, report, kind, refusal):
+    before = snapshot(project)
+    code, out = record(project, capsys, report, kind=kind)
+    assert code == 1 and out["recorded"] is False and refusal in out["refused"]
+    assert snapshot(project) == before
+    # A refusal leaves an earlier record as it was.
+    record(project, capsys, CLEAN)
+    before = snapshot(project)
+    assert record(project, capsys, report, kind=kind)[0] == 1 and snapshot(project) == before
+
+
+def test_clean_review_takes_no_acceptance(project, capsys):
+    code, out = record(project, capsys, CLEAN, accept=['findings.md:3 "x": no reason'])
+    assert code == 1 and "nothing to accept" in out["refused"] and not (project / RECEIPT).exists()
+
+
+@pytest.mark.parametrize("last, passed", [
+    ("`review: clean`", True),
+    ("review: clean.", True),
+    ("review: 1 violation (0 errors), 1 narrative problem, 0 command problems", True),
+    ("review: 1 violations (1 error), 1 narrative problems, 0 command problems", False),
+    ("review: 0 violations (0 error), 2 narrative problems, 0 command problems", False),
+])
+def test_summary_line_probes(project, capsys, last, passed):
+    # Singular words, backticks, and a closing period read the same; counts decide passed. The rows above it
+    # may be listed with bullets and still count.
+    severity = "error" if "(1 error)" in last else "warning"
+    body = f"- R-wording-001 violation {severity} findings.md:5 \"users\"\n" if "1 violation" in last else ""
+    accept = ACCEPTED if "1 narrative" in last else []
+    code, out = record(project, capsys, body + last + "\n", accept=accept)
+    assert code == 0 and out["passed"] is passed
+
+
+def test_snapshot_sits_beside_the_draft_and_is_replaced(project, capsys):
+    with_manifest(project)
+    record(project, capsys, CLEAN)
+    snap = project / "deliveries/inv/pkg/review/snapshot"
+    assert sorted(p.name for p in snap.iterdir()) == ["findings.md", "methodology.md", "revalidation_flags.json"]
+    assert (snap / "findings.md").read_text() == FINDINGS
+    assert json.loads((snap / "revalidation_flags.json").read_text()) == [
+        {"finding": "F1", "reason": "dates corrected", "represented_in": ["chart 1"], "omit": False}]
+    assert not (project / DRAFT / "review").exists() and not (project / DRAFT / "receipt.json").exists()
+    add(project, capsys)
+    (project / DRAFT / "methodology-note.md").write_text("# Note\n")
+    record(project, capsys, CLEAN)
+    assert sorted(p.name for p in snap.iterdir()) == ["findings.md", "methodology-note.md", "methodology.md",
+                                                      "revalidation_flags.json", "review-rules.md"]
+    (project / DRAFT / "methodology-note.md").unlink()
+    record(project, capsys, CLEAN)
+    assert not (snap / "methodology-note.md").exists() and show(project, capsys)[1]["status"] == "current"
+
+
+def test_record_reads_the_report_from_stdin_and_checks_arguments(project, capsys, monkeypatch):
+    monkeypatch.setattr(sys, "stdin", __import__("io").StringIO(CLEAN))
+    code, out = run(project, capsys, "review-receipt", "record", "inv", "pkg", "--kind", "full", "--report", "-")
+    assert code == 0 and out["passed"] and json.loads((project / RECEIPT).read_text())["report"] == CLEAN
+    before = snapshot(project)
+    for argv in (["--kind", "partial", "--report", "-"], ["--kind", "full"],
+                 ["--kind", "full", "--report", str(project / "absent.txt")],
+                 ["--kind", "full", "--report", "-", "--accept", "  "],
+                 ["--kind", "full", "--report", "-", "--accept", "two\nlines"]):
+        assert run(project, capsys, "review-receipt", "record", "inv", "pkg", *argv)[0] == 2, argv
+    assert snapshot(project) == before
+    code, out = run(project, capsys, "review-receipt", "record", "inv", "absent", "--kind", "full", "--report", "-")
+    assert code == 1 and out["refused"] == "no draft at deliveries/inv/absent/draft; create it with awb-package"
+
+
+def test_show_reports_an_unreadable_receipt_and_bounds_the_diff(project, capsys):
+    record(project, capsys, CLEAN)
+    path = project / DRAFT / "findings.md"
+    path.write_text(FINDINGS + "".join(f"- Added line {n} with some words to fill it out.\n" for n in range(600)))
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["diff_cut"] > 0
+    assert out["diff"].endswith(f"[... {out['diff_cut']} characters cut; read each changed file in full ...]\n")
+    assert len(out["diff"]) < draft_module(project)._DIFF_LIMIT + 100
+    (project / RECEIPT).write_text("not json")
+    code, out = show(project, capsys)
+    assert code == 1 and out["status"] == "none" and out["errors"][0].startswith(RECEIPT)
+    (project / RECEIPT).write_text(json.dumps({"kind": "full"}))
+    code, out = show(project, capsys)
+    assert code == 1 and out["status"] == "none" and "not a review receipt" in out["errors"][0]

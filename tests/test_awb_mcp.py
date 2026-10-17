@@ -5,6 +5,7 @@
 # test_setup_runs_under_awb_python_over_a_recorded_interpreter: with AWB_PYTHON set, setup runs under it while README records another interpreter, reports the line overridden, and leaves it as written.
 # test_read_commands_round_trip_and_write_nothing: every read command without DuckDB (state, questions, stale, review-rules, check-draft, status, help) runs its helper and leaves the project, .git included, unchanged.
 # test_records_round_trip: records adds a question, edits next steps, adds a review rule and one with --scope, flags through stdin, and runs clean-record, each writing its record.
+# test_review_receipt_round_trip: read review-receipt shows none, package review-receipt records a report passed on stdin, and read then shows it stale with the diff and the prior report after an edit, writing nothing; its help topic resolves, and read requires the package.
 # test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit; read returns both changes while keeping its answer, and attempts to change answered question content or replace its answer are refused.
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
 # test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, records words it and returns state finding's warning on a number the result does not record, read shows sql, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
@@ -294,6 +295,32 @@ def test_records_round_trip(workbench, connect):
     text, error = client.call("records", command="clean-record", args=["absent", "--dry-run"], stdin="{}")
     assert error and "absent" in text
     assert client.roots_asked == 7
+
+
+def test_review_receipt_round_trip(workbench, connect):
+    client = connect(cwd=workbench)
+    draft = workbench / "deliveries/churn/pkg/draft"
+    draft.mkdir(parents=True)
+    (draft / "findings.md").write_text("# Churn\n\n- West leads.\n")
+    (draft / "methodology.md").write_text("# Methodology\n")
+    before = snapshot(workbench)
+    text, error = client.call("read", command="review-receipt", investigation="churn", package="pkg")
+    assert not error and json.loads(text.split("\n\n")[0])["status"] == "none"
+    assert snapshot(workbench) == before
+    text, error = client.call("package", command="review-receipt", stdin="R-x-001 pass\nreview: clean\n",
+                              args=["record", "churn", "pkg", "--kind", "full", "--report", "-"])
+    assert not error and json.loads(text.split("\n\n")[0])["passed"] is True, text
+    (draft / "findings.md").write_text("# Churn\n\n- East leads.\n")
+    before = snapshot(workbench)
+    text, error = client.call("read", command="review-receipt", investigation="churn", package="pkg")
+    shown = json.loads(text.split("\n\n")[0])
+    assert not error and shown["status"] == "stale" and shown["changed"] == ["findings.md"]
+    assert "+- East leads." in shown["diff"] and shown["report"] == "R-x-001 pass\nreview: clean\n"
+    assert snapshot(workbench) == before
+    text, error = client.call("read", command="help", topic="review-receipt record")
+    assert not error and "--accept" in text
+    text, error = client.call("read", command="review-receipt", investigation="churn")
+    assert error and "package is required" in text
 
 
 def test_question_tree_metadata_round_trip(workbench, connect):
