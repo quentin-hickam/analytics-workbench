@@ -10,8 +10,8 @@
 # test_linking_reads_the_recorded_settings_file: a result recorded from another settings file is linked from that file, by run and by hand; unreadable evidence refuses a hand link.
 # test_results_answer_only_data_questions: answers naming a user or stakeholder question is refused before evidence, by run.py, and by a hand link; link_answers skips one; the person's answer is still taken; a ledger linking results to a person's question is malformed.
 # test_status_transitions: answered can only be superseded, keeping its answer; open reopens parked or declined and is a no-op on open; reasons are required; only open or parked questions are edited, and a data question keeps answerer data; a superseded answer stays visible in questions.md and list.
-# test_status_collector_reads_the_ledger: collect_status reports counts, the root and must sub-question counts, open questions by answerer, and derived answers awaiting recheck; null without a ledger; a malformed one, or questions.md without questions.json, is an uncertainty.
-# test_resume_and_list_show_finding_status: state shows open questions and answers awaiting recheck; list shows each linked finding's current status.
+# test_status_collector_reads_the_ledger: collect_status reports counts, the root and must sub-question counts, open questions by answerer, and derived answers awaiting recheck or provisional; null without a ledger; a malformed one, or questions.md without questions.json, is an uncertainty.
+# test_resume_and_list_show_finding_status: state shows open questions and answers awaiting recheck or provisional until promoted; list shows each linked finding's current status.
 
 from datetime import date
 import importlib.util
@@ -251,7 +251,9 @@ def test_run_links_declared_answers(project):
     assert second["questions"] == {"answered": ["Q-002"], "linked": ["Q-001"], "skipped": []}
     entries = ledger(project)
     assert entries["Q-001"]["results"] == ["r1", "r3"] and entries["Q-003"]["status"] == "declined"
-    assert "| answered | [r1](evidence/r1.json); [r3](evidence/r3.json) |" in (project / INV / "questions.md").read_text()
+    # Stored answered; displayed provisional while no answering finding is promoted.
+    assert "| answered (provisional) | [r1](evidence/r1.json); [r3](evidence/r3.json) |" in (
+        project / INV / "questions.md").read_text()
     before = snapshot(project)
     assert produce(project, "r1")["questions"] == {"answered": [], "linked": [], "skipped": ["Q-003 (declined)"]}
     assert (project / INV / "questions.json").read_bytes() == before[f"{INV}/questions.json"]
@@ -410,11 +412,15 @@ def test_resume_and_list_show_finding_status(project, capsys):
     produce(project, "r1")
     code, out, _ = cli(project, capsys, "list", "--all")
     assert code == 0 and out.splitlines() == [
-        "Q-001 answered [data, analytical, should; parent: root] Does churn differ by region? -> r1 (provisional)",
+        "Q-001 answered (provisional) [data, analytical, should; parent: root] Does churn differ by region? -> r1 (provisional)",
         "Q-002 open [stakeholder, context, should; parent: root] Which churn definition does finance use?"]
     view = provenance.state_view(project, "churn")
     assert view.endswith("==> open ledger questions <==\n"
-                         "Q-002 open [stakeholder, context, should; parent: root] Which churn definition does finance use?\n")
+                         "Q-002 open [stakeholder, context, should; parent: root] Which churn definition does finance use?\n"
+                         "Q-001 answered (provisional) [data, analytical, should; parent: root] Does churn differ by region? "
+                         "-> r1 (provisional)\n")
+    provenance.update_findings(project, "churn", ["r1"], status="supported", reason="checked")
+    assert "Q-001" not in provenance.state_view(project, "churn").split("==> open ledger questions <==")[1]
     provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "region view corrected"}])
     assert "Q-001 answered (awaiting recheck)" in provenance.state_view(project, "churn")
     assert cli(project, capsys, "list", "--investigation", "absent")[0] == 2
@@ -435,7 +441,8 @@ def test_status_collector_reads_the_ledger(project):
                          "roots": {"answered (awaiting recheck)": 1},
                          "must_subquestions": {"open": 1}, "open_by_answerer": {"stakeholder": 1},
                          "open": ["Q-002 [stakeholder, context] Which churn definition does finance use?"],
-                         "awaiting_recheck": ["Q-001 answered (awaiting recheck) [data, analytical] Does churn differ by region? -> r1 (revalidation-needed (was provisional))"]}
+                         "awaiting_recheck": ["Q-001 answered (awaiting recheck) [data, analytical] Does churn differ by region? -> r1 (revalidation-needed (was provisional))"],
+                         "provisional": []}
     (project / INV / "questions.json").write_text('{"schema": "awb-questions/1", "questions": [1]}')
     result = status.collect(project)
     assert result["active"]["questions"] is None
@@ -570,10 +577,12 @@ def test_cli_derives_awaiting_recheck_and_refreshes_render(project, capsys, find
     # Finding changes keep the generated view current, so an ordinary ledger write is safe.
     assert cli(project, capsys, "add", "Another?", "--kind", "context", "--answerer", "user", "--origin", "scope")[0] == 0
     produce(project, "r1", table="n\n2\n")
-    if finding_status == "superseded":
-        provenance.update_findings(project, "churn", ["r1"], status="supported", reason="rechecked")
+    # The rerun leaves r1 provisional (flagged) or superseded, and r2 was never promoted.
+    assert "Q-001 answered (" in cli(project, capsys, "list", "--all")[1]
+    provenance.update_findings(project, "churn", ["r1"], status="supported", reason="rechecked")
     assert "Q-001 answered [" in cli(project, capsys, "list", "--all")[1]
     assert "awaiting recheck" not in (project / INV / "questions.md").read_text()
+    assert "provisional)" not in (project / INV / "questions.md").read_text()
 
 
 @pytest.mark.parametrize("unrecognized", ["flagged", "revalidation-needed (review pending)", "superseded (was supported)", "revalidation-needed (was unknown)"])

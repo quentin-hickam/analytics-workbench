@@ -13,6 +13,7 @@
 # test_file_and_underscore_segments_are_paths: a file extension or underscore in any segment identifies a path.
 # test_workbench_roots_are_paths: known workbench roots identify single-slash paths; src/awb.py stays a path.
 # test_project_name_roots_are_paths: a slash token with a given name or plain-word root as any segment is a path, and prose otherwise.
+# test_declared_answer_is_provisional_until_a_finding_is_promoted: a result declaring answers marks its question answered on record, displayed answered (provisional) in questions list, questions.md, state, and the status counts until one answering finding is supported; a flagged one shows awaiting recheck instead; a provisional peer beside a supported finding leaves it answered; a person's answer is never provisional.
 # test_rerun_after_committing_its_code_needs_no_second_promotion: the reproduction of finding 5.4 of the 2026-10-15 UX simulation, which did not reproduce: a result recorded on uncommitted code and promoted stays current once that code is committed, and a rerun keeps its row, so one promotion suffices.
 
 import importlib.util
@@ -32,6 +33,10 @@ PROVENANCE = Path(__file__).resolve().parents[1] / ".agents/skills/awb-init/asse
 spec = importlib.util.spec_from_file_location("awb_provenance_findings", PROVENANCE)
 provenance = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(provenance)
+STATUS = Path(__file__).resolve().parents[1] / ".agents/skills/awb-status/scripts/collect_status.py"
+spec = importlib.util.spec_from_file_location("awb_status_findings", STATUS)
+status = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(status)
 
 
 @pytest.fixture
@@ -278,3 +283,70 @@ def test_rerun_after_committing_its_code_needs_no_second_promotion(tmp_path):
     assert provenance.findings_drift(tmp_path, "inv") == []
     assert "| One order closed | [r1](evidence/r1.json) | supported | association | |" in (
         investigation / "state.md").read_text()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is required")
+def test_declared_answer_is_provisional_until_a_finding_is_promoted(tmp_path):
+    templates = PROVENANCE.parent / "workbench"
+    readme = (templates / "README.md").read_text().replace(
+        "Active investigation: none", "Active investigation: [inv](investigations/inv/state.md)")
+    (tmp_path / "README.md").write_text(readme)
+    investigation = tmp_path / "investigations/inv"
+    (investigation / "queries").mkdir(parents=True)
+    for record in ("state.md", "history.md", "brief.md"):
+        shutil.copyfile(templates / "investigation" / record, investigation / record)
+    state = investigation / "state.md"
+    state.write_text(state.read_text().replace("<!-- use an ISO date -->", "2026-09-01"))
+    (investigation / "settings.toml").write_text(
+        '[parameters]\nyear = 2026\n\n[results.r1]\nquestion = "How many orders closed?"\nanswers = ["Q-001"]\n'
+        '\n[results.r2]\nquestion = "How many orders opened?"\nanswers = ["Q-001"]\n')
+    for result_id in ("r1", "r2"):
+        (investigation / f"queries/{result_id}.sql").write_text("select 1 as n\n")
+    git(tmp_path, "init", "-q")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "-qm", "records")
+    checks = [{"name": "scope", "outcome": "pass", "detail": "Orders in 2026."}]
+    provenance.add_question(tmp_path, "inv", "How many orders closed?", kind="analytical", answerer="data",
+                            origin="scope")
+    provenance.add_question(tmp_path, "inv", "Which period counts?", kind="decision", answerer="user",
+                            origin="scope")
+
+    def produce(result_id):
+        prior = provenance.prior_result(tmp_path, "inv", result_id)
+        (investigation / "results").mkdir(exist_ok=True)
+        (investigation / f"results/{result_id}.csv").write_text("n\n1\n")
+        provenance.record_evidence(tmp_path, "inv", result_id, views=[], checks=checks,
+                                   settings_path="investigations/inv/settings.toml")
+        return provenance.record_finding(tmp_path, "inv", result_id, checks, prior=prior)
+
+    def shown():
+        line = provenance.question_lines(tmp_path, "inv", ("answered", provenance.PROVISIONAL_ANSWER,
+                                                           provenance.AWAITING_RECHECK))[0]
+        rendered = (investigation / "questions.md").read_text()
+        roots = status.collect(tmp_path)["active"]["questions"]["roots"]
+        return line.split(" [")[0], rendered, roots
+
+    assert produce("r1")["questions"] == {"answered": ["Q-001"], "linked": [], "skipped": []}
+    # The stored status is answered; every view shows it provisional, and status counts it apart.
+    assert json.loads((investigation / "questions.json").read_text())["questions"][0]["status"] == "answered"
+    line, rendered, roots = shown()
+    assert line == "Q-001 answered (provisional)"
+    assert "| answered (provisional) | [r1](evidence/r1.json) |" in rendered
+    assert roots == {"answered (provisional)": 1, "open": 1}
+    assert status.collect(tmp_path)["active"]["questions"]["provisional"] == [
+        "Q-001 answered (provisional) [data, analytical] How many orders closed? -> r1 (provisional)"]
+    assert "Q-001 answered (provisional)" in provenance.state_view(tmp_path, "inv")
+    # Promotion makes it answered; a second, still provisional finding leaves it answered.
+    provenance.update_findings(tmp_path, "inv", ["r1"], status="supported", reason="Checked against the source.")
+    produce("r2")
+    line, rendered, roots = shown()
+    assert line == "Q-001 answered" and "| answered | [r1](evidence/r1.json); [r2](evidence/r2.json) |" in rendered
+    assert roots == {"answered": 1, "open": 1}
+    assert "Q-001 answered" not in provenance.state_view(tmp_path, "inv")
+    # A flagged answering finding wins over a supported peer: awaiting recheck, not answered or provisional.
+    provenance.flag_findings(tmp_path, "inv", [{"result": "r2", "reason": "view corrected"}])
+    line, _, roots = shown()
+    assert line == "Q-001 answered (awaiting recheck)" and roots == {"answered (awaiting recheck)": 1, "open": 1}
+    # A person's answer never rests on findings, so it is never provisional.
+    provenance.answer_question(tmp_path, "inv", "Q-002", text="Calendar 2026", by="the user")
+    assert provenance.question_lines(tmp_path, "inv", ("answered",))[-1].startswith("Q-002 answered [user")

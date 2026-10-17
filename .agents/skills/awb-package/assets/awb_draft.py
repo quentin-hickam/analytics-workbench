@@ -2484,7 +2484,8 @@ def open_question_problems(root, investigation, draft, provenance, *, names, roo
     each required question's audience wording when set, otherwise its text, rendered by
     _inline/_shown with whitespace collapsed, once each.
 
-    Required means priority must and status open, parked, or answered (awaiting recheck).
+    Required means priority must and status open, parked, or answered (awaiting recheck); an
+    answered (provisional) question is answered here, since a draft may represent provisional findings.
     Declined and superseded questions are set aside. Nested bullets, charts, missing/repeated
     questions and any other bullet text are reported; outline/markdown checks report other
     structural forms. Known limits: this compares rendered text, not paraphrases or audience
@@ -2948,18 +2949,24 @@ def _git(root, *args):
                           stderr=subprocess.PIPE).stdout.decode()
 
 
+# packaging_state's reasons for a packaging state no commit can record. provenance_gaps lists neither:
+# a project without Git, or a repository before its first commit, has no version to name.
+NO_GIT, NO_COMMIT = "the project is not a git repository", "the checkout has no commit yet"
+_NO_HISTORY = {NO_GIT, NO_COMMIT}
+
+
 def packaging_state(root, paths=("src", "package-format")) -> tuple:
     """Return the packaging checkout's commit and its uncommitted package-source paths."""
     try:
         if _git(root, "rev-parse", "--is-inside-work-tree").strip() != "true":
             raise ValueError
     except (OSError, ValueError, subprocess.CalledProcessError):
-        unknown = {"unknown": "the project is not a git repository"}
+        unknown = {"unknown": NO_GIT}
         return unknown, unknown
     try:
         commit = _git(root, "rev-parse", "--verify", "HEAD").strip()
     except subprocess.CalledProcessError:
-        commit = {"unknown": "the checkout has no commit yet"}
+        commit = {"unknown": NO_COMMIT}
     prefix = _git(root, "rev-parse", "--show-prefix").strip()
     changes = []
     entries = iter(_git(root, "status", "--porcelain=v1", "-z", "--untracked-files=all",
@@ -4408,7 +4415,9 @@ def provenance_gaps(record: dict) -> list[dict]:
     """Each manifest value recorded as unknown, an {"unknown": reason} object, by its dotted field path,
     with the reason, and each requirements line a result's runtime could not read, whose packages'
     versions went unrecorded. A string is never a gap, so a settings value or a column name such as
-    unknown_pickup is not one."""
+    unknown_pickup is not one. Neither is packaging_commit or packaging_uncommitted_changes unknown for
+    exactly a reason packaging_state gives for a project without Git or without a commit yet; any other
+    reason there is a gap."""
     gaps = []
 
     def walk(value, path):
@@ -4428,6 +4437,9 @@ def provenance_gaps(record: dict) -> list[dict]:
                 walk(item, f"{path}[{index}]")
 
     for key, value in record.items():
+        if key in {"packaging_commit", "packaging_uncommitted_changes"} and _is_unknown(value) \
+                and isinstance(value["unknown"], str) and value["unknown"] in _NO_HISTORY:
+            continue
         if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers", "presentation_order"}:
             walk(value, key)
     return gaps

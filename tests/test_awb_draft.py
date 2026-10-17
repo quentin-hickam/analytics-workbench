@@ -23,6 +23,7 @@
 # test_recorded_text_reviewed_probes: every recorded text probed in review records the magnitudes intended, and an extreme or non-finite cell records nothing or itself without crashing.
 # test_check_numbers_skips_a_doi: a DOI, 10. with a four- to nine-digit registrant code, a slash, and a suffix, is skipped whole after doi: or DOI, in a doi.org link, or bare when its suffix holds a letter and a digit, ending at whitespace or a , or ; before a digit; a shorter registrant code, no slash, a bare suffix without a letter or a digit, as in 10.2500/litre, 10.2500/1000, or 10.12345/67.8, and a number glued after a DOI by , or ; are read.
 # test_provenance_gaps_are_unknown_objects_and_unread_requirements: an {"unknown": reason} object and an unread requirements line are gaps; a settings value or column name such as unknown_pickup, or a string starting with unknown, is not.
+# test_packaging_commit_without_history_is_no_gap: a repository with no commit, or a project without Git, records its packaging commit as unknown with packaging_state's reason, and provenance_gaps lists neither packaging field; another reason, a non-text reason, or a producing commit is still a gap.
 # test_check_numbers_allowed_phrases_and_precision: an allowed phrase covers only the number it is written around, a bare allowed text every occurrence; a row's text copied exactly covers its number after a line wrap or extra spaces; a number traces at every written digit beyond 28 significant digits and not one unit of a further place outside its rounding.
 # test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's or a path's digits add nothing; evidence text and parsed settings content add scaled and scientific values a narrative can write in full, without dates, booleans, or the settings file's size.
 # test_recorded_values_keep_every_json_digit: profile and evidence fractions keep every written digit, so the exact narrative value traces and a value one digit off does not.
@@ -850,6 +851,26 @@ def test_provenance_gaps_are_unknown_objects_and_unread_requirements():
         {"field": "producing_commit", "reason": "not a git repository"},
         {"field": "results[0].runtime.unread_requirements[0]",
          "reason": "requirements not read, packages unrecorded: requirements.txt:2: -e ."}]
+
+
+def test_packaging_commit_without_history_is_no_gap(tmp_path):
+    draft = load(ASSETS["src/packaging/draft.py"], "draft_no_history")
+    # A repository with no commit records the packaging commit as unknown, and lists the untracked sources.
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/awb.py").write_text("")
+    commit, changes = draft.packaging_state(tmp_path)
+    assert commit == {"unknown": "the checkout has no commit yet"} and changes == [{"path": "src/awb.py", "status": "??"}]
+    assert draft.provenance_gaps({"packaging_commit": commit, "packaging_uncommitted_changes": changes}) == []
+    # A project without Git is no gap either; any other unknown packaging state still is.
+    unknown = {"unknown": "the project is not a git repository"}
+    assert draft.provenance_gaps({"packaging_commit": unknown, "packaging_uncommitted_changes": unknown}) == []
+    assert draft.provenance_gaps({"packaging_commit": {"unknown": "git timed out"},
+                                  "packaging_uncommitted_changes": {"unknown": ["the checkout has no commit yet"]},
+                                  "producing_commit": {"unknown": "the checkout has no commit yet"}}) == [
+        {"field": "packaging_commit", "reason": "git timed out"},
+        {"field": "packaging_uncommitted_changes", "reason": ["the checkout has no commit yet"]},
+        {"field": "producing_commit", "reason": "the checkout has no commit yet"}]
 
 
 def test_check_numbers_allowed_phrases_and_precision(tmp_path):

@@ -2086,20 +2086,27 @@ def _status_map(entries):
     return {e["result"]: _finding_cells(e)[2] for e in entries}
 
 
-# The derived display status of an answered data question resting on a flagged or superseded finding.
+# The derived display statuses of an answered data question: resting on a flagged or superseded finding,
+# or on findings none of which is promoted yet.
 AWAITING_RECHECK = "answered (awaiting recheck)"
+PROVISIONAL_ANSWER = "answered (provisional)"
 
 
 def question_status(entry, findings):
-    """Display only: any flagged or superseded answering finding needs recheck, even with settled peers.
+    """Display only: any flagged or superseded answering finding needs recheck, even with settled peers;
+    otherwise, with no answering finding supported, the answer is provisional until one is promoted.
 
     Statuses come from the closed _finding_statuses reading. Missing findings are reported by the evidence checks;
-    they do not assert a flag. A person's answer and non-answered questions keep stored status.
+    they do not assert a flag, and a missing row counts as not promoted. A person's answer and non-answered
+    questions keep stored status.
     """
+    if entry["status"] != "answered" or entry["answerer"] != "data":
+        return entry["status"]
     unsettled = {"superseded", _FLAGGED, *(f"{_FLAGGED} (was {s})" for s in _STATUSES)}
-    if entry["status"] == "answered" and entry["answerer"] == "data" and any(
-            findings.get(r) in unsettled for r in entry["results"]):
+    if any(findings.get(r) in unsettled for r in entry["results"]):
         return AWAITING_RECHECK
+    if not any(findings.get(r) == "supported" for r in entry["results"]):
+        return PROVISIONAL_ANSWER
     return entry["status"]
 
 
@@ -2487,7 +2494,7 @@ def state_view(project_root, investigation: str) -> str:
         out.append("==> questions the findings answer, by result <==\n" + "\n".join(questions) + "\n")
     try:
         ledger = question_lines(root, investigation, show_audience=False) + question_lines(
-            root, investigation, (AWAITING_RECHECK,), show_audience=False)
+            root, investigation, (AWAITING_RECHECK, PROVISIONAL_ANSWER), show_audience=False)
     except StateError as error:
         ledger = [f"warning: {error}"]
     if ledger:
