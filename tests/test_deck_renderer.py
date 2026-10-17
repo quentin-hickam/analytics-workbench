@@ -253,7 +253,10 @@ def test_renderer_is_deterministic(package, tmp_path):
 @pytest.mark.parametrize("old, new, row", [
     ("**Headline:** Totals reconcile to the finance ledger",
      "**Headline:** Totals reconcile to the finance ledger and to every regional team's own records in each month",
-     {"slide": "How we know", "problem": "the headline has 16 words; keep it to 15"}),
+     {"slide": "How we know", "severity": "warning",
+      "headline": "Totals reconcile to the finance ledger and to every regional team's own records in each month",
+      "problem": "the headline has 16 words, over the 15-word limit; shorten it with the user's approval, or record "
+                 "their acceptance in accepted_long_headlines"}),
     ("Column: comparison 4", "Pie: comparison 4",
      {"chart": "Chart 4", "problem": "names no chart form (Pie); open the specification with one of: Horizontal "
                                      "bar, Bar with intervals, Line, Column, Stacked bar, Scatter, Table"}),

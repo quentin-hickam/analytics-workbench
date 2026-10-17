@@ -58,3 +58,10 @@ You record it and `export` keeps it.
   - Never for a number from a recorded result the draft relies on: pass that result to `export` instead, so `results` and the producing state record it. Never for a number computed from results that none records.
 
 You record it and `export` keeps it.
+
+## The user's acceptances
+
+- `accepted_long_headlines`: absent, or `{headline, reason}` for each headline over 15 words the user chose to keep. `headline` is the `outline` row's `headline` exactly, so a reworded headline needs a new entry; `reason` is the user's reason.
+- `helper_drift_confirmed`: absent, or `{file, sha256, reason}` for each `helper_drift` row the user confirmed, `file` and `sha256` copied from the row (`null` for a missing file), so a later change to that file needs a new entry; `reason` is the change and why the user accepts it.
+
+You record each on the user's yes, and `export` keeps them.

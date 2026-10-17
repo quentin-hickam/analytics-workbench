@@ -1959,11 +1959,13 @@ def _words(text):
 
 
 def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
-    """List each break of the slide rules in findings.md: {"slide", "line", "problem"}.
+    """List each break of the slide rules in findings.md: {"slide", "line", "problem", "severity"}.
 
-    Every slide after the title has a headline of at most HEADLINE_WORDS words (its `###` heading, or one
-    **Headline:** line), at most SLIDE_BULLETS bullets (Open questions is exempt), at most one chart, and one **Notes:** paragraph that
-    ends it, and holds nothing else. The title slide is the `#` heading with its subtitle line; a `###`
+    Every row is an `error` but a headline over HEADLINE_WORDS words, a `warning` that also carries the
+    `headline` text, which the user may accept in the manifest's accepted_long_headlines. Every slide after
+    the title has a headline of at most HEADLINE_WORDS words (its `###` heading, or one **Headline:** line),
+    at most SLIDE_BULLETS bullets (Open questions is exempt), at most one chart, and one **Notes:** paragraph
+    that ends it, and holds nothing else. The title slide is the `#` heading with its subtitle line; a `###`
     finding slide sits under ## Findings or ## Appendix. The deck holds each _REQUIRED slide once: Answer
     first after the title, then at least one finding slide, with How we know and then Limitations and open
     caveats after the finding slides or under ## Appendix, How we know first when both stand in the same
@@ -1973,8 +1975,8 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
     outline = read_outline(findings_path)
     rows = []
 
-    def row(slide, line, problem):
-        rows.append({"slide": slide, "line": line, "problem": problem})
+    def row(slide, line, problem, severity="error", **extra):
+        rows.append({"slide": slide, "line": line, "problem": problem, "severity": severity, **extra})
 
     title = outline["title"]
     if title is None:
@@ -2017,7 +2019,9 @@ def outline_problems(findings_path: str | os.PathLike) -> list[dict]:
             if not words:
                 row(name, line, "the headline is empty; state the slide's point with its key number")
             elif words > HEADLINE_WORDS:
-                row(name, line, f"the headline has {words} words; keep it to {HEADLINE_WORDS}")
+                row(name, line, f"the headline has {words} words, over the {HEADLINE_WORDS}-word limit; shorten it "
+                                "with the user's approval, or record their acceptance in accepted_long_headlines",
+                    "warning", headline=slide["headline"])
         if len(slide["bullets"]) > SLIDE_BULLETS and (slide["finding"] or name != "Open questions"):
             row(name, slide["bullets"][SLIDE_BULLETS]["line"],
                 f"{len(slide['bullets'])} bullets; keep it to {SLIDE_BULLETS} and move the rest to another slide "
@@ -2621,9 +2625,69 @@ def _write_start_here(draft, investigation, package):
         _write_text(path, text)
 
 
+# ---------------------------------------------------------------- user acceptances and helper drift
+
+# awb-init's install_helpers.py writes it: each project path it installed or replaced -> that file's SHA-256,
+# taken with CRLF read as LF as _digest takes it, so a checkout that converts line endings is no drift.
+RECEIPT = ".awb-receipt.json"
+# The receipt paths whose files gate a release: the helpers and the package formats.
+_GATING = ("src/", "package-format/")
+
+
+def accepted_long_headlines(record: dict) -> set:
+    """The headlines the manifest's accepted_long_headlines accepts: each entry's exact `headline` text, with a
+    `reason` filled in. Any other entry or value accepts nothing, so a malformed field leaves its rows open."""
+    entries = record.get("accepted_long_headlines")
+    return {entry["headline"] for entry in entries if isinstance(entry, dict) and isinstance(entry.get("headline"), str)
+            and isinstance(entry.get("reason"), str) and entry["reason"].strip()} if isinstance(entries, list) else set()
+
+
+def helper_drift(root) -> list[dict]:
+    """Each helper under src/ and package-format/ file whose content differs from the SHA-256 the install receipt
+    records: {"file", "status", "sha256", "recorded"}, status changed, missing (sha256 null), or unreadable.
+    No receipt, or a file it does not record, gives no row; an unreadable receipt is itself a row, so a gate
+    edited past the receipt is never silently passed."""
+    path = Path(root) / RECEIPT
+    try:
+        receipt = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(receipt, dict) or not all(isinstance(v, str) for v in receipt.values()):
+            raise ValueError
+    except (OSError, ValueError):
+        return [{"file": RECEIPT, "status": "unreadable", "sha256": _digest(path)[0], "recorded": None}]
+    rows = []
+    for name, recorded in sorted(receipt.items()):
+        digest, status = _digest(Path(root) / name) if name.startswith(_GATING) else (recorded, None)
+        if digest != recorded:
+            rows.append({"file": name, "status": status, "sha256": digest, "recorded": recorded})
+    return rows
+
+
+def _digest(path):
+    """(SHA-256 with CRLF read as LF, "changed") of the file at path, or (None, "missing" or "unreadable")."""
+    try:
+        return hashlib.sha256(Path(path).read_bytes().replace(b"\r\n", b"\n")).hexdigest(), "changed"
+    except FileNotFoundError:
+        return None, "missing"
+    except OSError:
+        return None, "unreadable"
+
+
+def _drift_confirmed(record: dict) -> set:
+    """(file, sha256) pairs the manifest's helper_drift_confirmed confirms, each with a `reason` filled in."""
+    entries = record.get("helper_drift_confirmed")
+    return {(entry["file"], entry.get("sha256")) for entry in entries
+            if isinstance(entry, dict) and isinstance(entry.get("file"), str)
+            and isinstance(entry.get("sha256"), (str, type(None))) and "sha256" in entry
+            and isinstance(entry.get("reason"), str) and entry["reason"].strip()} if isinstance(entries, list) else set()
+
+
+def _outline_passed(rows):
+    return rows is not None and all(row.get("accepted") for row in rows)
+
+
 def _structure_passed(report):
     return (not report["names_problems"] and not report["errors"] and report["findings"] == []
-            and report["outline"] == [] and report["charts"] == [] and report["headings"] == [] and report["markdown"] == []
+            and _outline_passed(report["outline"]) and report["charts"] == [] and report["headings"] == [] and report["markdown"] == []
             and report["claims"] == [] and report["questions"] == []
             and report["storyline"] == [] and report["open_questions"] == []
             and report["verify"] == [] and report["flag_entries"] == [] and report["numbers"] == []
@@ -2640,6 +2704,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
               "storyline": None, "unlinked_findings": None, "open_questions": None, "open_questions_count": None,
               "numbers": None, "numbers_problems": [], "inventory": None, "verify": None,
               "flag_entries": None, "unmatched_flags": None, "draft_markers": None, "start_here": None,
+              "helper_drift": [{**row, "confirmed": False} for row in helper_drift(root)],
               "errors": [], "passed": False}
     if not draft.is_dir():
         report["errors"].append(f"no draft at {report['draft']}; create it with awb-package")
@@ -2771,6 +2836,14 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             except (OSError, UnicodeError) as error:
                 report["errors"].append(f"numbers check: {error}")
 
+    # A long headline passes once the user accepts it; drift is confirmed here and gates only release.
+    accepted, confirmed = (accepted_long_headlines(record), _drift_confirmed(record)) if record else (set(), set())
+    for row in report["outline"] or []:
+        if row["severity"] == "warning":
+            row["accepted"] = row["headline"] in accepted
+    for row in report["helper_drift"]:
+        row["confirmed"] = (row["file"], row["sha256"]) in confirmed
+
     report["passed"] = _structure_passed(report) and report["unmatched_flags"] == []
     return report
 
@@ -2803,7 +2876,9 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "slide in the main sequence, then How we know and Limitations and open caveats, either of which may "
                "stand under ## Appendix instead, How we know first when both stand in the main sequence or both "
                "under ## Appendix), its line null when missing; and a slide after ## Appendix outside it, a second "
-               "## Appendix, an appendix slide that stays in the main sequence, or an empty ## Appendix. slides "
+               "## Appendix, an appendix slide that stays in the main sequence, or an empty ## Appendix. Each row's "
+               "severity is error, but an over-15-word headline's is warning: that row carries headline and accepted, "
+               "true once the manifest's accepted_long_headlines lists that exact headline with a reason. slides "
                "counts the main sequence's slides, title included, and the appendix's.\nstoryline lists the "
                "finding slides to move, those outside the longest run already in priority/tree order, the main "
                "sequence and the appendix each ranked alone, each with its expected position; when the manifest's "
@@ -2862,10 +2937,15 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "attach list and prompt assembly/m365.md gives), and what stays internal; the inventory then lists "
                "it, and --verify-only verifies it like any other file and lists an errors row when the draft lacks "
                "it. start_here names it when present.\n"
-               "Exit 0 only when names_problems, findings, outline, charts, "
+               "helper_drift lists each src/ helper and package-format/ file whose SHA-256 differs from what "
+               ".awb-receipt.json records, as file, status (changed, missing, or unreadable), sha256 (null when "
+               "missing), recorded, and confirmed, true once the manifest's helper_drift_confirmed lists that file at "
+               "that sha256 with a reason; an unreadable receipt is a row of its own, and no receipt gives none. It "
+               "does not fail this check; release refuses while a row is unconfirmed.\n"
+               "Exit 0 only when names_problems, findings, charts, "
                "headings, markdown, claims, "
                "questions, storyline, open_questions, numbers, numbers_problems, verify, flag_entries, unmatched_flags, and errors "
-               "are all empty.")
+               "are all empty and outline holds only accepted rows.")
     _package_arguments(parser)
     parser.add_argument("--verify-only", action="store_true",
                         help="verify against the recorded inventory without rewriting it (the release gate)")
@@ -4069,6 +4149,12 @@ def release(root, investigation, package) -> dict:
     package_dir = _package_dir(root, investigation, package)
     check_report = check_draft(root, investigation, package, verify_only=True)
     report = {"released": False, "check": {"passed": check_report["passed"]}}
+    # First, since a changed helper or package format may change the gate's own verdict.
+    unconfirmed = [row for row in check_report["helper_drift"] if not row["confirmed"]]
+    if unconfirmed:
+        report["refused"] = "helpers or package formats differ from the install receipt without the user's confirmation"
+        report["helper_drift"] = unconfirmed
+        return report
     if not _structure_passed(check_report):
         report["refused"] = "check-draft --verify-only does not pass"
         report["check"] = check_report
@@ -4119,7 +4205,8 @@ def cli_release(root: Path, argv: list[str]) -> int:
         prog="awb.py release", formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Copy a draft that passes check-draft --verify-only, with every flagged finding "
                     "recorded and disposed, to the next numbered release and to release storage.",
-        epilog="Prints one JSON line.\nRefuses, creating nothing, unless check-draft --verify-only passes and "
+        epilog="Prints one JSON line.\nRefuses, creating nothing, while a check-draft helper_drift row is "
+               "unconfirmed, listing those rows as helper_drift, and unless check-draft --verify-only passes and "
                "every represented revalidation_flags entry is omit or release_with_caveat; a flag refusal "
                "lists unmatched_flags and dispositions. Its draft_markers rows do not refuse: run check-draft "
                "--verify-only first to show them.\nOn success it prints the report fields: datasets, "

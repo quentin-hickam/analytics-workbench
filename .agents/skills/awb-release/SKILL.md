@@ -21,8 +21,11 @@ Run the full read-only review in [awb-package's references/review.md](../awb-pac
 
 First run `python3 src/awb.py check-draft <investigation> <package> --verify-only`, which writes nothing. A release copies the draft byte for byte, so when `draft_markers` lists wording such as DRAFT or working copy in the deck's title, subtitle, headings, or title notes, show each row and ask the user to confirm it or revise it through awb-package, and release only once they confirm.
 
-Then run `python3 src/awb.py release <investigation> <package>`. Its gate is `check-draft --verify-only`: a pass reruns every mechanical check and verifies every file but the manifest against the recorded inventory, so the contract needs no rereading and only the review reads the narratives. It refuses, creating nothing, in two ways:
+`helper_drift` lists each helper or package format that changed, or went missing, since the installer recorded it; these files decide whether a release passes. For each row whose `confirmed` is false, name its file and what it does in plain words, and ask the user whether to release with that change. On their yes, add `{file, sha256, reason}` to the draft manifest's `helper_drift_confirmed`, `file` and `sha256` copied from the row and their reason in `reason`. Otherwise put the file back, then run `check-draft --verify-only` again: a `src/` helper, or a `changed` package format, through awb-init repair, which asks whether to replace each customized file; a `missing` package format with the installer command in awb-package's **1. Establish**, which reinstalls it; `.awb-receipt.json` from Git.
 
+Then run `python3 src/awb.py release <investigation> <package>`. Its gate is `check-draft --verify-only`: a pass reruns every mechanical check and verifies every file but the manifest against the recorded inventory, so the contract needs no rereading and only the review reads the narratives. It refuses, creating nothing, in three ways:
+
+- `helpers or package formats differ from the install receipt without the user's confirmation`: ask about its `helper_drift` rows as above, then run `release` again.
 - `check-draft --verify-only does not pass`: report the `check` rows verbatim and stop; repairs are package revisions through awb-package. A `claims` row also follows a claim strength or causal design basis changed in `state.md` since packaging: the released methodology must state each finding's current Claim.
 - `flagged findings without a release disposition`: settle them under **4. Resolve flags**, then run `release` again.
 

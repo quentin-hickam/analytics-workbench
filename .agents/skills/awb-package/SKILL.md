@@ -49,7 +49,7 @@ For each required question whose text is not in the audience's words, set audien
 
 In either mode a consequential open choice, such as audience wording the user has not approved or an unsettled usefulness criterion, stops the draft before its full slides and is asked in the same message as the headlines.
 
-With the headlines, show the required questions as the slide words them, and say in one sentence that the deck opens with a title slide and then the answer slide. Report the main slides, title included, and the appendix slides against any recorded length, and when the main slides exceed it, propose which move to the appendix. Propose the ledger-derived finding order; record an order the user approves instead as the manifest's `presentation_order` once `export` has written the manifest, leaving ledger priority and parent unchanged. A revision that keeps the storyline skips the checkpoint, but new audience wording still needs the user's approval.
+With the headlines, show the required questions as the slide words them, and say in one sentence that the deck opens with a title slide and then the answer slide. Say that a headline holds at most 15 words. Before trimming a headline the user wrote or approved, ask: offer the shorter wording, or keeping theirs, recorded with their reason in the manifest's `accepted_long_headlines`. Report the main slides, title included, and the appendix slides against any recorded length, and when the main slides exceed it, propose which move to the appendix. Propose the ledger-derived finding order; record an order the user approves instead as the manifest's `presentation_order` once `export` has written the manifest, leaving ledger priority and parent unchanged. A revision that keeps the storyline skips the checkpoint, but new audience wording still needs the user's approval.
 
 ### Write the full slides
 
@@ -75,7 +75,7 @@ Once the narratives and flags are complete, run the review in [references/review
 
 ## 6. Check
 
-Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it.
+Once every other draft file is final, run `python3 src/awb.py check-draft <investigation> <package>`. Repair the draft and rerun it; a long-headline `warning` row is asked about as the headline checkpoint says, never trimmed unasked.
 
 A `numbers` row is a number no represented result records. A `numbers` row on a `methodology.md` **Claim strength:** line that the `claims` check refuses clears once that `claims` row is repaired, so repair that row first and never list its numbers in `allowed_numbers`. Repair any other `numbers` row by the first of these that fits:
 

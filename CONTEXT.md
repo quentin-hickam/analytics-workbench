@@ -79,6 +79,9 @@ A preserved, numbered revision of a delivery package created from its working dr
 **Frozen**:
 The condition of every release: its files, results, and provenance stay exactly as released. Corrections, flags, and revisions after the milestone go to the working draft and the next release.
 
+**Helper drift**:
+A helper or package-format file in a project that differs from the checksum the installer recorded for it. Those files decide whether a draft passes, so a release proceeds only once the user confirms each drifted file at its current checksum.
+
 **Disposition**:
 The user's choice for a flagged finding that a draft represents: revalidate it, omit it, or release it with its caveat. A new or changed flag reopens the choice. A release proceeds only when every place the finding appears is omitted or released with its caveat; revalidation pauses it for separate analytical work.
 

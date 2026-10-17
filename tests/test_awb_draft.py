@@ -1,4 +1,8 @@
 # Kept cases:
+# test_receipt_name_matches_the_installer: the draft helper reads the receipt file the installer writes.
+# test_an_edited_helper_is_drift_that_release_refuses_until_confirmed: with an install receipt, an edited src/packaging/draft.py is a helper_drift row naming it in both check-draft modes, which still pass; release refuses until helper_drift_confirmed lists that file at that hash with a reason, and a later edit needs a new confirmation.
+# test_helper_drift_rows_for_missing_unrecorded_and_unreadable_files: no receipt gives no rows; a missing package format is a row with a null sha256, confirmable as such; a changed file outside src/ and package-format/, or one the receipt does not record, gives none; an unreadable or malformed receipt is a row of its own, and release refuses on it.
+# test_converted_line_endings_are_no_drift: a recorded helper and package format checked out with CRLF line endings give no helper_drift row, while an edit after the conversion still does.
 # test_check_draft_checks_findings_drift: synchronized JSON passes, drift fails with state render in both modes, an old helper gets an upgrade hint, and rows with no findings.json are drift.
 # test_names_cover_project_records: names hold created views, sources without CTEs or table functions, settings dotted paths (not bare nested keys), and result IDs from evidence and state links; plain words, including plain investigation and package names, are left out.
 # test_toml_keys_fall_back_to_tomli_then_key_lines: without tomllib, settings keys parse with tomli (no bare nested keys); without either, table headers and key lines; display.toml then names the missing package.
@@ -334,7 +338,10 @@ def test_check_draft_reports_outline_and_chart_spec_rows(project, capsys):
     for argv in (("check-draft", "inv", "pkg"), ("check-draft", "inv", "pkg", "--verify-only")):
         code, report = run(project, capsys, *argv)
         assert code == 1 and not report["passed"]
-        assert report["outline"] == [{"slide": long, "line": 12, "problem": "the headline has 16 words; keep it to 15"}]
+        assert report["outline"] == [{"slide": long, "line": 12, "severity": "warning", "headline": long, "accepted": False,
+                                      "problem": "the headline has 16 words, over the 15-word limit; shorten it with "
+                                                 "the user's approval, or record their acceptance in "
+                                                 "accepted_long_headlines"}]
         assert report["charts"] == [
             {"chart": "Chart 1", "problem": "names no chart form (Pie); open the specification with one of: "
                                             "Horizontal bar, Bar with intervals, Line, Column, Stacked bar, Scatter, "
@@ -1874,6 +1881,96 @@ def test_copy_releases_copies_compares_and_never_overwrites(project, capsys, tmp
     assert (store / "inv/pkg/001/findings.md").read_text() == "changed\n"
     code, report = run(project, capsys, "copy-releases", "inv", "other")
     assert code == 1 and report["errors"] == ["no package at deliveries/inv/other"]
+
+
+DECK_RULES = "# Deck rules\n"
+
+
+def install_receipt(project, extra=()):
+    """The receipt awb-init's installer writes for the fixture's helpers and one package format."""
+    write(project, "package-format/deck-rules.md", DECK_RULES)
+    paths = [*ASSETS, "package-format/deck-rules.md", *extra]
+    write(project, ".awb-receipt.json", json.dumps(
+        {path: hashlib.sha256((project / path).read_bytes()).hexdigest() for path in paths}))
+
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def test_receipt_name_matches_the_installer():
+    installer = load(SKILLS / "awb-init/scripts/install_helpers.py", "installer_receipt")
+    assert load(ASSETS["src/packaging/draft.py"], "draft_receipt").RECEIPT == installer.RECEIPT
+
+
+def test_an_edited_helper_is_drift_that_release_refuses_until_confirmed(project, capsys):
+    install_receipt(project)
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["helper_drift"] == []
+    helper = project / "src/packaging/draft.py"
+    helper.write_bytes(helper.read_bytes() + b"\n# adapted to keep a long headline\n")
+    for argv in (("check-draft", "inv", "pkg"), ("check-draft", "inv", "pkg", "--verify-only")):
+        code, report = run(project, capsys, *argv)
+        # Drift does not fail check-draft; it gates release.
+        assert code == 0 and report["passed"]
+        assert report["helper_drift"] == [{"file": "src/packaging/draft.py", "status": "changed", "sha256": sha(helper),
+                                           "recorded": sha(ASSETS["src/packaging/draft.py"]), "confirmed": False}]
+    refusal = "helpers or package formats differ from the install receipt without the user's confirmation"
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == refusal and [r["file"] for r in report["helper_drift"]] == [
+        "src/packaging/draft.py"]
+    # A confirmation matches only that file at that hash, and only with a reason.
+    for entries in ([{"file": "src/packaging/draft.py", "sha256": sha(ASSETS["src/packaging/draft.py"]), "reason": "r"}],
+                    [{"file": "src/packaging/draft.py", "sha256": sha(helper)}],
+                    [{"file": "src/packaging/draft.py", "sha256": sha(helper), "reason": ""}],
+                    [{"file": "src/awb.py", "sha256": sha(helper), "reason": "r"}],
+                    {"file": "src/packaging/draft.py", "sha256": sha(helper), "reason": "r"}):
+        set_manifest(project, helper_drift_confirmed=entries)
+        code, report = run(project, capsys, "release", "inv", "pkg")
+        assert code == 1 and report["refused"] == refusal, entries
+    assert not (project / "deliveries/inv/pkg/released").exists()
+    set_manifest(project, helper_drift_confirmed=[{"file": "src/packaging/draft.py", "sha256": sha(helper),
+                                                   "reason": "The user approved the adapted outline check."}])
+    run(project, capsys, "check-draft", "inv", "pkg")
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 0 and report["released"], report
+    # A later edit is a new hash, which the earlier confirmation does not cover.
+    helper.write_bytes(helper.read_bytes() + b"# edited again\n")
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == refusal
+
+
+def test_helper_drift_rows_for_missing_unrecorded_and_unreadable_files(project, capsys):
+    draft = load(project / "src/packaging/draft.py", "draft_drift_rows")
+    assert draft.helper_drift(project) == []  # no receipt, no rows
+    install_receipt(project, extra=["investigations/inv/run.py"])
+    (project / "package-format/deck-rules.md").unlink()
+    write(project, "investigations/inv/run.py", "x = 2\n")  # recorded, but no helper or package format
+    write(project, "package-format/findings-template.md", "# unrecorded\n")
+    write(project, "src/extra.py", "# unrecorded\n")
+    assert draft.helper_drift(project) == [{"file": "package-format/deck-rules.md", "status": "missing", "sha256": None,
+                                            "recorded": hashlib.sha256(DECK_RULES.encode()).hexdigest()}]
+    set_manifest(project, helper_drift_confirmed=[{"file": "package-format/deck-rules.md", "sha256": None,
+                                                   "reason": "The user removed the deck rules on purpose."}])
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["helper_drift"][0]["confirmed"] is True
+    for receipt in ("{not json", "[]", '{"src/awb.py": 1}'):
+        write(project, ".awb-receipt.json", receipt)
+        assert draft.helper_drift(project) == [{"file": ".awb-receipt.json", "status": "unreadable",
+                                                "sha256": sha(project / ".awb-receipt.json"), "recorded": None}]
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["helper_drift"][0]["file"] == ".awb-receipt.json"
+
+
+def test_converted_line_endings_are_no_drift(project):
+    draft = load(project / "src/packaging/draft.py", "draft_drift_crlf")
+    install_receipt(project)
+    for path in ("src/awb.py", "package-format/deck-rules.md"):
+        converted = project / path
+        converted.write_bytes(converted.read_bytes().replace(b"\n", b"\r\n"))
+    assert draft.helper_drift(project) == []
+    (project / "src/awb.py").write_bytes((project / "src/awb.py").read_bytes() + b"# edited\r\n")
+    assert [(row["file"], row["status"]) for row in draft.helper_drift(project)] == [("src/awb.py", "changed")]
 
 
 @pytest.mark.parametrize("verify_only", [False, True])

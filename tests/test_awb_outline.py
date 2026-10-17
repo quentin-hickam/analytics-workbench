@@ -3,6 +3,9 @@
 # test_parse_outline_reads_as_it_renders: a comment hides a bullet, a fence is no bullet, a chart's fields end at a blank line so a later Caveat bullet stays on the slide, a list-item specification is a chart, a field already given is a bullet, and a wrapped bullet is one bullet, a block quote inside it included; a paragraph back at a bullet's depth after its nested chart joins no field.
 # test_outline_problems_clean_deck: a deck following every slide rule, its required slides included, has no rows; a 15-word headline and five bullets pass.
 # test_outline_problems_rows: each slide rule broken gives its row with slide, line, and problem, a block quote outside a list being a paragraph of its own, as is a paragraph back at a bullet's depth after a deeper item, and the title slide's notes counted too; a deck without its # heading also has its subtitle on no slide, and one without ## Findings has each finding outside it.
+# test_a_long_headline_is_a_warning_row_carrying_its_text: a 21-word finding heading or **Headline:** line, wrapped or not, is one warning row carrying the headline's text.
+# test_an_accepted_long_headline_passes_check_draft_and_release: a 21-word headline fails check-draft and release until accepted_long_headlines lists its exact text with a reason; an entry without a reason, for other text, or a non-list field accepts nothing; a reworded headline needs a new entry.
+# test_every_other_outline_row_is_an_error: beside a long headline's warning, other outline rows are errors without headline text; a 15-word headline gives no row.
 # test_outline_passes_without_implications: a deck without Implications passes, and one with it passes too.
 # test_outline_requires_its_slides_in_order: a deck without How we know, Limitations, or Answer, with Answer not first, without a finding slide in the main sequence, with How we know before a finding or Limitations before How we know, or with a required slide repeated gives one row for each, a missing slide's line null.
 # test_appendix_slides_parse_in_order_and_count_separately: ## Appendix ### slides parse in order, a template slide's name making that slide rather than a finding, are marked appendix and counted apart from the main sequence, and a required slide there still counts.
@@ -17,6 +20,9 @@ import importlib.util
 from pathlib import Path
 
 import pytest
+
+# The draft fixture project, for the long-headline acceptance through check-draft and release.
+from test_awb_draft import FINDINGS, METHODOLOGY, manifest, project, run, set_manifest, write  # noqa: F401
 
 ASSET = Path(__file__).resolve().parents[1] / ".agents/skills/awb-package/assets/awb_draft.py"
 spec = importlib.util.spec_from_file_location("awb_draft_outline", ASSET)
@@ -186,6 +192,8 @@ def test_outline_problems_clean_deck(tmp_path):
 ANSWER = "## Answer\n\n**Headline:** West claims close late four times as often as the east\n"
 NOTES = "**Notes:** The ledger is the finance team's.\n"
 LONG = " ".join(["word"] * 15) + " 21%"
+LONG_PROBLEM = ("the headline has {} words, over the 15-word limit; shorten it with the user's approval, or record "
+                "their acceptance in accepted_long_headlines")
 
 
 @pytest.mark.parametrize("old, new, expected", [
@@ -220,7 +228,7 @@ LONG = " ".join(["word"] * 15) + " 21%"
      ("How we know", 46, "2 **Headline:** lines; keep one")),
     ("**Headline:** Totals reconcile to the finance ledger", "**Headline:**",
      ("How we know", 42, "the headline is empty; state the slide's point with its key number")),
-    ("Totals reconcile to the finance ledger", LONG, ("How we know", 42, "the headline has 16 words; keep it to 15")),
+    ("Totals reconcile to the finance ledger", LONG, ("How we know", 42, LONG_PROBLEM.format(16))),
     ("- Claims are counted once.\n", "".join(f"- Point {n}.\n" for n in range(6)),
      ("How we know", 51, "6 bullets; keep it to 5 and move the rest to another slide or into the notes")),
     ("- Claims are counted once.\n", "- Claims are counted once.\n\n**Chart 3.** Table: a\n\n**Chart 4.** Table: b\n",
@@ -261,6 +269,62 @@ def test_outline_problems_rows(tmp_path, old, new, expected):
     rows = draft.outline_problems(package(tmp_path, DECK.replace(old, new, 1)))
     assert [(r["slide"], r["line"], r["problem"]) for r in rows] == (expected if isinstance(expected, list)
                                                                      else [expected])
+
+
+# 21 words, as the user approved them.
+WORDY = ("Late claims rose each month in the west while every other region held steady through the first "
+         "half of the year")
+
+
+@pytest.mark.parametrize("old, new", [
+    ("### Late claims rose each month in the west", f"### {WORDY}"),
+    ("**Headline:** Totals reconcile to the finance ledger", f"**Headline:** {WORDY}"),
+    ("**Headline:** Totals reconcile to the finance ledger", "**Headline:** " + WORDY.replace(" while ", "\nwhile ")),
+], ids=["finding heading", "headline line", "headline line wrapped"])
+def test_a_long_headline_is_a_warning_row_carrying_its_text(tmp_path, old, new):
+    rows = draft.outline_problems(package(tmp_path, DECK.replace(old, new, 1)))
+    assert [(row["severity"], row["headline"], row["problem"]) for row in rows] == [
+        ("warning", WORDY, LONG_PROBLEM.format(21))]
+
+
+def test_an_accepted_long_headline_passes_check_draft_and_release(project, capsys):
+    draft_dir = project / "deliveries/inv/pkg/draft"
+    for name, text in (("findings.md", FINDINGS), ("methodology.md", METHODOLOGY)):
+        write(draft_dir, name, text.replace("Late orders rose in the west", WORDY))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and not report["passed"]
+    assert [(row["severity"], row["headline"], row["accepted"]) for row in report["outline"]] == [
+        ("warning", WORDY, False)]
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
+    # An entry accepts only its exact headline, and only with a reason.
+    for entries in ([{"headline": WORDY}], [{"headline": WORDY, "reason": " "}], [{"headline": WORDY[:-1], "reason": "r"}],
+                    {"headline": WORDY, "reason": "r"}, "all"):
+        set_manifest(project, accepted_long_headlines=entries)
+        code, report = run(project, capsys, "check-draft", "inv", "pkg")
+        assert code == 1 and report["outline"][0]["accepted"] is False, entries
+    set_manifest(project, accepted_long_headlines=[{"headline": WORDY, "reason": "The user keeps their wording."}])
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"] and report["outline"][0]["accepted"] is True, report
+    code, report = run(project, capsys, "release", "inv", "pkg")
+    assert code == 0 and report["released"], report
+    assert manifest(project, "released/001")["accepted_long_headlines"][0]["headline"] == WORDY
+    # A reworded headline needs a new acceptance.
+    reworded = WORDY.replace("steady", "flat")
+    for name in ("findings.md", "methodology.md"):
+        write(draft_dir, name, (draft_dir / name).read_text().replace(WORDY, reworded))
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["outline"][0]["headline"] == reworded and report["outline"][0]["accepted"] is False
+
+
+def test_every_other_outline_row_is_an_error(tmp_path):
+    text = DECK.replace("**Headline:** Totals reconcile to the finance ledger\n", "").replace(
+        "### Late claims rose each month in the west", f"### {WORDY}")
+    rows = draft.outline_problems(package(tmp_path, text))
+    assert [(row["slide"], row["severity"]) for row in rows] == [(WORDY, "warning"), ("How we know", "error")]
+    assert "headline" not in rows[1]
+    fifteen = " ".join(["word"] * 15)
+    assert draft.outline_problems(package(tmp_path, DECK.replace("Totals reconcile to the finance ledger", fifteen))) == []
 
 
 HOW = DECK[DECK.index("## How we know"):DECK.index("## Limitations")]
