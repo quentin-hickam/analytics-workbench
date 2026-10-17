@@ -2,6 +2,7 @@
 # test_receipt_name_matches_the_installer: the draft helper reads the receipt file the installer writes.
 # test_an_edited_helper_is_drift_that_release_refuses_until_confirmed: with an install receipt, an edited src/packaging/draft.py is a helper_drift row naming it in both check-draft modes, which still pass; release refuses until helper_drift_confirmed lists that file at that hash with a reason, and a later edit needs a new confirmation.
 # test_helper_drift_rows_for_missing_unrecorded_and_unreadable_files: no receipt gives no rows; a missing package format is a row with a null sha256, confirmable as such; a changed file outside src/ and package-format/, or one the receipt does not record, gives none; an unreadable or malformed receipt is a row of its own, and release refuses on it.
+# test_converted_line_endings_are_no_drift: a recorded helper and package format checked out with CRLF line endings give no helper_drift row, while an edit after the conversion still does.
 # test_check_draft_checks_findings_drift: synchronized JSON passes, drift fails with state render in both modes, an old helper gets an upgrade hint, and rows with no findings.json are drift.
 # test_names_cover_project_records: names hold created views, sources without CTEs or table functions, settings dotted paths (not bare nested keys), and result IDs from evidence and state links; plain words, including plain investigation and package names, are left out.
 # test_toml_keys_fall_back_to_tomli_then_key_lines: without tomllib, settings keys parse with tomli (no bare nested keys); without either, table headers and key lines; display.toml then names the missing package.
@@ -1959,6 +1960,17 @@ def test_helper_drift_rows_for_missing_unrecorded_and_unreadable_files(project, 
                                                 "sha256": sha(project / ".awb-receipt.json"), "recorded": None}]
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 1 and report["helper_drift"][0]["file"] == ".awb-receipt.json"
+
+
+def test_converted_line_endings_are_no_drift(project):
+    draft = load(project / "src/packaging/draft.py", "draft_drift_crlf")
+    install_receipt(project)
+    for path in ("src/awb.py", "package-format/deck-rules.md"):
+        converted = project / path
+        converted.write_bytes(converted.read_bytes().replace(b"\n", b"\r\n"))
+    assert draft.helper_drift(project) == []
+    (project / "src/awb.py").write_bytes((project / "src/awb.py").read_bytes() + b"# edited\r\n")
+    assert [(row["file"], row["status"]) for row in draft.helper_drift(project)] == [("src/awb.py", "changed")]
 
 
 @pytest.mark.parametrize("verify_only", [False, True])

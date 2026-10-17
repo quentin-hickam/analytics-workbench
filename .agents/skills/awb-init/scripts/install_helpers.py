@@ -58,7 +58,7 @@ Install/check modes print one line of JSON:
                      interpreter to use on the line.
 Package formats stay absent until awb-package copies them with --package-formats.
 The project's install receipt, .awb-receipt.json, maps each file this script installed or replaced to
-its SHA-256: a file matching its entry is unmodified. A file without an entry is customized unless
+its SHA-256, taken with CRLF line endings read as LF: a file matching its entry is unmodified. A file without an entry is customized unless
 it equals the shipped asset.
 Existing dependency files are only read, and no package is installed. Exit status: 0 done; 1 not a
 workbench, Python too old, an unreadable receipt, README naming another interpreter, or a project
@@ -111,7 +111,9 @@ BEFORE = {"tomli": (3, 11)}
 
 
 def _sha256(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    # CRLF read as LF, so a checkout that converts line endings is not a change; awb_draft's helper_drift
+    # hashes the same way.
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 def _normalize(name):

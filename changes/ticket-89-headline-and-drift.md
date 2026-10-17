@@ -5,3 +5,4 @@
 ### Changed
 
 - A headline over 15 words is now a `warning` outline row carrying the headline's text, and every other outline row an `error`, each row naming its `severity`. The user can keep a longer headline: the manifest's `accepted_long_headlines` lists its exact text with their reason, and `check-draft` and `release` then pass it, while a reworded headline needs a new entry. The headline checkpoint states the 15-word limit and asks before trimming a headline the user wrote or approved.
+- The installer's receipt and `helper_drift` hash a file with CRLF line endings read as LF, so a checkout that converts line endings is neither a customized file nor helper drift.

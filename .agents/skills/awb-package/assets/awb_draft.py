@@ -2627,7 +2627,8 @@ def _write_start_here(draft, investigation, package):
 
 # ---------------------------------------------------------------- user acceptances and helper drift
 
-# awb-init's install_helpers.py writes it: each project path it installed or replaced -> that file's SHA-256.
+# awb-init's install_helpers.py writes it: each project path it installed or replaced -> that file's SHA-256,
+# taken with CRLF read as LF as _digest takes it, so a checkout that converts line endings is no drift.
 RECEIPT = ".awb-receipt.json"
 # The receipt paths whose files gate a release: the helpers and the package formats.
 _GATING = ("src/", "package-format/")
@@ -2642,7 +2643,7 @@ def accepted_long_headlines(record: dict) -> set:
 
 
 def helper_drift(root) -> list[dict]:
-    """Each helper under src/ and package-format/ file whose bytes differ from the SHA-256 the install receipt
+    """Each helper under src/ and package-format/ file whose content differs from the SHA-256 the install receipt
     records: {"file", "status", "sha256", "recorded"}, status changed, missing (sha256 null), or unreadable.
     No receipt, or a file it does not record, gives no row; an unreadable receipt is itself a row, so a gate
     edited past the receipt is never silently passed."""
@@ -2662,9 +2663,9 @@ def helper_drift(root) -> list[dict]:
 
 
 def _digest(path):
-    """(SHA-256, "changed") of the file at path, or (None, "missing" or "unreadable")."""
+    """(SHA-256 with CRLF read as LF, "changed") of the file at path, or (None, "missing" or "unreadable")."""
     try:
-        return hashlib.sha256(Path(path).read_bytes()).hexdigest(), "changed"
+        return hashlib.sha256(Path(path).read_bytes().replace(b"\r\n", b"\n")).hexdigest(), "changed"
     except FileNotFoundError:
         return None, "missing"
     except OSError:

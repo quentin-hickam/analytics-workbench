@@ -5,6 +5,7 @@
 # test_requirements_match_helper_imports: the static requirements list equals the third-party imports of the shipped helpers and the run.py template, fallbacks included.
 # test_present_helpers_are_classified_and_kept: current, earlier and customized copies are reported and left byte for byte without --upgrade.
 # test_receipt_alone_decides_earlier: a file matching its receipt entry is earlier; a file whose entry differs, or without an entry such as one installed before receipts, is customized.
+# test_converted_line_endings_keep_the_status: a shipped or earlier copy checked out with CRLF line endings is still current or earlier, not customized.
 # test_package_formats_install_on_request: --package-formats installs missing formats into the receipt; without it present formats go unreported.
 # test_every_package_format_ships: every file under awb-package's package-format assets, the methodology note template included, is a copied package format at the same path.
 # test_check_writes_nothing: --check reports missing helpers and the absent requirements file without writing.
@@ -199,6 +200,15 @@ def test_receipt_alone_decides_earlier(project, imports_ok):
     assert result["files"]["src/preparation/landing.py"] == "earlier"
     assert result["files"]["src/provenance.py"] == "customized"
     assert result["files"]["workbench-guides/data.md"] == "customized"  # installed before receipts
+
+
+def test_converted_line_endings_keep_the_status(project, imports_ok):
+    shipped = earlier_version("src/provenance.py")
+    earlier(project, {"src/provenance.py": shipped})
+    write(project, {"src/provenance.py": shipped.replace(b"\n", b"\r\n"),
+                    "src/awb.py": ASSETS["src/awb.py"].read_bytes().replace(b"\n", b"\r\n")})
+    result = installer.install(project, check=True, upgrade=True)
+    assert result["files"]["src/provenance.py"] == "earlier" and result["files"]["src/awb.py"] == "current"
 
 
 def test_package_formats_install_on_request(project, imports_ok):
