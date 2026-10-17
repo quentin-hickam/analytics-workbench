@@ -255,13 +255,14 @@ def test_headline_checkpoint_states_the_word_limit_and_asks_before_trimming():
 
 def test_package_records_and_previews_audience_number_formats_and_prose_approximations():
     brief = (ROOT / '.agents/skills/awb-init/assets/workbench/investigation/brief.md').read_text()
-    assert "Always record precision and clock format: the user's choices, otherwise audience defaults." in brief
+    assert "Once the audience is named, always record precision and clock format: the user's choices, otherwise audience defaults." in brief
     assert ('Unless the audience is recorded as technical, use whole numbers for large values, one decimal '
             "for shares and rates, and the audience's usual clock format.") in brief
     assert 'when the user states them' not in brief
     package = (ROOT / '.agents/skills/awb-package/SKILL.md').read_text()
     establish = skill_section('.agents/skills/awb-package/SKILL.md', '## 1. Establish')
-    assert "Record precision and clock format, using the brief template's audience defaults when unspecified" in establish
+    assert ("Record precision and clock format, using the [brief template](../awb-init/assets/workbench/investigation/"
+            "brief.md)'s audience defaults when unspecified") in establish
     checkpoint = skill_section('.agents/skills/awb-package/SKILL.md', '### The headline checkpoint')
     assert "With the headlines" in checkpoint and "state the brief's precision and clock format" in checkpoint
     helpers = (ROOT / '.agents/skills/awb-package/references/helpers.md').read_text()

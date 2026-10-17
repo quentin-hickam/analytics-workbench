@@ -3976,7 +3976,7 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "foundation/display.toml holds [columns] (column = display name), [values.<column>] (coded "
                "value = label, matching the saved text exactly, so True, not true), [round] (column = decimal places, 0 to 20), [percent] with columns = [...] "
                "(fractions shown 100 times larger, scaled exactly before rounding), [scale] (column = { divide = "
-               "<a positive number>, files = true }, values divided before percent scaling and rounding; "
+               "<a positive number> } or { divide = <n>, files = false }, values divided before percent scaling and rounding; "
                "files = false keeps files in their recorded unit and records prose_scale for tracing), [confirmed] with "
                "columns = [...] (shared names confirmed to fit every result), and [results.\"<result>\"] "
                "with columns, values, and percent tables that replace the global ones for that result, a values "
