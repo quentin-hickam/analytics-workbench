@@ -466,6 +466,7 @@ class Scan:
             i = index[name]
             v = q(f"__v{i}")
             non_null = info[name]["non_null"]
+            looks_like_key = KEY_NAME.search(name) and (info[name]["distinct"] or 0) >= 0.8 * non_null
             flagged = []
             if kind == "number":
                 for k, s in enumerate(NUMERIC_SENTINELS):
@@ -474,7 +475,7 @@ class Scan:
                         continue
                     others_max, others_min = a[f"mxo{i}"], a[f"mno{i}"]
                     if (s < 0 and others_min is not None and others_min >= 0) or \
-                            (s > 0 and not KEY_NAME.search(name) and others_max is not None
+                            (s > 0 and not looks_like_key and others_max is not None
                              and s > 2 * max(others_max, 0)):
                         flagged.append(s)
                         self.add("sentinel", name, _number_text(s), count, non_null,

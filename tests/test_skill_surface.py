@@ -493,9 +493,7 @@ def test_first_pass_answers_keep_to_the_evidence():
     invariants = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Analytical invariants').split())
     # A saved query's figure is exploration until run.py records it as a result.
     assert "can become a finding; present other query output, saved queries' too, as exploration" in invariants
-    for rule in ('Record what the user recalls as their statement, not as confirmed',
-                 'name what a comparison leaves uncontrolled when a decision rests on it'):
-        assert rule in invariants
+    assert 'Name what a comparison leaves uncontrolled when a decision rests on it' in invariants
 
 
 def test_chat_claim_rules_sit_where_chat_is_written():
@@ -503,16 +501,20 @@ def test_chat_claim_rules_sit_where_chat_is_written():
     # reached chat while the rule sat among the analytical invariants; it moved, not duplicated.
     text = AGENTS.read_text(encoding='utf-8')
     conversation = ' '.join(section(text, '## Conversation').split())
-    assert 'Offer an untested explanation as a question.' in conversation
-    assert "Name every share's base and say when it changes." in conversation
-    assert 'untested explanation' not in ' '.join(section(text, '## Analytical invariants').split())
+    assert 'Offer an untested cause, label, or recollection as a question' in conversation
+    assert '("timing errors?", not "timing errors")' in conversation
+    assert "record recollections as the user's" in conversation
+    assert text.count('recollections') == 1 and text.count('recollection as a question') == 1
+    assert 'recalls' not in text
+    assert "Name codes by meaning, and every share's base and when it changes." in conversation
+    assert 'untested' not in ' '.join(section(text, '## Analytical invariants').split())
     # IDs stay in the records: no allowance for one beside plain text in chat.
     assert 'Records keep precise terms and IDs; chat uses plain words' in conversation
     assert 'may sit beside plain text' not in conversation
     # The headline checkpoint repeats the explanation rule and shows the figures chat has not.
     checkpoint = ' '.join(section((ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8'),
                                   '### The headline checkpoint').split())
-    assert "Offer an untested explanation as a question, never as a headline's claim." in checkpoint
+    assert 'Headlines claim only what results show: no untested cause or label, no exception dropped.' in checkpoint
     assert 'show them with the figures behind each headline that chat has not shown' in checkpoint
     # A duplicate row is a repeat to explain, its treatment proposed without a cause asserted.
     clean = ' '.join((ROOT / '.agents/skills/awb-clean/SKILL.md').read_text(encoding='utf-8').split())

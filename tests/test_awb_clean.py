@@ -187,6 +187,30 @@ def test_text_dates_and_codes_are_typed_conservatively(tmp_path):
     assert columns["code"]["typed_as"] is None
 
 
+def test_sentinels_in_code_columns_are_not_exempted_by_id_name(tmp_path):
+    pytest.importorskip("duckdb")
+    import duckdb
+
+    path = tmp_path / "codes.parquet"
+    with duckdb.connect() as db:
+        db.execute("COPY (SELECT (CASE WHEN n % 7 = 0 THEN 99 ELSE n % 7 END)::INTEGER AS RatecodeID "
+                   "FROM range(70) t(n)) TO ? (FORMAT PARQUET)", [str(path)])
+    record, _ = scanner.scan(tmp_path, "codes.parquet", today=TODAY)
+    assert keys(record)["sentinel:RatecodeID:99"]["count"] == 10
+
+
+def test_positive_sentinel_exempts_key_names_at_eighty_percent_distinct(tmp_path):
+    pytest.importorskip("duckdb")
+    # Sixteen distinct values in twenty non-null rows; nulls do not lower distinctness.
+    values = list(range(1, 16)) + [99, 1, 2, 3, 4, None, None]
+    write(tmp_path, "keys.csv", "record_id,value\n" + "\n".join(
+        f"{n if n is not None else ''},{n if n is not None else ''}" for n in values) + "\n")
+    record, _ = scanner.scan(tmp_path, "keys.csv", today=TODAY)
+    found = keys(record)
+    assert "sentinel:record_id:99" not in found
+    assert found["sentinel:value:99"]["count"] == 1
+
+
 def test_rescan_reports_delta_with_stable_ids_and_inherited_options(project, capsys):
     pytest.importorskip("duckdb")
     with_session(project)

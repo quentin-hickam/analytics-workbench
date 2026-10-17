@@ -50,7 +50,7 @@ An investigation's `run.py`, the thin entry point that composes shared operation
 A validated result an investigation records as a row of `state.md`, with a status, a claim strength, and a link to its result evidence. The row is rendered from the investigation's `findings.json`, which the provenance helper alone writes. The agent promotes a provisional finding to supported once its checks are recorded and the user approves its headline or text. Exploration notes are recorded separately and are not findings.
 
 **Claim strength**:
-The strongest wording a finding supports: descriptive, association, or causal. Causal requires a stated design basis, an experiment or an identified natural experiment; exploration supports association at most. A delivered narrative never words a finding above it.
+The strongest wording a finding supports: descriptive, association, or causal. Causal requires an experiment or identified natural experiment; exploration supports association at most. Narratives stay within that strength. Untested causes, labels and recollections are questions; recollections remain the user's and codes are named by meaning.
 
 **Flagged**:
 Awaiting revalidation: a finding that a shared correction or changed input may affect, marked with the reason and with its prior status kept visible in the status value, as in `revalidation-needed (was supported)`. Scan output is an anomaly in EDA and an issue in cleaning, never a flag.
