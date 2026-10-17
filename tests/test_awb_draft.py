@@ -254,6 +254,7 @@ def run(project, capsys, *argv):
 def reviewed(project):
     """Record a clean full review of the draft as it stands, which release requires."""
     draft = load(project / "src/packaging/draft.py", "draft_reviewed")
+    assert draft.start_review(project, "inv", "pkg", "full")["started"]
     assert draft.record_review(project, "inv", "pkg", "full", "review: clean\n")["passed"]
 
 
@@ -1886,6 +1887,7 @@ def test_release_requires_a_current_review_receipt(project, capsys):
     assert not released.exists()
 
     failing = "review: 0 violations (0 error), 1 narrative problems, 0 command problems\n"
+    assert draft.start_review(project, "inv", "pkg", "full")["started"]
     assert draft.record_review(project, "inv", "pkg", "full", failing)["passed"] is False
     assert run(project, capsys, "check-draft", "inv", "pkg")[1]["review"]["status"] == "failed"
     assert run(project, capsys, "release", "inv", "pkg")[1]["review"] == {"status": "failed", "changed": []}
@@ -1902,6 +1904,7 @@ def test_release_requires_a_current_review_receipt(project, capsys):
 
     # A scoped review that passes completes the release, and its acceptances travel with it.
     scoped = failing.replace("review:", "review (scoped):")
+    assert draft.start_review(project, "inv", "pkg", "scoped")["started"]
     assert not draft.record_review(project, "inv", "pkg", "scoped", scoped, now="2026-10-16T12:00:00+00:00")["passed"]
     assert draft.record_review(project, "inv", "pkg", "scoped", scoped, accepted)["passed"]
     assert run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")[1]["review"]["status"] == "current"
