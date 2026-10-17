@@ -19,6 +19,11 @@
 # test_session_refuses_a_project_root_containing_a_comma: regression: comma-containing project root is rejected before opening a connection.
 # test_cli_sql_prints_first_rows_and_total_and_writes_full_result: sql runs a project-relative query file or SQL text, prints a capped Markdown table and the total, and writes CSV or Parquet.
 # test_cli_sql_reports_failures_on_one_line: SQL errors, failing view files and non-query SQL print one stderr line and return 1; a bad --out extension is a usage error.
+# test_sql_param_values_read_as_settings_values: a --param value is read as a one-line TOML value, so a date, number, boolean, quoted string, or array keeps its type, and other text, a value spanning lines included, is the string as given.
+# test_sql_param_refuses_what_a_query_cannot_name: a --param without =, or whose name is not letters, digits, and _, is a usage error.
+# test_cli_sql_binds_parameters_from_param_and_settings: with and without --read-only, --settings binds an investigation's [parameters] and --param wins over them, each statement getting only the names it uses with their types kept, writing nothing; a missing, unreadable, or misnamed settings investigation fails on one line, and a bad --param exits 2.
+# test_cli_sql_plan_failures_name_the_fix_and_keep_read_only: under --read-only, an unbound parameter, an ambiguous column, and another binder error return DuckDB's error on one line with its likely fix and never suggest dropping --read-only; without it, an unbound parameter gets the same fix.
+# test_cli_sql_and_profile_report_a_missing_query_file: one line ending in .sql, in any case, relative or absolute, that names no file is a missing query file for sql and profile; SQL text over several lines or not ending in .sql still runs; a table named sql in a schema is the known limit.
 # test_cli_sql_read_only_runs_select_and_refuses_every_write: --read-only prints SELECT results and refuses COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, a setting PRAGMA, CALL, CREATE, and INSERT, and a SELECT calling a table function that writes (enable_profiling, enable_logging, checkpoint), directly or through a view, macro, subquery, or query(), and any call of query, query_table, json_execute_serialized_sql, or a table macro calling one (histogram_values, histogram) as a table function, however named or quoted, before any statement runs, and refuses --out, leaving the project unchanged; profile --read-only does the same; a read-only PRAGMA, SHOW, SUMMARIZE, PIVOT with IN, information_schema, a column or CTE named query, and the histogram() aggregate still run, through sql and profile.
 # test_read_only_sql_refuses_a_plan_that_differs_at_the_run: a query() whose SQL reads range(1) under EXPLAIN and enables profiling at the run is refused before any statement runs; no file is written, the session's profiling stays off, and the session still answers.
 # test_profile_runs_with_a_landing_helper_older_than_read_only: profile without --read-only calls session(root) alone, so a landing helper without the read_only keyword still profiles.
@@ -65,6 +70,7 @@
 # test_a_declaration_that_plans_no_check_needs_neither_duckdb_nor_parquet: empty check lists plan nothing, so publish needs no duckdb and no Parquet output.
 # test_cli_publish_records_declared_checks: the publish command records declared checks with its --check outcome, counts them in its output and catalog_row (one check passes, several pass), and prints failed_checks on refusal.
 
+import argparse
 import hashlib
 import importlib.util
 import json
@@ -75,7 +81,7 @@ import shutil
 import subprocess
 import sys
 import types
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -515,6 +521,106 @@ def test_cli_sql_reports_failures_on_one_line(tmp_path, capsys):
         landing.cli_sql(tmp_path, ["SELECT 1", "--out", "result.json"])
     assert exit.value.code == 2
     assert not (tmp_path / "result.json").exists()
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("start=2026-01-01", ("start", date(2026, 1, 1))),
+    ("n=5", ("n", 5)),
+    ("rate=0.25", ("rate", 0.25)),
+    ("on=true", ("on", True)),
+    ('code="5"', ("code", "5")),
+    ("regions=['a', 'b']", ("regions", ["a", "b"])),
+    ("region=west", ("region", "west")),  # no TOML value: the text as given
+    ("code=007", ("code", "007")),
+    ("flag=True", ("flag", "True")),
+    ("empty=", ("empty", "")),
+    ("pair=a=b", ("pair", "a=b")),
+    ("two=1\nother = 2", ("two", "1\nother = 2")),  # never read as TOML across lines
+])
+def test_sql_param_values_read_as_settings_values(text, expected):
+    assert landing._parameter(text) == expected
+
+
+@pytest.mark.parametrize("text", ["start", "=5", "the-start=5", "$start=5", "a b=5"])
+def test_sql_param_refuses_what_a_query_cannot_name(text):
+    with pytest.raises(argparse.ArgumentTypeError, match="name=value"):
+        landing._parameter(text)
+
+
+def test_cli_sql_binds_parameters_from_param_and_settings(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    (tmp_path / "investigations/churn").mkdir(parents=True)
+    (tmp_path / "investigations/churn/settings.toml").write_text(
+        "[parameters]\nfirst = 2\nlast = 3\nunused = 2026-01-01\n")
+    (tmp_path / "queries/window.sql").write_text("SELECT id FROM orders WHERE id BETWEEN $first AND $last ORDER BY id;\n")
+    before = _files(tmp_path)
+    for read_only in ([], ["--read-only"]):
+        # settings bind every name a statement uses, and --param wins over them
+        assert landing.cli_sql(tmp_path, read_only + ["--settings", "churn", "queries/window.sql"]) == 0
+        assert capsys.readouterr().out == "| id |\n|---|\n| 2 |\n| 3 |\n2 of 2 rows shown\n"
+        assert landing.cli_sql(tmp_path, read_only + ["--settings", "churn", "--param", "last=4",
+                                                      "--param", "first=4", "queries/window.sql"]) == 0
+        assert capsys.readouterr().out == "| id |\n|---|\n| 4 |\n1 of 1 rows shown\n"
+        # each statement gets the names it uses; a date, a number, and a list keep their types
+        assert landing.cli_sql(tmp_path, read_only + [
+            "--param", "n=2", "--param", "day=2026-01-01", "--param", "ids=[1, 3]",
+            "SELECT $n + 1 AS x; SELECT $day + INTERVAL 1 DAY AS d, list_contains($ids, 3) AS has FROM range($n)"]) == 0
+        assert capsys.readouterr().out == ("| d | has |\n|---|---|\n| 2026-01-02 00:00:00 | True |\n"
+                                           "| 2026-01-02 00:00:00 | True |\n2 of 2 rows shown\n")
+    assert _files(tmp_path) == before
+    # a missing or unreadable settings file fails on one line; a bad --param is a usage error
+    assert landing.cli_sql(tmp_path, ["--settings", "absent", "SELECT 1"]) == 1
+    assert "investigations/absent/settings.toml does not exist" in capsys.readouterr().err
+    (tmp_path / "investigations/churn/settings.toml").write_text("[parameters\n")
+    assert landing.cli_sql(tmp_path, ["--read-only", "--settings", "churn", "SELECT 1"]) == 1
+    assert capsys.readouterr().err.startswith("sql: investigations/churn/settings.toml: ")
+    assert landing.cli_sql(tmp_path, ["--settings", "../churn", "SELECT 1"]) == 1
+    assert "needs an investigation name" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as exit:
+        landing.cli_sql(tmp_path, ["--param", "first", "SELECT 1"])
+    assert exit.value.code == 2
+
+
+def test_cli_sql_plan_failures_name_the_fix_and_keep_read_only(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    for query, fix in (("SELECT id FROM orders WHERE id > $cohort_end", "bind each $name with --param name=value"),
+                       ("SELECT id FROM orders a, orders b", "qualify the column"),
+                       ("SELECT absent FROM orders", "fix the statement, or for a PIVOT list its values with IN (...)")):
+        assert landing.cli_sql(tmp_path, ["--read-only", query]) == 1, query
+        error = capsys.readouterr().err
+        assert error.startswith("sql: read-only: refused a statement DuckDB cannot plan (") and fix in error, error
+        assert "without --read-only" not in error and error.count("\n") == 1, error
+    # without --read-only, an unbound parameter gets the same fix
+    assert landing.cli_sql(tmp_path, ["SELECT id FROM orders WHERE id > $cohort_end"]) == 1
+    error = capsys.readouterr().err
+    assert "bind each $name with --param name=value" in error and error.count("\n") == 1
+
+
+def test_cli_sql_and_profile_report_a_missing_query_file(tmp_path, capsys):
+    pytest.importorskip("duckdb")
+    sql_project(tmp_path)
+    validate_spec = importlib.util.spec_from_file_location("awb_validate_missing", ASSET.parent / "awb_validate.py")
+    validate = importlib.util.module_from_spec(validate_spec)
+    validate_spec.loader.exec_module(validate)
+    (tmp_path / "src/preparation").mkdir(parents=True)
+    shutil.copyfile(ASSET, tmp_path / "src/preparation/landing.py")
+    for path in ("queries/absent.sql", "investigations/x/exploration/topic.SQL", " queries/absent.sql ",
+                 str(tmp_path / "absent.sql")):
+        for read_only in ([], ["--read-only"]):
+            assert landing.cli_sql(tmp_path, read_only + [path]) == 1, path
+            assert capsys.readouterr().err == \
+                f"sql: no query file {' '.join(path.split())}; a relative path is read from the project root\n"
+            assert validate.cli_profile(tmp_path, read_only + [path]) == 1, path
+            assert "no query file" in capsys.readouterr().err
+    # SQL text spanning lines, or not ending in .sql, is still SQL text
+    for query in ("SELECT 1 AS n\n-- from queries/old.sql", "SELECT 'queries/absent.sql' AS n", "SELECT 1 AS sql"):
+        assert landing.cli_sql(tmp_path, ["--read-only", query]) == 0, query
+    capsys.readouterr()
+    # Known limit: one line ending in .sql names a file, so a table named sql in schema s is read as one.
+    assert landing.cli_sql(tmp_path, ["SELECT * FROM s.sql"]) == 1
+    assert "no query file" in capsys.readouterr().err
 def _files(root):
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 

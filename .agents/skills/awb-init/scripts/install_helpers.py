@@ -53,16 +53,19 @@ Install/check modes print one line of JSON:
                      (--check), unrecorded without a readable README.md, or overridden when $AWB_PYTHON
                      names this interpreter, which leaves the line as it is. A README naming another
                      existing interpreter, or repeating the line, is an error: rerun with that
-                     interpreter, or edit the line to switch. So is a project .venv or venv interpreter
-                     other than this one while README records none: rerun with it, or name the
-                     interpreter to use on the line.
+                     interpreter, or edit the line, which the error spells, to switch. So is a project
+                     .venv or venv interpreter other than this one while README records none: rerun with
+                     it, or name the interpreter to use on the line. So is writing the line for an
+                     interpreter outside the project that lacks a required package: the error names
+                     them, with packages and install as below.
 Package formats stay absent until awb-package copies them with --package-formats.
 The project's install receipt, .awb-receipt.json, maps each file this script installed or replaced to
 its SHA-256: a file matching its entry is unmodified. A file without an entry is customized unless
 it equals the shipped asset.
 Existing dependency files are only read, and no package is installed. Exit status: 0 done; 1 not a
-workbench, Python too old, an unreadable receipt, README naming another interpreter, or a project
-venv passed over, nothing written; 2 unusable arguments.
+workbench, Python too old, an unreadable receipt, README naming another interpreter, a project
+venv passed over, or an interpreter outside the project lacking packages, nothing written; 2 unusable
+arguments.
 """
 
 import argparse
@@ -209,7 +212,7 @@ def _interpreter(root, check):
         if cli.same_interpreter(detail):
             return {**report, "status": "current"}, None, None
         return report, (f"README's Project interpreter is {recorded}, not this interpreter ({sys.executable}); "
-                        "rerun with it, or edit that line to switch"), None
+                        f"rerun with it, or switch by editing that README line to read: {report['line']}"), None
     # With no interpreter recorded, awb.py runs the project's own venv: record that one, not this one.
     venv, _ = cli.project_venv(root)
     if venv is not None and not cli.same_interpreter(venv):
@@ -242,6 +245,21 @@ def _interpreter(root, check):
             lines[anchor] += newline
         lines[anchor + 1:anchor + 1] = [newline, entry] if anchor >= 0 else [entry]
     return {**report, "status": "replaced" if was else "written", **was}, None, "".join(lines)
+
+
+def _packages():
+    """({import name: ok or missing}, the requirements of those missing) for this interpreter."""
+    packages, absent = {}, []
+    for name, requirement in REQUIREMENTS.items():
+        if name in BEFORE and sys.version_info >= BEFORE[name]:
+            continue  # Only older interpreters need the fallback.
+        try:
+            importlib.import_module(name)
+            packages[name] = "ok"
+        except Exception:  # A broken install fails in ways other than ImportError.
+            packages[name] = "missing"
+            absent.append(_distribution(requirement))
+    return packages, absent
 
 
 def _has_pip():
@@ -308,6 +326,18 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
     interpreter, error, readme = _interpreter(root, check)
     if error:
         return {"project": str(root), "workbench": True, "interpreter": interpreter, "error": error}
+    packages, absent = _packages()
+    if absent and not interpreter["in_project"] and interpreter.get("status") in ("written", "replaced", "missing"):
+        # Recording an interpreter that cannot run the helpers, such as the MCP server's own, would leave
+        # every workbench command failing until README is edited by hand.
+        command = f"{_pip_install(sys.executable, sys.prefix)} {' '.join(absent)}"
+        return {"project": str(root), "workbench": True, "interpreter": interpreter, "packages": packages,
+                "install": command,
+                "error": f"this interpreter, {sys.executable}, is outside the project and cannot import "
+                         f"{', '.join(absent)}, so recording it would leave workbench commands failing; nothing "
+                         "was written. Create the project's virtual environment, .venv, install the packages "
+                         "into it, and rerun with it (the awb MCP setup tool takes its absolute path as "
+                         "interpreter), or install them into this interpreter and rerun"}
     copies = _copies()
     unknown = set(replace) - {path for path, _ in copies}
     if unknown:
@@ -387,16 +417,6 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
                                   **({"missing": missing} if missing else {}),
                                   **({"unread": unread} if unread else {})}
 
-    packages, absent = {}, []
-    for name, requirement in REQUIREMENTS.items():
-        if name in BEFORE and sys.version_info >= BEFORE[name]:
-            continue  # Only older interpreters need the fallback.
-        try:
-            importlib.import_module(name)
-            packages[name] = "ok"
-        except Exception:  # A broken install fails in ways other than ImportError.
-            packages[name] = "missing"
-            absent.append(_distribution(requirement))
     result["python"] = python
     result["packages"] = packages
     if absent:

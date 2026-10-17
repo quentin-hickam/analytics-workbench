@@ -1260,30 +1260,57 @@ READ_TABLE_FUNCTIONS = frozenset("""
 EXTENSION_READ_FUNCTIONS = {"read_xlsx": "excel"}
 
 
-def read_only_sql(connection, text):
+def read_only_sql(connection, text, parameters=None):
     """Run SQL text in a read-only session(): only SELECT statements, refusing COPY, ATTACH, INSTALL,
     LOAD, EXPORT, SET, a PRAGMA that sets, CALL, CREATE, and every other kind, and a SELECT whose plan
     calls a table function outside READ_TABLE_FUNCTIONS or that calls dynamic SQL (_refuse_dynamic_sql),
-    before any statement runs. Returns the last statement's relation, as connection.sql() does."""
+    before any statement runs. Each statement is checked and run with the `parameters` it names as $name
+    (_bound). Returns the last statement's relation, as connection.sql() does."""
     import duckdb
     statements = duckdb.extract_statements(text)  # parsed once, so what runs is what was checked
     _refuse_statements(statements, ("SELECT",), "(only SELECT runs here, and a PIVOT is one only with an IN "
                        "(...) list of its values)")
     for statement in statements:
-        _refuse_writing_plan(connection, statement)
+        _refuse_writing_plan(connection, statement, parameters)
     for statement in statements[:-1]:
-        connection.execute(statement.query)
-    return connection.sql(statements[-1].query) if statements else None
+        connection.execute(statement.query, _bound(statement.query, parameters))
+    return connection.sql(statements[-1].query, params=_bound(statements[-1].query, parameters)) \
+        if statements else None
 
 
-def _refuse_writing_plan(connection, statement):
+def _bound(sql, parameters):
+    """The entries of parameters that sql names as $name, as run.py binds a result's query; None for none."""
+    names = set(re.findall(r"\$(\w+)", sql))
+    return {name: value for name, value in (parameters or {}).items() if name in names} or None
+
+
+# DuckDB's errors for a $name left unbound: EXPLAIN's or a prepared statement's, and sql()'s.
+UNBOUND_PARAMETERS = ("prepared statement parameters", "Unexpected prepared parameter")
+
+
+def _sql_fix(message):
+    """The likely fix for a DuckDB error a statement raises: bind its parameters, qualify its column, or
+    else fix the statement; a PIVOT, whose expansion a read-only session can plan only with its values
+    listed, is named, since its text after DuckDB's expansion no longer says PIVOT."""
+    if any(text in message for text in UNBOUND_PARAMETERS):
+        return ("bind each $name with --param name=value, or --settings <investigation> for that "
+                "investigation's settings [parameters] (over MCP, the read tool's params or settings)")
+    if "Ambiguous reference to column" in message:
+        return "qualify the column with its table's name or alias"
+    return "fix the statement, or for a PIVOT list its values with IN (...)"
+
+
+def _refuse_writing_plan(connection, statement, parameters=None):
     """Raise unless one parsed statement calls no dynamic SQL (_refuse_dynamic_sql) and the plan DuckDB
-    would run for it calls only READ_TABLE_FUNCTIONS. EXPLAIN binds the statement, expanding views and macros,
-    without running it; the name check runs again after it, since binding can load an extension's macros."""
+    would run for it, bound with the parameters it names, calls only READ_TABLE_FUNCTIONS. EXPLAIN binds the
+    statement, expanding views and macros, without running it; the name check runs again after it, since
+    binding can load an extension's macros. A statement EXPLAIN cannot bind is refused with DuckDB's error
+    and its likely fix (_sql_fix), never with advice to drop read-only, which binds it no better."""
     _refuse_dynamic_sql(connection, statement)
     text = statement.query
     try:
-        plan = json.loads(connection.execute("EXPLAIN (FORMAT json) " + text).fetchall()[0][1])
+        plan = json.loads(connection.execute("EXPLAIN (FORMAT json) " + text,
+                                             _bound(text, parameters)).fetchall()[0][1])
     except Exception as error:  # a PIVOT without IN, SQL that does not bind, or an extension not installed
         called, message = _called_names(text), str(error)
         for name, extension in sorted(EXTENSION_READ_FUNCTIONS.items()):
@@ -1297,8 +1324,9 @@ def _refuse_writing_plan(connection, statement):
                     f"read-only session installs none; install it once without --read-only, "
                     f'python3 src/awb.py sql "INSTALL {extension}; SELECT 1" (over MCP, the data tool\'s sql), '
                     "then run this again") from error
-        raise ValueError(f"read-only: refused a statement whose plan cannot be checked ({error}); "
-                         "run it without --read-only") from error
+        # from None: the message carries DuckDB's error, which _fail would otherwise print twice
+        raise ValueError(f"read-only: refused a statement DuckDB cannot plan ({error}); {_sql_fix(str(error))}") \
+            from None
     table_functions = {name for (name,) in connection.execute(
         "SELECT upper(function_name) FROM duckdb_functions() WHERE function_type = 'table'").fetchall()}
     nodes = list(plan)
@@ -1488,13 +1516,47 @@ def _refuse_statements(statements, allowed, where):
 
 
 def _sql_argument(root, argument):
-    """Return the text of the query file argument names, else argument itself as SQL text."""
+    """Return the text of the query file argument names, else argument itself as SQL text. One line
+    ending in .sql, in any case, names a file: when none exists there, this raises rather than run it."""
     try:
         path = _under(root, argument)
         is_file = path.is_file()
     except (OSError, ValueError):  # SQL text can be too long, or hold a NUL, for a path
         is_file = False
+    if not is_file and "\n" not in argument and argument.strip().lower().endswith(".sql"):
+        raise ValueError(f"no query file {argument.strip()}; a relative path is read from the project root")
     return path.read_text(encoding="utf-8") if is_file else argument
+
+
+def _parameter(text):
+    """(name, value) from --param's name=value. The name is letters, digits, and _, as a query names it
+    with $name. The value is read as a one-line TOML value, as settings [parameters] are, so 2026-01-01 is
+    a date, 5 an integer, true a boolean, and "5" a string; text that is no TOML value is a string as given."""
+    name, separator, value = text.partition("=")
+    if not separator or not re.fullmatch(r"\w+", name):
+        raise argparse.ArgumentTypeError(f"expected name=value, the name in letters, digits, and _: {text!r}")
+    if "\n" in value or "\r" in value:
+        return name, value
+    try:
+        return name, _toml().loads(f"value = {value}")["value"]
+    except ValueError:  # TOMLDecodeError
+        return name, value
+
+
+def _settings_parameters(root, investigation):
+    """The [parameters] table of investigations/<investigation>/settings.toml."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", investigation):
+        raise ValueError(f"--settings needs an investigation name: {investigation!r}")
+    path = Path(root) / "investigations" / investigation / "settings.toml"
+    if not path.is_file():
+        raise ValueError(f"investigations/{investigation}/settings.toml does not exist")
+    try:
+        parameters = _toml().loads(path.read_text(encoding="utf-8")).get("parameters", {})
+    except ValueError as error:
+        raise ValueError(f"investigations/{investigation}/settings.toml: {error}") from error
+    if not isinstance(parameters, dict):
+        raise ValueError(f"investigations/{investigation}/settings.toml: parameters is not a table")
+    return parameters
 
 
 def _table_cell(value, width=80):
@@ -1507,6 +1569,16 @@ def _markdown_table(header, rows):
     lines = ["| " + " | ".join(map(_table_cell, header)) + " |", "|" + "---|" * len(header)]
     lines += ["| " + " | ".join(map(_table_cell, row)) + " |" for row in rows]
     return "\n".join(lines)
+
+
+def _bound_sql(connection, text, parameters):
+    """connection.sql(text), each statement bound with the parameters it names as $name (_bound)."""
+    import duckdb
+    statements = duckdb.extract_statements(text)
+    for statement in statements[:-1]:
+        connection.execute(statement.query, _bound(statement.query, parameters))
+    return connection.sql(statements[-1].query, params=_bound(statements[-1].query, parameters)) \
+        if statements else None
 
 
 def _fail(command, error):
@@ -1524,6 +1596,11 @@ def cli_sql(root: Path, argv: list[str]) -> int:
     parser.add_argument("query", help="query file (absolute or project-relative) or SQL text")
     parser.add_argument("--limit", type=int, default=20, help="rows to print (default 20)")
     parser.add_argument("--out", help="write the full result to this project-relative .csv or .parquet file")
+    parser.add_argument("--param", action="append", default=[], type=_parameter, metavar="NAME=VALUE",
+                        help="bind $NAME to VALUE, read as a TOML value as settings are (2026-01-01 is a date, "
+                             "5 an integer, other text a string); repeat for each; wins over --settings")
+    parser.add_argument("--settings", metavar="INVESTIGATION",
+                        help="bind the [parameters] of investigations/INVESTIGATION/settings.toml")
     parser.add_argument("--read-only", action="store_true",
                         help="write nothing: run only SELECT statements whose table functions read files or the "
                              "catalog and build no SQL from a string (query, query_table, the histogram table "
@@ -1540,10 +1617,16 @@ def cli_sql(root: Path, argv: list[str]) -> int:
     if out is not None and out.suffix.lower() not in {".csv", ".parquet"}:
         parser.error("--out must end in .csv or .parquet")
     try:
+        parameters = {**(_settings_parameters(root, args.settings) if args.settings else {}), **dict(args.param)}
         with session(root, read_only=args.read_only) as connection:
             # sql() runs every statement and returns the last one's result, or None.
             text = _sql_argument(root, args.query)
-            relation = read_only_sql(connection, text) if args.read_only else connection.sql(text)
+            if args.read_only:
+                relation = read_only_sql(connection, text, parameters)
+            elif parameters:
+                relation = _bound_sql(connection, text, parameters)
+            else:
+                relation = connection.sql(text)
             if relation is None:
                 raise ValueError("the SQL returns no rows; end it with a query")
             if out is not None:
@@ -1556,6 +1639,8 @@ def cli_sql(root: Path, argv: list[str]) -> int:
             header, rows = relation.columns, relation.limit(args.limit).fetchall()
             total = relation.aggregate("count(*)").fetchone()[0]
     except Exception as error:
+        if not args.read_only and any(text in str(error) for text in UNBOUND_PARAMETERS):
+            error = ValueError(f"{error}; {_sql_fix(str(error))}")
         return _fail("sql", error)
     print(_markdown_table(header, rows))
     print(f"{len(rows)} of {total} rows shown" + (f"; full result in {args.out}" if out else ""))
