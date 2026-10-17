@@ -5,6 +5,8 @@ description: "Start or refine an analytics workbench investigation. Use for \"le
 
 # Scope an investigation
 
+Run this skill's commands through the `awb` MCP tools when the host offers them, as the project's `AGENTS.md` **Commands** maps them; the command lines below are the fallback.
+
 Interview the user until the investigation knows what it must answer, for whom, and what it still does not know. Settled decisions go in the brief; every question still open goes in the investigation's question ledger, `questions.md`, rendered from `questions.json`. Scoping writes investigation records only; data work, analysis, and packages follow on request.
 
 ## 1. Find the investigation

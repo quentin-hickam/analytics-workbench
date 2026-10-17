@@ -3,13 +3,15 @@
 # test_unknown_methods_fail_at_once: server/discover and any other unknown request get -32601 at once; a bad line gets -32700, a non-2.0 message, one with an id and neither method nor result, or one whose id is not a string, number, or null -32600, an unknown tool or a non-string tool name -32602; the server keeps serving.
 # test_setup_installs_into_a_folder_without_helpers: setup round trip: check writes nothing, then install writes src/awb.py and the receipt; a folder without workbench markers exits 1 with the installer's hint.
 # test_setup_runs_under_awb_python_over_a_recorded_interpreter: with AWB_PYTHON set, setup runs under it while README records another interpreter, reports the line overridden, and leaves it as written.
+# test_setup_records_nothing_for_an_outside_interpreter_without_the_packages: on a fresh project with no recorded interpreter and no venv, setup under a server interpreter outside the project that lacks duckdb, or passed one as interpreter, fails, with or without check, naming the missing packages and the interpreter argument, and writes nothing.
+# test_setup_runs_under_and_records_the_interpreter_it_is_given: setup with interpreter runs the installer under it and records it, project-relative inside the project, so later calls find it; a relative, absent, or empty interpreter is refused.
 # test_read_commands_round_trip_and_write_nothing: every read command without DuckDB (state, questions, stale, review-rules, check-draft, status, help) runs its helper and leaves the project, .git included, unchanged.
 # test_read_check_draft_reports_helper_drift: read check-draft reports no helper_drift on a fresh setup, and a helper_drift row naming src/packaging/draft.py once it is edited.
 # test_records_round_trip: records adds a question, edits next steps, adds a review rule and one with --scope, flags through stdin, and runs clean-record, each writing its record.
 # test_review_receipt_round_trip: read review-receipt shows none, package review-receipt refuses a record with no start, starts a review, and records a report passed on stdin, and read then shows it stale with the diff and the prior report after an edit, writing nothing; its help topic resolves, and read requires the package.
 # test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit; read returns both changes while keeping its answer, and attempts to change answered question content or replace its answer are refused.
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
-# test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, records words it and returns state finding's warning on a number the result does not record, read shows sql, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
+# test_data_run_package_release_round_trip: with DuckDB, data writes sql --out and an EDA scan, run writes evidence and a finding, records words it and returns state finding's warning on a number the result does not record, read shows sql, sql binding $name from params and settings, with params winning, and an unbound one's fix, profile, and the scan, package and release reach their helpers, and every read leaves the project unchanged.
 # test_shared_views_parameters_and_pre_commit_results_over_mcp: with DuckDB, run loads the investigation's views/*.sql into the result session, eda-scan reads a $name in [eda] where from [parameters], and read status lists a result run before the first commit once the repository has one, until run records it again.
 # test_package_export_passes_the_chart_selection_through: with DuckDB, the package tool passes export's --chart row selection to the helper unchanged: @first=1 writes one row and the manifest records it, and a malformed selection comes back as the helper's refusal with exit status 2.
 # test_read_sql_refuses_writes: read sql and profile refuse COPY, ATTACH, INSTALL, LOAD, EXPORT, SET, CREATE, a SELECT calling enable_profiling with save_location or enable_logging with file storage, and a query() whose SQL differs between the plan check and the run, and write no file; read refuses arguments outside its command and help topics outside the helpers.
@@ -52,12 +54,12 @@ needs_duckdb = pytest.mark.skipif(not HAS_DUCKDB, reason="needs duckdb and panda
 class Client:
     """A stdio MCP client: one server process, answering its roots/list requests from `roots`."""
 
-    def __init__(self, cwd, log, roots=None, env=None):
+    def __init__(self, cwd, log, roots=None, env=None, python=None):
         self.roots = roots
         self.roots_asked = 0
         self.log = open(log, "ab")
         self.process = subprocess.Popen(
-            [sys.executable, str(SERVER)], cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            [python or sys.executable, str(SERVER)], cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=self.log, env={**os.environ, "AWB_PYTHON": sys.executable, **(env or {})})
         self.lines = queue.Queue()
         self.raw = []
@@ -115,8 +117,8 @@ class Client:
 def connect(tmp_path):
     clients = []
 
-    def start(cwd=None, roots=None, env=None, initialize=True):
-        client = Client(cwd or tmp_path, tmp_path / "server.log", roots, env)
+    def start(cwd=None, roots=None, env=None, initialize=True, python=None):
+        client = Client(cwd or tmp_path, tmp_path / "server.log", roots, env, python)
         clients.append(client)
         if initialize:
             client.initialize()
@@ -252,6 +254,53 @@ def test_setup_runs_under_awb_python_over_a_recorded_interpreter(tmp_path, conne
         assert not error and text.endswith("exit status 0"), text
         assert json.loads(text.split("\n\n")[0])["interpreter"]["status"] == "overridden"
     assert readme.read_bytes() == before and (root / "src/awb.py").is_file()
+
+
+def bare_venv(path):
+    """A virtual environment with no packages, not even pip, and its interpreter."""
+    subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(path)], check=True, capture_output=True)
+    return next(candidate for candidate in (path / "bin/python", path / "Scripts/python.exe") if candidate.is_file())
+
+
+def test_setup_records_nothing_for_an_outside_interpreter_without_the_packages(tmp_path, connect):
+    root = scaffold(tmp_path / "wb")
+    server_python = bare_venv(tmp_path / "server-venv")  # outside the project, lacking duckdb and pandas
+    before = snapshot(root)
+    # A fresh project with no README interpreter and no venv: setup would run under the server's own.
+    client = connect(cwd=root, env={"AWB_PYTHON": ""}, python=str(server_python))
+    for check in (True, False):
+        text, error = client.call("setup", check=check)
+        result = json.loads(text.split("\n\n")[0])
+        assert error and text.endswith("exit status 1"), text
+        assert "cannot import duckdb, pandas" in result["error"] and "nothing was written" in result["error"]
+        assert "interpreter" in result["error"] and result["packages"]["duckdb"] == "missing"
+        assert result["interpreter"]["in_project"] is False and str(server_python) in result["interpreter"]["line"]
+        assert snapshot(root) == before
+    # Passed as interpreter, it is refused the same way.
+    text, error = connect(cwd=root, env={"AWB_PYTHON": ""}).call("setup", interpreter=str(server_python))
+    assert error and "cannot import duckdb, pandas" in text and snapshot(root) == before
+
+
+def test_setup_runs_under_and_records_the_interpreter_it_is_given(tmp_path, connect):
+    root = scaffold(tmp_path / "wb")
+    python = bare_venv(root / "env")  # a folder awb.py would not find on its own
+    client = connect(cwd=root, env={"AWB_PYTHON": ""})
+    text, error = client.call("setup", interpreter=str(python))
+    assert not error and text.endswith("exit status 0"), text
+    result = json.loads(text.split("\n\n")[0])
+    recorded = python.relative_to(root).as_posix()
+    assert result["interpreter"] == {"line": f"Project interpreter: {recorded}", "in_project": True,
+                                     "status": "written"}
+    assert result["python"]["executable"] == str(python) and result["packages"]["duckdb"] == "missing"
+    assert f"\nProject interpreter: {recorded}\n" in (root / "README.md").read_text()
+    # Later calls run under the recorded interpreter without the argument.
+    text, error = client.call("setup", check=True)
+    assert not error and json.loads(text.split("\n\n")[0])["interpreter"]["status"] == "current", text
+    for interpreter, expected in (("env/bin/python", "absolute path of an existing file"),
+                                  (str(root / "absent/python"), "absolute path of an existing file"),
+                                  ("", "interpreter must be a non-empty string")):
+        text, error = client.call("setup", interpreter=interpreter)
+        assert error and expected in text, interpreter
 
 
 def test_read_commands_round_trip_and_write_nothing(workbench, connect):
@@ -415,6 +464,21 @@ def test_data_run_package_release_round_trip(workbench, connect):
     assert not error and "| west | 2 |" in text
     text, error = client.call("read", command="sql", query="-- leading comment\nSELECT 1 AS one")
     assert not error and "| 1 |" in text
+    # $name parameters bind from params, from an investigation's settings, or both, params winning
+    settings = workbench / INV / "settings.toml"
+    kept = settings.read_bytes()
+    settings.write_text(kept.decode().replace("[parameters]\n", '[parameters]\nregion = "east"\n'))
+    query = "SELECT count(*) AS n FROM orders WHERE region = $region AND id >= $first"
+    text, error = client.call("read", command="sql", query=query, params={"region": "west", "first": "3"})
+    assert not error and text.startswith("| n |\n|---|\n| 1 |"), text
+    text, error = client.call("read", command="sql", query=query, settings="churn", params={"first": "1"})
+    assert not error and text.startswith("| n |\n|---|\n| 1 |"), text
+    text, error = client.call("read", command="sql", query=query, settings="churn",
+                              params={"region": "west", "first": "1"})
+    assert not error and text.startswith("| n |\n|---|\n| 2 |"), text
+    text, error = client.call("read", command="sql", query=query, params={"first": "1"})
+    assert error and "region" in text and "params or settings" in text and "without --read-only" not in text
+    settings.write_bytes(kept)
     text, error = client.call("read", command="profile", query="orders", max_rows=10)
     assert not error and text.startswith("rows: 3")
     text, error = client.call("read", command="eda-show", dataset="orders", section="rows")
@@ -558,6 +622,11 @@ def test_read_refuses_what_it_does_not_run(workbench, connect):
             ({"command": "review-rules", "investigation": "--all", "package": "p"}, "simple name"),
             ({"command": "sql"}, "query is required"),
             ({"command": "sql", "query": "SELECT 1", "limit": -1}, "limit must be"),
+            ({"command": "sql", "query": "SELECT 1", "params": {"n": 1}}, "params must be an object of strings"),
+            ({"command": "sql", "query": "SELECT 1", "params": ["n=1"]}, "params must be an object of strings"),
+            ({"command": "sql", "query": "SELECT 1", "params": {"a-b": "1"}}, "params names must be"),
+            ({"command": "sql", "query": "SELECT 1", "settings": "../x"}, "simple name"),
+            ({"command": "profile", "query": "orders", "params": {"n": "1"}}, "unknown arguments: params"),
             ({"command": "write"}, "unknown read command")):
         text, error = client.call("read", **arguments)
         assert error and expected in text, arguments

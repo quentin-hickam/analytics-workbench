@@ -274,7 +274,7 @@ def cli_profile(root: Path, argv: list[str]) -> int:
         parser.error("--max-rows must be 1 or more")
     if args.read_only and args.out:
         parser.error("--read-only refuses --out")
-    out = None
+    out = landing = None
     try:
         landing = _landing(root)
         out = landing._under(root, args.out) if args.out else None
@@ -305,6 +305,11 @@ def cli_profile(root: Path, argv: list[str]) -> int:
             out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     except Exception as error:
         message = f"{error}: {error.__cause__}" if error.__cause__ else str(error)
+        if any(text in message for text in getattr(landing, "UNBOUND_PARAMETERS", ())):
+            # landing's fix binds with sql's --param or --settings, which profile does not take.
+            message = (message.split(f"; {landing.BIND_FIX}")[0] + "; profile binds no parameters: write "
+                       "each $name's value into the query, or run it with `python3 src/awb.py sql --param "
+                       "name=value` (over MCP, the read tool's sql with params)")
         print(f"profile: {' '.join(message.split())}", file=sys.stderr)
         return 1
     if "sampled_from" in result:

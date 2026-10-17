@@ -1015,6 +1015,50 @@ def test_commands_state_the_cli_fallback_scripts_by_path_and_the_interpreter():
         assert "README's `Project interpreter`" in text, skill
 
 
+def test_agents_md_makes_the_awb_tools_the_first_route_for_helpers():
+    # The Commands section used to prefer the tools in one paragraph and say to run helpers with the CLI
+    # in another, and agents followed the CLI line.
+    commands = ' '.join(section(AGENTS.read_text(encoding='utf-8'), '## Commands').split())
+    assert 'Run workbench helpers with `python3 src/awb.py <command>`' not in commands
+    assert commands.startswith('When the host offers the `awb` MCP server, use its tools for `awb.py` commands')
+    assert ('Run helpers as black boxes through the `awb` tools, else as `python3 src/awb.py <command>`'
+            in commands)
+    # Changing a shipped helper or package-format template needs the user's yes, asked in plain words;
+    # opening one to adapt or debug it is the rule awb-package's helpers.md states too.
+    assert ("open one's source only to adapt or debug it, and change shipped helpers or `package-format/` "
+            "templates only once the user, asked plainly, agrees" in commands)
+    helpers = (ROOT / '.agents/skills/awb-package/references/helpers.md').read_text(encoding='utf-8')
+    assert 'open its source only to adapt or debug it' in helpers
+
+
+HELPER_SKILLS = ('awb-package', 'awb-release', 'awb-status', 'awb-clean', 'awb-explore', 'awb-scope',
+                 'awb-brainstorm', 'awb-init')
+
+
+@pytest.mark.parametrize('skill', HELPER_SKILLS)
+def test_each_skill_that_runs_helpers_names_the_mcp_route_under_its_heading(skill):
+    text = (ROOT / f'.agents/skills/{skill}/SKILL.md').read_text(encoding='utf-8')
+    heading = re.search(r'^# .+\n\n(.+)\n', text, re.M)
+    assert heading and heading.group(1) == (
+        "Run this skill's commands through the `awb` MCP tools when the host offers them, as the project's "
+        "`AGENTS.md` **Commands** maps them; the command lines below are the fallback."), skill
+
+
+def test_init_creates_the_venv_records_the_interpreter_and_fills_storage_lines():
+    foundation = ' '.join(section((ROOT / '.agents/skills/awb-init/SKILL.md').read_text(encoding='utf-8'),
+                                  '## 3. Create the project foundation').split())
+    # Setup on a fresh project ran under the MCP server's own Python and recorded it.
+    assert ('When the project has no virtual environment and the user named no interpreter, first create '
+            '`.venv` in the project') in foundation
+    assert 'if that fails, ask once which interpreter to use' in foundation
+    assert "passing that interpreter's absolute path as `interpreter`" in foundation
+    assert 'Report in one line the interpreter its `interpreter` entry records.' in foundation
+    # The storage lines take the forms the landing and release helpers copy to.
+    assert ("write it on README's `Landed data is kept at` or `Released packages are kept at` line: an absolute "
+            "path, a path starting with `~`, or one relative to the project root starting with `./` or `../`"
+            in foundation)
+
+
 def test_no_code_history_means_no_commits_or_suggestions():
     readme = (ROOT / '.agents/skills/awb-init/assets/workbench/README.md').read_text(encoding='utf-8')
     assert re.search(r'^Code history: Git$', readme, re.M)

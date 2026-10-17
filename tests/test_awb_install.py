@@ -18,6 +18,8 @@
 # test_readme_gains_the_project_interpreter_line: the installer writes `Project interpreter: <path>` over `not yet recorded`, reports it current on a rerun, and inserts a missing line after Commits, else Active investigation, else at the end, keeping a CRLF README's line endings; --check reports it missing and writes nothing.
 # test_project_interpreter_inside_the_project_is_recorded_relative: a virtual environment's interpreter inside the project is recorded by its project-relative path and reported in_project.
 # test_recorded_interpreter_is_kept_or_replaced: a README naming another existing interpreter, or repeating the line, refuses with exit 1 and writes nothing, with or without --check; a recorded interpreter that no longer exists is replaced and named under was; a link to this interpreter outside any virtual environment is this interpreter.
+# test_a_venv_made_after_a_recorded_interpreter_gets_the_readme_edit: a project .venv run while README records another interpreter is refused, with or without --check, by an error spelling the README line that switches to it, and writing nothing; with that line it is current.
+# test_an_outside_interpreter_without_the_packages_is_not_recorded: an interpreter outside the project that cannot import a required package is refused, with or without --check, over a not-yet-recorded line or one naming no file, with its packages and install command, no status, and nothing written; one already recorded, or one inside the project, is kept or recorded with its install command; without README nothing is refused.
 # test_project_venv_is_kept_while_readme_records_none: a project with its own .venv or venv interpreter, run under another while README records none, refuses with exit 1 and writes nothing, with or without --check; README naming this interpreter lets it run.
 # test_hardlinked_interpreter_in_another_prefix_is_refused: outside a virtual environment, a hard link to this interpreter's binary in another directory is another interpreter: README naming it refuses, and so does a project .venv that is such a link while README records none; nothing is written.
 # test_awb_python_naming_this_interpreter_leaves_the_readme_line: with AWB_PYTHON naming this interpreter, by path or by name on PATH, the line is reported overridden and neither refused nor written, over another recorded interpreter or a project venv; AWB_PYTHON naming another interpreter changes nothing.
@@ -432,6 +434,61 @@ def test_recorded_interpreter_is_kept_or_replaced(project, tmp_path, imports_ok)
         os.symlink(sys.executable, alias)
         readme.write_text(f"# P\n\nProject interpreter: {alias}\n")
         assert installer.install(project)["interpreter"]["status"] == "current"
+
+
+def test_a_venv_made_after_a_recorded_interpreter_gets_the_readme_edit(project, tmp_path, imports_ok, monkeypatch):
+    # README records the interpreter an earlier setup ran under; the project's .venv came later.
+    earlier_python = executable(tmp_path / "server/bin/python3")
+    template_readme(project, f"# P\n\nCommits: on request\n\nProject interpreter: {earlier_python}\n")
+    venv_python = executable(project / ".venv/bin/python")
+    monkeypatch.setattr(sys, "executable", str(venv_python))
+    monkeypatch.delenv("AWB_PYTHON", raising=False)
+    before = snapshot(project)
+    for check in (False, True):
+        result = installer.install(project, check=check)
+        assert result["error"] == (f"README's Project interpreter is {earlier_python}, not this interpreter "
+                                   f"({venv_python}); rerun with it, or switch by editing that README line to "
+                                   "read: Project interpreter: .venv/bin/python")
+        assert snapshot(project) == before
+    # The edit the error spells is the switch.
+    (project / "README.md").write_text(f"# P\n\nCommits: on request\n\nProject interpreter: .venv/bin/python\n")
+    assert installer.install(project)["interpreter"]["status"] == "current"
+
+
+def test_an_outside_interpreter_without_the_packages_is_not_recorded(project, tmp_path, monkeypatch):
+    monkeypatch.setattr(installer.importlib, "import_module", no_duckdb)
+    monkeypatch.delenv("AWB_PYTHON", raising=False)
+    template_readme(project)
+    before = snapshot(project)
+    for check in (False, True):
+        result = installer.install(project, check=check)
+        assert result["error"].startswith(f"this interpreter, {sys.executable}, is outside the project and cannot "
+                                          "import duckdb, so recording it would leave workbench commands failing; "
+                                          "nothing was written.")
+        # nothing was recorded, so the report carries no status, as the other refusals' do not
+        assert result["interpreter"] == {"line": f"Project interpreter: {sys.executable}", "in_project": False}
+        assert result["packages"]["duckdb"] == "missing"
+        assert result["install"] == f"{installer._pip_install(sys.executable, sys.prefix)} duckdb"
+        assert snapshot(project) == before
+    completed = subprocess.run([sys.executable, str(SCRIPT), str(project)], capture_output=True, text=True,
+                               env={**os.environ, "AWB_PYTHON": ""})
+    if importlib.util.find_spec("duckdb") is None:  # this interpreter really lacks it
+        assert completed.returncode == 1 and "cannot import" in json.loads(completed.stdout)["error"]
+        assert snapshot(project) == before
+    # A recorded interpreter that names no file is not replaced by one lacking packages either.
+    (project / "README.md").write_text("# P\n\nProject interpreter: .venv/bin/python\n")
+    assert "cannot import duckdb" in installer.install(project)["error"]
+    # Already recorded, or inside the project, it is kept or recorded, with the install command to run.
+    template_readme(project, f"# P\n\nProject interpreter: {sys.executable}\n")
+    result = installer.install(project)
+    assert "error" not in result and result["interpreter"]["status"] == "current" and "install" in result
+    template_readme(project)
+    monkeypatch.setattr(sys, "executable", str(executable(project / ".venv/bin/python")))
+    result = installer.install(project)
+    assert "error" not in result and result["interpreter"]["status"] == "written" and "install" in result
+    # Without a README there is no line to record, so nothing is refused.
+    (project / "README.md").unlink()
+    assert installer.install(project)["interpreter"]["status"] == "unrecorded"
 
 
 @pytest.mark.parametrize("folder", [".venv", "venv"])

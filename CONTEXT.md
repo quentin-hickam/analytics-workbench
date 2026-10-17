@@ -104,7 +104,7 @@ The current understanding of an investigation, including its active question, fi
 The record of meaningful findings, analytical decisions, and relevant data limitations accumulated during an investigation, including superseded conclusions. It retains methodological mistakes that changed a finding or explain why an earlier conclusion was wrong, and excludes routine debugging, coding mistakes, and abandoned attempts that changed no understanding.
 
 **Project interpreter**:
-The Python interpreter that runs a project's helpers and `run.py`, recorded on the project README's `Project interpreter` line by the helper installer. `python3` in every documented workbench command means it, and `src/awb.py` reruns itself under it when another interpreter starts it.
+The Python interpreter that runs a project's helpers and `run.py`, recorded on the project README's `Project interpreter` line by the helper installer. `python3` in every documented workbench command means it, and `src/awb.py` reruns itself under it when another interpreter starts it. The installer records the interpreter it runs under, which the MCP `setup` tool takes as `interpreter`, and never one outside the project that lacks the helpers' packages.
 
 **Code history**:
 The Git history of a project's analytical code, which evidence and manifests cite by commit. A project without Git records `Code history: none (<reason>)` on its README line; it then has no commits, and evidence records file checksums instead.
