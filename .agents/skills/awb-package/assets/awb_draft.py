@@ -1154,7 +1154,7 @@ _UNCHECKED = {"How we know", "Limitations and open caveats", "Open questions", "
 # The methodology note's section that states limitations, as methodology-note-template.md heads it.
 _NOTE_UNCHECKED = "Limitations"
 # A negated clause, a closed grammar: a phrase is skipped when a negator stands at most four words before it
-# in its clause, or, for a noun phrase (effect on, impact, drivers of, causes), when the clause states it
+# in its clause (directly before it, for a _CONNECTIVE phrase), or, for a noun phrase (effect on, impact, drivers of, causes), when the clause states it
 # unknown within four words after it. A clause ends at a paragraph or item break, at . ; : , ! ? ( ) [ ] or a
 # dash, and at but, and, while, whereas, although, though, or however. A relative word (who, whom, whose,
 # which, that, where) before the negator in its clause, or between the noun phrase and its predicate, makes
@@ -1165,6 +1165,9 @@ _RELATIVE = re.compile(r"\b(?:who|whom|whose|which|that|where)\b", re.IGNORECASE
 _NEGATOR = re.compile(r"\b(?:not(?!\s+(?:only|just|merely|simply)\b)|never|cannot|neither|nor|\w+n['’]t"
                       r"|no\s+(?:evidence|sign|indication|proof|support|test)|without\s+\w+ing)\b", re.IGNORECASE)
 _NOUN_PHRASE = re.compile(r"effects?\s+(?:of|on)|impacts?|drivers?\s+of|causes", re.IGNORECASE)
+# A connective phrase is negated only directly after its negator ("not due to weather"): in "did not fall due to
+# weather" the negator takes the verb, and the sentence may still claim that weather kept sales up.
+_CONNECTIVE = re.compile(r"because\s+of|due\s+to|as\s+a\s+result\s+of|attributable\s+to", re.IGNORECASE)
 _UNKNOWN = re.compile(r"(?:is|are|was|were|remains?|stays?)\s+(?:still\s+)?(?:unknown|unclear|untested"
                       r"|not\s+(?:known|established|tested))\b", re.IGNORECASE)
 
@@ -1251,7 +1254,8 @@ def _negated(body, match, breaks):
     if cut := _CLAUSE_END.search(after):
         after = after[:cut.start()]
     negators = list(_NEGATOR.finditer(before))
-    if negators and len(before[negators[-1].end():].split()) <= 4 \
+    window = 0 if _CONNECTIVE.fullmatch(" ".join(match.group(0).split())) else 4
+    if negators and len(before[negators[-1].end():].split()) <= window \
             and not _RELATIVE.search(before[:negators[-1].start()]):
         return True
     unknown = _UNKNOWN.search(after) if _NOUN_PHRASE.fullmatch(" ".join(match.group(0).split())) else None

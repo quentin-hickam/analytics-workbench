@@ -77,7 +77,7 @@
 # test_numbers_check_and_rendered_view_drop_the_same_comments: across a seeded corpus of 2,000 random narratives, link targets and escaped code spans among their pieces, the words the rendered view drops as comment are exactly those the numbers check's source lines blank, code spans aside, which it blanks by design, and the numbers check reads exactly the view's lines outside fenced code.
 # test_numbers_check_pairs_code_spans_across_the_paragraph: a number after a code span wrapped across lines, a span on a later line after it, is read, as the draft shows it; one inside a wrapped span is skipped; a span on one line keeps its result. A line opening with a span, all code, or ending a wrapped span still leaves a numbered line after it wrapping the paragraph, in a quote too, so its number is read.
 # test_an_allowed_text_quoting_a_code_span_covers_its_number: an allowed text holding a code span matches the line as written and covers its number.
-# test_negated_causal_phrases_are_no_claims: a causal phrase in a negated clause, under the closed grammar _NEGATOR, _CLAUSE_END, and _UNKNOWN declare, is skipped; a negator outside the clause or window, in a relative clause, or an intensifier such as not only leaves it a row.
+# test_negated_causal_phrases_are_no_claims: a causal phrase in a negated clause, under the closed grammar _NEGATOR, _CLAUSE_END, and _UNKNOWN declare, is skipped; a negator outside the clause or window (directly before a connective phrase such as due to), in a relative clause, or an intensifier such as not only leaves it a row.
 # test_check_draft_skips_negated_causal_wording: does not test what caused them passes check-draft's claims; drove the increase on the same slide is still a row.
 # test_methodology_note_limitations_section_is_not_read_for_claims: causal wording under the note's ## Limitations, its ### sections included, gives no claims row; the same sentence under another section does.
 # test_methodology_note_is_checked_with_rows_naming_it: a clean methodology-note.md passes and joins the inventory; an internal name, an untraced number, causal wording above the strongest represented claim, and an HTML block in it fail check-draft and release with rows naming the file; without it check-draft reports exactly what it did before.
@@ -2207,7 +2207,7 @@ NEGATED_PROBES = [
     ("The rise is not due to weather.", []), ("The rise isn't attributable to price.", []),
     ("We cannot say whether discounts drove sales.", []), ("There is no evidence that discounts drove sales.", []),
     ("Without testing what caused them, we report shares.", []), ("Neither region drove it.", []),
-    ("Sales did not\nfall due to weather.", []),  # a wrapped line continues its clause
+    ("The rise was not\ndue to weather.", []),  # a wrapped line continues its clause
     # Outside the grammar the phrase is still read: another clause, a relative clause, a negator five words back,
     # an intensifier, a determiner, a noun phrase's relative clause, a verb's predicate, or another bullet.
     ("The rise was not due to weather, but due to pricing.", ["due to"]),
@@ -2220,6 +2220,10 @@ NEGATED_PROBES = [
     ("Stores with no discount drove the rise.", ["drove"]), ("Stores without a discount drove the rise.", ["drove"]),
     ("Weather causes delays whose length is unknown.", ["causes"]), ("Discounts drove sales that are unknown.", ["drove"]),
     ("- Sales did not fall\n- Discounts drove returns", ["drove"]),
+    # A connective phrase is negated only directly after the negator: these may claim the discount kept retention up.
+    ("Retention did not drop due to the loyalty discount.", ["due to"]),
+    ("Revenue did not fall because of the loyalty discount.", ["because of"]),
+    ("Sales did not\nfall due to weather.", ["due to"]),
 ]
 
 
