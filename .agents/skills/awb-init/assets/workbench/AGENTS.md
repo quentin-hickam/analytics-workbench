@@ -21,7 +21,7 @@ When the host offers the `awb` MCP server, use its tools for `awb.py` commands, 
 
 If a write tool is refused or unavailable, run its CLI command, keep using the tools that work, and say so once. Skill scripts run by path, never as `awb.py` commands.
 
-In every workbench command, `python3` means README's `Project interpreter`. Run helpers as black boxes through the `awb` tools, else as `python3 src/awb.py <command>`: open one's source only to adapt or debug it, and change shipped helpers or `package-format/` templates only once the user, asked plainly, agrees. Compute with `awb.py sql`, and counts, nulls, and distinct values with `awb.py profile`; save a query run twice as `investigations/<name>/exploration/<topic>.sql`; rerun it by path. `awb-init` repairs missing helpers or packages.
+In every workbench command, `python3` means README's `Project interpreter`. Run helpers as black boxes through the `awb` tools, else as `python3 src/awb.py <command>`: open one's source only to adapt or debug it, and change shipped helpers or `package-format/` templates only once the user, asked plainly, agrees. Compute with `awb.py sql`; counts, nulls, and distinct values with `awb.py profile`; save a query run twice as `investigations/<name>/exploration/<topic>.sql`; rerun it by path. `awb-init` repairs missing helpers or packages.
 
 ## Conversation
 
@@ -43,7 +43,7 @@ Only a result from the investigation's `run.py`, run with its settings, can beco
 
 Settle ambiguous terms with concrete examples and the data. Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and dataset, view, and cache descriptions in `foundation/catalog.md`; never in context maps or ADRs.
 
-Change findings, issues, and next steps with `awb.py state finding`, `state issues`, and `state next`; record a question the work raises with `questions add --parent <question it serves>`, and the user's answer with `questions answer`. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. Record a reader the user names in the brief's Audience section.
+Change findings, issues, and next steps with `awb.py state finding`, `state issues`, and `state next`; record a question the work raises with `questions add --parent <question it serves>`, and the user's answer with `questions answer`. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. Record readers the user names in the brief's Audience section.
 
 Commit when asked; when README's `Commits:` line says `as I go`, which you set when asked, also commit analytical code as you go. Otherwise suggest one at most once a session while analytical code is uncommitted. While README's `Code history:` line says `none`, make and suggest no commits.
 
