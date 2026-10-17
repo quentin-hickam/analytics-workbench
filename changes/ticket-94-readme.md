@@ -1,5 +1,0 @@
-### Changed
-
-- The README is shorter, about 5,300 words down from 6,200. **Install and administer** stays below the quick-start, since the archive carries no `docs/`, but condensed, and **How it works** is three short paragraphs after it. The analyst glossary drops receipt, canonical view, and disposition, adds provisional, and says in one paragraph when a flagged finding is asked about.
-- The quick-start now says what users missed: a headline holds at most 15 words and a longer one can be kept with a reason; sending tables adds a **Supporting datasets** slide; how review rounds go and when a draft is stable; what a methods note length such as "one page" means and that the package check compares it; what a commit means; that a release can skip showing the changed slides; that setup and scoping download no data; that a status request can carry other requests; and where a release is kept, in the project and in storage.
-- **The usual requests** lists bringing the data in as its own step and marks clean and explore as one optional step, which the agent may fold into landing or analysis.

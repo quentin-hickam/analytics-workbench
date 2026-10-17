@@ -1,9 +1,0 @@
-### Added
-
-- The status collector lists `active.caveats`, every finding's caveat, flagged or not, and `questions.by_question`, each of the user's questions with its findings by status, counting a finding under a question when its result answers that question or one under it, and with the question's origin. Findings no question names are counted in `questions.findings_without_question`.
-- `awb-status` suggests "Preview the slide headlines" while findings are provisional and no draft exists. The investigation state template says who promotes a finding and when: the agent, once its checks are recorded and the user has approved its headline or text, and again after a rerun changes a supported finding's result.
-
-### Changed
-
-- State writers, `state render` included, record `Last updated` as the local time to the second with its UTC offset, stamped after the findings and history files written with it. Status orders it against each later change by time, so a state written after the day's last change reads `up to date` instead of "indeterminate at date precision". A clean committed file is dated by its mtime while that predates its commit, so committing after a state write no longer makes the state look older, and a result's table, profile, and evidence do not date it while the evidence is no older than the table, so a rerun that keeps every result unchanged leaves the state up to date; when only a commit's time is known, or the state records a date alone, status says so in plain words beside the evidence check from `stale`.
-- The `awb-status` report reports findings by the user's questions, by text, labelling a question added while brainstorming, exploring, or analysing, then every caveat, and never says nothing is open while one remains. Its read-only rule covers the status report itself; other requests in the same message go through their own skills after it.
