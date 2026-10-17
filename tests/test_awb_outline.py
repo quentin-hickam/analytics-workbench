@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 # The draft fixture project, for the long-headline acceptance through check-draft and release.
-from test_awb_draft import FINDINGS, METHODOLOGY, manifest, project, run, set_manifest, write  # noqa: F401
+from test_awb_draft import FINDINGS, METHODOLOGY, manifest, project, reviewed, run, set_manifest, write  # noqa: F401
 
 ASSET = Path(__file__).resolve().parents[1] / ".agents/skills/awb-package/assets/awb_draft.py"
 spec = importlib.util.spec_from_file_location("awb_draft_outline", ASSET)
@@ -306,6 +306,7 @@ def test_an_accepted_long_headline_passes_check_draft_and_release(project, capsy
     set_manifest(project, accepted_long_headlines=[{"headline": WORDY, "reason": "The user keeps their wording."}])
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["passed"] and report["outline"][0]["accepted"] is True, report
+    reviewed(project)
     code, report = run(project, capsys, "release", "inv", "pkg")
     assert code == 0 and report["released"], report
     assert manifest(project, "released/001")["accepted_long_headlines"][0]["headline"] == WORDY
