@@ -792,8 +792,8 @@ def test_finding_text_warns_on_reconciliation_no_check_records(project, capsys):
         code, out, _ = run(project, capsys, "finding", result_id, "--text", wording)
         assert code == 0 and f"| {wording} | [{result_id}]" in out, result_id
         warning = (f'warning: {result_id}: "sums to" asserts a reconciliation or a completed check that no passing '
-                   "check in its evidence records; state the check, with any tolerance set before the data was "
-                   "seen, in the detail of a passing values or metrics judgment in "
+                   "check in its evidence records; state the check, with any tolerance the brief or the "
+                   "result's settings record, in the detail of a passing values or metrics judgment in "
                    f"[results.{result_id}.validation] and rerun, or reword")
         assert (out.splitlines()[0] == warning) is warned, (result_id, out)
     for phrase, found in (("The totals reconciled with finance", "reconciled"),

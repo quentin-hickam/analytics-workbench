@@ -13,7 +13,7 @@
 # test_file_and_underscore_segments_are_paths: a file extension or underscore in any segment identifies a path.
 # test_workbench_roots_are_paths: known workbench roots identify single-slash paths; src/awb.py stays a path.
 # test_project_name_roots_are_paths: a slash token with a given name or plain-word root as any segment is a path, and prose otherwise.
-# test_declared_answer_is_provisional_until_a_finding_is_promoted: a result declaring answers marks its question answered on record, displayed answered (provisional) in questions list, questions.md, state, and the status counts until one answering finding is supported; a flagged one shows awaiting recheck instead; a provisional peer beside a supported finding leaves it answered; a person's answer is never provisional.
+# test_declared_answer_is_provisional_until_a_finding_is_promoted: a result declaring answers marks its question answered on record, displayed answered (provisional) in questions list, questions.md, state, and the status counts until one answering finding is supported; flagging the never-promoted one shows answered (provisional, awaiting recheck), still counted provisional; a flagged one beside a supported or once-supported finding shows awaiting recheck instead; a provisional peer beside a supported finding leaves it answered; a person's answer is never provisional.
 # test_rerun_after_committing_its_code_needs_no_second_promotion: the reproduction of finding 5.4 of the 2026-10-15 UX simulation, which did not reproduce: a result recorded on uncommitted code and promoted stays current once that code is committed, and a rerun keeps its row, so one promotion suffices.
 
 import importlib.util
@@ -321,7 +321,8 @@ def test_declared_answer_is_provisional_until_a_finding_is_promoted(tmp_path):
 
     def shown():
         line = provenance.question_lines(tmp_path, "inv", ("answered", provenance.PROVISIONAL_ANSWER,
-                                                           provenance.AWAITING_RECHECK))[0]
+                                                           provenance.AWAITING_RECHECK,
+                                                           provenance.PROVISIONAL_RECHECK))[0]
         rendered = (investigation / "questions.md").read_text()
         roots = status.collect(tmp_path)["active"]["questions"]["roots"]
         return line.split(" [")[0], rendered, roots
@@ -336,6 +337,19 @@ def test_declared_answer_is_provisional_until_a_finding_is_promoted(tmp_path):
     assert status.collect(tmp_path)["active"]["questions"]["provisional"] == [
         "Q-001 answered (provisional) [data, analytical] How many orders closed? -> r1 (provisional)"]
     assert "Q-001 answered (provisional)" in provenance.state_view(tmp_path, "inv")
+    # Flagging the never-promoted finding keeps the answer provisional while it awaits recheck: status counts it
+    # provisional, not answered, and the Open questions slide still requires it.
+    provenance.flag_findings(tmp_path, "inv", [{"result": "r1", "reason": "orders view corrected"}])
+    line, rendered, roots = shown()
+    assert line == "Q-001 answered (provisional, awaiting recheck)"
+    assert "| answered (provisional, awaiting recheck) | [r1](evidence/r1.json) |" in rendered
+    assert roots == {"answered (provisional, awaiting recheck)": 1, "open": 1}
+    listed = status.collect(tmp_path)["active"]["questions"]
+    assert listed["provisional"] == listed["awaiting_recheck"] == [
+        "Q-001 answered (provisional, awaiting recheck) [data, analytical] How many orders closed? "
+        "-> r1 (revalidation-needed (was provisional))"]
+    assert "Q-001 answered (provisional, awaiting recheck)" in provenance.state_view(tmp_path, "inv")
+    assert produce("r1")["action"] == "flag cleared" and shown()[0] == "Q-001 answered (provisional)"
     # Promotion makes it answered; a second, still provisional finding leaves it answered.
     provenance.update_findings(tmp_path, "inv", ["r1"], status="supported", reason="Checked against the source.")
     produce("r2")
@@ -345,6 +359,10 @@ def test_declared_answer_is_provisional_until_a_finding_is_promoted(tmp_path):
     assert "Q-001 answered" not in provenance.state_view(tmp_path, "inv")
     # A flagged answering finding wins over a supported peer: awaiting recheck, not answered or provisional.
     provenance.flag_findings(tmp_path, "inv", [{"result": "r2", "reason": "view corrected"}])
+    line, _, roots = shown()
+    assert line == "Q-001 answered (awaiting recheck)" and roots == {"answered (awaiting recheck)": 1, "open": 1}
+    # A finding flagged after its promotion still counts as once promoted.
+    provenance.flag_findings(tmp_path, "inv", [{"result": "r1", "reason": "view corrected"}])
     line, _, roots = shown()
     assert line == "Q-001 answered (awaiting recheck)" and roots == {"answered (awaiting recheck)": 1, "open": 1}
     # A person's answer never rests on findings, so it is never provisional.

@@ -130,11 +130,13 @@ def collect(root, *, probe_upstream=False):
         recheck = [q for q in questions if q["status"] == "answered" and q["answerer"] == "data"
                    and any(FINDING_STATUSES.get(statuses.get(r)) in ("revalidation-needed", "superseded")
                            for r in q["results"])]
-        # With no answering finding supported, an unrecognized or missing row included, the answer is provisional.
+        # While no answering finding is supported or was before its flag, an unrecognized or missing row included,
+        # the answer is provisional, a recheck included.
         provisional = [q for q in questions if q["status"] == "answered" and q["answerer"] == "data"
-                       and q not in recheck
-                       and not any(FINDING_STATUSES.get(statuses.get(r)) == "supported" for r in q["results"])]
-        displayed = {q["id"]: "answered (awaiting recheck)" if q in recheck else "answered (provisional)"
+                       and not any(statuses.get(r) in ("supported", "revalidation-needed (was supported)")
+                                   for r in q["results"])]
+        displayed = {q["id"]: "answered (provisional, awaiting recheck)" if q in recheck and q in provisional
+                     else "answered (awaiting recheck)" if q in recheck else "answered (provisional)"
                      if q in provisional else q["status"] for q in questions}
         open_questions = [q for q in questions if q["status"] == "open"]
 

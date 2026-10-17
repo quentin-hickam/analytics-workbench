@@ -498,10 +498,12 @@ def test_chat_claim_rules_sit_where_chat_is_written():
 def test_footer_counts_a_provisional_answer_as_provisional():
     # "5 answered" while chat had shown only leaders: an answer resting on unpromoted findings is provisional.
     agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
-    assert 'counting `answered (provisional)` as provisional' in agents
+    # A flagged answer never promoted displays answered (provisional, awaiting recheck): provisional too.
+    assert 'counting any `provisional` answer as provisional' in agents
     assert '1 provisional' in footer_example(AGENTS.read_text(encoding='utf-8'))
     status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
-    assert 'Count `answered (provisional)`' in status and 'as provisional, not answered' in status
+    assert ('Count `answered (provisional)` and `answered (provisional, awaiting recheck)`' in status
+            and 'as provisional, not answered' in status)
 
 
 def test_reports_use_plain_words_not_ids():
@@ -662,7 +664,7 @@ def test_only_the_users_questions_are_roots():
     # The footer names the user's questions as the roots and counts them only when they changed.
     agents = ' '.join(AGENTS.read_text(encoding='utf-8').split())
     assert ("ends with one plain line: any change to the user's questions, the ledger's roots, "
-            "counting `answered (provisional)` as provisional, and the next step") in agents
+            "counting any `provisional` answer as provisional, and the next step") in agents
     status = ' '.join((ROOT / '.agents/skills/awb-status/SKILL.md').read_text(encoding='utf-8').split())
     assert 'lead with `roots`, the questions the user asked' in status
     assert 'Report `questions.counts`, the totals with every sub-question, only on request' in status
@@ -799,17 +801,21 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
     step3 = steps[steps.index('3. Check what no command checks'):]
     assert '`brief.md`' in steps[:steps.index('2. Judge')]
     assert 'against `brief.md`: every part of its **Business question**' in step3
-    assert 'is answered in a slide\'s headline, bullets, or chart, not only in its **Notes:**' in step3
+    assert ('is answered in a slide\'s headline, bullets, or chart, or listed as unanswered on the **Open questions** '
+            'or **Limitations and open caveats** slide, not only in a slide\'s **Notes:** or nowhere') in step3
     assert 'how a source builds a series' in step3 and '`foundation/sources.md`' in step3
     # Citation forms for a checked sentence, and the narrowed tolerance rule.
     assert 'a result ID, an evidence path, or a foundation quality ID (`DQ-NNN`) with the scan its row cites' in step3
     assert 'with its tolerance' not in review
-    assert 'A tolerance is stated only for a check that had one set before the data was seen' in step3
-    assert 'an exact check says "exactly" or "every row"' in step3
-    assert 'A tolerance chosen after the result was seen is not a tolerance' in step3
+    # The reviewer checks the record a tolerance comes from, not when it was chosen; the timing is writer guidance.
+    assert ('only one a record holds from before the result: `brief.md`, such as its **Usefulness criteria**, or the '
+            'result\'s settings') in step3 and '`methodology.md` cites that record' in step3
+    assert 'A tolerance no such record holds, one only in a judgment\'s `detail` included, is a problem' in step3
+    assert 'an exact check says "exactly" or "every row"' in step3 and 'before the data was seen' not in review
     # Readability is a closed list, quoted like every step 3 problem.
     assert 'readability, only these' in step3 and '`foundation/glossary.md`' in step3
     assert 'a precision the brief\'s **Audience** states' in step3 and 'outside **Implications**' in step3
+    assert 'the brief\'s **Audience** does not record the audience as using it' in step3
     # Rule precedence, and a conflict goes to the user.
     assert 'the `error` rule wins and the line passes the `warning` one' in steps
     assert 'or a conflict between two rules, to the user rather than repairing it' in review
@@ -822,7 +828,16 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
     for path in ('awb-package/references/package-contract.md', 'awb-init/assets/workbench/workbench-guides/analysis.md',
                  'awb-init/references/provenance.md'):
         assert 'with its tolerance' not in read(path), path
-    assert 'set before the data was seen' in read('awb-package/references/package-contract.md')
+    assert 'a tolerance chosen after seeing the result is not one' in read('awb-package/references/package-contract.md')
+    assert "or the result's settings record it outside a judgment's `detail`" in read(
+        'awb-package/references/package-contract.md')
+    # The glossary and source register the step 3 checks read make a review stale and scope a later one.
+    assert ('the checks against `brief.md`, `foundation/glossary.md`, or `foundation/sources.md` when the diff '
+            'changes it') in review
+    assert ('once the narratives, `brief.md`, `foundation/glossary.md`, `foundation/sources.md`, or '
+            '`foundation/review-rules.md` change') in review
+    assert 'a tolerance chosen after seeing the result is not a tolerance' in read(
+        'awb-package/assets/package-format/findings-template.md')
 
     # Asking the user comes before recording a rule, in review.md and the skill's first step.
     rule = review[review.index('When the user corrects a draft while reviewing it'):]
@@ -830,6 +845,7 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
         < rule.index('review-rules add --confirmed')
     assert 'saying in plain words what would be checked' in rule and '--package <investigation>/<package>' in rule
     assert 'An `error` rule wins over a `warning` rule it conflicts with' in rule
+    assert 'rather than a standard such as a word limit or a decimal place' in rule
     package = read('awb-package/SKILL.md')
     establish = package[package.index('## 1. Establish'):package.index('## 2. Gather')]
     assert 'first ask the user whether later drafts should be checked for it' in establish

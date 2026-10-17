@@ -31,7 +31,7 @@ Offer an untested explanation as a question. Name every share's base and say whe
 
 When you need the user, ask in that message for a plain decision, with your recommendation and the alternative; never send them to a skill or instruction file. Report an environment or tool limit only when it affects the user: whether they must act, and what the workbench does instead.
 
-A turn that changed workbench records ends with one plain line: any change to the user's questions, the ledger's roots, counting `answered (provisional)` as provisional, and the next step; other turns have none. For example: Your five questions: 2 answered, 1 provisional, 2 open · next: explore the March extract.
+A turn that changed workbench records ends with one plain line: any change to the user's questions, the ledger's roots, counting any `provisional` answer as provisional, and the next step; other turns have none. For example: Your five questions: 2 answered, 1 provisional, 2 open · next: explore the March extract.
 
 ## Analytical invariants
 
