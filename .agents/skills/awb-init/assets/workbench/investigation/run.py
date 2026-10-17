@@ -4,9 +4,11 @@
 Run from anywhere: `python3 investigations/<name>/run.py [result-id ...]`. With no IDs it
 produces every result in settings.toml. It refuses to run, exiting 2, while a wanted result's ID
 cannot name its files, or its table lacks its question, lists code that is not files in the project
-or parameters that are not names, or declares answers the question ledger does not hold as data
-questions, and exits 1 when the ledger cannot be read. For each result it runs the result's saved
-queries in a fresh session of canonical views, validates the result, saves the table and its profile
+or parameters that are not names, names views that are not view files, or declares answers the
+question ledger does not hold as data questions, and exits 1 when the ledger cannot be read. For each
+result it runs the result's saved queries in one session of canonical views and this folder's
+views/*.sql, the investigation's shared SQL, on one thread so a rerun repeats floating-point sums
+exactly; it validates the result, saves the table and its profile
 under results/, records evidence under evidence/, writes its state.md findings row, and prints one
 compact JSON line with the paths, failed and unassessed checks, and what it did to the row, with
 the row's status and claim strength.
@@ -39,8 +41,8 @@ sys.path.insert(0, str(ROOT))
 from src.exploration.validate import profile, validate  # noqa: E402
 from src.preparation.landing import session  # noqa: E402
 from src.provenance import (  # noqa: E402
-    ledger_answerers, prior_result, producer_path, record_evidence, record_finding, result_parameters,
-    result_problems, views_read)
+    investigation_views, ledger_answerers, prior_result, producer_path, record_evidence, record_finding,
+    result_parameters, result_problems, views_read)
 
 
 def run(connection, sql, parameters):
@@ -64,14 +66,20 @@ def produce(connection, sql, parameters):
 # known at run time, such as row_counts or joins.left_rows. run.py gives the module run() above
 # before loading it. Read further data through saved queries listed in settings so their views are
 # recorded, and list any other file it imports or reads, or the result's queries read directly, in
-# its table's code = [...], since evidence records only declared files as the result's code.
-# Example, producers/orders-by-month.py:
+# its table's code = [...], since evidence records only declared files as the result's code. A
+# helper module in this folder imports by its name, as `import helpers` for helpers.py, since Python
+# puts this folder on sys.path when it runs run.py. reconcile() records a filter's rows in, kept,
+# and excluded by rule as a row_counts step that validation fails unless they add up.
+# Example, producers/orders-by-month.py, whose second query counts the rows each rule drops:
+#
+# from src.exploration.validate import reconcile
 #
 # def produce(connection, sql, parameters):
-#     before = int(run(connection, sql[1], parameters)["orders"].iloc[0])  # unfiltered count
+#     counts = run(connection, sql[1], parameters).iloc[0]  # columns orders, cancelled, test_accounts
 #     frame = run(connection, sql[0], parameters)
-#     return frame, {"row_counts": [{"step": "period filter", "before": before,
-#                                    "after": int(frame["orders"].sum()), "min_ratio": 0.01}]}
+#     excluded = {"cancelled": int(counts["cancelled"]), "test accounts": int(counts["test_accounts"])}
+#     return frame, {"row_counts": [reconcile("order filter", int(counts["orders"]),
+#                                             int(frame["orders"].sum()), excluded)]}
 def producer(result_id):
     """The result's produce() from its producer module, or the default producer when it has none."""
     path = HERE / producer_path(result_id)
@@ -119,8 +127,10 @@ def produce_result(connection, result_id, config, parameters):
     table, profile_path = output / f"{result_id}.csv", output / f"{result_id}.profile.json"
     frame.to_csv(table, index=False)
     profile_path.write_text(json.dumps(profile(frame), indent=2) + "\n")
-    # Settings `views` overrides detection when a result reads views its queries do not name.
-    views = config.get("views") or views_read(ROOT, [HERE / query for query in queries])
+    # Settings `views` overrides detection when a result reads views its queries do not name. The
+    # shared SQL is producing code for every result, so the foundation views it reads are recorded too.
+    views = config.get("views") or views_read(
+        ROOT, [HERE / query for query in queries] + [ROOT / path for path in investigation_views(ROOT, NAME)])
     evidence = record_evidence(ROOT, NAME, result_id, views=views, settings_path=SETTINGS, checks=checks,
                                parameters=scoped)
     # Writes findings and renders the row; failure before findings are saved removes this evidence.
@@ -160,7 +170,7 @@ def main(argv):
         print("\n".join(f"settings.toml: {problem}" for problem in problems), file=sys.stderr)
         return 2
     status = 0
-    with session(ROOT) as connection:
+    with session(ROOT, investigation=NAME) as connection:
         for result_id in wanted:
             try:
                 line = produce_result(connection, result_id, results[result_id],

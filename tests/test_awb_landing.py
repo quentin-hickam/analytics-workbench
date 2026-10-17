@@ -12,6 +12,7 @@
 # test_retain_copies_and_verifies_then_reports_existing_copy: verified copy succeeds and matches; a second call reports the identical existing copy as matched, not a conflict.
 # test_retain_reports_checksum_discrepancy_without_changing_existing_copy: changed retained copy reports a conflict and a discrepancy, unmatched, without overwriting.
 # test_session_loads_views_in_name_order_without_recursing: session loads two views with the second depending on the first.
+# test_result_session_loads_investigation_views_after_the_foundation_on_one_thread: session(investigation=...) loads investigations/<name>/views/*.sql after the foundation views, in name order, and runs on one thread; other sessions load only the foundation; a missing folder adds nothing; a name with a path separator is refused.
 # test_session_resolves_project_paths_from_another_working_directory: session resolves project-relative paths from another working directory.
 # test_session_names_failing_view_and_closes_connection: regression: failed view loading closes the session connection.
 # test_land_refuses_existing_id_before_fetch: existing completed acquisition is refused before fetching.
@@ -396,6 +397,27 @@ def test_session_loads_views_in_name_order_without_recursing(tmp_path):
     (views / "nested/03_unused.sql").write_text("invalid SQL")
     with landing.session(tmp_path) as connection:
         assert connection.execute("SELECT doubled FROM derived ORDER BY doubled").fetchall() == [(6,), (10,)]
+
+
+def test_result_session_loads_investigation_views_after_the_foundation_on_one_thread(tmp_path):
+    pytest.importorskip("duckdb")
+    (tmp_path / "foundation/views").mkdir(parents=True)
+    (tmp_path / "foundation/views/01_base.sql").write_text("CREATE VIEW base AS SELECT 3 AS n UNION ALL SELECT 5;")
+    local = tmp_path / "investigations/inv/views"
+    local.mkdir(parents=True)
+    # A name earlier than the foundation file still loads after it, and its own files load in name order.
+    (local / "00_screen.sql").write_text("CREATE VIEW screened AS SELECT n FROM base WHERE n > 3;")
+    (local / "01_top.sql").write_text("CREATE VIEW top AS SELECT max(n) AS n FROM screened;")
+    (local / "notes.md").write_text("not SQL")
+    with landing.session(tmp_path, investigation="inv") as connection:
+        assert connection.execute("SELECT n FROM top").fetchall() == [(5,)]
+        assert connection.execute("SELECT current_setting('threads')").fetchone()[0] == 1
+    with landing.session(tmp_path) as connection:  # other sessions load only the foundation
+        assert not connection.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'top'").fetchall()
+    with landing.session(tmp_path, investigation="absent") as connection:  # no views/ folder loads nothing more
+        assert connection.execute("SELECT count(*) FROM base").fetchone()[0] == 2
+    with pytest.raises(ValueError, match="Invalid directory name"):
+        landing.session(tmp_path, investigation="../inv")
 
 
 def test_session_resolves_project_paths_from_another_working_directory(tmp_path, monkeypatch):

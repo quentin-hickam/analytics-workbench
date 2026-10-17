@@ -277,7 +277,7 @@ def test_run_checks_answers_before_running(project):
     # Stand-ins for the duckdb and pandas helpers: opening a session would leave a marker.
     (project / "src/exploration/validate.py").write_text("profile = validate = None\n")
     (project / "src/preparation/landing.py").write_text(
-        "from pathlib import Path\n\ndef session(root):\n    Path(root, 'opened').touch()\n    raise SystemExit(9)\n")
+        "from pathlib import Path\n\ndef session(root, **options):\n    Path(root, 'opened').touch()\n    raise SystemExit(9)\n")
     shutil.copyfile(TEMPLATES / "investigation/run.py", project / INV / "run.py")
     add(project, "Does churn differ by region?")
     produce(project, "r1")

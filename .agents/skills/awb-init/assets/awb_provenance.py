@@ -26,8 +26,10 @@ that table and the [parameters] entries the producer received, those the result 
 left out of producing_paths, so other parameters, other results' tables, and other top-level tables
 never make this result stale. Producing paths are an allow list: the
 investigation's run.py, the result's own queries, its producer module producers/<result-id>.py
-(producer_path()), the code its table declares, and src/ except the helpers that only dispatch,
-record, or package (awb.py, provenance.py, packaging/), so a repair replacing those stales nothing.
+(producer_path()), the code its table declares, the investigation's views/*.sql, which every result
+session loads (investigation_views(); one added later stales every result), and src/ except the
+helpers that only dispatch, record, or package (awb.py, provenance.py, packaging/), so a repair
+replacing those stales nothing.
 Prose, notes, and every other file in the investigation never count, nor do other results' queries
 and producers. compare_evidence reads only awb-evidence/3 files whose settings name their result;
 any other file fails every comparison, so its result must be rerun. It compares the parameters the
@@ -188,6 +190,19 @@ def views_read(project_root, sql_paths: Iterable[str | os.PathLike], *,
                 found.add(path)
                 pending.append(view_text)
     return sorted(found)
+
+
+def investigation_views(project_root, investigation: str) -> list[str]:
+    """The investigation's shared SQL: investigations/<name>/views/*.sql, project-relative and sorted.
+
+    A result session loads these after the foundation views, as session(investigation=...) does, so each
+    counts as producing code for every result of the investigation, and one added later stales them all.
+    """
+    if not isinstance(investigation, str) or not _ID.fullmatch(investigation):
+        raise ValueError(f"investigation {investigation!r} is not a simple identifier")
+    root = Path(project_root).resolve()
+    folder = root / "investigations" / investigation / "views"
+    return sorted(_relative(root, path) for path in folder.glob("*.sql") if path.is_file())
 
 
 def _input_record(root, path, filename, keys):
@@ -634,11 +649,13 @@ def result_problems(result_id: str, table, questions: dict[str, str] | None = No
                     folder=None) -> list[str]:
     """What a result's ID and [results.<id>] table lack: an ID that names its files, one letter or digit
     then letters, digits, '.', '_', or '-'; a one-line question; inputs, when given, as a list of names;
-    answers, when given, as a list of ledger question IDs; code, when given, as a list of paths; and
-    parameters, when given, as a list of [parameters] names, each letters, digits, '_', or '-'. With
-    `questions`, ledger_answerers()'s mapping, each answers ID must be in the ledger with answerer data:
-    a person answers the others. With `folder`, the investigation's folder, each code path must name a
-    file in the project; a directory is refused, since a file added to it later would not be recorded.
+    answers, when given, as a list of ledger question IDs; code, when given, as a list of paths; views,
+    when given, as a list of project-relative view files; and parameters, when given, as a list of
+    [parameters] names, each letters, digits, '_', or '-'. With `questions`, ledger_answerers()'s
+    mapping, each answers ID must be in the ledger with answerer data: a person answers the others. With
+    `folder`, the investigation's folder, each code path must name a file in the project; a directory is
+    refused, since a file added to it later would not be recorded; and each views entry must name a .sql
+    file directly under foundation/views/ or the investigation's views/, the files a result session loads.
 
     record_evidence refuses a table with problems, checking answers against the ledger and code against
     the files; run.py checks every wanted result, both included, before running any, since a rerun
@@ -677,6 +694,18 @@ def result_problems(result_id: str, table, questions: dict[str, str] | None = No
                                 "reads, since a file added to a directory later would not count")
             elif not target.is_file():
                 problems.append(f"{where} code names {path}, which does not exist under {prefix}")
+    views = table.get("views", [])
+    if not isinstance(views, list) or not all(isinstance(path, str) and path.strip() for path in views):
+        problems.append(f'{where} views must be a list of view files, as views = ["foundation/views/orders.sql"]')
+    elif folder is not None:
+        folder = Path(folder).absolute()
+        root, local = folder.parents[1], f"investigations/{folder.name}/views"
+        for path in views:
+            # Only a .sql file directly under either folder is one a result session loads.
+            if (posixpath.dirname(posixpath.normpath(path)) not in ("foundation/views", local)
+                    or not path.endswith(".sql") or not (root / path).is_file()):
+                problems.append(f"{where} views names {path}, which is not a view file under foundation/views/ or "
+                                f"{local}/; list view files by project-relative path")
     parameters = table.get("parameters", [])
     if not isinstance(parameters, list) or not all(isinstance(n, str) and _NAME.fullmatch(n) for n in parameters):
         problems.append(f'{where} parameters must be a list of [parameters] names, as parameters = ["start"]')
@@ -706,10 +735,10 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
 
     The settings file must hold the result's [results.<id>] table, whose question and inputs the
     evidence copies. Producing code is an allow list: the investigation's run.py, the table's
-    `queries` (default queries/<id>.sql), the result's producer module (producer_path()), and the
-    table's `code`, each relative to the investigation, plus src/ except the helpers that only
-    dispatch, record, or package. A declared code path must name a file. code_paths adds further producing
-    files or directories, relative to the project. `parameters` is the mapping the producer received,
+    `queries` (default queries/<id>.sql), the result's producer module (producer_path()), the
+    table's `code`, each relative to the investigation, and its shared SQL (investigation_views()),
+    plus src/ except the helpers that only dispatch, record, or package. A declared code path must
+    name a file. code_paths adds further producing files or directories, relative to the project. `parameters` is the mapping the producer received,
     result_parameters() in run.py, and settings record only those [parameters] entries; without it,
     as an older run.py calls this, every entry is recorded, since its producer may read any. Omitted
     publications are those the views read; omitted acquisitions are the inputs recorded in those
@@ -740,6 +769,7 @@ def record_evidence(project_root, investigation: str, result_id: str, *, views: 
     own = ["run.py", *_queries(result_id, table), producer_path(result_id), *declared]
     code = [p for p in _expand(root, ["src"] if (root / "src").is_dir() else []) if not p.startswith(_NOT_PRODUCING)]
     code += _expand(root, [prefix + path for path in own] + list(code_paths or []))
+    code += investigation_views(root, investigation)  # every result session loads them
     if parameters is not None:  # Only the parameters the producer received can change the result.
         settings["content"] = _scoped(settings["content"], result_id, set(parameters))
     view_entries = [{**e, "publications": _view_publications(root, e["path"])}
@@ -871,6 +901,10 @@ def compare_evidence(project_root, evidence_path) -> list[dict]:
                         # untracked once created, which the diff leaves out.
                         created = _git(root, "ls-files", "--others", "-z", "--", *paths)
                         mismatches += [f"{p}: created after the producing commit" for p in created.split("\0") if p]
+                # A view file added to the investigation's views/ since recording loads in the result's session.
+                recorded = set(_known(evidence["producing_paths"]))
+                mismatches += [f"{p}: added after the result was recorded" for p in
+                               investigation_views(root, _known(evidence["investigation"])) if p not in recorded]
             elif name == "uncommitted-code":
                 paths = [e["path"] for e in _known(evidence["producing_uncommitted_changes"], deep=False)]
                 for entry in evidence["producing_uncommitted_changes"]:

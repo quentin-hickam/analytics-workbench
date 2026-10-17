@@ -16,10 +16,13 @@
 # test_profile_counts_long_lists_that_differ_in_the_middle_apart: regression: two 2000-item lists, bare or in a struct, that differ in the middle count as two, since numpy's shortened text would hide the difference.
 # test_cli_profile_summarizes_a_view_and_saves_the_full_profile: profile through src/awb.py resolves a view name, prints row count and per-column type, null rate and distinct count, and saves profile() unchanged.
 # test_cli_profile_samples_results_above_max_rows_repeatably: a result above --max-rows is profiled on a seeded sample and the JSON records sampled_from.
+# test_joins_spec_without_left_rows_or_keys_raises_a_value_error_naming_it: a joins spec missing left_rows, keys, or both, or one that is not a table, raises ValueError naming what is missing instead of KeyError.
+# test_reconcile_fills_row_counts_and_fails_counts_that_do_not_add_up: reconcile() returns the row_counts step a producer returns, with numpy counts as ints and ratio bounds kept; validate() passes it with the reconciliation in the detail, which backs reconciliation wording, and fails one whose rows in differ from kept plus excluded, an excluded written by hand in settings included; a count that is not a whole number 0 or more, an unnamed step, or excluded that is not a rule map raises.
 # test_cli_profile_reports_unknown_names_and_missing_landing_helper: an unknown bare name or a project without src/preparation/landing.py prints one stderr line and returns 1.
 
 import importlib.util
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -76,6 +79,52 @@ def test_join_key_uniqueness_reports_rows_and_distinct_duplicate_keys():
     assert validation.validate(frame, {"joins": {
         "left_rows": 5, "keys": ["id"], "keys_unique": False,
     }})[2]["outcome"] == "pass"
+
+
+@pytest.mark.parametrize(("join", "named"), [
+    ({"keys": ["id"]}, "left_rows"),
+    ({"left_rows": 3}, "keys"),
+    ({}, "keys or left_rows"),
+    (["id"], "a table"),
+])
+def test_joins_spec_without_left_rows_or_keys_raises_a_value_error_naming_it(join, named):
+    with pytest.raises(ValueError, match=named) as raised:
+        validation.validate(pd.DataFrame({"id": [1, 2, 3]}), {"joins": join})
+    if named == "left_rows":
+        assert "joins has no left_rows" in str(raised.value) and "joins.left_rows" in str(raised.value)
+
+
+def test_reconcile_fills_row_counts_and_fails_counts_that_do_not_add_up():
+    frame = pd.DataFrame({"trips": range(90)})
+    step = validation.reconcile("screening", np.int64(100), len(frame),
+                                {"zero distance": np.int64(6), "rate code 99": 4}, min_ratio=0.5)
+    assert step == {"step": "screening", "before": 100, "after": 90,
+                    "excluded": {"zero distance": 6, "rate code 99": 4}, "min_ratio": 0.5}
+    assert all(type(value) is int for value in (step["before"], *step["excluded"].values()))
+    check = validation.validate(frame, {"row_counts": [step]})[1]
+    assert check == {"name": "row_counts", "outcome": "pass", "detail": (
+        "Steps checked: 1; last 100 -> 90 rows; reconciled: screening 100 = 90 kept + 10 excluded "
+        "(zero distance 6, rate code 99 4).")}
+    # The pass detail is what backs "reconciles" wording in a finding (provenance's _ASSERTS_KINDS).
+    assert re.search(r"(?<![\w-])reconcil(?:e|es|ed|ing|iation)(?![\w-])", check["detail"])
+    short = validation.reconcile("screening", 100, 88, {"zero distance": 6, "rate code 99": 4})
+    assert validation.validate(frame, {"row_counts": [short]})[1] == {"name": "row_counts", "outcome": "fail",
+        "detail": "screening: 100 rows in, but 88 kept + 10 excluded (zero distance 6, rate code 99 4) make 98; "
+                  "the counts do not reconcile."}
+    # A step written by hand in settings is checked the same way, and no rule is a plain kept count.
+    assert validation.validate(frame, {"row_counts": [
+        {"step": "all", "before": 90, "after": 90, "excluded": {}}]})[1]["detail"].endswith(
+        "reconciled: all 90 = 90 kept + 0 excluded (no rule).")
+    assert validation.validate(frame, {"row_counts": [
+        {"step": "hand", "before": 90, "after": 80, "excluded": {"late": 5}}]})[1]["outcome"] == "fail"
+    # A step without excluded keeps its ratio checks and records no reconciliation.
+    assert "reconciled" not in validation.validate(frame, {"row_counts": 100})[1]["detail"]
+    for arguments in (("s", 10, 9, {"x": 1.0}), ("s", True, 9, {}), ("s", -1, 0, {}), ("s", 10, 9.5, {}),
+                      ("", 10, 9, {"x": 1}), ("s", 10, 9, [("x", 1)]), ("s", 10, 9, {"": 1})):
+        with pytest.raises(ValueError):
+            validation.reconcile(*arguments)
+    with pytest.raises(ValueError, match="excluded"):
+        validation.validate(frame, {"row_counts": [{"step": "hand", "before": 90, "after": 80, "excluded": 10}]})
 
 
 def test_null_threshold_reports_rate_and_threshold_and_summarizes_failures():

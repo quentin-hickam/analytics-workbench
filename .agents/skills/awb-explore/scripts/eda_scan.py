@@ -628,7 +628,10 @@ def scan_dataset(root, dataset, options):
             raise ScanError(f"period {period_choice} ({chosen['period'][1]}) is not one of {', '.join(PERIODS)}")
         connection.execute(f"CREATE TEMP VIEW __eda_all AS SELECT * FROM {source}")
         names = [row[0] for row in connection.execute("DESCRIBE __eda_all").fetchall()]
-        scope = scope_filters(chosen, names)
+        parameters = data.get("parameters") if isinstance(data.get("parameters"), dict) else {}
+        scope = scope_filters(chosen, names, parameters)
+        read = {f"parameters.{name}" for name in scope.pop("parameters_read")}
+        unused = [key for key in unused if key not in read]
         condition = " AND ".join(f"({f['sql']})" for f in scope["applied"]) or "TRUE"
         try:
             connection.execute(f"CREATE TEMP VIEW __eda AS SELECT * FROM __eda_all WHERE {condition}")
@@ -738,9 +741,47 @@ def as_scalar(entry):
     return str(entry[0]) if entry else None
 
 
-def scope_filters(chosen, names):
-    applied, skipped = [], []
+# A parameter reference, as run.py reads one in a query: $ then letters, digits, or _, anywhere in the text.
+PARAMETER = re.compile(r"\$(\w+)")
+
+
+def sql_literal(value):
+    """A [parameters] value as SQL: a string quoted, a number as written, in parentheses when negative so
+    that `x - $n` stays a subtraction, a date or date-time typed. None for any other value."""
+    if isinstance(value, str):
+        return lit(value)
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) or (isinstance(value, float) and math.isfinite(value)):
+        return f"({value!r})" if value < 0 else repr(value)
+    if isinstance(value, datetime):
+        return f"{'TIMESTAMPTZ' if value.tzinfo else 'TIMESTAMP'} {lit(value.isoformat())}"
+    if isinstance(value, date):
+        return f"DATE {lit(value.isoformat())}"
+    return None
+
+
+def with_parameters(sql, source, parameters, read):
+    """The where predicate with each $name replaced by its [parameters] value as a SQL literal, adding each
+    name to `read`. A name [parameters] does not set, or a value no literal writes, is a ScanError."""
+    def replace(match):
+        name = match[1]
+        if name not in parameters:
+            raise ScanError(f"where ({source}) names ${name}, which [parameters] does not set; set it there "
+                            "or write the value in the predicate")
+        literal = sql_literal(parameters[name])
+        if literal is None:
+            raise ScanError(f"where ({source}) names ${name}, whose value {parameters[name]!r} is not a string, "
+                            "number, date, or date-time")
+        read.add(name)
+        return literal
+    return PARAMETER.sub(replace, sql)
+
+
+def scope_filters(chosen, names, parameters=None):
+    applied, skipped, read = [], [], set()
     for sql in as_list(chosen["where"][0]) if "where" in chosen else []:
+        sql = with_parameters(sql, chosen["where"][1], parameters or {}, read)
         applied.append({"sql": sql, "source": chosen["where"][1]})
     column = chosen.get("date_column")
     for key, op in (("period_start", ">="), ("period_end", "<=")):
@@ -754,7 +795,7 @@ def scope_filters(chosen, names):
         else:
             applied.append({"sql": f"CAST({q(column[0])} AS DATE) {op} CAST({lit(value)} AS DATE)",
                             "source": source})
-    return {"applied": applied, "skipped": skipped}
+    return {"applied": applied, "skipped": skipped, "parameters_read": sorted(read)}
 
 
 def pick_date(chosen, temporal):
@@ -894,10 +935,11 @@ def markdown(scan, path):
 SETTINGS_HELP = """settings: the scan reads the investigation's settings.toml. Each key comes
 from the first of [eda.<dataset>], [eda], [scope], and the top level; period_start and period_end
 then fall back to [parameters] start and end, the period run.py uses. Keys: where (predicate or
-list, joined with AND), date_column, period_start, period_end (inclusive dates), measure (numeric
-column or expression; a boolean gives a rate), dimensions (list), key (the grain's columns, as a
-comma-separated string or a list, each item split on commas like --key), period. Options replace
-settings. A setting that does not fit the dataset prints as `not applied` with its reason; an
+list, joined with AND; a $name in it, or in --where, is the [parameters] value as a SQL literal, and
+a name [parameters] does not set stops the scan), date_column, period_start, period_end (inclusive
+dates), measure (numeric column or expression; a boolean gives a rate), dimensions (list), key (the
+grain's columns, as a comma-separated string or a list, each item split on commas like --key),
+period. Options replace settings. A setting that does not fit the dataset prints as `not applied` with its reason; an
 unconfigured scope or measure prints as `not set` with the options to pass.
 
 --show PATH: dot-separated keys into the saved scan, where a list item is named by its name,
