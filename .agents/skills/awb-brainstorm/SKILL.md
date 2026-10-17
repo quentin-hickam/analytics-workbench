@@ -5,6 +5,8 @@ description: "Propose questions from an analytics workbench investigation's ques
 
 # Brainstorm questions for an investigation
 
+Run this skill's commands through the `awb` MCP tools when the host offers them, as the project's `AGENTS.md` **Commands** maps them; the command lines below are the fallback.
+
 Propose questions; the user chooses. This skill reads records, runs no queries, and writes only the ledger rows the user's choices produce.
 
 ## 1. Read

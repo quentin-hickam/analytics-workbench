@@ -5,6 +5,8 @@ description: "Draft or revise an analytics workbench delivery package: deck outl
 
 # Draft a delivery package
 
+Run this skill's commands through the `awb` MCP tools when the host offers them, as the project's `AGENTS.md` **Commands** maps them; the command lines below are the fallback.
+
 Packaging **serializes** recorded results: it reuses recorded evidence, exports, and provenance, and changed results come only from separately authorized analysis. Read the [package contract](references/package-contract.md) first; it holds the layout, the consistency rules, and the commands. Bundled asset paths are relative to this `SKILL.md`.
 
 ## Sequence

@@ -5,6 +5,8 @@ description: "Explore one dataset for the active analytics workbench investigati
 
 # Explore a dataset for an investigation
 
+Run this skill's commands through the `awb` MCP tools when the host offers them, as the project's `AGENTS.md` **Commands** maps them; the command lines below are the fallback.
+
 Explore one canonical view or publication at a time, within the investigation's question and scope. This skill carries the analysis rules EDA needs; load `workbench-guides/analysis.md` only to turn a pattern into a finding. EDA writes only under `investigations/<name>/exploration/` and the records in step 5.
 
 ## 1. Frame
@@ -38,7 +40,7 @@ Read [reading the scan](references/reading-the-scan.md) for an anomaly kind's co
 
 Run one follow-up for each anomaly you are confirming as a shared data problem and each candidate explanation the user's question turns on; leave the rest as ledger questions. The step is done when every observation you report is either settled by a saved query or recorded as a ledger question.
 
-Write each follow-up as `investigations/<name>/exploration/<topic>.sql` and run it from the project root with `python3 src/awb.py sql <path>`. Start each file with a comment naming the question it serves and its scope, and copy every printed scope filter, period included, into its `WHERE`. Aggregate, order, and limit in SQL so the printed table stays short. To separate mix from within-group change, compute each group's share and mean per period in one query; a moving overall mean over stable group means is a mix shift. Revise and rerun the same file rather than adding variants; save even a one-off, since the report cites its path. Draw an exploratory chart only on request, saved under `exploration/`.
+Write each follow-up as `investigations/<name>/exploration/<topic>.sql` and run it from the project root with `python3 src/awb.py sql <path>`, adding `--settings <name>` when it reads settings `[parameters]` as `$name`. Start each file with a comment naming the question it serves and its scope, and copy every printed scope filter, period included, into its `WHERE`. Aggregate, order, and limit in SQL so the printed table stays short. To separate mix from within-group change, compute each group's share and mean per period in one query; a moving overall mean over stable group means is a mix shift. Revise and rerun the same file rather than adding variants; save even a one-off, since the report cites its path. Draw an exploratory chart only on request, saved under `exploration/`.
 
 ## 5. Record what was learned
 

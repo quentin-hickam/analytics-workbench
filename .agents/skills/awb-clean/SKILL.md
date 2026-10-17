@@ -5,6 +5,8 @@ description: "Find data errors in one analytics workbench dataset and correct th
 
 # Clean one dataset
 
+Run this skill's commands through the `awb` MCP tools when the host offers them, as the project's `AGENTS.md` **Commands** maps them; the command lines below are the fallback.
+
 Work on one dataset at a time: a canonical view, a publication, or a landed acquisition. This skill and its references hold the data and analysis guides' cleaning rules, so a cleaning pass reads neither guide. Corrections go into view definitions or a new publication; landed originals and existing publications are never modified.
 
 Run the bundled scripts as black boxes, by path, with README's `Project interpreter` (the scan needs `duckdb`). A typical pass is six tool calls: scan, read the view definition and the view's catalog row in one call, edit the view, rescan, `stale`, record.

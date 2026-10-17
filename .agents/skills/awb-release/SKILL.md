@@ -5,6 +5,8 @@ description: "Preserve a numbered, frozen copy of an analytics workbench package
 
 # Release a delivery package
 
+Run this skill's commands through the `awb` MCP tools when the host offers them, as the project's `AGENTS.md` **Commands** maps them; the command lines below are the fallback.
+
 A release is a *frozen* copy of the existing draft. Changes to the draft go through [awb-package](../awb-package/SKILL.md), and changes to analysis go through separately authorized analytical work. A request only to record or change where releases are kept goes directly to **Record storage without releasing**.
 
 ## 1. Identify the draft

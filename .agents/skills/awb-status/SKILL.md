@@ -5,6 +5,8 @@ description: "Report where an analytics workbench stands and suggest next reques
 
 # Report workbench status
 
+Run this skill's commands through the `awb` MCP tools when the host offers them, as the project's `AGENTS.md` **Commands** maps them; the command lines below are the fallback.
+
 Stay *read-only*: report what the records say, and turn every fix into a next request.
 
 ## Collect
