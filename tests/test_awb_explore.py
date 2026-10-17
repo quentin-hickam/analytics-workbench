@@ -14,7 +14,7 @@
 # test_comma_separated_key_is_one_declared_key_from_option_or_settings: --key "a, b" and settings key "a,b" or ["a,b"] give the columns of one key, as awb-clean's composite grain; a repeated --key or an empty --key exits 2; an absent option column reports key-missing; a settings key with an absent column or none is skipped. Runs without duckdb.
 # test_template_settings_take_the_period_from_parameters_and_name_unset_choices: [parameters] start/end scope the period; unset scope, measure, and dimensions print the options to pass.
 # test_eda_where_reads_settings_parameters: [eda] where with $start reads the [parameters] date as a typed literal, and with $region a quoted string; the scan records the substituted predicate and counts those parameters as read; --where reads them too; an unset name or a value no literal writes exits 2 naming it before anything is written.
-# test_parameter_literals_follow_each_value_type: strings are quoted with ' doubled, numbers written as TOML parsed them and parenthesized when negative, dates and date-times typed (TIMESTAMPTZ when they carry an offset); booleans, times, lists, tables, and non-finite floats have no literal.
+# test_parameter_literals_follow_each_value_type: strings are quoted with ' doubled, numbers written as TOML parsed them and parenthesized when negative, -0.0 included, dates and date-times typed (TIMESTAMPTZ when they carry an offset); booleans, times, lists, tables, and non-finite floats have no literal.
 # test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one: --show walks keys and named list items without rescanning; a miss exits 2 listing what is there.
 
 from datetime import date
@@ -437,7 +437,8 @@ where = ["shift_date >= $start", "region = $region"]
 def test_parameter_literals_follow_each_value_type():
     from datetime import datetime, time, timedelta, timezone
     assert eda.sql_literal("O'Hare") == "'O''Hare'"
-    assert [eda.sql_literal(v) for v in (5, -5, 2.5, -0.5, 1e-05)] == ["5", "(-5)", "2.5", "(-0.5)", "1e-05"]
+    assert [eda.sql_literal(v) for v in (5, -5, 2.5, -0.5, 1e-05, -0.0, 0.0)] == [
+        "5", "(-5)", "2.5", "(-0.5)", "1e-05", "(-0.0)", "0.0"]  # -0.0 too, so `x -$n` is no comment
     # A negative value after a minus stays a subtraction, never a -- comment.
     assert eda.with_parameters("x - $n", "eda.where", {"n": -5}, set()) == "x - (-5)"
     assert eda.sql_literal(date(2025, 7, 1)) == "DATE '2025-07-01'"

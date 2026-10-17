@@ -753,7 +753,7 @@ def sql_literal(value):
     if isinstance(value, bool):
         return None
     if isinstance(value, int) or (isinstance(value, float) and math.isfinite(value)):
-        return f"({value!r})" if value < 0 else repr(value)
+        return f"({value!r})" if math.copysign(1, value) < 0 else repr(value)  # -0.0 too
     if isinstance(value, datetime):
         return f"{'TIMESTAMPTZ' if value.tzinfo else 'TIMESTAMP'} {lit(value.isoformat())}"
     if isinstance(value, date):
