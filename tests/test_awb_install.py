@@ -32,8 +32,6 @@
 # test_cli_arguments: --replace repeats one path per flag, needs --upgrade, and rejects an uncopied path with exit 2.
 # test_print_json_server_entry_without_writing: copilot and claude print the same JSON stdio entry with their own destination (COPILOT_HOME moves only copilot's, CLAUDE_CONFIG_DIR only claude's); both option spellings print without writing.
 # test_print_server_entry_interpreter_warnings: old Python, down to one without shlex.join, or a virtual environment warns only on stderr before the registration lines, with unchanged host entry and no writes; a stable Python 3.10+ emits no warning.
-# test_print_server_entry_prefers_python_312: run by another interpreter, or by 3.12 in a virtual environment, the entry runs the absolute path python3.12 on PATH reports, with a note in place of warnings; a 3.12 outside a virtual environment runs itself; a probe reporting a virtual or conda environment, failing like an inactive shim, naming a relative path, or printing anything but its JSON report leaves this interpreter. Nothing is written.
-# test_python_312_through_the_py_launcher: without python3.12 on PATH, `py -3.12` is probed and its reported path chosen.
 # test_print_codex_server_entry_with_quoted_unicode_paths: native TOML with absolute paths and safe quoting; default/overridden destination, without writing.
 # test_print_host_registration_command: each host's own registration command prints on stderr, POSIX-quoted with absolute interpreter and server paths that hold spaces, quotes and Unicode, before the fallback merge line, which for claude says to close Claude Code first; the entry still prints on stdout; nothing is written or run.
 # test_server_entry_refusals_write_nothing: exact host choices and print-only mode refuse unknown/missing values, unknown/abbreviated options, and install arguments with exit 2 and no stdout or writes.
@@ -703,8 +701,7 @@ def test_cli_arguments(upgradable):
     (["--mcp-config", "claude"], {"CLAUDE_CONFIG_DIR": "claude config"}, "claude config/.claude.json"),
 ])
 def test_print_json_server_entry_without_writing(tmp_path, arguments, config_dirs, destination):
-    # An empty PATH finds no Python 3.12, which depends on the machine, so the entry runs this interpreter.
-    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1", "PATH": ""}
+    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
     env.pop("COPILOT_HOME", None)
     env.pop("CLAUDE_CONFIG_DIR", None)
     env.update({variable: str(tmp_path / directory) for variable, directory in config_dirs.items()})
@@ -747,7 +744,6 @@ def test_print_server_entry_interpreter_warnings(tmp_path, monkeypatch, capsys, 
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("CODEX_HOME", raising=False)
     monkeypatch.setattr(sys, "version_info", (3, 10))
-    monkeypatch.setattr(installer.shutil, "which", lambda name: None)
     monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "stable-python"))
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "stable-python"))
     before = snapshot(tmp_path)
@@ -779,65 +775,6 @@ def test_print_server_entry_interpreter_warnings(tmp_path, monkeypatch, capsys, 
     assert snapshot(tmp_path) == before
 
 
-def fake_python(directory, name, stdout, status=0):
-    """A POSIX executable that prints stdout and exits with status, standing in for an interpreter on PATH."""
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / name
-    path.write_text(f"#!/bin/sh\nprintf '%s' {shlex.quote(stdout)}\nexit {status}\n")
-    path.chmod(0o755)
-    return path
-
-
-@pytest.mark.skipif(os.name == "nt", reason="the stand-in interpreters are POSIX shell scripts")
-@pytest.mark.parametrize("version, virtual, stdout, status, chosen", [
-    ((3, 10), False, "[true, {real}]\r\n", 0, True),
-    ((3, 13), True, "[true, {real}]\n", 0, True),
-    ((3, 12), True, "[true, {real}]\n", 0, True),
-    ((3, 12), False, "[true, {real}]\n", 0, False),
-    ((3, 10), False, "[false, {real}]\n", 0, False),
-    ((3, 10), False, "", 127, False),
-    ((3, 10), False, "[true, \"relative/python3.12\"]\n", 0, False),
-    ((3, 10), False, "True\n{real}\n", 0, False),
-])
-def test_print_server_entry_prefers_python_312(tmp_path, monkeypatch, capsys, version, virtual, stdout, status,
-                                               chosen):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("CODEX_HOME", raising=False)
-    monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "stable-python"))
-    monkeypatch.setattr(sys, "prefix", str(tmp_path / ("project/.venv" if virtual else "stable-python")))
-    monkeypatch.setattr(sys, "version_info", version)
-    real = tmp_path / "versions/3.12.4/bin/python3.12"
-    # A shim on PATH reports the interpreter it runs; a failing one is an inactive version manager's.
-    fake_python(tmp_path / "shims", "python3.12", stdout.format(real=json.dumps(str(real))), status)
-    monkeypatch.setenv("PATH", str(tmp_path / "shims"))
-    before = snapshot(tmp_path)
-    installer.print_server_entry("codex")
-    actual = capsys.readouterr()
-    command = str(real) if chosen else str(Path(sys.executable).absolute())
-    assert actual.out.startswith(f"[mcp_servers.awb]\ncommand = {installer._toml(command)}\n")
-    note = f"Note: the entry runs Python 3.12, the default, at {real}, not this interpreter.\n"
-    assert (note in actual.err) == chosen
-    if chosen:
-        # The note replaces the warnings and comes before the command, which registers the entry once pasted.
-        assert actual.err.startswith(note) and "Warning" not in actual.err
-        assert shlex.quote(str(real)) in actual.err
-    assert snapshot(tmp_path) == before
-
-
-def test_python_312_through_the_py_launcher(tmp_path, monkeypatch):
-    # Without python3.12 on PATH, the Windows py launcher's -3.12 is asked for the same report.
-    monkeypatch.setattr(sys, "version_info", (3, 10))
-    real = tmp_path / "Python312" / "python.exe"
-    calls = []
-    monkeypatch.setattr(installer.shutil, "which", lambda name: str(tmp_path / "py") if name == "py" else None)
-    def run(argv, **kwargs):
-        calls.append(argv[:2])
-        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps([True, str(real)]) + "\n", stderr="")
-    monkeypatch.setattr(installer.subprocess, "run", run)
-    assert installer.default_python() == str(real)
-    assert calls == [[str(tmp_path / "py"), "-3.12"]]
-
-
 @pytest.mark.parametrize("codex_home, destination", [
     (None, "home/.codex/config.toml"),
     ("codex config", "codex config/config.toml"),
@@ -852,8 +789,7 @@ def test_print_codex_server_entry_with_quoted_unicode_paths(tmp_path, codex_home
     server.parent.mkdir(parents=True)
     shutil.copyfile(SCRIPT, script)
     shutil.copyfile(SKILLS / "awb-init/assets/awb_mcp.py", server)
-    # An empty PATH finds no Python 3.12, which depends on the machine, so the entry runs this interpreter.
-    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1", "PATH": ""}
+    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
     env.pop("CODEX_HOME", None)
     if codex_home is not None:
         env["CODEX_HOME"] = str(tmp_path / codex_home)
@@ -892,8 +828,7 @@ def test_print_host_registration_command(tmp_path, host, destination):
     python = tmp_path / "stable \"py\" it's 🐍" / "python3"
     python.parent.mkdir()
     python.symlink_to(Path(sys.executable).resolve())
-    # An empty PATH finds no Python 3.12, which depends on the machine, so the entry runs this interpreter.
-    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1", "PATH": ""}
+    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
     env.pop("COPILOT_HOME", None)
     env.pop("CLAUDE_CONFIG_DIR", None)
     env.pop("CODEX_HOME", None)

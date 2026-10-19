@@ -129,7 +129,7 @@ This section is for whoever installs the skills and sets up the agent host. An a
 
 ### Requirements
 
-- Python 3.10 or later for every helper and script (3.11 or later, or `tomli`, to read TOML settings). Python 3.12 is the default when installed: setup builds a new project's `.venv` with it, and the MCP server entry runs it. The project's interpreter also needs pandas and `duckdb`, which `awb-init`'s installer declares and checks; result validation was tested with pandas 2.2. The status collector and the cleaning record script need only the standard library.
+- Python 3.10 or later for every helper and script (3.11 or later, or `tomli`, to read TOML settings). Python 3.12 is the default when installed: setup builds a new project's `.venv` with it, and the MCP server registration below runs under it. The project's interpreter also needs pandas and `duckdb`, which `awb-init`'s installer declares and checks; result validation was tested with pandas 2.2. The status collector and the cleaning record script need only the standard library.
 <!-- dist:exclude -->
 - pytest is needed only to run this repository's own tests under `tests/`; they exercise the shipped helper files and are not part of the distributed archive. The reference deck renderer in `tests/`, which proves the deck contract can be built from without Microsoft 365, also needs python-pptx; its tests skip without it.
 <!-- /dist:exclude -->
@@ -153,13 +153,13 @@ Repair installs missing helpers and guides and replaces only the unmodified copi
 
 #### MCP server
 
-After installing the skills, run this with a stable Python 3.10+ interpreter outside any project virtual environment, replacing `<host>` with `copilot`, `claude`, or `codex`:
+After installing the skills, run this with Python 3.12 when it is installed (`python3.12`, or `py -3.12` on Windows, in place of `python3`), else a stable Python 3.10+ interpreter, outside any project virtual environment, replacing `<host>` with `copilot`, `claude`, or `codex`:
 
 ```sh
 python3 ~/.agents/skills/awb-init/scripts/install_helpers.py --mcp-config <host>
 ```
 
-It prints the `awb` entry on stdout and, on stderr, the host's registration command for a POSIX shell such as bash or zsh, then the file to merge the entry into as the fallback, with a warning first when the interpreter is older than 3.10 or inside a virtual environment. When another interpreter runs it and Python 3.12 is installed outside a virtual environment, as `python3.12` on the path or through the Windows `py` launcher, the entry runs that Python 3.12 instead, by its own absolute path, and a note says so in place of any warning. It runs nothing and writes nothing.
+It prints the `awb` entry on stdout and, on stderr, the host's registration command for a POSIX shell such as bash or zsh, then the file to merge the entry into as the fallback, with a warning first when the interpreter is older than 3.10 or inside a virtual environment. It runs nothing and writes nothing.
 
 Prefer the host's command: it adds the entry to the host's user-level configuration and keeps the rest, which matters most for Claude Code, since it rewrites `~/.claude.json` while it runs. In PowerShell or cmd, or without the host's command, merge the printed entry into the existing file, keeping other servers and settings; for Claude Code, close every session first.
 

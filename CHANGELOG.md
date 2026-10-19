@@ -6,7 +6,7 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ### Changed
 
-- Python 3.12 is the default interpreter; 3.10 or later still works. `awb-init` builds a new project's `.venv` with Python 3.12 when it is installed, else the newest 3.10 or later. `install_helpers.py --mcp-config` run by another interpreter prints an entry that runs Python 3.12 when one is installed outside a virtual environment, found as `python3.12` on the path or through the Windows `py` launcher and recorded by the absolute path it reports, so a version manager's shim is never registered; a note on stderr says so in place of the interpreter warnings.
+- Python 3.12 is the default interpreter when installed; 3.10 or later still works. `awb-init` builds a new project's `.venv` with Python 3.12, else with the system's default Python 3 when it is 3.10 or later, and the README and `awb-init` say to run the MCP server registration with Python 3.12 (`python3.12`, or `py -3.12` on Windows) when it is installed. The registered interpreter is still the one that runs `install_helpers.py --mcp-config`.
 
 ## [0.4.0] - 2026-10-19
 

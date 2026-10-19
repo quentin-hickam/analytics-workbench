@@ -19,8 +19,7 @@ Accepted input (--mcp-config): argparse accepts the exact, case-sensitive host t
 claude, codex, supplied as --mcp-config HOST or --mcp-config=HOST. No project root or install flags
 may accompany this mode. Unknown hosts/options, abbreviated options, missing values and mixed modes
 are refused on stderr with exit 2 and no configuration on stdout. Output: the entry in the host's
-format on stdout; on stderr, a note when the entry runs Python 3.12 instead of this interpreter, else any
-interpreter warning, then the host's own user-level registration
+format on stdout; on stderr, any interpreter warning, then the host's own user-level registration
 command, quoted for a POSIX shell (claude mcp add-json --scope user, codex mcp add, copilot mcp add),
 then the file to merge the entry into as the fallback for other shells or a host without that command.
 For Claude Code the fallback says to close every Claude Code session first, since Claude Code rewrites
@@ -78,7 +77,6 @@ import os
 import re
 import shlex
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -87,8 +85,6 @@ SKILLS = Path(__file__).resolve().parents[2]
 CLI = Path(__file__).resolve().parents[1] / "assets/awb_cli.py"
 RECEIPT = ".awb-receipt.json"
 PYTHON = (3, 10)
-# The interpreter the MCP entry and a new project's .venv use when installed; any PYTHON or later still works.
-DEFAULT_PYTHON = (3, 12)
 # Project path -> asset under the skills directory, for every file the skills copy into a project.
 # Every path outside package-format/ is installed into each workbench; package formats wait for awb-package.
 COPIED = {
@@ -476,48 +472,18 @@ SERVER_HOSTS = {
 }
 
 
-def default_python():
-    """The absolute path of an installed Python 3.12 outside a virtual environment, found as python3.12 on PATH or
-    through the Windows py launcher, when this interpreter is not one; else None. The path is the interpreter's
-    own, so a version manager's shim, which may later run another version, is never returned."""
-    if tuple(sys.version_info[:2]) == DEFAULT_PYTHON and sys.prefix == sys.base_prefix:
-        return None
-    # A conda environment under envs/ shares its base's prefix test, so it is refused by its layout. The report is
-    # JSON, ASCII only, so a path in any encoding survives the pipe.
-    probe = ("import json, os, sys; print(json.dumps([sys.version_info[:2] == " + repr(DEFAULT_PYTHON) + " and "
-             "sys.prefix == sys.base_prefix and not (os.path.isdir(os.path.join(sys.prefix, 'conda-meta')) and "
-             "os.path.basename(os.path.dirname(sys.prefix)) == 'envs'), sys.executable]))")
-    for name, *options in (("python3.12",), ("py", "-3.12")):
-        found = shutil.which(name)
-        if found is None:
-            continue
-        try:
-            result = subprocess.run([found, *options, "-c", probe], capture_output=True, text=True, timeout=30)
-            stable, path = json.loads(result.stdout) if result.returncode == 0 else (False, "")
-        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
-            continue
-        if stable is True and isinstance(path, str) and Path(path).is_absolute():
-            return path
-    return None
-
-
 def print_server_entry(host):
-    """Print the awb server entry for host's user-level configuration; on stderr, a note or interpreter warning, then
+    """Print the awb server entry for host's user-level configuration; on stderr, any interpreter warning, then
     the host's own registration command for a POSIX shell, then that file as the fallback merge destination.
-    Run and write nothing. The entry runs Python 3.12, the default, when one is installed outside a virtual
-    environment, else this interpreter."""
+    Run and write nothing."""
     destination, render, command, fallback_note = SERVER_HOSTS[host]
-    default = default_python()
-    entry = {"type": "stdio", "command": default or str(Path(sys.executable).absolute()),
+    entry = {"type": "stdio", "command": str(Path(sys.executable).absolute()),
              "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")], "env": {}}
     print(render(entry))
     sys.stdout.flush()  # Keep the entry above the guidance when both streams share a terminal.
-    # Notes come first: the command below registers the entry's interpreter as soon as it is pasted.
+    # Warnings come first: the command below registers this interpreter as soon as it is pasted.
     old_python = sys.version_info < (3, 10)
     virtual = sys.prefix != sys.base_prefix
-    if default:
-        print(f"Note: the entry runs Python 3.12, the default, at {default}, not this interpreter.", file=sys.stderr)
-        old_python = virtual = False
     if old_python:
         print("Warning: this interpreter is older than Python 3.10.", file=sys.stderr)
     if virtual:
