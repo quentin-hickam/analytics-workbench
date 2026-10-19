@@ -32,7 +32,7 @@
 # test_cli_arguments: --replace repeats one path per flag, needs --upgrade, and rejects an uncopied path with exit 2.
 # test_print_json_server_entry_without_writing: copilot and claude print the same JSON stdio entry with their own destination (COPILOT_HOME moves only copilot's, CLAUDE_CONFIG_DIR only claude's); both option spellings print without writing.
 # test_print_server_entry_interpreter_warnings: old Python, down to one without shlex.join, or a virtual environment warns only on stderr before the registration lines, with unchanged host entry and no writes; a stable Python 3.10+ emits no warning.
-# test_print_server_entry_prefers_python_312: run by another interpreter, or by 3.12 in a virtual environment, the entry runs the absolute path python3.12 on PATH reports, with a note in place of warnings; a 3.12 outside a virtual environment runs itself; a probe reporting a virtual environment, failing like an inactive shim, or naming a relative path leaves this interpreter. Nothing is written.
+# test_print_server_entry_prefers_python_312: run by another interpreter, or by 3.12 in a virtual environment, the entry runs the absolute path python3.12 on PATH reports, with a note in place of warnings; a 3.12 outside a virtual environment runs itself; a probe reporting a virtual or conda environment, failing like an inactive shim, naming a relative path, or printing anything but its JSON report leaves this interpreter. Nothing is written.
 # test_python_312_through_the_py_launcher: without python3.12 on PATH, `py -3.12` is probed and its reported path chosen.
 # test_print_codex_server_entry_with_quoted_unicode_paths: native TOML with absolute paths and safe quoting; default/overridden destination, without writing.
 # test_print_host_registration_command: each host's own registration command prints on stderr, POSIX-quoted with absolute interpreter and server paths that hold spaces, quotes and Unicode, before the fallback merge line, which for claude says to close Claude Code first; the entry still prints on stdout; nothing is written or run.
@@ -790,13 +790,14 @@ def fake_python(directory, name, stdout, status=0):
 
 @pytest.mark.skipif(os.name == "nt", reason="the stand-in interpreters are POSIX shell scripts")
 @pytest.mark.parametrize("version, virtual, stdout, status, chosen", [
-    ((3, 10), False, "True\n{real}\n", 0, True),
-    ((3, 13), True, "True\n{real}\n", 0, True),
-    ((3, 12), True, "True\n{real}\n", 0, True),
-    ((3, 12), False, "True\n{real}\n", 0, False),
-    ((3, 10), False, "False\n{real}\n", 0, False),
+    ((3, 10), False, "[true, {real}]\r\n", 0, True),
+    ((3, 13), True, "[true, {real}]\n", 0, True),
+    ((3, 12), True, "[true, {real}]\n", 0, True),
+    ((3, 12), False, "[true, {real}]\n", 0, False),
+    ((3, 10), False, "[false, {real}]\n", 0, False),
     ((3, 10), False, "", 127, False),
-    ((3, 10), False, "True\nrelative/python3.12\n", 0, False),
+    ((3, 10), False, "[true, \"relative/python3.12\"]\n", 0, False),
+    ((3, 10), False, "True\n{real}\n", 0, False),
 ])
 def test_print_server_entry_prefers_python_312(tmp_path, monkeypatch, capsys, version, virtual, stdout, status,
                                                chosen):
@@ -807,7 +808,7 @@ def test_print_server_entry_prefers_python_312(tmp_path, monkeypatch, capsys, ve
     monkeypatch.setattr(sys, "version_info", version)
     real = tmp_path / "versions/3.12.4/bin/python3.12"
     # A shim on PATH reports the interpreter it runs; a failing one is an inactive version manager's.
-    fake_python(tmp_path / "shims", "python3.12", stdout.format(real=real), status)
+    fake_python(tmp_path / "shims", "python3.12", stdout.format(real=json.dumps(str(real))), status)
     monkeypatch.setenv("PATH", str(tmp_path / "shims"))
     before = snapshot(tmp_path)
     installer.print_server_entry("codex")
@@ -831,7 +832,7 @@ def test_python_312_through_the_py_launcher(tmp_path, monkeypatch):
     monkeypatch.setattr(installer.shutil, "which", lambda name: str(tmp_path / "py") if name == "py" else None)
     def run(argv, **kwargs):
         calls.append(argv[:2])
-        return subprocess.CompletedProcess(argv, 0, stdout=f"True\n{real}\n", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps([True, str(real)]) + "\n", stderr="")
     monkeypatch.setattr(installer.subprocess, "run", run)
     assert installer.default_python() == str(real)
     assert calls == [[str(tmp_path / "py"), "-3.12"]]

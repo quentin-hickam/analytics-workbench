@@ -482,19 +482,22 @@ def default_python():
     own, so a version manager's shim, which may later run another version, is never returned."""
     if tuple(sys.version_info[:2]) == DEFAULT_PYTHON and sys.prefix == sys.base_prefix:
         return None
-    probe = (f"import sys; print(sys.version_info[:2] == {DEFAULT_PYTHON} and sys.prefix == sys.base_prefix); "
-             "print(sys.executable)")
+    # A conda environment under envs/ shares its base's prefix test, so it is refused by its layout. The report is
+    # JSON, ASCII only, so a path in any encoding survives the pipe.
+    probe = ("import json, os, sys; print(json.dumps([sys.version_info[:2] == " + repr(DEFAULT_PYTHON) + " and "
+             "sys.prefix == sys.base_prefix and not (os.path.isdir(os.path.join(sys.prefix, 'conda-meta')) and "
+             "os.path.basename(os.path.dirname(sys.prefix)) == 'envs'), sys.executable]))")
     for name, *options in (("python3.12",), ("py", "-3.12")):
         found = shutil.which(name)
         if found is None:
             continue
         try:
             result = subprocess.run([found, *options, "-c", probe], capture_output=True, text=True, timeout=30)
-        except (OSError, subprocess.SubprocessError):
+            stable, path = json.loads(result.stdout) if result.returncode == 0 else (False, "")
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
             continue
-        lines = result.stdout.splitlines()
-        if result.returncode == 0 and len(lines) == 2 and lines[0] == "True" and Path(lines[1]).is_absolute():
-            return lines[1]
+        if stable is True and isinstance(path, str) and Path(path).is_absolute():
+            return path
     return None
 
 
