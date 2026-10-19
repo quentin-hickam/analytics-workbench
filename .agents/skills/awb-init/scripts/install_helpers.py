@@ -19,7 +19,8 @@ Accepted input (--mcp-config): argparse accepts the exact, case-sensitive host t
 claude, codex, supplied as --mcp-config HOST or --mcp-config=HOST. No project root or install flags
 may accompany this mode. Unknown hosts/options, abbreviated options, missing values and mixed modes
 are refused on stderr with exit 2 and no configuration on stdout. Output: the entry in the host's
-format on stdout; on stderr, any interpreter warning, then the host's own user-level registration
+format on stdout; on stderr, any interpreter warning, a note naming PATH's python3.12 when this
+interpreter is another version outside a virtual environment, then the host's own user-level registration
 command, quoted for a POSIX shell (claude mcp add-json --scope user, codex mcp add, copilot mcp add),
 then the file to merge the entry into as the fallback for other shells or a host without that command.
 For Claude Code the fallback says to close every Claude Code session first, since Claude Code rewrites
@@ -85,6 +86,8 @@ SKILLS = Path(__file__).resolve().parents[2]
 CLI = Path(__file__).resolve().parents[1] / "assets/awb_cli.py"
 RECEIPT = ".awb-receipt.json"
 PYTHON = (3, 10)
+# The interpreter the skills prefer for the MCP server and a new project's .venv; any PYTHON or later works.
+DEFAULT_PYTHON = (3, 12)
 # Project path -> asset under the skills directory, for every file the skills copy into a project.
 # Every path outside package-format/ is installed into each workbench; package formats wait for awb-package.
 COPIED = {
@@ -489,7 +492,13 @@ def print_server_entry(host):
     if virtual:
         print("Warning: this interpreter runs in a virtual environment.", file=sys.stderr)
     if old_python or virtual:
-        print("Use a stable Python 3.10+ interpreter outside a project virtual environment.", file=sys.stderr)
+        print("Use a stable Python 3.12 interpreter, or 3.10 or later, outside a project virtual environment.",
+              file=sys.stderr)
+    # Outside a virtual environment, PATH's python3.12 is a stable interpreter rather than the environment's own.
+    default = None if virtual or tuple(sys.version_info[:2]) == DEFAULT_PYTHON else shutil.which("python3.12")
+    if default:
+        print(f"Note: Python 3.12, the default, is at {default}; rerun with it to register that interpreter.",
+              file=sys.stderr)
     print("Register awb with the host's own command, in a POSIX shell such as bash or zsh:", file=sys.stderr)
     print(" ".join(shlex.quote(part) for part in command(entry)), file=sys.stderr)  # shlex.join needs 3.8.
     print("Fallback, for other shells or when that command is unavailable: merge the printed awb entry into "

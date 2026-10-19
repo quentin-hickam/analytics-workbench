@@ -32,6 +32,7 @@
 # test_cli_arguments: --replace repeats one path per flag, needs --upgrade, and rejects an uncopied path with exit 2.
 # test_print_json_server_entry_without_writing: copilot and claude print the same JSON stdio entry with their own destination (COPILOT_HOME moves only copilot's, CLAUDE_CONFIG_DIR only claude's); both option spellings print without writing.
 # test_print_server_entry_interpreter_warnings: old Python, down to one without shlex.join, or a virtual environment warns only on stderr before the registration lines, with unchanged host entry and no writes; a stable Python 3.10+ emits no warning.
+# test_print_server_entry_notes_python_312: run by another version outside a virtual environment, the entry is unchanged and stderr names PATH's python3.12 before the registration command; under 3.12 or in a virtual environment, no note.
 # test_print_codex_server_entry_with_quoted_unicode_paths: native TOML with absolute paths and safe quoting; default/overridden destination, without writing.
 # test_print_host_registration_command: each host's own registration command prints on stderr, POSIX-quoted with absolute interpreter and server paths that hold spaces, quotes and Unicode, before the fallback merge line, which for claude says to close Claude Code first; the entry still prints on stdout; nothing is written or run.
 # test_server_entry_refusals_write_nothing: exact host choices and print-only mode refuse unknown/missing values, unknown/abbreviated options, and install arguments with exit 2 and no stdout or writes.
@@ -744,6 +745,7 @@ def test_print_server_entry_interpreter_warnings(tmp_path, monkeypatch, capsys, 
     monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     monkeypatch.delenv("CODEX_HOME", raising=False)
     monkeypatch.setattr(sys, "version_info", (3, 10))
+    monkeypatch.setattr(installer.shutil, "which", lambda name: None)
     monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "stable-python"))
     monkeypatch.setattr(sys, "prefix", str(tmp_path / "stable-python"))
     before = snapshot(tmp_path)
@@ -769,9 +771,38 @@ def test_print_server_entry_interpreter_warnings(tmp_path, monkeypatch, capsys, 
     expected_stderr = ""
     if warnings:
         expected_stderr += "\n".join(warnings) + "\n"
-        expected_stderr += "Use a stable Python 3.10+ interpreter outside a project virtual environment.\n"
+        expected_stderr += ("Use a stable Python 3.12 interpreter, or 3.10 or later, outside a project virtual "
+                            "environment.\n")
     expected_stderr += destination_line
     assert actual.err == expected_stderr
+    assert snapshot(tmp_path) == before
+
+
+@pytest.mark.parametrize("version, virtual, noted", [
+    ((3, 10), False, True),
+    ((3, 13), False, True),
+    ((3, 12), False, False),
+    ((3, 10), True, False),
+])
+def test_print_server_entry_notes_python_312(tmp_path, monkeypatch, capsys, version, virtual, noted):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(sys, "base_prefix", str(tmp_path / "stable-python"))
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / ("project/.venv" if virtual else "stable-python")))
+    monkeypatch.setattr(installer.shutil, "which", lambda name: None)
+    installer.print_server_entry("codex")
+    plain = capsys.readouterr()
+    default = str(tmp_path / "bin/python3.12")
+    monkeypatch.setattr(installer.shutil, "which", lambda name: default if name == "python3.12" else None)
+    monkeypatch.setattr(sys, "version_info", version)
+    before = snapshot(tmp_path)
+    installer.print_server_entry("codex")
+    actual = capsys.readouterr()
+    assert actual.out == plain.out
+    note = f"Note: Python 3.12, the default, is at {default}; rerun with it to register that interpreter.\n"
+    assert (note in actual.err) == noted
+    if noted:
+        # The note comes before the registration command, which registers this interpreter once pasted.
+        assert actual.err.index(note) < actual.err.index("Register awb")
     assert snapshot(tmp_path) == before
 
 
@@ -828,7 +859,8 @@ def test_print_host_registration_command(tmp_path, host, destination):
     python = tmp_path / "stable \"py\" it's 🐍" / "python3"
     python.parent.mkdir()
     python.symlink_to(Path(sys.executable).resolve())
-    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1"}
+    # An empty PATH keeps the python3.12 note, which depends on the machine, out of stderr.
+    env = {**os.environ, "HOME": str(tmp_path / "home"), "PYTHONDONTWRITEBYTECODE": "1", "PATH": ""}
     env.pop("COPILOT_HOME", None)
     env.pop("CLAUDE_CONFIG_DIR", None)
     env.pop("CODEX_HOME", None)

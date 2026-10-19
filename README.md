@@ -37,7 +37,7 @@ Along the way, answers come in chat, and the project folder keeps the record: fo
 ### Before you start
 
 - The skills must be installed in your agent host. If someone else installs your tools, [Install and administer](#install-and-administer) is for them.
-- The computer needs Python 3.10 or later. Setup stops on an older Python and says so; ask whoever installs your tools for a newer one.
+- The computer needs Python 3.10 or later; Python 3.12 is the default when installed. Setup stops on an older Python and says so; ask whoever installs your tools for a newer one.
 - Git keeps the project's code history on your computer. No GitHub account is needed. Without Git, the work still runs; the agent says so once and makes no commits.
 - Open your agent in an empty folder, or in the folder that will hold the project.
 
@@ -62,7 +62,7 @@ Without a question, `awb-init` asks for one in a line. With no question yet, say
 The agent asks in plain words, with its recommendation and the alternative.
 
 1. **A scoping round.** Right after setup, the decisions only you can make, such as who counts in the population, the period, how a measure is defined, and what result would change the decision. They come up to four at a time, and a vague answer gets a follow-up with a concrete case. The agent looks up facts the data or files can settle. You can put a decision off; it then waits in the question ledger.
-2. **Python environment.** Unless you name a Python or the project has an environment of its own, setup creates `.venv` in the project folder with the packages the helpers need, and says which Python it recorded. You are asked only if that fails, or before installing into a Python outside the project.
+2. **Python environment.** Unless you name a Python or the project has an environment of its own, setup creates `.venv` in the project folder, with Python 3.12 when installed, and the packages the helpers need, and says which Python it recorded. You are asked only if that fails, or before installing into a Python outside the project.
 3. **Storage locations.** Before the agent first brings in data, where to keep a copy of the original files; before the first release, where to keep released packages. The original data files and releases stay out of the project's Git history, so these folders hold the lasting copies. Folders named in your first message are recorded at setup. The agent copies to a full path or one starting with `~`, `./`, or `../`; for anything else, such as a web address, it tells you what to copy where. Answer "none", and the agent warns that this computer holds the only copy.
 4. **Data and analysis choices.** You decide whether identical rows shared by files or sheets are copies or separate records, unless the source says they are re-extracts; when cleaning, what a placeholder means, the canonical label, and which duplicate wins; and any threshold, minimum, or exclusion your brief leaves open, proposed before the agent sees which rows lead.
 5. **Audience and length**, when you first ask for a package, unless you said them earlier: who will see the deck, what they already know, the decision they own, their terms, and any length you want. The agent also asks which tables to send with the deck and, when you mention a methods note, whether your audience needs one; otherwise the draft's report offers one. A methods note length, such as "one page", is recorded in the brief as a word count, about 500 to a page. The package check reports a note more than 10% over it, and the agent shortens it or tells you its length; with no length recorded, the note runs a page or two.
@@ -129,7 +129,7 @@ This section is for whoever installs the skills and sets up the agent host. An a
 
 ### Requirements
 
-- Python 3.10 or later for every helper and script (3.11 or later, or `tomli`, to read TOML settings). The project's interpreter also needs pandas and `duckdb`, which `awb-init`'s installer declares and checks; result validation was tested with pandas 2.2. The status collector and the cleaning record script need only the standard library.
+- Python 3.10 or later for every helper and script (3.11 or later, or `tomli`, to read TOML settings). Python 3.12 is the default: setup builds a new project's `.venv` with it, and the MCP server is registered with it, when it is installed. The project's interpreter also needs pandas and `duckdb`, which `awb-init`'s installer declares and checks; result validation was tested with pandas 2.2. The status collector and the cleaning record script need only the standard library.
 <!-- dist:exclude -->
 - pytest is needed only to run this repository's own tests under `tests/`; they exercise the shipped helper files and are not part of the distributed archive. The reference deck renderer in `tests/`, which proves the deck contract can be built from without Microsoft 365, also needs python-pptx; its tests skip without it.
 <!-- /dist:exclude -->
@@ -153,13 +153,13 @@ Repair installs missing helpers and guides and replaces only the unmodified copi
 
 #### MCP server
 
-After installing the skills, run this with a stable Python 3.10+ interpreter outside any project virtual environment, replacing `<host>` with `copilot`, `claude`, or `codex`:
+After installing the skills, run this with a stable Python 3.12 interpreter, or 3.10 or later when 3.12 is not installed, outside any project virtual environment, replacing `<host>` with `copilot`, `claude`, or `codex`:
 
 ```sh
-python3 ~/.agents/skills/awb-init/scripts/install_helpers.py --mcp-config <host>
+python3.12 ~/.agents/skills/awb-init/scripts/install_helpers.py --mcp-config <host>
 ```
 
-It prints the `awb` entry on stdout and, on stderr, the host's registration command for a POSIX shell such as bash or zsh, then the file to merge the entry into as the fallback, with a warning first when the interpreter is older than 3.10 or inside a virtual environment. It runs nothing and writes nothing.
+It prints the `awb` entry on stdout and, on stderr, the host's registration command for a POSIX shell such as bash or zsh, then the file to merge the entry into as the fallback, with a warning first when the interpreter is older than 3.10 or inside a virtual environment, and a note naming `python3.12` on the path when another version outside a virtual environment runs it. It runs nothing and writes nothing.
 
 Prefer the host's command: it adds the entry to the host's user-level configuration and keeps the rest, which matters most for Claude Code, since it rewrites `~/.claude.json` while it runs. In PowerShell or cmd, or without the host's command, merge the printed entry into the existing file, keeping other servers and settings; for Claude Code, close every session first.
 
