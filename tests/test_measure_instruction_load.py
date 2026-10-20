@@ -41,6 +41,16 @@ def test_always_loaded_agents_md_does_not_grow():
     assert loaded["characters"] <= AGENTS_CHARACTERS
 
 
+# The awb tool definitions ride on every model request too: their size after the token-efficiency trims.
+TOOL_DEFINITION_CHARACTERS = 7700
+
+
+def test_mcp_tool_definitions_do_not_grow():
+    loaded = load().tool_definitions()
+    assert loaded["tools"] == 7
+    assert loaded["characters"] <= TOOL_DEFINITION_CHARACTERS
+
+
 PACKAGE_REQUIRED_WORDS, PACKAGE_NUMBER_AND_EVIDENCE_WORDS = 7716, 2500
 
 

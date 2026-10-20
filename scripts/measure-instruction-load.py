@@ -5,6 +5,7 @@ A declared path missing from the baseline revision or the working tree counts as
 words and is listed under that side's `missing`, so the script runs across layout changes.
 """
 import argparse
+import importlib.util
 import json
 import subprocess
 from pathlib import Path
@@ -18,6 +19,7 @@ CONTRACT = SKILLS + 'awb-package/references/package-contract.md'
 REVIEW = SKILLS + 'awb-package/references/review.md'
 HELPERS = SKILLS + 'awb-package/references/helpers.md'
 NUMBERS_AND_EVIDENCE = SKILLS + 'awb-package/references/numbers-and-evidence.md'
+MCP_SERVER = SKILLS + 'awb-init/assets/awb_mcp.py'
 
 
 def skill(name):
@@ -45,6 +47,16 @@ def measure(paths, baseline=None):
         words += len(text.split())
         chars += len(text)
     return {'words': words, 'characters': chars, 'files': files, 'missing': missing}
+
+
+def tool_definitions():
+    """The current awb MCP tool definitions as the model sees them, which hosts send on every request."""
+    spec = importlib.util.spec_from_file_location('awb_mcp_measured', ROOT / MCP_SERVER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    text = json.dumps([{key: tool[key] for key in ('name', 'description', 'inputSchema')}
+                       for tool in module.TOOLS], separators=(',', ':'))
+    return {'words': len(text.split()), 'characters': len(text), 'tools': len(module.TOOLS)}
 
 
 def main():
@@ -80,6 +92,7 @@ def main():
         reduction = (round(100 * (before['words'] - after['words']) / before['words'], 1)
                      if before['words'] else None)
         result['scenarios'][name] = {'before': before, 'after': after, 'word_reduction_percent': reduction}
+    result['mcp_tool_definitions_current'] = tool_definitions()
     print(json.dumps(result, indent=2))
 
 

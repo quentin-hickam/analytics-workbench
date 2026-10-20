@@ -106,7 +106,7 @@ The [UX simulation synthesis](docs/ux-simulation-2026-10-15/README.md) has each 
 ### Good to know
 
 - A turn that changed the project's records ends with one plain line: what changed for your questions, if anything, and the next step.
-- A commit saves the project's code and records, such as its queries and findings, as a point in its history on this computer that you can go back to. It uploads nothing. Data files and packages stay out of it, but results and the example values exploration and cleaning record are saved. The agent commits only when you ask, and suggests it at most once a session; say "commit as you go" to switch.
+- A commit saves the project's code and records, such as its queries and findings, as a point in its history on this computer that you can go back to. It uploads nothing. Data files and packages stay out of it, but results and the example values exploration and cleaning record are saved. The agent commits only when you ask; say "commit as you go" to switch.
 - Your host may ask you to approve a command or tool call; that prompt is the host's, not the workbench's. Setup may suggest, in one line, registering the workbench's `awb` tool server with your host, which cuts those approvals; the work runs without it.
 - The checks have limits. The package check confirms that every number in the deck outline, the methodology reference, and any methods note traces to a recorded result or is listed, with its reason, as coming from elsewhere, such as a fact you gave or a figure from an earlier release. The reviewer reads the wording against your brief, your review rules, and the evidence. Neither redoes the analysis, so read the headlines and caveats yourself.
 
@@ -188,6 +188,13 @@ Restart or reconnect the host's `awb` server after registration. The skills then
 3. Start the `awb` server and accept its trust prompt. For its write tools, choose **Allow in this Workspace** when offered. Read-only tools need no approval in Local, though `awb/read` declares `openWorldHint`, so result review can still appear.
 4. Install the [package reviewer definition](.agents/skills/awb-package/assets/awb-package-reviewer.agent.md) at user level: with **Local** selected, run **Chat: New Custom Agent**, choose the user/profile location, name it `awb-package-reviewer`, and replace the created file's contents with the shipped definition. Local reads user agents from VS Code profile storage, not `~/.copilot/agents/`. Keep it out of generated workbenches and update it on upgrades. See [custom agent locations](https://code.visualstudio.com/docs/agent-customization/custom-agents#custom-agent-file-locations).
 5. Confirm that a reviewer subagent gets its four file read/search tools and `awb/read`, calls its review-rules check, and has no edit, terminal, or write tool. VS Code names an MCP tool `<registration key>/<tool>` and silently ignores unknown names, so keep the server registered as `awb`, and never broaden the definition to `awb/*`; without `awb/read`, the review reports failure and the draft cannot finish. See the [VS Code tools reference](https://code.visualstudio.com/docs/agents/reference/tools-reference) and [custom agent tools](https://docs.github.com/en/copilot/reference/custom-agents-configuration#tools). Copilot end-to-end behavior remains a field test.
+
+#### Cost per request
+
+Every tool call sends the whole chat to the model again, so a request costs more with each tool call and as the chat grows.
+
+- Start a new chat when the task changes.
+- Everyday questions rarely need the largest model or the highest reasoning effort; keep those for scoping and packaging. Findings still come only from the investigation's `run.py`, whichever model runs it.
 
 #### Project instructions in AGENTS.md
 
