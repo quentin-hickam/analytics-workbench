@@ -171,9 +171,13 @@ def unrecorded_reads(results, wanted):
             target = os.path.normpath(os.path.join(ROOT, literal))
             if "://" in literal or ("/" not in literal and not os.path.isfile(target)):
                 continue  # a URL, or a word such as a regex or a value
-            publications = re.findall(r"data/parquet/[^/\s'\"]+/[^/\s'\"*]+/", literal)
-            # DuckDB reads every file in a folder it is given.
+            # A publication's folder, its trailing slash optional.
+            publications = [f"{path}/" for path in re.findall(r"(data/parquet/[^/\s'\"]+/[^/\s'\"*]+)(?:/|$)", literal)]
+            # DuckDB reads every file in a folder it is given; '/' alone is a separator, such as string_split's.
             folder = os.path.isdir(target) and Path(target).is_relative_to(ROOT)
+            if os.path.isdir(target) and not folder and literal != "/":
+                problems.add(f"{view} reads {literal}, outside the project; copy it into the project")
+                continue
             unpublished = []
             for path in glob.glob(os.path.join(target, "**") if folder else target, recursive=True):
                 file = Path(os.path.normpath(path))

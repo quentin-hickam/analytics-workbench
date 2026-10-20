@@ -134,9 +134,12 @@ def _expand(root, paths):
 
 
 def _view_publications(root, path):
+    """The publications a view names: data/parquet/<dataset>/<publication>/, or that folder without its
+    trailing slash when it is one."""
     try:
-        return sorted({f"data/parquet/{dataset}/{publication}" for dataset, publication in
-                       re.findall(r"data/parquet/([^/\s'\"]+)/([^/\s'\"*]+)/", (root / path).read_text())})
+        found = re.findall(r"data/parquet/([^/\s'\"]+)/([^/\s'\"*]+)(/|(?=['\"]))", (root / path).read_text())
+        return sorted({f"data/parquet/{dataset}/{publication}" for dataset, publication, slash in found
+                       if slash or (root / "data/parquet" / dataset / publication).is_dir()})
     except (OSError, ValueError) as error:
         return {"unknown": f"{path}: {error}"}
 
