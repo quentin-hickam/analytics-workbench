@@ -45,6 +45,7 @@
 # test_snapshot_sits_beside_the_draft_and_is_replaced: the snapshot holds exactly what a review reads, under the package's review/, never in draft/, and each record replaces it, a removed note included.
 # test_record_reads_the_report_from_stdin_and_checks_arguments: start prints started and kind; --report - reads standard input; an unknown kind, a missing or unreadable report, and a blank or multi-line --accept exit 2 and write nothing; a missing draft is refused.
 # test_brief_change_makes_a_review_stale: the investigation's brief.md is snapshotted with the review, and an edit to it shows stale with brief.md alone in changed and a diff labelled with its path.
+# test_package_questions_replace_the_business_question: review-rules check lists the manifest's questions with their ledger text, or none without them, and an unknown ID is an error; while they are listed, the review reads the brief without its Business question and their text instead, so a brief edit there or another question's edit leaves it current, and a listed question's or another brief section's edit makes it stale, each labelled.
 # test_source_register_or_glossary_change_makes_a_review_stale: foundation/sources.md and foundation/glossary.md are snapshotted with the review, and an edit to either, or its removal, shows stale with it alone in changed and a diff labelled with its path.
 # test_withdrawn_quality_observation_or_its_cited_scan_makes_a_review_stale: foundation/quality.md is snapshotted whole and each foundation/scans/<name>.json path methodology.md names as evidence; withdrawing a cited observation, rescanning the cited scan, or removing the record shows stale with it in changed, and a scan no narrative names leaves the review current.
 # test_a_cited_quality_rows_saved_query_makes_a_review_stale: each saved-query path methodology.md names beside a cited quality ID is snapshotted; editing it shows stale with its path and diff, and editing an uncited saved query leaves the review current.
@@ -701,7 +702,9 @@ def test_package_and_release_invoke_the_read_only_review():
     assert "reports no `error` violation and no command problem" in brief
     assert "releasing only once a review is passed" in release
     assert "its `review` row is `current`" in package and "`stale`" in brief and "`stale`" in release
-    assert "whether its disposition is `omit`" in brief
+    # The brief says a review goes stale once anything it read changes; helpers.md lists what it reads.
+    assert "once anything it read changes, which `changed` names" in brief
+    assert "whether its disposition is `omit`" in (SKILLS / "awb-package/references/helpers.md").read_text()
     assert "later drafts could repeat" in brief and "later drafts could repeat" in agents
 
     cli = load(SKILLS / "awb-init/assets/awb_cli.py", "awb_cli_commands")
@@ -959,6 +962,47 @@ def test_brief_change_makes_a_review_stale(project, capsys):
     assert out["status"] == "stale" and out["changed"] == ["brief.md"]
     assert "--- reviewed investigations/inv/brief.md\n+++ investigations/inv/brief.md\n" in out["diff"]
     assert "+Methods note length: about 500 words" in out["diff"]
+
+
+def test_package_questions_replace_the_business_question(project, capsys):
+    brief = project / "investigations/inv/brief.md"
+    brief.parent.mkdir(parents=True)
+    brief.write_text("# Investigation brief\n\n## Business question\n\nWhich regions close late?\n\n"
+                     "### Detail\n\nBy month.\n\n## Audience\n\nThe board.\n")
+    ledger = brief.parent / "questions.json"
+    entries = [{"id": "Q-001", "text": "Which regions close late?"}, {"id": "Q-002", "text": "Which carriers?"}]
+    ledger.write_text(json.dumps({"questions": entries}))
+    # Without the manifest's questions, check lists none and the whole brief is read.
+    with_manifest(project)
+    assert "questions" not in run(project, capsys, "review-rules", "check", "inv", "pkg")[1]
+    with_manifest(project)
+    manifest = project / DRAFT / "manifest.json"
+    manifest.write_text(json.dumps({"revalidation_flags": FLAGS, "questions": ["Q-001"]}))
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 0 and out["questions"] == [{"id": "Q-001", "text": "Which regions close late?"}]
+    record(project, capsys, CLEAN)
+    snap = project / "deliveries/inv/pkg/review/snapshot"
+    assert (snap / "brief.md").read_text() == "# Investigation brief\n\n## Audience\n\nThe board.\n"
+    assert json.loads((snap / "questions.json").read_text()) == out["questions"]
+    # A question added to the brief for other work, or a change to another ledger question, leaves it current.
+    brief.write_text(brief.read_text().replace("By month.", "By month and carrier."))
+    ledger.write_text(json.dumps({"questions": [entries[0], {"id": "Q-002", "text": "Which carriers, by month?"}]}))
+    assert show(project, capsys)[1]["status"] == "current"
+    # Rewording a listed question, or another brief section, makes it stale, each labelled.
+    ledger.write_text(json.dumps({"questions": [{"id": "Q-001", "text": "Which regions close late, by month?"}]}))
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == ["questions"]
+    assert f"+++ {DRAFT}/manifest.json questions\n" in out["diff"] and "by month?" in out["diff"]
+    ledger.write_text(json.dumps({"questions": entries}))
+    brief.write_text(brief.read_text().replace("The board.", "The board and its chair."))
+    out = show(project, capsys)[1]
+    assert out["status"] == "stale" and out["changed"] == ["brief.md"]
+    assert "+++ investigations/inv/brief.md without its Business question\n" in out["diff"]
+    # An ID the ledger lacks is an error the reviewer reports as a command problem.
+    manifest.write_text(json.dumps({"revalidation_flags": FLAGS, "questions": ["Q-009"]}))
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 1 and out["errors"] == ["the manifest's questions names Q-009, which the ledger lacks"]
+    assert "questions" not in out
 
 
 @pytest.mark.parametrize("name", ["foundation/sources.md", "foundation/glossary.md"])

@@ -6,6 +6,7 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ### Changed
 
+- A package can answer only some of the ledger's questions: the manifest's `questions` lists their IDs (absent or `none`, every root as before). Its **Open questions** slide then requires only those and the questions under them, the review checks them, from `review-rules check`'s `questions`, in place of the brief's **Business question**, and the review receipt reads the brief without that section, so a brief edit for other work no longer makes the package review stale.
 - Simple questions take fewer tool calls and carry less fixed text. The project `AGENTS.md` no longer asks the agent to read both guides in every session, to settle terms with data before answering, to read the README for the active investigation or interpreter (the `awb` tools resolve both), to read history unless the ask turns on an earlier decision, to suggest a commit once a session, or to repeat that numbered releases are frozen (the release skills say so); `awb-explore` triggers only on "explore this dataset" or "profile this view", not on "look at this data".
 - The `awb` MCP tool definitions, which hosts send with every request, are about a sixth shorter (7,691 characters, down from about 9,100); a test keeps them at or under 7,700.
 - The status collector no longer repeats each finding's caveat under `active.caveats`; `awb-status` reports every `active.findings` `reason`. Its body drops rare-case detail about upstream probes, source-reference syntax, and timezones.

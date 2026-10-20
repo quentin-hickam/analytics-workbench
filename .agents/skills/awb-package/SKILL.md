@@ -25,7 +25,7 @@ Identify the investigation and package. For a correction later drafts could repe
 
 From the project root, install the missing shared formats with README's `Project interpreter`: `python3 <awb-init skill directory>/scripts/install_helpers.py . --package-formats`, which preserves existing files and records what it installs in `.awb-receipt.json`.
 
-For a new package, ask which audience-facing datasets to include and explicitly offer **none**; there is no default export set. A revision keeps the current manifest's selection unless the user changes it or it no longer fits the package scope; when it no longer fits, explain why and ask for another before exporting.
+For a new package, ask which audience-facing datasets to include and explicitly offer **none**; there is no default export set. When the user narrows the package to some of their questions, list those ledger IDs in the manifest's `questions` after `export`, leaving the brief as it is. A revision keeps the current manifest's selection unless the user changes it or it no longer fits the package scope; when it no longer fits, explain why and ask for another before exporting.
 
 Read the investigation brief's **Audience**: who sees or presents the deck, their knowledge, decision, terms, deck length, and checkpoint mode. If missing or blank, ask and record the answer there (after **Purpose** when absent) as record maintenance. Record precision and clock format, using the [brief template](../awb-init/assets/workbench/investigation/brief.md)'s audience defaults when unspecified; also any stated deck length, methods note length as `Methods note length: about <n> words`, or checkpoint mode. When it or the request mentions a methods note, ask whether the audience needs `methodology-note.md`.
 
@@ -76,7 +76,7 @@ Write the draft at the contract's paths, or revise the same files: a first pass,
 
 ## 5. Review
 
-Once the narratives and flags are complete, run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against the brief's definitions and questions, every rule in `foundation/review-rules.md`, and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it, right after `review-receipt start`. Record and act on its report as that file's **After the review** says; the first review of a draft is full, and later ones are scoped against the recorded one.
+Once the narratives and flags are complete, run the review in [references/review.md](references/review.md): a fresh subagent, limited to read tools, checks the draft against the brief's definitions and questions, every rule in `foundation/review-rules.md`, and what `check-draft` cannot check, and reports without fixing; that file's **Launch** says how each host starts it, right after `review-receipt start`. Record and act on its report as that file's **After the review** says.
 
 ## 6. Check
 

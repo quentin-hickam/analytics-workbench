@@ -2723,7 +2723,29 @@ def _longest_ordered_run(ranks):
     return kept
 
 
-def open_question_problems(root, investigation, draft, provenance, *, names, roots):
+def package_questions(root, investigation, record) -> tuple:
+    """(questions, problem) for the manifest's `questions`, the ledger questions the package answers: each
+    as {id, text} in the manifest's order, read from the investigation's questions.json, or None when the
+    field is absent or none, the package then answering every root question. problem names a value that is
+    not a list of question IDs, an ID the ledger lacks, or a ledger that cannot be read; questions is then
+    None."""
+    listed = record.get("questions", "none") if isinstance(record, dict) else "none"
+    if listed == "none":
+        return None, None
+    if not isinstance(listed, list) or not listed or not all(isinstance(entry, str) for entry in listed):
+        return None, "the manifest's questions is not none or a list of ledger question IDs"
+    path = Path(root) / "investigations" / investigation / "questions.json"
+    try:
+        ledger = {entry["id"]: entry["text"] for entry in _read_json(path)["questions"]}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return None, f"the manifest lists questions, and {_rel(root, path)} cannot be read: {error}"
+    missing = [entry for entry in listed if entry not in ledger]
+    if missing:
+        return None, f"the manifest's questions names {', '.join(missing)}, which the ledger lacks"
+    return [{"id": entry, "text": ledger[entry]} for entry in listed], None
+
+
+def open_question_problems(root, investigation, draft, provenance, *, names, roots, scope=None):
     """Accepted input: exactly one ## Open questions slide iff required questions exist,
     immediately after ## Limitations and open caveats (or, with that slide under ## Appendix, after the
     last main finding, Implications, or How we know slide) and before ## What changed since the
@@ -2743,8 +2765,17 @@ def open_question_problems(root, investigation, draft, provenance, *, names, roo
     a row directs the caller to questions edit --audience; that scan skips any part of the text the
     outline reader refuses, which the slide's own names check still covers. Block markup/comments in that wording
     are not an alternate matching form. Notes remain presenter context and do not satisfy a question.
+    scope, the IDs the manifest's `questions` lists, limits required questions to those and the questions
+    under them; None leaves every root in.
     """
-    questions = [q for q in provenance.question_tree(root, investigation) if (q["priority"] == "must" or q["show"])
+    tree = provenance.question_tree(root, investigation)
+    if scope is not None:
+        kept = set()
+        for question in tree:  # depth-first, so a parent comes before its children
+            if question["id"] in scope or question["parent"] in kept:
+                kept.add(question["id"])
+        tree = [question for question in tree if question["id"] in kept]
+    questions = [q for q in tree if (q["priority"] == "must" or q["show"])
                  and q["display_status"] in ("open", "parked", provenance.AWAITING_RECHECK,
                                               provenance.PROVISIONAL_RECHECK)]
     expected = Counter(_collapse(_shown(_inline(q["audience"] or q["text"])[0])) for q in questions)
@@ -3059,8 +3090,16 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         report["errors"].append(f"findings drift: {error}")
     if provenance is not None:
         try:
+            manifest = _read_json(draft / MANIFEST)
+        except (OSError, ValueError):
+            manifest = {}  # the manifest check below reports it
+        listed, problem = package_questions(root, investigation, manifest)
+        try:
             report["open_questions"], report["open_questions_count"] = open_question_problems(
-                root, investigation, draft, provenance, names=names, roots=recorded)
+                root, investigation, draft, provenance, names=names, roots=recorded,
+                scope=None if listed is None else {question["id"] for question in listed})
+            if problem:
+                report["open_questions"].append({"slide": "Open questions", "line": None, "problem": problem})
         except (OSError, ValueError, AttributeError) as error:
             report["errors"].append(f"open questions check: {error}")
     try:
@@ -4288,10 +4327,21 @@ def _for_package(rule, investigation, package):
 
 def check_review_rules(root, investigation, package) -> dict:
     """List every review rule that holds for the package with the draft narrative lines its pattern matches,
-    leaving out a rule kept for another package; writes nothing."""
+    leaving out a rule kept for another package, and, when the manifest lists them, the ledger questions the
+    package answers (package_questions), which the review checks in place of the brief's Business question;
+    writes nothing."""
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     report = {"rules_file": REVIEW_RULES, "draft": _rel(root, draft), "rules": [], "problems": [], "errors": []}
+    try:
+        manifest = _read_json(draft / MANIFEST)
+    except (OSError, ValueError):
+        manifest = {}
+    listed, problem = package_questions(root, investigation, manifest)
+    if problem:
+        report["errors"].append(problem)
+    elif listed is not None:
+        report["questions"] = listed
     texts = {}
     for name in _narratives(draft):
         try:
@@ -4428,7 +4478,10 @@ def cli_review_rules(root: Path, argv: list[str]) -> int:
         epilog="Prints one JSON line.\nEach rules row has id, severity, and status: matched (with matches, "
                "at most 20, and more_matches beyond), no match, no pattern (judge the rule by reading), "
                "retired, or unchecked (its problem is listed). A row has scope when the rule's is slide or "
-               "document, and package when the rule is kept for this package.\nA line rule's match is one line: file, line, and text. A slide rule's match is "
+               "document, and package when the rule is kept for this package.\nquestions, present only when "
+               "the manifest lists the package's questions, gives each one's id and ledger text; the review checks "
+               "them in place of the brief's Business question. A malformed list, or an ID the ledger lacks, is "
+               "an error.\nA line rule's match is one line: file, line, and text. A slide rule's match is "
                "one slide, in methodology.md and the note one section, under a #, ##, or ### heading as the "
                "file renders: file, heading (null before the first), the heading's line, and lines, each line "
                "and text. A document rule's match is one file: file and lines. A match lists at most 20 "
@@ -4516,10 +4569,13 @@ SOURCES = "foundation/sources.md"
 QUALITY = "foundation/quality.md"
 _SCAN_PATH = re.compile(r"foundation/scans/[A-Za-z0-9][A-Za-z0-9._@-]*\.json")
 _QUERY_PATH = re.compile(r"(?:[A-Za-z0-9][A-Za-z0-9._@-]*/)*[A-Za-z0-9][A-Za-z0-9._@-]*\.sql\b", re.IGNORECASE)
+# The ledger questions the manifest lists as the package's, which the review checks in place of the brief's
+# Business question.
+QUESTIONS = "questions"
 _REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.md",
                   METHODOLOGY_NOTE: METHODOLOGY_NOTE, BRIEF: BRIEF, REVIEW_RULES: "review-rules.md",
                   GLOSSARY: "glossary.md", SOURCES: "sources.md", QUALITY: "quality.md",
-                  "revalidation_flags": "revalidation_flags.json"}
+                  "revalidation_flags": "revalidation_flags.json", QUESTIONS: "questions.json"}
 # show's whole JSON line, as printed, stays within one read tool result (16,000 characters by default).
 _READ_LIMIT = 16000
 _SUMMARY = re.compile(r"review( \(scoped\))?: (?:(clean)|([0-9]+) violations? \(([0-9]+) errors?\), "
@@ -4578,12 +4634,28 @@ def _package_rules(data, investigation, package):
     return b"\n".join(kept) + (b"\n" if last == len(lines) and kept and kept[-1] != b"" else b"")
 
 
+def _without_business_question(data):
+    """The brief's bytes without its ## Business question section, up to the next # or ## heading, or the
+    whole brief when it has no such heading."""
+    lines = data.split(b"\n")
+    start = next((index for index, line in enumerate(lines)
+                  if re.fullmatch(rb"##[ \t]+Business question[ \t]*\r?", line)), None)
+    if start is None:
+        return data
+    end = next((index for index in range(start + 1, len(lines)) if re.match(rb"#{1,2}[ \t]", lines[index])),
+               len(lines))
+    return b"\n".join(lines[:start] + lines[end:])
+
+
 def review_inputs(root, investigation, package) -> dict:
     """{input: bytes, or None when absent} for exactly what a review reads: the three narratives, the
     investigation's brief.md, the rule file without rules kept for another package (_package_rules), the
     glossary, source register, and quality record whole, the reduced revalidation_flags as indented JSON, and
     each evidence file the manifest's results name or scan or saved query methodology.md names by its
-    path, which step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a
+    path, which step 3 reads to confirm a cited check. When the manifest lists the package's questions, the
+    review checks them in place of the brief's Business question: the brief is read without that section
+    and `questions` holds their IDs and ledger text as JSON (package_questions), so a brief edit there, such
+    as a question for other work, leaves the review current. Raises OSError on a path that cannot be read, a
     directory included."""
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
@@ -4608,6 +4680,13 @@ def review_inputs(root, investigation, package) -> dict:
     except (OSError, ValueError):
         flags = {"manifest": "unreadable"}
     inputs["revalidation_flags"] = (json.dumps(flags, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    # Present only while the manifest lists questions, so a receipt recorded without them stays current.
+    if record.get("questions", "none") != "none":
+        listed, problem = package_questions(root, investigation, record)
+        inputs[QUESTIONS] = (json.dumps(listed or {"problem": problem}, indent=2, ensure_ascii=False)
+                             + "\n").encode("utf-8")
+        if inputs[BRIEF] is not None:
+            inputs[BRIEF] = _without_business_question(inputs[BRIEF])
     results = record.get("results") if isinstance(record.get("results"), list) else []
     evidence = {entry["evidence"] for entry in results if isinstance(entry, dict)
                 and isinstance(entry.get("evidence"), str) and entry["evidence"] not in ("", *_REVIEW_INPUTS)}
@@ -4848,7 +4927,9 @@ def review_receipt(root, investigation, package) -> dict:
             before = None
         # The rule file is diffed as the review reads it, so its line numbers count only this package's rules.
         label = f"{draft}/{MANIFEST} revalidation_flags" if name == "revalidation_flags" else \
-            f"investigations/{investigation}/{BRIEF}" if name == BRIEF else \
+            f"{draft}/{MANIFEST} questions" if name == QUESTIONS else \
+            f"investigations/{investigation}/{BRIEF}" + (" without its Business question" if QUESTIONS in current
+                                                         else "") if name == BRIEF else \
             f"{REVIEW_RULES} without rules kept for another package" if name == REVIEW_RULES else \
             f"{draft}/{name}" if name in _REVIEW_INPUTS and not name.startswith("foundation/") else name
         pieces += difflib.unified_diff(_diff_text(before), _diff_text(current.get(name)),
@@ -4893,7 +4974,9 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
     record = actions.add_parser(
         "record", formatter_class=raw, help="record a review's report and what it read",
         description="Record the report of a review begun with start: snapshot the draft's findings.md, "
-                    "methodology.md, methodology-note.md when present, the investigation's brief.md when present, "
+                    "methodology.md, methodology-note.md when present, the investigation's brief.md when present "
+                    "(without its Business question while the manifest lists questions, whose ledger text it "
+                    "keeps instead), "
                     "foundation/glossary.md, foundation/sources.md, and foundation/quality.md when present, "
                     "foundation/review-rules.md when present without rules kept for another package, and the "
                     "manifest's revalidation_flags (finding, reason, represented_in, and whether the "
