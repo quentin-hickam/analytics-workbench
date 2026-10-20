@@ -574,9 +574,10 @@ class Scan:
                                      f"ORDER BY __awb_count DESC, {everything} LIMIT 5").fetchall()
             width = len(compared)
             but = f" (ignoring {', '.join(lineage)})" if lineage else ""
+            # The repeated row comes before its lineage, so stdout's cut example still shows it.
             self.add("duplicate-rows", None, suffix, extra, rows,
                      f"{extra} extra rows repeating another row{where}{but} ({groups} distinct repeated rows)",
-                     [{"value": _plain({**dict(zip(lineage, row[width + 1:])), **dict(zip(compared, row[:width]))}),
+                     [{"value": _plain({**dict(zip(compared, row[:width])), **dict(zip(lineage, row[width + 1:]))}),
                        "count": row[width]} for row in sample], {"lineage": lineage} if lineage else None)
         keys = [[c.strip() for c in spec.split(",") if c.strip()] for spec in self.options["keys"]]
         explicit = bool(keys)

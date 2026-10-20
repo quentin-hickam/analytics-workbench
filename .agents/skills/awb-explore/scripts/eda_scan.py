@@ -370,29 +370,43 @@ def bucket(d, period, years=False):
     return f"CAST({d} AS BIGINT)" if years else f"CAST(date_trunc('{period}', {d}) AS DATE)"
 
 
-def year_column(chosen, columns, skipped):
-    """The chosen date column when it holds integer years (1 to 9999), else None. An option naming
-    an integer column outside that range is a usage error; a setting is skipped, as any setting
-    that does not fit the dataset is."""
+def not_years(name, low, high):
+    """Why an integer column is no year column, or None when it holds years (1 to 9999)."""
+    if low is not None and (low < 1 or high > 9999):
+        return f"{name} holds integers from {low} to {high}, not years from 1 to 9999"
+    return None
+
+
+def year_column(chosen, columns):
+    """The chosen date column when it holds integer years, else None. An option naming an integer
+    column of no years is a usage error; scan_dataset drops such a setting before scoping."""
     if "date_column" not in chosen:
         return None
-    name, source = chosen["date_column"]
+    name = chosen["date_column"][0]
     column = next((c for c in columns if c["name"] == name and INTEGER.match(c["type"])), None)
     if column is None or column["numeric"]["min"] is None:
         return None
-    low, high = column["numeric"]["min"], column["numeric"]["max"]
-    if low < 1 or high > 9999:
-        reason = f"{name} holds integers from {low} to {high}, not years from 1 to 9999"
-        if source == "option":
-            raise ScanError(f"--date-column {reason}")
-        skipped.append({"setting": source, "reason": reason})
-        return None
+    if reason := not_years(name, column["numeric"]["min"], column["numeric"]["max"]):
+        raise ScanError(f"--date-column {reason}")
     return column
 
 
-def grain(connection, columns, rows, key):
+def lineage_columns(root):
+    """Every column foundation/datasets.toml lists under a lineage key, saying which sheet, file, or row a
+    record came from, so a repeated record differs there alone; an unreadable file lists none."""
+    data, _ = load_settings(root / "foundation/datasets.toml")
+    datasets = data.get("datasets") if isinstance(data.get("datasets"), dict) else {}
+    return {c for entry in datasets.values() if isinstance(entry, dict)
+            for c in (entry["lineage"] if isinstance(entry.get("lineage"), list) else []) if isinstance(c, str)}
+
+
+def grain(connection, columns, rows, key, lineage=()):
+    """Duplicate rows compare every column but the lineage ones, as awb-clean's scan does."""
+    ignored = [c["name"] for c in columns if c["name"] in lineage]
+    compared = ", ".join(q(c["name"]) for c in columns if c["name"] not in lineage) or "*"
     result = {"rows": rows, "duplicate_rows": rows - connection.execute(
-        "SELECT count(*) FROM (SELECT DISTINCT * FROM __eda)").fetchone()[0]}
+        f"SELECT count(*) FROM (SELECT DISTINCT {compared} FROM __eda)").fetchone()[0],
+        **({"lineage": ignored} if ignored else {})}
     result["single_column_keys"] = [c["name"] for c in columns if c["unique"]]
     # A nearly unique column makes any pair containing it unique, so it is reported, not paired.
     near = [c for c in columns if not c["unique"] and rows and c["distinct"] >= 0.95 * rows
@@ -559,7 +573,8 @@ def anomalies(scan, today):
 
     g = scan["grain"]
     if g["duplicate_rows"]:
-        add("duplicate-rows", None, f"{g['duplicate_rows']:,} rows repeat another row exactly", "awb-clean")
+        but = f" (ignoring {', '.join(g['lineage'])})" if g.get("lineage") else ""
+        add("duplicate-rows", None, f"{g['duplicate_rows']:,} rows repeat another row exactly{but}", "awb-clean")
     declared = g.get("declared_key") or {}
     if declared.get("missing_columns"):
         add("key-missing", ", ".join(declared["columns"]),
@@ -669,6 +684,21 @@ def scan_dataset(root, dataset, options):
         names = list(types)
         parameters = data.get("parameters") if isinstance(data.get("parameters"), dict) else {}
         scope = scope_filters(chosen, types, parameters)
+        column = chosen.get("date_column")
+        if column and column[1] != "option" and INTEGER.match(types.get(column[0], "")):
+            # A setting's integer column of no years, under the where filters, is no date column, so
+            # its bounds do not apply either; a where that fails is reported below.
+            where = [f"({f['sql']})" for f in scope_filters({k: v for k, v in chosen.items() if k == "where"},
+                                                            types, parameters)["applied"]]
+            try:
+                low, high = connection.execute(f"SELECT min({q(column[0])}), max({q(column[0])}) FROM __eda_all "
+                                               f"WHERE {' AND '.join(where) or 'TRUE'}").fetchone()
+            except Exception:
+                low = high = None
+            if reason := not_years(column[0], low, high):
+                del chosen["date_column"]
+                scope = scope_filters(chosen, types, parameters)
+                scope["skipped"].insert(0, {"setting": column[1], "reason": reason})
         read = {f"parameters.{name}" for name in scope.pop("parameters_read")}
         unused = [key for key in unused if key not in read]
         condition = " AND ".join(f"({f['sql']})" for f in scope["applied"]) or "TRUE"
@@ -696,7 +726,7 @@ def scan_dataset(root, dataset, options):
             c["temporal"]["coverage"] = coverage(
                 connection, c, choose_period(c["temporal"]["min"], c["temporal"]["max"], period_choice))
             c["temporal"]["min"], c["temporal"]["max"] = plain(c["temporal"]["min"]), plain(c["temporal"]["max"])
-        years = year_column(chosen, columns, scope["skipped"])
+        years = year_column(chosen, columns)
         if years:
             if period_choice not in (None, "year"):
                 scope["skipped"].append({"setting": chosen["period"][1],
@@ -742,7 +772,7 @@ def scan_dataset(root, dataset, options):
             "grain": None, "columns": columns, "null_patterns": None, "measure": None,
             "associations": None, "anomalies": [],
         }
-        scan["grain"] = grain(connection, columns, rows, key)
+        scan["grain"] = grain(connection, columns, rows, key, lineage_columns(root))
         scan["null_patterns"] = null_patterns(connection, columns, date_column, period, bool(years))
         if measure:
             scan["measure"] = measure_scan(connection, measure, dimensions, date_column, period,

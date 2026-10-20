@@ -15,7 +15,8 @@
 # test_template_settings_take_the_period_from_parameters_and_name_unset_choices: [parameters] start/end scope the period; unset scope, measure, and dimensions print the options to pass.
 # test_eda_where_reads_settings_parameters: [eda] where with $start reads the [parameters] date as a typed literal, and with $region a quoted string; the scan records the substituted predicate and counts those parameters as read; --where reads them too; an unset name or a value no literal writes exits 2 naming it before anything is written.
 # test_parameter_literals_follow_each_value_type: strings are quoted with ' doubled, numbers written as TOML parsed them and parenthesized when negative, -0.0 included, dates and date-times typed (TIMESTAMPTZ when they carry an offset); booleans, times, lists, tables, and non-finite floats have no literal.
-# test_an_integer_year_column_is_the_date_column: --date-column year --start 1850 --end 2024 on an INTEGER column filters as integers, reports coverage by year with an empty run of years as a gap, and gives the measure's trend and per-year counts by year; a date bound for it, or a column of integers outside 1 to 9999, exits 2 naming the fix; a date bound in settings is skipped as not applied.
+# test_an_integer_year_column_is_the_date_column: --date-column year --start 1850 --end 2024 on an INTEGER column filters as integers, reports coverage by year with an empty run of years as a gap, and gives the measure's trend and per-year counts by year; a date bound for it, or a column of integers outside 1 to 9999, exits 2 naming the fix, and as a setting is one not applied line whose integer bound is not applied either; a date bound in settings is skipped as not applied.
+# test_duplicate_rows_leave_declared_lineage_out: duplicate rows compare every column but the lineage columns foundation/datasets.toml lists, which grain names and the anomaly says it ignores.
 # test_a_single_missing_year_is_reported_as_a_gap: an integer year column missing one year scans without error and reports that year as a one-year gap.
 # test_show_prints_one_saved_section_and_lists_keys_for_an_unknown_one: --show walks keys and named list items without rescanning; a miss exits 2 listing what is there.
 
@@ -516,12 +517,37 @@ def test_an_integer_year_column_is_the_date_column(tmp_path, capsys):
     duckdb.connect().execute(f"COPY (SELECT 1 AS id, 20240101 AS stamp) TO '{publication / 'co2.parquet'}' (FORMAT parquet)")
     status, out, err = run(root, "data/parquet/co2/p1", "--date-column", "stamp", capsys=capsys)
     assert status == 2 and "--date-column stamp holds integers from 20240101 to 20240101, not years from 1 to 9999" in err
+    # As a setting, such a column is no date column: one line says so, and its bound is not applied.
+    write(root, "investigations/overtime/settings.toml", "[eda]\ndate_column = \"stamp\"\nperiod_start = 1850\n")
+    status, out, err = run(root, "data/parquet/co2/p1", capsys=capsys)
+    assert status == 0, err
+    assert out.count("not applied: eda.date_column") == 1 and \
+        "not applied: eda.date_column: stamp holds integers from 20240101 to 20240101, not years" in out
+    assert "not applied: eda.period_start: no date column is set" in out
+    assert json.loads((root / "investigations/overtime/exploration/eda/co2-p1.json").read_text())["scope"]["applied"] == []
     duckdb.connect().execute(PANEL.format(path=publication / "co2.parquet"))
     write(root, "investigations/overtime/settings.toml", "[eda]\ndate_column = \"year\"\nperiod_start = 1850-01-01\nperiod_end = 2024\n")
     status, out, err = run(root, "data/parquet/co2/p1", capsys=capsys)
     assert status == 0, err
     assert "not applied: eda.period_start: year holds integer years; 1850-01-01 is not a year" in out
     assert '`"year" <= 2024` (eda.period_end)' in out
+
+
+def test_duplicate_rows_leave_declared_lineage_out(tmp_path, capsys):
+    duckdb = pytest.importorskip("duckdb")
+    root = project(tmp_path, settings="")
+    publication = root / "data/parquet/lines/p1"
+    publication.mkdir(parents=True)
+    duckdb.connect().execute(f"COPY (SELECT * FROM (VALUES ('a', 1, 100), ('a', 2, 100), ('b', 1, 100), ('b', 2, 101)) "
+                             f"t(sheet, sheet_row, invoice)) TO '{publication / 'lines.parquet'}' (FORMAT parquet)")
+    status, out, err = run(root, "data/parquet/lines/p1", capsys=capsys)
+    scan = json.loads((root / "investigations/overtime/exploration/eda/lines-p1.json").read_text())
+    assert status == 0 and scan["grain"]["duplicate_rows"] == 0 and "lineage" not in scan["grain"]
+    write(root, "foundation/datasets.toml", '[datasets.lines]\nlineage = ["sheet", "sheet_row"]\n')
+    status, out, err = run(root, "data/parquet/lines/p1", capsys=capsys)
+    scan = json.loads((root / "investigations/overtime/exploration/eda/lines-p1.json").read_text())
+    assert status == 0 and scan["grain"]["duplicate_rows"] == 2 and scan["grain"]["lineage"] == ["sheet", "sheet_row"]
+    assert any(a["detail"] == "2 rows repeat another row exactly (ignoring sheet, sheet_row)" for a in scan["anomalies"])
 
 
 def test_a_single_missing_year_is_reported_as_a_gap(tmp_path, capsys):
