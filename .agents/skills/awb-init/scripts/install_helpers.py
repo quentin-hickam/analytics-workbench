@@ -41,8 +41,9 @@ Install/check modes print one line of JSON:
                      named by --replace)
   customized         each customized file -> the installed asset to compare it with
   vscode_mcp         the awb server in .vscode/mcp.json, run by this interpreter: written (new file), added
-                     (to an existing file's servers), current, missing (--check), different (an awb entry
-                     with another command or args, kept), or unreadable (not a JSON object, kept)
+                     (to an existing file's servers), current, replaced (an earlier entry running an awb_mcp.py;
+                     earlier with --check), missing (--check), different (an awb entry running anything else, kept), unreadable (not
+                     a JSON object, kept), or tracked (the file is in Git, so its machine paths stay out; kept)
   retired            (--upgrade) files the skills no longer ship: unmodified, removed, or customized (kept)
   requirements, python, packages, install   the third-party packages the helpers and the run.py
                      template need, where they are declared, and whether this interpreter imports them;
@@ -81,6 +82,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -311,9 +313,17 @@ VSCODE_MCP = ".vscode/mcp.json"
 
 
 def _vscode_server(root, check):
-    """Register the awb server in the workspace's VS Code configuration, keeping any other server; an existing
-    awb entry or a file that is not plain JSON is reported and left as it is."""
+    """Register the awb server in the workspace's VS Code configuration, keeping any other server. An earlier
+    awb entry, such as one naming a moved interpreter or skills directory, is replaced; another awb entry, a
+    file that is not plain JSON, or one Git tracks is reported and left as it is."""
     path = root / VSCODE_MCP
+    try:
+        tracked = subprocess.run(["git", "-C", str(root), "ls-files", "--error-unmatch", VSCODE_MCP],
+                                 capture_output=True).returncode == 0
+    except OSError:  # No Git: nothing can be committed.
+        tracked = False
+    if tracked:
+        return "tracked"
     entry = {"type": "stdio", "command": str(Path(sys.executable).absolute()),
              "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")]}
     config = {"servers": {}}
@@ -324,11 +334,17 @@ def _vscode_server(root, check):
                 raise ValueError
         except ValueError:
             return "unreadable"
-        if "awb" in config["servers"]:
-            return "current" if config["servers"]["awb"] == entry else "different"
+        old = config["servers"].get("awb")
+        if old == entry:
+            return "current"
+        ours = isinstance(old, dict) and isinstance(old.get("args"), list) \
+            and any(str(arg).replace("\\", "/").endswith("/awb_mcp.py") for arg in old["args"])
+        if old is not None and not ours:
+            return "different"
+    earlier = "awb" in config["servers"]
     if check:
-        return "missing"
-    status = "added" if path.is_file() else "written"
+        return "earlier" if earlier else "missing"
+    status = "replaced" if earlier else "added" if path.is_file() else "written"
     config["servers"]["awb"] = entry
     path.parent.mkdir(exist_ok=True)
     path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")

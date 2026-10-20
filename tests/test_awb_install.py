@@ -23,7 +23,8 @@
 # test_project_venv_is_kept_while_readme_records_none: a project with its own .venv or venv interpreter, run under another while README records none, refuses with exit 1 and writes nothing, with or without --check; README naming this interpreter lets it run.
 # test_hardlinked_interpreter_in_another_prefix_is_refused: outside a virtual environment, a hard link to this interpreter's binary in another directory is another interpreter: README naming it refuses, and so does a project .venv that is such a link while README records none; nothing is written.
 # test_awb_python_naming_this_interpreter_leaves_the_readme_line: with AWB_PYTHON naming this interpreter, by path or by name on PATH, the line is reported overridden and neither refused nor written, over another recorded interpreter or a project venv; AWB_PYTHON naming another interpreter changes nothing.
-# test_vscode_server_entry_is_written_merged_and_kept: install writes the awb stdio entry for this interpreter to .vscode/mcp.json, adds it beside other servers, reports it current on a rerun, keeps a different awb entry or a file that is not a JSON object, and --check reports it missing without writing.
+# test_vscode_server_entry_is_written_merged_and_kept: install writes the awb stdio entry for this interpreter to .vscode/mcp.json, adds it beside other servers, reports it current on a rerun, replaces an earlier entry running an awb_mcp.py (another interpreter path or a moved skills directory, Windows separators included; earlier with --check), keeps an awb entry running anything else or a file that is not a JSON object, and --check reports it missing without writing.
+# test_vscode_server_entry_skips_a_tracked_file: a .vscode/mcp.json that Git tracks is reported tracked and never written, so machine paths stay out of commits.
 # test_absent_mapped_asset_is_skipped: the installer skips a copied asset the skills directory lacks; without the provenance asset an existing requirements.txt is reported unchecked, not a crash.
 # test_refuses_non_workbench_old_python_and_unreadable_receipt: none of these writes anything.
 # test_refuses_readme_only_directory: README.md is not a marker; reports missing markers and initialization guidance with exit 1, without writing.
@@ -578,12 +579,28 @@ def test_vscode_server_entry_is_written_merged_and_kept(project, imports_ok):
     assert installer.install(project, check=True)["vscode_mcp"] == "missing"
     assert installer.install(project)["vscode_mcp"] == "added"
     assert json.loads(config.read_text()) == {"servers": {"other": other, "awb": entry}, "inputs": []}
+    for old in [{**entry, "command": "/elsewhere/python"}, {**entry, "args": ["C:\\old skills\\awb-init\\assets\\awb_mcp.py"]}]:
+        config.write_text(json.dumps({"servers": {"awb": old, "other": other}}))
+        assert installer.install(project, check=True)["vscode_mcp"] == "earlier"
+        assert installer.install(project)["vscode_mcp"] == "replaced"
+        assert json.loads(config.read_text()) == {"servers": {"awb": entry, "other": other}}
     for kept, status in [({"servers": {"awb": {**entry, "args": ["moved.py"]}}}, "different"),
                          ("// comment\n{}", "unreadable"), ([], "unreadable"), ({"servers": []}, "unreadable")]:
         text = kept if isinstance(kept, str) else json.dumps(kept)
         config.write_text(text)
         assert installer.install(project)["vscode_mcp"] == status
         assert config.read_text() == text
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
+def test_vscode_server_entry_skips_a_tracked_file(project, imports_ok):
+    config = project / ".vscode/mcp.json"
+    config.parent.mkdir()
+    config.write_text('{"servers": {}}\n')
+    subprocess.run(["git", "init", "-q", str(project)], check=True)
+    subprocess.run(["git", "-C", str(project), "add", ".vscode/mcp.json"], check=True)
+    assert installer.install(project)["vscode_mcp"] == "tracked"
+    assert config.read_text() == '{"servers": {}}\n'
 
 
 def test_absent_mapped_asset_is_skipped(project, monkeypatch, imports_ok):
