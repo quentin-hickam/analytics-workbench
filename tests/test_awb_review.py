@@ -46,7 +46,7 @@
 # test_record_reads_the_report_from_stdin_and_checks_arguments: start prints started and kind; --report - reads standard input; an unknown kind, a missing or unreadable report, and a blank or multi-line --accept exit 2 and write nothing; a missing draft is refused.
 # test_brief_change_makes_a_review_stale: the investigation's brief.md is snapshotted with the review, and an edit to it shows stale with brief.md alone in changed and a diff labelled with its path.
 # test_source_register_or_glossary_change_makes_a_review_stale: foundation/sources.md and foundation/glossary.md are snapshotted with the review, and an edit to either, or its removal, shows stale with it alone in changed and a diff labelled with its path.
-# test_replacing_a_referenced_document_makes_a_review_stale: the SHA-256 of each file in the project a Sources row's reference: links to, bare or in angle brackets, is snapshotted; replacing one in place, the register unedited, shows stale with its path and both digests, and a file linked without reference: leaves the review current.
+# test_replacing_a_referenced_document_makes_a_review_stale: the SHA-256 of each file in the project a Sources row's reference: links to, bare or in angle brackets, with a #page= fragment or %20 escapes, is snapshotted; replacing one in place, the register unedited, shows stale with its path and both digests, and a file linked without reference: leaves the review current.
 # test_withdrawn_quality_observation_or_its_cited_scan_makes_a_review_stale: foundation/quality.md is snapshotted whole and each foundation/scans/<name>.json path methodology.md names as evidence; withdrawing a cited observation, rescanning the cited scan, or removing the record shows stale with it in changed, and a scan no narrative names leaves the review current.
 # test_a_cited_quality_rows_saved_query_makes_a_review_stale: each saved-query path methodology.md names beside a cited quality ID is snapshotted; editing it shows stale with its path and diff, and editing an uncited saved query leaves the review current.
 # test_show_reports_an_unreadable_receipt_and_bounds_the_diff: a long diff is cut so the printed line, a long prior report and typographic punctuation included, fits one read result, with a note counting the rest; an unreadable or malformed receipt is an error, exit 1, with status none.
@@ -989,9 +989,12 @@ def test_replacing_a_referenced_document_makes_a_review_stale(project, capsys):
     manual.write_bytes(b"%PDF-1.4 total includes returns")
     dictionary.write_text("column,meaning\n")
     other.write_text("Notes.\n")
+    spaced = project / "foundation/references/orders/release notes.pdf"
+    spaced.write_bytes(b"%PDF-1.4 notes")
     (project / "foundation/sources.md").write_text(
         "# Source register\n\n## Sources\n\n| Source ID | Relevance and fitness | Notes |\n| --- | --- | --- |\n"
-        "| orders | from documentation | reference: [manual](references/orders/manual.pdf); reference: "
+        "| orders | from documentation | reference: [manual](references/orders/manual.pdf#page=12); reference: "
+        "[notes](references/orders/release%20notes.pdf); reference: "
         "[dictionary](<references/orders/data dictionary.csv>); see [other](references/orders/other.md) |\n")
     record(project, capsys, CLEAN)
     assert show(project, capsys)[1]["status"] == "current"
@@ -1008,6 +1011,9 @@ def test_replacing_a_referenced_document_makes_a_review_stale(project, capsys):
     record(project, capsys, CLEAN)
     dictionary.write_text("column,meaning\ntotal,net of returns\n")
     assert show(project, capsys)[1]["changed"] == ["foundation/references/orders/data dictionary.csv"]
+    record(project, capsys, CLEAN)
+    spaced.write_bytes(b"%PDF-1.4 revised notes")
+    assert show(project, capsys)[1]["changed"] == ["foundation/references/orders/release notes.pdf"]
 
 
 def test_withdrawn_quality_observation_or_its_cited_scan_makes_a_review_stale(project, capsys):

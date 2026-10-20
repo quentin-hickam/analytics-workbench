@@ -38,6 +38,7 @@ from collections import Counter, namedtuple
 from datetime import datetime
 from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, ROUND_HALF_UP, Context, Decimal, InvalidOperation, localcontext
 from pathlib import Path
+from urllib.parse import unquote
 
 MANIFEST = "manifest.json"
 # The optional audience-facing account of method; when the draft holds it, the names, numbers, claims,
@@ -4628,7 +4629,8 @@ def review_inputs(root, investigation, package) -> dict:
     linked = set()
     for row in table[1] if table else []:
         for angled, bare in _REFERENCE_LINK.findall(row.get("Notes", "")):
-            path = (root / "foundation" / (angled or bare)).resolve()
+            # A renderer drops a fragment or query and decodes percent escapes, as a pasted link holds them.
+            path = (root / "foundation" / unquote(re.split(r"[#?]", angled or bare)[0])).resolve()
             if path.is_relative_to(root.resolve()) and path.is_file():
                 linked.add(path.relative_to(root.resolve()).as_posix())
     for name in sorted(linked - set(inputs)):
