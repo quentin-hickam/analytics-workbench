@@ -11,7 +11,7 @@ Propose questions; the user chooses. This skill reads records, runs no queries, 
 
 ## 1. Read
 
-Use the investigation the user names, otherwise the README's active one; for one other than the active one, pass `--investigation <name>` to every `awb.py state` and `awb.py questions` command in this skill. From the project root:
+Use the investigation the user names, otherwise the active one; for one other than the active one, pass `--investigation <name>` to every `awb.py state` and `awb.py questions` command in this skill. From the project root:
 
 ```sh
 python3 src/awb.py state

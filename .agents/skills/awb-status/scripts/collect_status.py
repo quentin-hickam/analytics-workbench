@@ -265,9 +265,6 @@ def collect(root, *, probe_upstream=False):
         result["active"] = {"name": slug, "last_updated": updated, "counts": dict(counts) if findings is not None else None, "findings": visible_findings if findings is not None else None,
                             "question": section(brief, "Business question", brief_path), "material_unknowns": section(brief, "Material unknowns", brief_path),
                             "unresolved_issues": section(state, "Unresolved issues", state_path), "next_steps": section(state, "Next steps", state_path)}
-        # Every finding's caveat, flagged or not, so a report never calls nothing open while one remains.
-        result["active"]["caveats"] = None if findings is None else [
-            {"finding": f["finding"], "status": f["status"], "caveat": f["reason"]} for f in visible_findings if f["reason"]]
         result["active"]["questions"] = ledger(investigation, findings)
     others = []
     investigations_path = root / "investigations"
