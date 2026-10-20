@@ -4520,13 +4520,17 @@ _REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.m
                   METHODOLOGY_NOTE: METHODOLOGY_NOTE, BRIEF: BRIEF, REVIEW_RULES: "review-rules.md",
                   GLOSSARY: "glossary.md", SOURCES: "sources.md", QUALITY: "quality.md",
                   "revalidation_flags": "revalidation_flags.json"}
-# show's whole JSON line, as printed, stays within one read tool result (16,000 characters by default).
-_READ_LIMIT = 16000
+# show's whole JSON line, as printed, stays within one read tool result: awb_mcp.py's MAX_CHARS, read alike.
+try:
+    _READ_LIMIT = max(1000, int(os.environ.get("AWB_MCP_MAX_CHARS") or 16000))
+except ValueError:
+    _READ_LIMIT = 16000
 _SUMMARY = re.compile(r"review( \(scoped\))?: (?:(clean)|([0-9]+) violations? \(([0-9]+) errors?\), "
                       r"([0-9]+) narrative problems?, ([0-9]+) command problems?)\.?")
-# A row may be bulleted or numbered, with backticks around it inside or outside the marker; review_summary
-# strips both before matching, as it strips backticks around the last line.
-_ROW_MARKER = re.compile(r"^(?:[-*+]|[0-9]+[.)])\s+")
+# A row may be bulleted, numbered, a task-list item, or quoted, under more than one marker, in bold or
+# backticks inside or outside them; review_summary drops emphasis and backticks and strips every marker
+# before matching, as it strips backticks around the last line.
+_ROW_MARKER = re.compile(r"^\s*(?:(?:[-+>]|[0-9]+[.)]|\[[ xX]\])\s*)*")
 _VIOLATION_ROW = re.compile(r"R-\S+ violation (error|warning)(?=\s)")
 _NARRATIVE_ROW = re.compile(r"narrative\s")
 _SUMMARY_FORM = ("`review: clean`, or `review: <v> violations (<e> error), <n> narrative problems, <c> command "
@@ -4636,6 +4640,12 @@ def _fingerprint(digests):
     return hashlib.sha256("".join(f"{name}\0{digest}\n" for name, digest in digests.items()).encode()).hexdigest()
 
 
+def _report_lines(text):
+    """The report's lines as record reads them: each stripped of whitespace and backticks, blank ones dropped.
+    The replay guard compares these, so a copy differing only there is the same report."""
+    return [line.strip().strip("`").strip() for line in text.splitlines() if line.strip().strip("`").strip()]
+
+
 def review_summary(text, kind, accepted) -> tuple:
     """(passed, refusal) from a review report: its last non-blank line, as review.md's Brief step 4 writes it.
 
@@ -4644,7 +4654,7 @@ def review_summary(text, kind, accepted) -> tuple:
     report no record may rest on: a last line that does not parse, a kind it does not open with, more error
     than violations, a clean line given acceptances, or a body listing more violation or narrative rows of a
     kind than the last line counts, so a report that undercounts its own rows never passes."""
-    lines = [line.strip().strip("`").strip() for line in text.splitlines() if line.strip().strip("`").strip()]
+    lines = _report_lines(text)
     if not lines:
         return None, "the report is empty"
     last = lines[-1]
@@ -4659,7 +4669,7 @@ def review_summary(text, kind, accepted) -> tuple:
         return None, "the report's last line counts more error violations than violations"
     if match[2] and accepted:
         return None, "a clean review has nothing to accept; record it without --accept"
-    body = [_ROW_MARKER.sub("", line, count=1).strip("`").strip() for line in lines[:-1]]
+    body = [_ROW_MARKER.sub("", re.sub(r"[*_`]", "", line)) for line in lines[:-1]]
     rows = Counter(row[1] for row in map(_VIOLATION_ROW.match, body) if row)
     narrative_rows = sum(1 for line in body if _NARRATIVE_ROW.match(line))
     if rows["error"] > errors or rows["warning"] > violations - errors or narrative_rows > narrative:
@@ -4709,7 +4719,7 @@ def record_review(root, investigation, package, kind, text, accepted=(), *, now=
 
     A report that does not pass is also refused when it is the one recorded, accepted or not, and an input
     has changed since (show reports stale), or when it was refused for a change under an earlier
-    start: a report in hand never covers an edit. A new reviewer returning the same words is refused too; a
+    start: a report in hand never covers an edit. A new reviewer returning it is refused too (_report_lines); a
     report that passes, such as a clean one, is not checked, since the Brief fixes its words.
 
     With accepted, the report must be the one already recorded, of the same kind, with nothing it read
@@ -4754,7 +4764,7 @@ def record_review(root, investigation, package, kind, text, accepted=(), *, now=
     except OSError as error:
         return {"recorded": False, "refused": f"the draft cannot be read: {error}"}
     digests = _digests(inputs)
-    report_digest = hashlib.sha256(text.encode()).hexdigest()
+    report_digest = hashlib.sha256("\n".join(_report_lines(text)).encode()).hexdigest()
     if digests != started.get("inputs"):
         if not passed and report_digest not in started.get("refused", []):
             try:
@@ -4767,10 +4777,13 @@ def record_review(root, investigation, package, kind, text, accepted=(), *, now=
         prior = _read_json(directory / RECEIPT)
     except (OSError, ValueError):
         prior = {}
-    if not passed and (report_digest in started.get("earlier", []) or isinstance(prior, dict) and prior.get(
-            "report") == text and prior.get("inputs") != digests):
+    if not passed and (report_digest in started.get("earlier", []) or isinstance(prior, dict) and isinstance(
+            prior.get("report"), str) and _report_lines(prior["report"]) == _report_lines(text)
+            and prior.get("inputs") != digests):
         return {"recorded": False, "refused": "this report was read against an earlier draft, refused or recorded "
-                                              f"before a change, so it cannot be recorded: {_NEW_REVIEW}"}
+                                              f"before a change, so it cannot be recorded: {_NEW_REVIEW}; if a new "
+                                              "reviewer returned it, repair a problem it lists, or run the other "
+                                              "kind of review"}
     snapshot = directory / "snapshot"
     try:
         # The old receipt goes first, so an interrupted record leaves none, and the next review is full.
@@ -4909,14 +4922,15 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
                "a new reviewer, and record the report it returns.\n"
                "With --accept, the report must be the one already recorded, with nothing it read changed since: "
                "only accepted and passed change, and the snapshot stays the one the review read.\n"
-               "Prints one JSON line: recorded, receipt, kind, passed, and accepted.\nRefuses, writing nothing, "
-               "when the last line does not parse, --kind disagrees with its opening, it counts more errors than "
+               "Prints one JSON line: recorded, receipt, kind, passed, and accepted.\nRefuses, leaving the record "
+               "as it was, when the last line does not parse, --kind disagrees with its opening, it counts more errors than "
                "violations, a clean report is given --accept, the report lists more violation or narrative "
                "rows than its last line counts, no review of this --kind was started, the draft changed after "
                "start, --accept comes with another report or after a change, or a report that does not pass is "
                "the recorded one after a change, or one refused for a change under an "
                "earlier start. A report that does not pass refused for a change after start is noted in "
-               "started.json, all that refusal writes; a new reviewer returning the same words is refused too.\n"
+               "started.json, all a refusal writes; a new reviewer returning it, blank lines, whitespace, and "
+               "backticks aside, is refused too.\n"
                "Exit 0 recorded; 1 refused; "
                "2 unusable arguments.")
     _package_arguments(record)

@@ -36,10 +36,10 @@
 # test_acceptance_amends_the_recorded_review_and_refuses_after_a_change: --accept amends the recorded report, keeping its snapshot and time, and refuses, writing nothing, after an edit to what it read or for another report.
 # test_scoped_start_needs_a_prior_record: start --kind scoped with no record to scope against, or with no draft, is refused, writing nothing.
 # test_record_binds_the_report_to_what_start_saw: record without a start of its kind, or after an edit since the start, is refused, writing nothing but the note in started.json, and a record consumes its start; the round-2 closure's re-record route is refused and show stays stale.
-# test_a_report_in_hand_never_covers_an_edit: the round-3 sequence (record, edit, --accept refused, start, the same report again) is refused at the record after start and show stays stale, as is a recorded report accepted before the edit; a new report of the edit records and takes its acceptances; a report refused for a change after start is refused after the next start; a repeated clean report records.
+# test_a_report_in_hand_never_covers_an_edit: the round-3 sequence (record, edit, --accept refused, start, the same report again) is refused at the record after start and show stays stale, as is a recorded report accepted before the edit; a new report of the edit records and takes its acceptances; a report refused for a change after start is refused after the next start; a copy differing only in blank lines, whitespace, or backticks is refused alike; a repeated clean report records.
 # test_represented_results_evidence_is_what_the_review_read: each evidence file the manifest's results name is snapshotted; a changed or dropped one shows stale, named by its path, with its diff.
 # test_an_error_violation_or_command_problem_cannot_be_accepted: an --accept never passes a report counting an error violation or a command problem.
-# test_unusable_report_is_refused_and_writes_nothing: an empty report, a last line that does not parse or is not last, a --kind its opening contradicts, more errors than violations, and rows the last line undercounts, backticked or numbered rows included, in backticks inside or outside the marker, are refused, writing nothing and leaving an earlier record as it was.
+# test_unusable_report_is_refused_and_writes_nothing: an empty report, a last line that does not parse or is not last, a --kind its opening contradicts, more errors than violations, and rows the last line undercounts, backticked or numbered rows included, in backticks inside or outside the marker, in bold, task-list, quoted, or under two markers, are refused, writing nothing and leaving an earlier record as it was.
 # test_clean_review_takes_no_acceptance: --accept on a clean report is refused.
 # test_summary_line_probes: backticks, a closing period, singular words, and bulleted rows read the same; the counts decide passed.
 # test_snapshot_sits_beside_the_draft_and_is_replaced: the snapshot holds exactly what a review reads, under the package's review/, never in draft/, and each record replaces it, a removed note included.
@@ -49,6 +49,7 @@
 # test_withdrawn_quality_observation_or_its_cited_scan_makes_a_review_stale: foundation/quality.md is snapshotted whole and each foundation/scans/<name>.json path methodology.md names as evidence; withdrawing a cited observation, rescanning the cited scan, or removing the record shows stale with it in changed, and a scan no narrative names leaves the review current.
 # test_a_cited_quality_rows_saved_query_makes_a_review_stale: each saved-query path methodology.md names beside a cited quality ID is snapshotted; editing it shows stale with its path and diff, and editing an uncited saved query leaves the review current.
 # test_show_reports_an_unreadable_receipt_and_bounds_the_diff: a long diff is cut so the printed line, a long prior report and typographic punctuation included, fits one read result, with a note counting the rest; an unreadable or malformed receipt is an error, exit 1, with status none.
+# test_show_bound_follows_the_mcp_bound: with AWB_MCP_MAX_CHARS set, show's printed line fits that bound instead of 16,000.
 
 import importlib.util
 import json
@@ -874,6 +875,11 @@ def test_an_error_violation_or_command_problem_cannot_be_accepted(project, capsy
     ('- `R-periods-001 violation error findings.md:3 "partial month"`\nreview: clean\n', "full", "more than its"),
     ('1. `narrative findings.md:3 "x" overstated`\nreview: clean\n', "full", "more than its"),
     ('`- R-periods-001 violation error findings.md:3 "partial month"`\nreview: clean\n', "full", "more than its"),
+    # So does one in bold, a task-list item, a block quote, or under two markers.
+    ('**R-periods-001 violation error** findings.md:3 "partial month"\nreview: clean\n', "full", "more than its"),
+    ('- [ ] R-periods-001 violation error findings.md:3 "partial month"\nreview: clean\n', "full", "more than its"),
+    ('> narrative findings.md:3 "x" overstated\nreview: clean\n', "full", "more than its"),
+    ('- 1. narrative findings.md:3 "x" overstated\nreview: clean\n', "full", "more than its"),
 ])
 def test_unusable_report_is_refused_and_writes_nothing(project, capsys, report, kind, refusal):
     before = snapshot(project)
@@ -1054,6 +1060,14 @@ def test_show_reports_an_unreadable_receipt_and_bounds_the_diff(project, capsys)
     assert code == 1 and out["status"] == "none" and "not a review receipt" in out["errors"][0]
 
 
+def test_show_bound_follows_the_mcp_bound(project, capsys, monkeypatch):
+    monkeypatch.setenv("AWB_MCP_MAX_CHARS", "4000")
+    record(project, capsys, CLEAN)
+    (project / DRAFT / "findings.md").write_text(FINDINGS + "".join(f"- Added line {n}.\n" for n in range(600)))
+    out = show(project, capsys)[1]
+    assert out["diff_cut"] > 0 and 3600 < len(json.dumps(out)) <= 4000
+
+
 def show_full_diff(project):
     """The whole diff show would give with no bound."""
     module = draft_module(project)
@@ -1142,7 +1156,8 @@ def test_record_binds_the_report_to_what_start_saw(project, capsys):
 
 
 REPLAYED = ("this report was read against an earlier draft, refused or recorded before a change, so it cannot be "
-            "recorded: run review-receipt start, launch a new reviewer, and record the report it returns")
+            "recorded: run review-receipt start, launch a new reviewer, and record the report it returns; if a new "
+            "reviewer returned it, repair a problem it lists, or run the other kind of review")
 
 
 def test_a_report_in_hand_never_covers_an_edit(project, capsys):
@@ -1159,6 +1174,10 @@ def test_a_report_in_hand_never_covers_an_edit(project, capsys):
     before = snapshot(project)
     assert record(project, capsys, WARNING_AND_NARRATIVE, first=False) == (1, {"recorded": False,
                                                                                "refused": REPLAYED})
+    # A copy that differs only in blank lines, whitespace, or backticks is the same report.
+    for drifted in (WARNING_AND_NARRATIVE + "\n", WARNING_AND_NARRATIVE.rstrip("\n"),
+                    "\n" + WARNING_AND_NARRATIVE.replace("\n", "  \n\n").replace("R-", "`R-")):
+        assert record(project, capsys, drifted, first=False) == (1, {"recorded": False, "refused": REPLAYED})
     assert record(project, capsys, WARNING_AND_NARRATIVE, accept=ACCEPTED, first=False)[0] == 1
     assert snapshot(project) == before and show(project, capsys)[1]["changed"] == ["findings.md"]
     # A new reviewer's report of the edited draft records, and then takes its acceptances.
@@ -1182,6 +1201,7 @@ def test_a_report_in_hand_never_covers_an_edit(project, capsys):
     run(project, capsys, "review-receipt", "start", "inv", "pkg", "--kind", "scoped")
     assert record(project, capsys, scoped, kind="scoped", first=False) == (1, {"recorded": False,
                                                                                "refused": REPLAYED})
+    assert record(project, capsys, scoped + "\n", kind="scoped", first=False)[1]["refused"] == REPLAYED
     # A clean report is not checked, since the Brief fixes its words: a repeated one records.
     assert record(project, capsys, "R-periods-001 pass\nreview (scoped): clean\n", kind="scoped")[0] == 0
     path.write_text(edit)
