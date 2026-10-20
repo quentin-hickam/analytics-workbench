@@ -8,14 +8,14 @@ Installing the skills or setting up an agent host? [Install and administer](#ins
 
 ## What you get
 
-The end product is a delivery package: a folder of files that a deck is built from. It is not a .pptx. Nothing in the workbench draws slides.
+The end product is a delivery package: one flat folder of files that a deck is built from. It is not a .pptx. Nothing in the workbench draws slides.
 
 - `findings.md`: the deck outline, slide by slide. After the title slide, each slide has a headline of one sentence and at most 15 words, unless you keep a longer one, up to five bullets, caveats on the slide they qualify, speaker notes, and at most one chart's specification. A headline carries the slide's key number where it has one, and **Open questions** may run past five bullets to list every question the decision needs. The **Answer** slide is the executive summary.
-- `charts/`: one data file per chart, holding exactly the rows the chart plots, rounded as the slide shows them and labeled in your audience's terms.
-- `datasets/`: any tables you chose to send with the deck, which a **Supporting datasets** slide then describes. You are asked, and none is a fine answer.
+- `chart-1.csv`, `chart-2.csv`, …: one data file per chart, holding exactly the rows the chart plots, rounded as the slide shows them and labeled in your audience's terms.
+- `dataset-<name>.csv`: any tables you chose to send with the deck, which a **Supporting datasets** slide then describes. You are asked, and none is a fine answer.
 - `methodology-note.md`: an optional short methods note for your audience, in their terms: method, sources, definitions, exclusions, and limitations.
 - `methodology.md`: the internal methodology reference, the full account of the analysis in the workbench's own names and IDs. The builder may consult it; your audience does not get it.
-- `deck-rules.md` and `assembly/m365.md`: builder instructions. The deck rules say what any builder does with the outline and chart files; the assembly file holds the steps for the PowerPoint agent in Microsoft 365 Copilot.
+- `deck-rules.md` and `m365-assembly.md`: builder instructions. The deck rules say what any builder does with the outline and chart files; the assembly file holds the steps for the PowerPoint agent in Microsoft 365 Copilot.
 - `START-HERE.md`: which files to send your audience, which to attach to the builder with the one-line prompt to send it, and which stay internal.
 - `manifest.json`: the internal record of what the package holds and what produced it.
 
@@ -24,7 +24,7 @@ The deck always has a title slide, the **Answer** slide, at least one finding, *
 To build the deck:
 
 - **With Microsoft 365 Copilot.** In a Copilot app chat, add the PowerPoint agent, attach the files `START-HERE.md` lists, and send its prompt. The agent builds each slide from the outline, draws each chart as an editable chart from its data file, and asks you when something is unclear.
-- **By hand.** A person can build the deck by hand from the same files: one slide per outline slide from `findings.md`, and each chart drawn from its file in `charts/`, following `deck-rules.md`. Another tool can work from them the same way.
+- **By hand.** A person can build the deck by hand from the same files: one slide per outline slide from `findings.md`, and each chart drawn from its `chart-N.csv` file, following `deck-rules.md`. Another tool can work from them the same way.
 
 A Microsoft 365 Copilot license is needed only for the Copilot route.
 

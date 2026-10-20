@@ -2272,8 +2272,8 @@ def chart_data(chart: dict) -> tuple[list, list[str]]:
 
 # ---------------------------------------------------------------- chart files
 
-# A package's charts/ holds one CSV per **Chart N.** specification in findings.md, named chart-N.csv
-# in specification order: a header row of display names and the plotted values, nothing else.
+# A package holds one CSV per **Chart N.** specification in findings.md, named chart-N.csv in specification
+# order beside findings.md: a header row of display names and the plotted values, nothing else.
 _CHART_FILE = re.compile(r"chart-([1-9]\d*)\.csv")
 # An underscore or a dot between letters marks a column name or code, not a display name.
 _IDENTIFIER = re.compile(r"[A-Za-z0-9]_[A-Za-z0-9]|[A-Za-z]\.[A-Za-z]")
@@ -2297,18 +2297,17 @@ def _check_chart(number, headers, rows):
             raise ValueError(f"Chart {number} header is not a display name: {header}")
 
 
-def write_charts(charts_dir: str | os.PathLike, charts: list) -> list[Path]:
-    """Replace the chart files with chart-1.csv, ... from (headers, rows) pairs; none removes them."""
+def write_charts(directory: str | os.PathLike, charts: list) -> list[Path]:
+    """Replace the chart files in directory with chart-1.csv, ... from (headers, rows) pairs; none removes
+    them."""
     for number, (headers, rows) in enumerate(charts, start=1):
         _check_chart(number, headers, rows)
-    directory = Path(charts_dir)
+    directory = Path(directory)
     if directory.is_dir():
         for stale in directory.iterdir():
             if _CHART_FILE.fullmatch(stale.name):
                 stale.unlink()
     if not charts:
-        if directory.is_dir() and not any(directory.iterdir()):
-            directory.rmdir()  # A package without charts has no charts directory.
         return []
     directory.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -2322,10 +2321,10 @@ def write_charts(charts_dir: str | os.PathLike, charts: list) -> list[Path]:
     return paths
 
 
-def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike) -> list[dict]:
-    """Match the chart specifications in findings.md with the chart files, and each specification with its
-    form and file: one of CHART_FORMS, a **Data:** line naming that form's roles, each named column in the
-    file's header, and each column of the header named."""
+def check_charts(findings_path: str | os.PathLike, directory: str | os.PathLike) -> list[dict]:
+    """Match the chart specifications in findings.md with the chart files in directory, the draft folder, and
+    each specification with its form and file: one of CHART_FORMS, a **Data:** line naming that form's roles,
+    each named column in the file's header, and each column of the header named."""
     view = _read_view(findings_path)[0]
     charts = _outline(view)["charts"]
     numbers = [chart["number"] for chart in charts]
@@ -2337,15 +2336,15 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
         if number != position:
             rows.append({"chart": f"Chart {number}",
                          "problem": f"specification {position} is numbered {number}"})
-    directory = Path(charts_dir)
+    directory = Path(directory)
     files = {}
     if directory.is_dir():
         for path in directory.iterdir():
             match = _CHART_FILE.fullmatch(path.name)
             if match:
                 files[int(match.group(1))] = path
-            else:
-                rows.append({"chart": path.name, "problem": "not a chart file"})
+            elif path.name.startswith("chart-"):  # attached with the chart-*.csv files, so drawn as a chart
+                rows.append({"chart": path.name, "problem": "not a chart file; rename or delete it"})
     specified = set(numbers)
     for number in sorted(specified - files.keys()):
         rows.append({"chart": f"Chart {number}", "problem": "no chart file for this specification"})
@@ -2480,19 +2479,18 @@ def chart_file_problems(root, investigation, draft, record) -> list[dict]:
                                                 for e in entries):
         return [{"chart": None, "problem": "the manifest's charts is not none or a list of the entries export "
                                            "writes; rerun export"}]
-    directory = Path(draft) / "charts"
-    files = sorted((int(match[1]), path) for path in (directory.iterdir() if directory.is_dir() else ())
+    files = sorted((int(match[1]), path) for path in Path(draft).iterdir()
                    if (match := _CHART_FILE.fullmatch(path.name)))
     recorded = {}
     for entry in entries:
         recorded.setdefault(entry["path"], entry)
     rows = [{"chart": f"Chart {number}", "problem": f"{path.name} is not in the manifest's charts; export writes "
                                                    "every chart file, so rerun export with its --chart"}
-            for number, path in files if f"charts/{path.name}" not in recorded]
-    present = {f"charts/{path.name}": path for _, path in files}
+            for number, path in files if path.name not in recorded]
+    present = {path.name: path for _, path in files}
     display = None
     for name, entry in recorded.items():
-        match = re.fullmatch(r"charts/" + _CHART_FILE.pattern, name)
+        match = _CHART_FILE.fullmatch(name)
         label = f"Chart {match[1]}" if match else name
         if name not in present:
             rows.append({"chart": label, "problem": f"the manifest's charts lists {name}, which the draft lacks; "
@@ -2832,29 +2830,32 @@ def draft_markers(findings_path: str | os.PathLike) -> list[dict]:
 # files go to the audience, which build the deck, and which stay internal. check-draft, not export, writes it:
 # export runs before the narratives and any methodology note are final, and check-draft runs last.
 START_HERE = "START-HERE.md"
-# The one-line prompt assembly/m365.md gives the requester; the two stay word for word the same.
-M365_PROMPT = "Build a PowerPoint deck from findings.md and the chart files, following deck-rules.md and m365.md."
+# The draft's copy of package-format/assembly/m365.md, beside the other files the builder is given.
+M365_ASSEMBLY = "m365-assembly.md"
+# The one-line prompt m365-assembly.md gives the requester; the two stay word for word the same.
+M365_PROMPT = ("Build a PowerPoint deck from findings.md and the chart files, following deck-rules.md and "
+               "m365-assembly.md.")
+# Export writes each selected dataset beside findings.md as dataset-<name>.csv.
+DATASET_PREFIX = "dataset-"
+# The folders an earlier, nested layout held; check-draft names how each comes back flat.
+_EARLIER_FOLDERS = ("charts", "datasets", "assembly")
 
 
 def start_here(draft, investigation, package) -> str:
     """START-HERE.md's plain text for a draft as it now stands: send these to your audience (the deck once
-    built, methodology-note.md when present, each file under datasets/); to build the deck (the attach list
-    and prompt assembly/m365.md gives, each chart file named, methodology.md and deck-rules.md marked as for the
+    built, methodology-note.md when present, each dataset-*.csv); to build the deck (the attach list and
+    prompt m365-assembly.md gives, each chart file named, methodology.md and deck-rules.md marked as for the
     builder only); internal (manifest.json and the part 2 files). Each file is listed once."""
     draft = Path(draft)
-    charts = sorted((int(match[1]), path.name) for path in
-                    ((draft / "charts").iterdir() if (draft / "charts").is_dir() else ())
+    charts = sorted((int(match[1]), path.name) for path in draft.iterdir()
                     if (match := _CHART_FILE.fullmatch(path.name)))
-    # Every dataset file but a hidden one, such as a file manager's .DS_Store, goes to the audience.
-    datasets = sorted(path.relative_to(draft).as_posix() for path in
-                      ((draft / "datasets").rglob("*") if (draft / "datasets").is_dir() else ())
-                      if path.is_file() and not path.name.startswith("."))
+    datasets = sorted(path.name for path in draft.glob(f"{DATASET_PREFIX}*.csv") if path.is_file())
     audience = ["the deck, once you build it as part 2 says"]
     if (draft / METHODOLOGY_NOTE).is_file():
         audience.append(f"{METHODOLOGY_NOTE}, a plain account of how the analysis was done")
-    attach = ["findings.md", *(f"charts/{name}" for _, name in charts),
+    attach = ["findings.md", *(name for _, name in charts),
               "methodology.md, the full account of the analysis, for the builder only",
-              "deck-rules.md, the rules the deck is built by, for the builder only", "assembly/m365.md"]
+              "deck-rules.md, the rules the deck is built by, for the builder only", M365_ASSEMBLY]
     # Plain text, a blank line after each list, so a viewer that renders Markdown joins no line to a list item.
     lines = ["Start here", "",
              f"This folder is the {package} package of the {investigation} investigation. Its files fall into "
@@ -3012,6 +3013,15 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
         report["errors"].append(_NO_DRAFT.format(report["draft"]))
         return report
 
+    # One flat folder attaches in one go; a folder, such as an earlier layout's charts/, would be missed.
+    for folder in sorted(path.name for path in draft.iterdir() if path.is_dir() and path.name != PREVIEW):
+        report["errors"].append(
+            f"{folder}/: an earlier layout's folder, but a package is one flat folder. Rerun the full export, every "
+            "--chart and --dataset the manifest records, which writes chart-N.csv and dataset-<name>.csv beside "
+            f"findings.md, copy package-format/assembly/m365.md to {M365_ASSEMBLY}, then delete {folder}/"
+            if folder in _EARLIER_FOLDERS else
+            f"{folder}/: a package is one flat folder; move the folder out of the draft, or put the files the "
+            "package needs beside findings.md")
     recorded, report["names_problems"] = _recorded_names(root, investigation, package)
     names = sorted(name for name in recorded if not _PLAIN_WORD.fullmatch(name))
     report["names"] = len(names)
@@ -3030,7 +3040,7 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"outline check: {error}")
     try:
-        report["charts"] = check_charts(findings_path, draft / "charts")
+        report["charts"] = check_charts(findings_path, draft)
     except (OSError, UnicodeError) as error:
         report["errors"].append(f"charts check: {error}")
     try:
@@ -3082,6 +3092,14 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             raise ValueError(f"no manifest at {_rel(root, path)}; run export first")
         record = _read_json(path)
         report["flag_entries"] = flag_entry_problems(record)
+        # A selected dataset missing beside findings.md, such as an earlier layout's datasets/x.csv, would
+        # release without it.
+        selection = record.get("dataset_selection")
+        for entry in selection if isinstance(selection, list) else []:
+            name = entry.get("path") if isinstance(entry, dict) else entry
+            if not isinstance(name, str) or "/" in name or not (draft / name).is_file():
+                report["errors"].append(f"dataset_selection lists {name}, which is no file beside findings.md; "
+                                        "rerun export with every --chart and --dataset")
         if report["charts"] is not None:
             try:
                 report["charts"] += chart_file_problems(root, investigation, draft, record)
@@ -3179,7 +3197,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                     "manifest inventory, and state.md's current flags), write START-HERE.md, and rewrite the "
                     "manifest inventory, stamping revised_at when it changes; --verify-only checks a release "
                     "candidate and writes nothing. The inventory leaves out the draft's .preview/ folder, the "
-                    "headline preview.",
+                    "headline preview; any other folder in the draft, and a dataset_selection path that is no file "
+                    "beside findings.md, is an errors row, since a package is one flat folder.",
         epilog="Prints one JSON line.\nmethodology-note.md, when the draft holds it, is read by the findings, "
                "claims, markdown, and numbers checks too; its rows carry file.\n"
                "outline lists, as slide, line, and problem, each break of the slide "
@@ -3216,7 +3235,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "a file, or without a form from deck-rules.md; a **Data:** line missing, malformed, or not naming "
                "its form's roles; a column it names that the file lacks, and a column of the file that it names by "
                "no role, headers compared NFKC-normalized as the line renders; an item nested under a field or a second paragraph in one; and a chart file without a "
-               "specification or data rows, or a foreign file. It also lists each chart file the manifest's "
+               "specification or data rows, or another file named chart-*. It also lists each chart file the "
+               "manifest's "
                "charts does not record, an entry whose file is missing or that records no selection, columns, "
                "headers, value labels, percent, scale, or rounding, an entry whose headers, value labels, percent "
                "columns, or scale divisors differ from what foundation/display.toml gives, and a file that differs "
@@ -3269,7 +3289,7 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                "informational, and empty without a note or a recorded length.\n"
                "Without --verify-only it first writes START-HERE.md, plain text in three parts: what to send the "
                "audience (the deck once built, methodology-note.md, each dataset), what builds the deck (the "
-               "attach list and prompt assembly/m365.md gives, methodology.md and deck-rules.md for the builder "
+               "attach list and prompt m365-assembly.md gives, methodology.md and deck-rules.md for the builder "
                "only), and what stays internal; the inventory then lists "
                "it, and --verify-only verifies it like any other file and lists an errors row when the draft lacks "
                "it. start_here names it when present.\n"
@@ -3877,7 +3897,7 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     if full:
         frames = [(entry, rows) for kind, _, entry, rows in shaped if kind == "chart"]
         try:
-            paths = write_charts(draft / "charts", [(entry["headers"], rows) for entry, rows in frames])
+            paths = write_charts(draft, [(entry["headers"], rows) for entry, rows in frames])
         except ValueError as error:
             report["errors"].append(f"charts: {error}")
             return report
@@ -3885,16 +3905,13 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
                             for p, (entry, _) in zip(paths, frames)]
         # Each entry records the shaping check-draft reapplies to verify its file.
         record["charts"] = [{"path": _rel(draft, p), **entry} for p, (entry, _) in zip(paths, frames)] or "none"
-        directory = draft / "datasets"
-        if directory.is_dir():
-            for stale in directory.glob("*.csv"):
-                stale.unlink()  # The selection is replaced whole, as write_charts replaces charts.
+        for stale in draft.glob(f"{DATASET_PREFIX}*.csv"):
+            stale.unlink()  # The selection is replaced whole, as write_charts replaces charts.
         selection = []
         for kind, label, entry, rows in shaped:
             if kind != "dataset":
                 continue
-            directory.mkdir(exist_ok=True)
-            dataset = directory / f"{label}.csv"
+            dataset = draft / f"{DATASET_PREFIX}{label}.csv"
             with dataset.open("w", newline="", encoding="utf-8") as stream:
                 writer = csv.writer(stream, lineterminator="\n")
                 writer.writerow(entry["headers"])
@@ -3904,8 +3921,6 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
                               "columns": entry["columns"], "percent": entry["percent"], "scale": entry["scale"],
                               "round": entry["round"],
                               **({"prose_scale": entry["prose_scale"]} if "prose_scale" in entry else {})})
-        if directory.is_dir() and not any(directory.iterdir()):
-            directory.rmdir()
         record["dataset_selection"] = selection or "none"
         report["methodology_lines"] = sources
 
@@ -3950,14 +3965,15 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     report["packaging_uncommitted_changes"] = fields["packaging_uncommitted_changes"]
     report["flags_pending"] = pending_flags(record.get("revalidation_flags"))
     if (draft / "findings.md").is_file():
-        report["check_charts"] = check_charts(draft / "findings.md", draft / "charts")
+        report["check_charts"] = check_charts(draft / "findings.md", draft)
     return report
 
 
 def cli_export(root: Path, argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="awb.py export", formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Write the draft's chart and dataset files from saved result tables, renamed, mapped, "
+        description="Write the draft's chart and dataset files, chart-N.csv and dataset-<name>.csv beside "
+                    "findings.md, from saved result tables, renamed, mapped, "
                     "scaled, and rounded through foundation/display.toml, a chart's rows selected as its --chart "
                     "says, once compare_evidence passes for every serialized result, and the manifest's "
                     "producing and packaging state from the evidence of every represented result. Creates the "

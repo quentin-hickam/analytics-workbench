@@ -1,12 +1,12 @@
 # Kept cases:
 # test_write_charts_numbers_files_in_order_and_writes_values: files are chart-1..N.csv in list order; headers and values land as given, an empty value as an empty field.
 # test_write_charts_replaces_stale_chart_files: a rewrite with fewer charts removes the extra chart file and leaves other files alone.
-# test_write_charts_without_charts_removes_them: an empty list removes every chart file, then the directory when nothing else is in it.
+# test_write_charts_without_charts_removes_them: an empty list removes every chart file and leaves other files alone.
 # test_write_charts_rejects_bad_input: a chart without rows, an identifier header, a blank header, or a repeated header raises and writes nothing.
 # test_check_charts_clean_package_returns_no_rows: specifications and chart files match one to one.
-# test_check_charts_reports_each_mismatch: misnumbered, missing, unspecified, foreign, and empty files are one row each.
+# test_check_charts_reports_each_mismatch: misnumbered, missing, unspecified, other chart-* named, and empty files are one row each; other files are not charts.
 # test_check_charts_spec_continuing_a_block: a specification directly under a bullet or paragraph line renders inside that block; the row says to leave a blank line.
-# test_check_charts_without_directory: specifications with no charts directory each report it; no specifications and no directory is clean.
+# test_check_charts_without_chart_files: specifications with no chart files each report it; no specifications and no files is clean.
 # test_charts_without_pandas: the module loads, writes, and checks charts when pandas cannot be imported.
 # test_check_charts_compares_headers_as_the_data_line_renders: a header holding CO₂ matches a **Data:** role naming CO₂, both NFKC-normalized as the line renders; a header no role names, or a role no header holds, is still a row.
 # test_a_blank_line_inside_a_chart_spec_names_the_chart: field-named bullets after a blank line ended a chart's fields count as slide bullets, each but Caveat is an outline row naming the chart, and the bullet-count row counts them; the same fields kept together give no row.
@@ -40,29 +40,25 @@ def findings(tmp_path, *numbers):
 
 
 def test_write_charts_numbers_files_in_order_and_writes_values(tmp_path):
-    paths = charts.write_charts(tmp_path / "charts", [LATE, TREND])
+    paths = charts.write_charts(tmp_path, [LATE, TREND])
     assert [path.name for path in paths] == ["chart-1.csv", "chart-2.csv"]
     assert paths[0].read_text() == "Region,Closed late (%)\nNorth,21.0\nEast,18.0\nWest,\n"
     assert paths[1].read_text() == "Month,Cases\nJan,1204\nFeb,1310\n"
 
 
 def test_write_charts_replaces_stale_chart_files(tmp_path):
-    charts.write_charts(tmp_path / "charts", [LATE, TREND])
-    (tmp_path / "charts/notes.txt").write_text("keep")
-    charts.write_charts(tmp_path / "charts", [TREND])
-    assert sorted(path.name for path in (tmp_path / "charts").iterdir()) == ["chart-1.csv", "notes.txt"]
-    assert (tmp_path / "charts/chart-1.csv").read_text().startswith("Month,Cases\n")
+    charts.write_charts(tmp_path, [LATE, TREND])
+    (tmp_path / "notes.txt").write_text("keep")
+    charts.write_charts(tmp_path, [TREND])
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["chart-1.csv", "notes.txt"]
+    assert (tmp_path / "chart-1.csv").read_text().startswith("Month,Cases\n")
 
 
 def test_write_charts_without_charts_removes_them(tmp_path):
-    charts.write_charts(tmp_path / "charts", [LATE, TREND])
-    (tmp_path / "charts/notes.txt").write_text("keep")
-    assert charts.write_charts(tmp_path / "charts", []) == []
-    assert [path.name for path in (tmp_path / "charts").iterdir()] == ["notes.txt"]
-    (tmp_path / "charts/notes.txt").unlink()
-    charts.write_charts(tmp_path / "charts", [LATE])
-    charts.write_charts(tmp_path / "charts", [])
-    assert not (tmp_path / "charts").exists()
+    charts.write_charts(tmp_path, [LATE, TREND])
+    (tmp_path / "notes.txt").write_text("keep")
+    assert charts.write_charts(tmp_path, []) == []
+    assert [path.name for path in tmp_path.iterdir()] == ["notes.txt"]
 
 
 @pytest.mark.parametrize("frames, message", [
@@ -73,26 +69,26 @@ def test_write_charts_without_charts_removes_them(tmp_path):
 ])
 def test_write_charts_rejects_bad_input(tmp_path, frames, message):
     with pytest.raises(ValueError, match=message):
-        charts.write_charts(tmp_path / "charts", frames)
+        charts.write_charts(tmp_path, frames)
     assert list(tmp_path.iterdir()) == []
 
 
 def test_check_charts_clean_package_returns_no_rows(tmp_path):
-    charts.write_charts(tmp_path / "charts", [LATE, TREND])
-    assert charts.check_charts(findings(tmp_path, 1, 2), tmp_path / "charts") == []
+    charts.write_charts(tmp_path, [LATE, TREND])
+    assert charts.check_charts(findings(tmp_path, 1, 2), tmp_path) == []
 
 
 def test_check_charts_reports_each_mismatch(tmp_path):
-    directory = tmp_path / "charts"
-    directory.mkdir()
+    directory = tmp_path
     (directory / "chart-1.csv").write_text("Region,Closed late (%)\n")
     (directory / "chart-3.csv").write_text("Region,Cases\nWest,4\n")
     (directory / "chart-4.csv").write_text("Region,Cases\nWest,4\n")
-    (directory / "late.png").write_bytes(b"")
+    (directory / "chart-1 (copy).csv").write_text("Region,Cases\nWest,4\n")
+    (directory / "late.png").write_bytes(b"")  # not named chart-*, so another package file
     assert charts.check_charts(findings(tmp_path, 1, 3, 2), directory) == [
         {"chart": "Chart 3", "problem": "specification 2 is numbered 3"},
         {"chart": "Chart 2", "problem": "specification 3 is numbered 2"},
-        {"chart": "late.png", "problem": "not a chart file"},
+        {"chart": "chart-1 (copy).csv", "problem": "not a chart file; rename or delete it"},
         {"chart": "Chart 2", "problem": "no chart file for this specification"},
         {"chart": "Chart 4", "problem": "chart file has no specification in findings"},
         {"chart": "Chart 1", "problem": "chart file has no data rows"},
@@ -103,44 +99,44 @@ def test_check_charts_reports_each_mismatch(tmp_path):
 def test_check_charts_spec_continuing_a_block(tmp_path, above):
     # Round 4 (Opus 1): CommonMark renders the line inside the bullet or paragraph above it, so it is no
     # specification, and the row says how to make it one.
-    charts.write_charts(tmp_path / "charts", [LATE])
+    charts.write_charts(tmp_path, [LATE])
     path = tmp_path / "findings.md"
     path.write_text(f"### H\n\n{above}\n**Chart 1.** Horizontal bar: rate by region\n- **Data:** category: Region; value: Closed late (%)\n")
-    assert charts.check_charts(path, tmp_path / "charts") == [{"chart": "Chart 1", "problem": (
+    assert charts.check_charts(path, tmp_path) == [{"chart": "Chart 1", "problem": (
         "Chart 1's specification continues the paragraph or bullet above it; leave a blank line before it")}]
     path.write_text(f"### H\n\n{above}\n\n**Chart 1.** Horizontal bar: rate by region\n- **Data:** category: Region; value: Closed late (%)\n")
-    assert charts.check_charts(path, tmp_path / "charts") == []
+    assert charts.check_charts(path, tmp_path) == []
 
 
-def test_check_charts_without_directory(tmp_path):
-    assert charts.check_charts(findings(tmp_path, 1, 2), tmp_path / "charts") == [
+def test_check_charts_without_chart_files(tmp_path):
+    assert charts.check_charts(findings(tmp_path, 1, 2), tmp_path) == [
         {"chart": "Chart 1", "problem": "no chart file for this specification"},
         {"chart": "Chart 2", "problem": "no chart file for this specification"},
     ]
-    assert charts.check_charts(findings(tmp_path), tmp_path / "charts") == []
+    assert charts.check_charts(findings(tmp_path), tmp_path) == []
 
 
 def test_charts_without_pandas(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "pandas", None)
     bare = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(bare)
-    bare.write_charts(tmp_path / "charts", [LATE])
-    assert bare.check_charts(findings(tmp_path, 1), tmp_path / "charts") == []
+    bare.write_charts(tmp_path, [LATE])
+    assert bare.check_charts(findings(tmp_path, 1), tmp_path) == []
 
 
 def test_check_charts_compares_headers_as_the_data_line_renders(tmp_path):
     # The issue's probe: "CO₂" in the file never matched, since only the **Data:** line was NFKC-normalized.
-    charts.write_charts(tmp_path / "charts", [(["Country", "Change in CO₂ (Mt)"], [["China", "12.5"]])])
+    charts.write_charts(tmp_path, [(["Country", "Change in CO₂ (Mt)"], [["China", "12.5"]])])
     path = tmp_path / "findings.md"
     path.write_text("### H\n\n**Chart 1.** Horizontal bar: change by country\n"
                     "- **Data:** category: Country; value: Change in CO₂ (Mt)\n", encoding="utf-8")
-    assert charts.check_charts(path, tmp_path / "charts") == []
+    assert charts.check_charts(path, tmp_path) == []
     path.write_text("### H\n\n**Chart 1.** Horizontal bar: change by country\n"
                     "- **Data:** category: Country; value: Change in CO2 (Mt)\n", encoding="utf-8")
-    assert charts.check_charts(path, tmp_path / "charts") == []  # CO₂ renders as CO2, so the plain spelling matches
+    assert charts.check_charts(path, tmp_path) == []  # CO₂ renders as CO2, so the plain spelling matches
     path.write_text("### H\n\n**Chart 1.** Horizontal bar: change by country\n"
                     "- **Data:** category: Country; value: Change in CH₄ (Mt)\n", encoding="utf-8")
-    assert charts.check_charts(path, tmp_path / "charts") == [
+    assert charts.check_charts(path, tmp_path) == [
         {"chart": "Chart 1", "problem": "chart-1.csv has no column 'Change in CH4 (Mt)', which **Data:** names"},
         {"chart": "Chart 1", "problem": "chart-1.csv column 'Change in CO₂ (Mt)' is named by no **Data:** role; "
                                         "name it by a role a Horizontal bar takes (category, value, series), or "

@@ -93,10 +93,10 @@ Regional operations managers, claims closed in the first half of the year
 @pytest.fixture
 def package(tmp_path):
     directory = tmp_path / "draft"
-    (directory / "charts").mkdir(parents=True)
+    directory.mkdir(parents=True)
     (directory / "findings.md").write_text(findings(), encoding="utf-8")
     for n, (_, _, content) in enumerate(FORMS, start=1):
-        (directory / f"charts/chart-{n}.csv").write_text(content, encoding="utf-8")
+        (directory / f"chart-{n}.csv").write_text(content, encoding="utf-8")
     return directory
 
 
@@ -208,9 +208,9 @@ def test_renderer_reads_headers_as_the_data_line_renders(package, tmp_path):
     findings = package / "findings.md"
     findings.write_text(findings.read_text(encoding="utf-8").replace("value: Closed late (%)", "value: Change in CO₂ (Mt)")
                         .replace("column: Cases", "column: Area (m²)"), encoding="utf-8")
-    (package / "charts/chart-1.csv").write_text("Region,Change in CO₂ (Mt)\nWest,21.3\nEast,2.7\nNorth,8\n",
+    (package / "chart-1.csv").write_text("Region,Change in CO₂ (Mt)\nWest,21.3\nEast,2.7\nNorth,8\n",
                                                 encoding="utf-8")
-    (package / "charts/chart-7.csv").write_text("Region,Area (m²)\nWest,1240\nEast,980\n", encoding="utf-8")
+    (package / "chart-7.csv").write_text("Region,Area (m²)\nWest,1240\nEast,980\n", encoding="utf-8")
     slides = list(deck(package, tmp_path).slides)[2:9]
     bar, table = frames(slides[0])[0], frames(slides[6])[0].table
     assert [(s.name, list(s.values)) for s in bar.chart.plots[0].series] == [("Change in CO₂ (Mt)", [21.3, 2.7, 8.0])]
@@ -256,7 +256,7 @@ def test_renderer_line_axis_follows_axis_field(package, tmp_path, number, axis, 
     (2, "Region,Rate (%),Lower (%),Upper (%)\nWest,-2,-3,-1\nEast,3,2,4\n", -3, 4),
 ])
 def test_renderer_value_axis_spans_zero_and_every_value(package, tmp_path, number, content, minimum, maximum):
-    (package / f"charts/chart-{number}.csv").write_text(content, encoding="utf-8")
+    (package / f"chart-{number}.csv").write_text(content, encoding="utf-8")
     axis = frames(list(deck(package, tmp_path).slides)[number + 1])[0].chart.value_axis
     assert (axis.minimum_scale, axis.maximum_scale) == (minimum, maximum)
 
@@ -295,7 +295,7 @@ def test_renderer_refuses_a_draft_breaking_the_contract(package, tmp_path, old, 
      "value -21 is below zero, which a Stacked bar cannot show as a part of a whole"),
 ])
 def test_renderer_refuses_data_it_cannot_draw(package, tmp_path, number, content, problem):
-    (package / f"charts/chart-{number}.csv").write_text(content, encoding="utf-8")
+    (package / f"chart-{number}.csv").write_text(content, encoding="utf-8")
     with pytest.raises(renderer.ContractError) as refused:
         renderer.render(package, tmp_path / "deck.pptx")
     assert refused.value.rows == [{"chart": f"Chart {number}", "problem": problem}]

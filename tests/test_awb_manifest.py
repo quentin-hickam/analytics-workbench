@@ -51,8 +51,7 @@ def package(tmp_path):
     (draft / "findings.md").write_bytes(b"abc")
     (draft / "figures").mkdir()
     (draft / "figures/a.png").write_bytes(b"")
-    (draft / "datasets").mkdir()
-    (draft / "datasets/d.csv").write_bytes(b"hello")
+    (draft / "dataset-d.csv").write_bytes(b"hello")
     (draft / "empty").mkdir()
     (draft / "manifest.json").write_bytes(b"{}")
     return draft
@@ -70,7 +69,7 @@ def test_inventory_lists_sorted_files_and_manifest_by_path_only(package, manifes
         assert (row["bytes"], row["sha256"]) == (len(content), hashlib.sha256(content).hexdigest())
     assert rows == [
         {"path": ".hidden", "bytes": 5, "sha256": HELLO},
-        {"path": "datasets/d.csv", "bytes": 5, "sha256": HELLO},
+        {"path": "dataset-d.csv", "bytes": 5, "sha256": HELLO},
         {"path": "figures/a.png", "bytes": 0, "sha256": EMPTY},
         {"path": "findings.md", "bytes": 3, "sha256": ABC},
         {"path": "manifest.json"},
@@ -103,9 +102,9 @@ def test_verify_reports_missing_file(package):
 
 def test_verify_reports_same_size_checksum_change(package):
     rows = manifest.inventory(package)
-    (package / "datasets/d.csv").write_bytes(b"world")
+    (package / "dataset-d.csv").write_bytes(b"world")
     assert manifest.verify(package, rows) == [
-        {"path": "datasets/d.csv", "kind": "checksum", "expected": HELLO,
+        {"path": "dataset-d.csv", "kind": "checksum", "expected": HELLO,
          "actual": "486ea46224d1bb4fb680f34f7c9ad96a8f24ec88be73ea8e5a6c65260e9cb8a7"},
     ]
 
@@ -180,12 +179,12 @@ def test_compare_trees_checks_full_copy_including_manifest(package, tmp_path):
 
 def test_compare_trees_reports_sorted_missing_extra_and_checksum(package, tmp_path):
     copy = shutil.copytree(package, tmp_path / "copy")
-    (copy / "datasets/d.csv").unlink()
+    (copy / "dataset-d.csv").unlink()
     (copy / "figures/a.png").write_bytes(b"abc")
     (copy / "new.md").write_bytes(b"hello")
     (copy / "findings.md").write_bytes(b"def")
     assert manifest.compare_trees(package, copy) == [
-        {"path": "datasets/d.csv", "kind": "missing", "expected": HELLO, "actual": None},
+        {"path": "dataset-d.csv", "kind": "missing", "expected": HELLO, "actual": None},
         {"path": "figures/a.png", "kind": "size", "expected": 0, "actual": 3},
         {"path": "figures/a.png", "kind": "checksum", "expected": EMPTY, "actual": ABC},
         {"path": "findings.md", "kind": "checksum", "expected": ABC,

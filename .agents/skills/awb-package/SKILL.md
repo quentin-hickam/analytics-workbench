@@ -61,7 +61,7 @@ Write the draft at the contract's paths, or revise the same files: a first pass,
 - Order finding slides by `presentation_order`, the slide slugs `ledger_order` lists, when the manifest records one, otherwise under the contract's **Ledger storyline** rules, which also govern **Open questions**; slides the user agreed to move go under `## Appendix`. Report every finding with no linked ledger question.
 - `methodology.md` follows `package-format/methodology-template.md` in the workbench's own vocabulary.
 - When the audience needs one, `methodology-note.md` follows `package-format/methodology-note-template.md`.
-- Copy `package-format/deck-rules.md` and `package-format/assembly/m365.md` unchanged to the same paths under the draft.
+- Copy `package-format/deck-rules.md` unchanged into the draft, and `package-format/assembly/m365.md` as `m365-assembly.md`.
 - Record facts a revision brings in that the investigation records lack, such as a limitation the user supplies, in its `history.md` as record maintenance, so no narrative states more than the records. When a review or the user corrects a claim a finding's text states, also reword that finding with `python3 src/awb.py state finding <id> --text "<corrected text>"` in the same revision.
 
 ## 4. Export the files and provenance

@@ -1327,8 +1327,8 @@ def test_readme_opens_with_what_you_get_and_the_analyst_quick_start():
 def test_readme_says_what_the_analyst_gets_and_is_asked():
     text = README.read_text(encoding='utf-8')
     what = ' '.join(section(text, '## What you get').split())
-    for name in ('findings.md', 'charts/', 'methodology-note.md', 'methodology.md', 'deck-rules.md',
-                 'assembly/m365.md', 'START-HERE.md'):
+    for name in ('findings.md', 'chart-1.csv', 'dataset-<name>.csv', 'methodology-note.md', 'methodology.md',
+                 'deck-rules.md', 'm365-assembly.md', 'START-HERE.md'):
         assert f'`{name}`' in what, name
     # Users expected slides: the package is the deck's sources, and Copilot is one builder of several.
     assert 'not a .pptx' in what

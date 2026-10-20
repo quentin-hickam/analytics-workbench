@@ -1,10 +1,10 @@
 # Deck rules
 
-`findings.md` is the slide-by-slide outline of the deck and the authoritative source of every word and number on it; the files in `charts/` hold every plotted value. Both are already written for the deck's audience, in their terms. Whoever builds the deck from them, a person, an agent, or a script, follows these rules and preserves every slide, claim, value, qualification, and caveat. A builder's own steps, such as how to attach the files or which chart objects to use, are in its file under `assembly/`; where that file and these rules differ on content, these rules govern.
+`findings.md` is the slide-by-slide outline of the deck and the authoritative source of every word and number on it; the `chart-N.csv` files hold every plotted value. Both are already written for the deck's audience, in their terms. Whoever builds the deck from them, a person, an agent, or a script, follows these rules and preserves every slide, claim, value, qualification, and caveat. A builder's own steps, such as how to attach the files or which chart objects to use, are in its assembly file, such as `m365-assembly.md`; where that file and these rules differ on content, these rules govern.
 
 ## Before you start
 
-You have `findings.md`, every `charts/` file, `methodology.md`, these rules, and your builder's assembly file; datasets, and `methodology-note.md` when the package has one, travel beside the deck and are not attached.
+You have `findings.md`, every `chart-*.csv` file, `methodology.md`, these rules, and your builder's assembly file; datasets, and `methodology-note.md` when the package has one, travel beside the deck and are not attached.
 
 ## Using methodology.md
 
@@ -33,7 +33,7 @@ When none holds, build without asking.
 
 ## Charts
 
-Draw each chart as an editable chart whose data is its file in `charts/`, not as a picture. Chart data verbatim: plot every row of its file, in the file's order, at the file's values. The file's numbers arrive rounded, and a percent column already holds percents (21.3, not 0.213): plot them as written, never multiplying a percent by 100 again. When a chart cannot be drawn from its file, or its data does not match the file, say so to the requester and name the slide; never substitute an image or estimated values.
+Draw each chart as an editable chart whose data is its chart file, not as a picture. Chart data verbatim: plot every row of its file, in the file's order, at the file's values. The file's numbers arrive rounded, and a percent column already holds percents (21.3, not 0.213): plot them as written, never multiplying a percent by 100 again. When a chart cannot be drawn from its file, or its data does not match the file, say so to the requester and name the slide; never substitute an image or estimated values.
 
 ### Chart forms
 
