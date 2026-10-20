@@ -1,5 +1,5 @@
 # Kept cases:
-# test_help_lists_every_command: --help and no arguments print every command with its summary and the per-command help pointer; the twelve commands with state before stale, review-rules between export and check-draft, export covering --result, draft-provenance gone.
+# test_help_lists_every_command: --help and no arguments print every command with its summary and the per-command help pointer; the commands with state before stale, review-rules between export and check-draft, friction last, export covering --result, draft-provenance gone.
 # test_dispatches_to_helper_function: a command loads its helper by path and passes the project root and remaining arguments.
 # test_missing_helper_or_function_and_unknown_command: each exits 2 with a message naming the remedy.
 # test_interpreter_line_accepted_and_refused_forms: README's `Project interpreter:` line is read only at column 0, once, as `not yet recorded` or a path to an existing file, absolute or project-relative, in optional backticks; a repeated or empty line or a path naming no file is refused with the reason.
@@ -38,7 +38,7 @@ def test_help_lists_every_command(tmp_path, capsys):
         assert all(name in out for name in cli.COMMANDS)
         assert "<command> --help" in out and "Exit status" in out
     assert list(cli.COMMANDS) == ["land", "retain", "publish", "sql", "profile", "state", "questions", "stale",
-                                  "export", "review-rules", "review-receipt", "check-draft", "release", "copy-releases"]
+                                  "export", "review-rules", "review-receipt", "check-draft", "release", "copy-releases", "friction"]
     assert "--result" in cli.COMMANDS["export"][2]
 
 

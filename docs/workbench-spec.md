@@ -182,6 +182,7 @@ project-root/
 │   ├── glossary.md               # Shared business and analytical vocabulary
 │   ├── references/               # Third-party data dictionaries, manuals, codebooks, schema exports; one folder per source ID
 │   ├── review-rules.md           # Numbered rules from review corrections, checked by every package review
+│   ├── friction.md               # Workbench-workflow problems logged as they happen, for upstream
 │   └── views/                    # Version-controlled canonical definitions, if used
 ├── investigations/
 │   └── <investigation-name>/

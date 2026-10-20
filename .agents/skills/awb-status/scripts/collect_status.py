@@ -28,6 +28,7 @@ DISPOSITIONS = {"none", "revalidate", "omit", "release_with_caveat"}
 # A rendered Claim cell: descriptive, association, or causal with its design basis.
 CLAIM = re.compile(r"(descriptive|association)|causal \((?:experiment|natural experiment): \S.*\)")
 BLOCKING = {"none", "revalidate"}
+FRICTION_COLUMNS = ["Date", "Skill or command", "What happened", "Workaround", "Cost", "Kind", "Status"]
 
 # Accepted input (rendered finding status): these four exact tokens, plus
 # revalidation-needed (was <prior>), where prior is provisional, supported, or superseded.
@@ -467,6 +468,11 @@ def collect(root, *, probe_upstream=False):
     result["release_storage"] = storage(release_line)
     release_base = local_path(release_line) if result["release_storage"]["availability"] == "reachable" else None
     result["upstream"] = upstream(root, probe_upstream, uncertain, entries)
+    # The friction log awb.py friction add writes; absent until its first entry.
+    friction_path = root / "foundation/friction.md"
+    friction = table(read(friction_path), FRICTION_COLUMNS, friction_path) if friction_path.exists() else []
+    result["open_product_friction"] = None if friction is None else \
+        sum(row["Kind"] == "product" and row["Status"] == "open" for row in friction)
 
     def manifest(directory, *, release=False):
         """Read manifest.json, recording an uncertainty when it is absent, unreadable, or not a JSON object."""

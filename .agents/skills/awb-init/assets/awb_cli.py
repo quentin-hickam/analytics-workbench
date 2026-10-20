@@ -23,7 +23,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent
 ROOT = SRC.parent
 
-# command: (helper path under src/, function, one-line summary), in workflow order
+# command: (helper path under src/, function, one-line summary), in workflow order, then friction, logged any time
 COMMANDS = {
     "land": ("preparation/landing.py", "cli_land",
              "copy supplied or downloaded files into data/raw/ as an acquisition, retain it, and record "
@@ -62,6 +62,8 @@ COMMANDS = {
                 "copy the verified draft to the next numbered release and to release storage"),
     "copy-releases": ("packaging/draft.py", "cli_copy_releases",
                       "copy existing releases to newly recorded release storage and compare each copy"),
+    "friction": ("provenance.py", "cli_friction",
+                 "add: log a problem with the workbench workflow itself in foundation/friction.md"),
 }
 
 

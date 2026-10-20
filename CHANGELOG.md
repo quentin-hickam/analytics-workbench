@@ -4,6 +4,10 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ## [Unreleased]
 
+### Added
+
+- A workbench friction log: the project `AGENTS.md` has the agent log each problem with the workbench workflow itself as it happens (a tool that failed or needed a workaround, a step the user did by hand, approved, or repeated, an instruction missing, wrong, or conflicting) with `awb.py friction add`, also the `records` tool's `friction` command, as one generic row in `foundation/friction.md`: date, skill or command, what happened, workaround, cost (`blocked`, `slowed`, `cosmetic`), kind (`product` or `host`), and status. The log is committed with the project, and `awb-status` reports how many `product` entries are open.
+
 ### Changed
 
 - Simple questions take fewer tool calls and carry less fixed text. The project `AGENTS.md` no longer asks the agent to read both guides in every session, to settle terms with data before answering, to read the README for the active investigation or interpreter (the `awb` tools resolve both), to read history unless the ask turns on an earlier decision, to suggest a commit once a session, or to repeat that numbered releases are frozen (the release skills say so); `awb-explore` triggers only on "explore this dataset" or "profile this view", not on "look at this data".

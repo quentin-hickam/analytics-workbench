@@ -3,6 +3,8 @@
 # test_collect_standard_records_without_writes_or_other_conclusions: counts normalize flagged statuses; nothing is written; other investigations give only name and date.
 # test_missing_and_custom_tables_are_unknown_not_zero: an unsupported state table or absent sources record is null with an uncertainty, never zero.
 # test_malformed_table_does_not_count_partial_rows: one malformed findings row makes the counts unknown.
+# test_friction_add_appends_one_line_rows_and_refuses_without_writing: friction add creates foundation/friction.md with its header, appends dated open rows with text collapsed to one line and pipes escaped, and refuses an empty field, an unknown cost or kind, or a log without its table, writing nothing.
+# test_status_counts_open_product_friction: open_product_friction is 0 without a log, counts rows of kind product still open, leaving host and closed rows out, and is null with an uncertainty for a log whose table is malformed.
 # test_unmatched_flags_are_counted_for_awb_package: a flag absent from the manifest is counted in unmatched_flags; no methodology review or mtime estimate keys remain.
 # test_rerun_since_draft_lists_results_recorded_after_the_draft: a represented result whose evidence is newer than the draft is listed, including one a narrative-only package never serialized; an empty list lists none; a manifest without results, or escaping or unreadable evidence, is unknown, an unreadable one an uncertainty.
 # test_release_only_package_counts_every_flag_unmatched: with no draft, every flagged finding is unmatched and nothing is uncertain.
@@ -56,6 +58,7 @@
 # test_probe_upstream_flag_reaches_the_probe: the command-line flag runs the probe and prints its results.
 
 """Status observations stay read-only and conservative when records need interpretation."""
+from datetime import date
 import importlib.util
 import json
 import os
@@ -70,6 +73,10 @@ SCRIPT = ROOT / ".agents/skills/awb-status/scripts/collect_status.py"
 spec = importlib.util.spec_from_file_location("awb_status", SCRIPT)
 status = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(status)
+spec = importlib.util.spec_from_file_location("awb_status_provenance",
+                                              ROOT / ".agents/skills/awb-init/assets/awb_provenance.py")
+provenance = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(provenance)
 TEMPLATES = ROOT / ".agents/skills/awb-init/assets/workbench"
 
 
@@ -134,6 +141,52 @@ def test_missing_and_custom_tables_are_unknown_not_zero(workbench):
     assert result["active"]["counts"] is None
     assert result["acquisitions"] is None and result["sources"] is None
     assert {u["path"] for u in result["uncertainties"]} == {"investigations/churn/state.md", "foundation/sources.md"}
+
+
+def friction(root, capsys, *argv):
+    code = provenance.cli_friction(root, ["add", *argv])
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+ENTRY = ("--skill", "awb.py publish", "--cost", "slowed", "--kind", "product")
+
+
+def test_friction_add_appends_one_line_rows_and_refuses_without_writing(tmp_path, capsys):
+    log = tmp_path / "foundation/friction.md"
+    code, out, _ = friction(tmp_path, capsys, *ENTRY, "--what", "refused a\nquoted | path",
+                            "--workaround", "ran the CLI")
+    assert code == 0 and out.endswith("open product entries: 1\n")
+    text = log.read_text()
+    assert text.startswith("# Workbench friction\n") and "| Date | Skill or command | What happened |" in text
+    assert text.endswith(f"| {date.today().isoformat()} | awb.py publish | refused a quoted \\| path | ran the CLI "
+                         "| slowed | product | open |\n")
+    assert friction(tmp_path, capsys, "--skill", "shell", "--what", "quoting", "--cost", "cosmetic",
+                    "--kind", "host")[0] == 0
+    assert log.read_text().count("| open |") == 2
+    before = log.read_bytes()
+    for argv in (("--what", " "), ("--what", "x", "--workaround", "\n"), ("--what", "x", "--cost", "lost")):
+        assert friction(tmp_path, capsys, *ENTRY, *argv)[0] == 2
+    with pytest.raises(ValueError):
+        provenance.add_friction(tmp_path, "x", "y", "z", "slowed", "neither")
+    assert log.read_bytes() == before
+    log.write_text("# Workbench friction\n\nnotes only\n")
+    code, _, err = friction(tmp_path, capsys, *ENTRY, "--what", "x")
+    assert code == 1 and "no table" in err and log.read_text() == "# Workbench friction\n\nnotes only\n"
+
+
+def test_status_counts_open_product_friction(workbench, capsys):
+    assert status.collect(workbench)["open_product_friction"] == 0
+    for kind in ("product", "product", "host"):
+        assert friction(workbench, capsys, *ENTRY[:-1], kind, "--what", "x")[0] == 0
+    log = workbench / "foundation/friction.md"
+    log.write_text(log.read_text().replace("| product | open |", "| product | closed |", 1))
+    result = status.collect(workbench)
+    assert result["open_product_friction"] == 1 and result["uncertainties"] == []
+    log.write_text(log.read_text() + "| too | few |\n")
+    result = status.collect(workbench)
+    assert result["open_product_friction"] is None
+    assert {"path": "foundation/friction.md", "reason": "Malformed table row: Date"} in result["uncertainties"]
 
 
 def test_malformed_table_does_not_count_partial_rows(workbench):

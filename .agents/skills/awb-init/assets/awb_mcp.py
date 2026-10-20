@@ -12,7 +12,8 @@ Tools:
   read     read-only (readOnlyHint): state, questions, sql, profile, stale, review-rules check,
            review-receipt show, check-draft --verify-only, status, eda-show, and help; built from fixed
            arguments
-  records  investigation and foundation records: state, questions, review-rules, clean-record
+  records  investigation and foundation records: state, questions, review-rules, clean-record,
+           friction
   data     land, retain, publish, sql, profile, eda-scan, clean-scan
   run      an investigation's run.py
   package  export, review-receipt, check-draft
@@ -81,7 +82,7 @@ AWB_COMMANDS = {"land": (), "retain": (), "publish": (), "sql": (), "profile": (
                 "questions": ("list", "add", "answer", "status", "edit", "render"),
                 "stale": (), "export": (), "review-rules": ("check", "add"),
                 "review-receipt": ("start", "record", "show"), "check-draft": (),
-                "release": (), "copy-releases": ()}
+                "release": (), "copy-releases": (), "friction": ("add",)}
 HELP_SCRIPTS = ("status", "eda-scan", "clean-scan", "clean-record", "install")
 
 
@@ -98,7 +99,7 @@ def log(message):
 PROJECT = {"type": "string",
            "description": "Absolute workbench root. Pass it on every call."}
 ARGS = {"type": "array", "items": {"type": "string"},
-        "description": "Arguments as on the command line, one per item, without the project root."}
+        "description": "Command-line arguments, one per item, without the project root."}
 
 
 def _write_tool(name, title, description, commands, *, stdin=False):
@@ -106,8 +107,8 @@ def _write_tool(name, title, description, commands, *, stdin=False):
                   "command": {"type": "string", "enum": list(commands)},
                   "args": ARGS}
     if stdin:
-        properties["stdin"] = {"type": "string", "description": "Text passed to the command's standard input, "
-                                                                "such as the JSON a command reads there."}
+        properties["stdin"] = {"type": "string", "description": "Text for the command's standard input, such "
+                                                                "as JSON it reads."}
     return {"name": name, "title": title, "description": description,
             "inputSchema": {"type": "object", "properties": properties, "required": ["command"],
                             "additionalProperties": False},
@@ -162,8 +163,9 @@ TOOLS = [
         "Write investigation and foundation records through their helpers. command state: change findings, "
         "issues, next steps, or the active investigation (`state flag` reads JSON from stdin); questions: "
         "add, answer, status, edit, render; review-rules: add a rule; clean-record: record a cleaning pass "
-        "for a scan name, decisions JSON on stdin (issues the scan did not report under `new`).",
-        ("state", "questions", "review-rules", "clean-record"), stdin=True),
+        "for a scan name, decisions JSON on stdin (issues the scan did not report under `new`); friction: add a "
+        "workflow-friction entry.",
+        ("state", "questions", "review-rules", "clean-record", "friction"), stdin=True),
     _write_tool(
         "data", "Prepare workbench data",
         "Land, retain, and publish data, run SQL or profiles that write files (--out) or need what the read "

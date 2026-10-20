@@ -53,6 +53,9 @@ findings.json (awb-findings/1) owns the Current findings table, which every find
 re-renders whole; hand edits to it are refused as drift. Each row carries a claim strength
 (descriptive, association, or causal with its design basis). Other lines keep their bytes, and the
 writers add the history.md entries for reruns and status and claim changes that matter.
+
+cli_friction backs `python3 src/awb.py friction add`, which appends an open row to the project's
+workbench friction log, foundation/friction.md, creating it when absent.
 """
 
 import argparse
@@ -2495,6 +2498,91 @@ def cli_questions(root: Path, argv: list[str]) -> int:
     except ValueError as error:
         print(f"awb.py questions: {error}", file=sys.stderr)
         return 2
+    return 0
+
+
+FRICTION = "foundation/friction.md"
+FRICTION_COLUMNS = ["Date", "Skill or command", "What happened", "Workaround", "Cost", "Kind", "Status"]
+_FRICTION_COSTS = ("blocked", "slowed", "cosmetic")
+_FRICTION_KINDS = ("product", "host")
+_FRICTION_HEADER = [
+    "# Workbench friction", "",
+    "Problems with the workbench workflow itself, logged as they happen with `python3 src/awb.py friction add`: "
+    "a helper or tool that refused, failed, or needed a workaround; a step the user did by hand or approved to "
+    "continue; a loop the process forced, such as a rerun or re-approval; an instruction missing, wrong, or "
+    "contradicting another. Findings, data quality, and dataset lessons belong in their own records.", "",
+    "Kind `product` is the workbench skills and helpers, `host` the editor, shell, or machine. Entries stay "
+    "generic, without data values or names, so the log can be shared upstream. Set an entry's Status to "
+    "`closed` once it is fixed or reported.", "",
+    _row(FRICTION_COLUMNS), _row(["---"] * len(FRICTION_COLUMNS))]
+
+
+def add_friction(project_root, skill: str, what: str, workaround: str, cost: str, kind: str, *,
+                 today: str | None = None) -> dict:
+    """Append an open row to foundation/friction.md, creating the file when absent.
+
+    Text cells are collapsed to one line with pipes escaped; an empty one, an unknown cost or kind, or
+    an existing file without the log's table header is refused, writing nothing. Returns the row and
+    the count of open product rows after it."""
+    path = Path(project_root) / FRICTION
+    if cost not in _FRICTION_COSTS or kind not in _FRICTION_KINDS:
+        raise ValueError(f"cost must be one of {', '.join(_FRICTION_COSTS)} and kind one of "
+                         f"{', '.join(_FRICTION_KINDS)}")
+    cells = [_cell(text) for text in (skill, what, workaround)]
+    if not all(cells):
+        raise ValueError("skill, what, and workaround must each hold text")
+    row = _row([today or _today(), *cells, cost, kind, "open"])
+    if path.exists():
+        lines = [_bare(line) for line in _read(path, FRICTION)]
+        if not any(_cells(line) == FRICTION_COLUMNS for line in lines):
+            raise StateError(f"{FRICTION} has no table headed {' | '.join(FRICTION_COLUMNS)}; restore it from Git "
+                             "or move the file aside")
+    else:
+        lines = list(_FRICTION_HEADER)
+        path.parent.mkdir(parents=True, exist_ok=True)
+    lines.append(row)
+    rows = [_cells(line) for line in lines if line.lstrip().startswith("|")]
+    open_product = sum(len(cells) == len(FRICTION_COLUMNS) and cells[5:] == ["product", "open"] for cells in rows)
+    _commit([_Text(path, FRICTION, "\n".join(lines) + "\n")])
+    return {"row": row, "open_product": open_product}
+
+
+def cli_friction(root: Path, argv: list[str]) -> int:
+    """Log a problem with the workbench workflow itself in foundation/friction.md."""
+    parser = argparse.ArgumentParser(
+        prog="awb.py friction",
+        description=f"Keep the workbench friction log, {FRICTION}: problems with the workbench workflow "
+                    "itself, never findings, data quality, or dataset lessons.")
+    actions = parser.add_subparsers(dest="action", required=True, metavar="{add}")
+    add = actions.add_parser(
+        "add", help="append an open entry dated today",
+        description=f"Append an open entry dated today to {FRICTION}, creating it when absent: a helper or "
+                    "tool that refused, failed, or needed a workaround; a step the user did by hand or approved "
+                    "to continue; a loop the process forced; an instruction missing, wrong, or contradicting "
+                    "another. Keep the text generic, without data values or names, so the log can be shared.",
+        epilog="Prints the row and the count of open product entries. Exit status: 0 added; 1 the log is "
+               "unreadable or lacks its table, or the write failed; 2 unusable arguments; nothing is written "
+               "unless 0.")
+    add.add_argument("--skill", required=True, help="the skill, awb.py command, or tool involved")
+    add.add_argument("--what", required=True, help="what happened, in one line")
+    add.add_argument("--workaround", default="none", help="what got past it, in one line (default: none)")
+    add.add_argument("--cost", required=True, choices=_FRICTION_COSTS,
+                     help="blocked: work stopped until worked around; slowed: extra steps; cosmetic: no delay")
+    add.add_argument("--kind", required=True, choices=_FRICTION_KINDS,
+                     help="product: the workbench skills or helpers; host: the editor, shell, or machine")
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as stop:
+        return stop.code
+    try:
+        added = add_friction(root, args.skill, args.what, args.workaround, args.cost, args.kind)
+    except StateError as error:
+        print(f"awb.py friction: {error}", file=sys.stderr)
+        return 1
+    except ValueError as error:
+        print(f"awb.py friction: {error}", file=sys.stderr)
+        return 2
+    print(f"logged in {FRICTION}: {added['row']}\nopen product entries: {added['open_product']}")
     return 0
 
 
