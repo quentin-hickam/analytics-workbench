@@ -2819,7 +2819,8 @@ def open_question_problems(root, investigation, draft, provenance, *, names, roo
         actual = Counter(b["text"] for b in slide["bullets"])
         for text, count in expected.items():
             if actual[text] < count:
-                row("missing question", slide["line"], question=text)
+                row("missing question" if scope is not None else "missing question; for a question from other work, "
+                    "list the package's own in the manifest's questions instead", slide["line"], question=text)
         for text, count in actual.items():
             if not expected[text]:
                 row("unexpected question or commentary; use the exact rendered ledger text", slide["line"], question=text)

@@ -34,7 +34,7 @@ Read the investigation brief's **Audience**: who sees or presents the deck, thei
 - **New draft or changed analytical scope or results:** read the investigation's `brief.md`, `state.md`, `history.md`, settings, `run.py`, and `producers/`; the relevant portions of `foundation/sources.md`, `catalog.md`, `quality.md`, and `glossary.md`; and any draft manifest and latest release.
 - **Bounded narrative revision, including an omission or accepted caveat:** start with the current draft and manifest, the brief's **Audience**, current findings and flags in `state.md`, the requested change and the evidence, history, and foundation entries relevant to it, plus the latest release parts and date the changes slide needs. Expand to the other records above wherever scope, evidence, provenance, or consistency is missing or conflicting.
 
-Recover the business question, decision or exploratory purpose, audience, usefulness criteria, contract evidence, and limitations and errors affecting interpretation.
+Recover the business question, the manifest's `questions` when listed, decision or exploratory purpose, audience, usefulness criteria, contract evidence, and limitations and errors affecting interpretation.
 
 Read the ledger with `python3 src/awb.py questions list --all` and each represented result's recorded settings `answers` to derive the storyline under the contract's **Ledger storyline** rules (pass `--investigation <name>` to commands for another investigation).
 

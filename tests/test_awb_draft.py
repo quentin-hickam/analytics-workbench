@@ -3347,7 +3347,7 @@ def test_open_questions_includes_parked_and_recheck_without_truncation(project, 
     assert entry["status"] == "answered"
     write(draft, "findings.md", before_open + opened.replace("- Which regions need review?\n", ""))
     _, report = run(project, capsys, "check-draft", "inv", "pkg")
-    assert any(row.get("question") == "Which regions need review?" and row["problem"] == "missing question"
+    assert any(row.get("question") == "Which regions need review?" and row["problem"].startswith("missing question")
                for row in report["open_questions"])
 
 
@@ -3370,7 +3370,8 @@ def test_manifest_questions_scope_the_open_questions_slide(project, capsys):
     # Every root question counts until the manifest names the package's questions.
     code, report = check("none")
     assert code == 1 and [(row["problem"], row.get("question")) for row in report["open_questions"]] == [
-        ("missing question", "Which carriers close late?")]
+        ("missing question; for a question from other work, list the package's own in the manifest's questions "
+         "instead", "Which carriers close late?")]
     # Listed, Q-001 and the question under it are the package's; Q-002 belongs to other work.
     code, report = check(["Q-001"])
     assert code == 0 and report["open_questions"] == [] and report["open_questions_count"] == 2, report
