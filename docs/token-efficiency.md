@@ -21,7 +21,7 @@ Compare the baseline and revised skills using fresh chats, the same model/settin
 3. “Revise the draft to explain this recorded limitation.” Include unrelated older history and existing exports. Require a complete consistent narrative, current caveats, byte-identical reused results and exports, and final findings and manifest verification.
 4. “Mark this package delivered.” Test both an unchanged draft and a newly flagged finding. Require a fresh passing `check-draft --verify-only`, a valid disposition before release, frozen prior releases, exact copying, and verified storage or an explicit copy instruction.
 
-Record input/output tokens and cached input separately where the host exposes them, reasoning tokens when available, tool-output size, tool calls, retries, and correctness outcomes. Record unavailable measurements as unavailable. Compare equivalent completed outcomes; a run that skips required work is not an efficiency win. Do not run live acquisitions, publish artifacts, or overwrite project data to benchmark instructions.
+Record the billing mode (per token or per request), input/output tokens and cached input separately where the host exposes them, reasoning tokens when available, tool-output size, tool calls, retries, and correctness outcomes. Record unavailable measurements as unavailable. Compare equivalent completed outcomes; a run that skips required work is not an efficiency win. Do not run live acquisitions, publish artifacts, or overwrite project data to benchmark instructions.
 
 ## Acceptance
 

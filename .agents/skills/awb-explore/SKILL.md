@@ -1,6 +1,6 @@
 ---
 name: awb-explore
-description: "Explore one dataset for the active analytics workbench investigation. Use for \"look at this data\", \"explore this dataset\", \"profile this view\", or \"help me understand this data\" within the investigation's question."
+description: "Explore one dataset for the active analytics workbench investigation. Use for \"explore this dataset\" or \"profile this view\"."
 ---
 
 # Explore a dataset for an investigation
@@ -11,7 +11,7 @@ Explore one canonical view or publication at a time, within the investigation's 
 
 ## 1. Frame
 
-Use the investigation the user names, otherwise the README's active one; for one other than the active one, pass `--investigation <name>` to every `awb.py state` and `awb.py questions` command below. If its brief, state, and open ledger questions are not loaded, print them with `python3 src/awb.py state`. Say in a sentence or two which dataset you will explore and why it bears on the question. If several datasets fit, start with the one that holds the question's measure.
+Use the investigation the user names, otherwise the active one; for one other than the active one, pass `--investigation <name>` to every `awb.py state` and `awb.py questions` command below. If its brief, state, and open ledger questions are not loaded, print them with `python3 src/awb.py state`. Say in a sentence or two which dataset you will explore and why it bears on the question. If several datasets fit, start with the one that holds the question's measure.
 
 ## 2. Scan
 

@@ -333,13 +333,11 @@ def test_status_offers_a_headline_preview_for_provisional_findings():
             if line.startswith('| ')]
     preview = rows.index('| Provisional findings and no draft | "Preview the slide headlines" | `awb-package` | progress |')
     assert rows[preview + 1].startswith('| Supported findings and no draft | "Prepare a draft package"')
-    # Who promotes a finding, and when, is said where its status is defined.
-    template = ' '.join((ROOT / '.agents/skills/awb-init/assets/workbench/investigation/state.md')
+    # Who promotes a finding, and when, is said where findings are worded, not in the state the resume prints.
+    analysis = ' '.join((ROOT / '.agents/skills/awb-init/assets/workbench/workbench-guides/analysis.md')
                         .read_text(encoding='utf-8').split())
-    assert ("The agent promotes a provisional finding to supported with `python3 src/awb.py state finding` once its "
-            "checks are understood and recorded and the user has approved its headline or text, such as at awb-package's "
-            "slide headline preview") in template
-    assert "to be promoted again once the user approves its text as rerun" in template
+    assert ("promoting to supported only once the user has approved the finding's headline or text, such as at "
+            "awb-package's headline preview") in analysis
     # The skill that shows the headlines carries the promotion, which a bounded revision may not read in the template.
     package = ' '.join((ROOT / '.agents/skills/awb-package/SKILL.md').read_text(encoding='utf-8').split())
     assert ("Promote each provisional finding behind an approved headline with "
@@ -355,7 +353,7 @@ def test_status_reports_findings_by_question_every_caveat_and_plain_freshness():
     assert 'labelling one whose `origin` is `brainstorm`, `eda`, or `analysis`' in status
     # Every caveat, not only flagged findings', as awb-release lists open caveats.
     assert 'every flagged finding in `active.findings`' not in status
-    assert 'Then every `active.caveats` entry, flagged findings first; while one remains, never say nothing is open.' in status
+    assert "Then every finding's `reason`, flagged findings first; while one remains, never say nothing is open." in status
     # A freshness order the records cannot settle is said plainly beside the evidence check.
     assert 'indeterminate' not in status
     assert ('run `read` command `stale` for the investigation (`python3 <project-root>/src/awb.py stale '
@@ -643,7 +641,7 @@ def test_every_commit_suggestion_is_once_a_session():
     names = {path.relative_to(ROOT / '.agents/skills').as_posix() for path, _ in suggestions}
     # The status request, both reports, and the repair report carry the guard the guides already had.
     assert {'awb-status/SKILL.md', 'awb-package/SKILL.md', 'awb-release/SKILL.md', 'awb-init/SKILL.md',
-            'awb-init/assets/workbench/AGENTS.md', 'awb-init/assets/workbench/workbench-guides/data.md',
+            'awb-init/assets/workbench/workbench-guides/data.md',
             'awb-init/assets/workbench/workbench-guides/analysis.md'} <= names
     for path, sentence in suggestions:
         assert any(guard in sentence for guard in COMMIT_GUARDS), (path, sentence)
@@ -1383,9 +1381,9 @@ def test_commands_state_the_cli_fallback_scripts_by_path_and_the_interpreter():
     assert ('If a write tool is refused or unavailable, run its CLI command, '
             'keep using the tools that work, and say so once.') in commands
     # The scan and record scripts live in their skill folders and are never awb.py subcommands.
-    assert 'Skill scripts run by path, never as `awb.py` commands.' in commands
     # One interpreter, recorded once: the installer writes the README line the commands mean.
-    assert "In every workbench command, `python3` means README's `Project interpreter`." in commands
+    assert ("On the command line, `python3` means README's `Project interpreter`; "
+            "skill scripts run by path with it, never as `awb.py` commands.") in commands
     readme = (ROOT / '.agents/skills/awb-init/assets/workbench/README.md').read_text(encoding='utf-8')
     assert re.search(r'^Project interpreter: not yet recorded$', readme, re.M)
     for skill in ('awb-clean', 'awb-explore', 'awb-package'):

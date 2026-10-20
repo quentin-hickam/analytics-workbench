@@ -322,8 +322,8 @@ def test_read_commands_round_trip_and_write_nothing(workbench, connect):
     text, error = client.call("read", command="status")
     active = json.loads(text.split("\n\n")[0])["active"]
     assert not error and active["name"] == "churn"
-    # Every caveat and the state's freshness reach the read tool with the rest of the collector's facts.
-    assert active["caveats"] == [] and "state_status" in json.loads(text.split("\n\n")[0])["git"]
+    # Every finding and the state's freshness reach the read tool with the rest of the collector's facts.
+    assert "findings" in active and "state_status" in json.loads(text.split("\n\n")[0])["git"]
     for topic, expected in ((None, "usage: python3 src/awb.py"), ("questions add", "--answerer"),
                             ("state finding", "--claim"), ("eda-scan", "--show"), ("install", "--upgrade")):
         text, error = client.call("read", command="help", **({"topic": topic} if topic else {}))

@@ -96,12 +96,9 @@ def log(message):
 # ---------------------------------------------------------------- tool definitions
 
 PROJECT = {"type": "string",
-           "description": "Absolute path of the workbench root (the folder holding src/awb.py). "
-                          "Pass it on every call."}
+           "description": "Absolute workbench root. Pass it on every call."}
 ARGS = {"type": "array", "items": {"type": "string"},
-        "description": "The command's arguments, one array item per argument, exactly as on its command line "
-                       "and without the project root; `read` with command `help` and this command as topic "
-                       "lists them."}
+        "description": "Arguments as on the command line, one per item, without the project root."}
 
 
 def _write_tool(name, title, description, commands, *, stdin=False):
@@ -126,9 +123,7 @@ TOOLS = [
          "query file or SQL text in query, against the foundation views, binding $name from params or "
          "settings), profile (per-column summary of a "
          "view, query file, or SELECT in query), stale (findings whose evidence no longer matches), "
-         "review-rules (check a draft against the review rules), review-receipt (the last draft review's "
-         "report and a diff of what changed since), check-draft (verify a release candidate, "
-         "writing nothing), status (project status facts), eda-show (one section of a saved EDA scan of "
+         "review-rules, review-receipt, check-draft (package drafts), status (project status facts), eda-show (one section of a saved EDA scan of "
          "dataset), help (a command's arguments; topic names it, such as `questions add` or `eda-scan`)."),
      "inputSchema": {"type": "object", "additionalProperties": False, "required": ["command"], "properties": {
          "project": PROJECT,
@@ -155,7 +150,7 @@ TOOLS = [
                             "upstream URLs and report each changed, unchanged, or unknown."},
          "dataset": {"type": "string", "description": "eda-show: the scanned view or publication path."},
          "section": {"type": "string", "description": "eda-show: dot-separated keys of the section, such "
-                     "as columns or measure.over_time.series."},
+                     "as columns.<column> or measure.over_time.series."},
          "label": {"type": "string", "description": "eda-show: the scan's --label."},
          "topic": {"type": "string", "description": "help: an awb.py command with an optional subcommand, "
                    "or a script: status, eda-scan, clean-scan, clean-record, install. Omitted, it lists "
@@ -167,8 +162,7 @@ TOOLS = [
         "Write investigation and foundation records through their helpers. command state: change findings, "
         "issues, next steps, or the active investigation (`state flag` reads JSON from stdin); questions: "
         "add, answer, status, edit, render; review-rules: add a rule; clean-record: record a cleaning pass "
-        "for a scan name, decisions JSON on stdin, with scan issues under `issues` and issues the scan did "
-        "not report under `new`. Read records with the read tool.",
+        "for a scan name, decisions JSON on stdin (issues the scan did not report under `new`).",
         ("state", "questions", "review-rules", "clean-record"), stdin=True),
     _write_tool(
         "data", "Prepare workbench data",
@@ -190,11 +184,8 @@ TOOLS = [
                      "openWorldHint": False}},
     _write_tool(
         "package", "Build package draft",
-        "Write a package draft's exports and manifest. command export: chart and dataset files, a --chart's "
-        "@first=<n> or @where=<column>=<value> row selection included, and producing state; review-receipt: "
-        "mark a draft review launched (`start`) and record it (`record`, the report on stdin with `--report -`); "
-        "check-draft: run every draft check, write START-HERE.md, and rewrite the manifest inventory (the read "
-        "tool's check-draft verifies without writing).",
+        "Write a package draft: export (chart and dataset files), review-receipt (start, record), "
+        "check-draft (run every check, write START-HERE.md and the manifest inventory).",
         ("export", "review-receipt", "check-draft"), stdin=True),
     _write_tool(
         "release", "Release package",
@@ -202,12 +193,9 @@ TOOLS = [
         "release storage. Both write to release storage, which may be outside the project.",
         ("release", "copy-releases")),
     {"name": "setup", "title": "Install workbench helpers",
-     "description": "Install or upgrade the workbench helpers, guides, and package formats in a project "
-                    "with workbench markers (AGENTS.md, foundation/, or investigations/), and record the "
-                    "interpreter that runs them on README's Project interpreter line unless AWB_PYTHON "
-                    "overrides it, through awb-init's install_helpers.py. It runs under interpreter when "
-                    "given, else the one workbench commands use: README's line, else the project's .venv or "
-                    "venv, else this server's own. check reports without writing.",
+     "description": "Install or upgrade the workbench helpers, guides, and package formats through "
+                    "awb-init's install_helpers.py, recording the interpreter on README's Project interpreter "
+                    "line; check reports without writing.",
      "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
          "project": PROJECT,
          "interpreter": {"type": "string", "description": "Absolute path of the Python that will run the "

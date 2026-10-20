@@ -4,7 +4,7 @@
 
 ## Start or resume
 
-For investigation work, resume README's active investigation with `python3 src/awb.py state` (`--investigation <name>` for another) and name it; read history when prior reasoning matters. Switch with `state switch <name>`. When an ask could belong to several investigations, ask which before changing records.
+For investigation work, resume the active investigation with `python3 src/awb.py state` (`--investigation <name>` for another) and name it; read history when the ask turns on an earlier decision. Switch with `state switch <name>`. When an ask could belong to several investigations, ask which before changing records.
 
 Use the workbench skills even for work you start; take a new business question or a consequential scope change through `awb-scope`.
 
@@ -13,15 +13,15 @@ Use the workbench skills even for work you start; take a new business question o
 - **Data**: before assessing a source, landing, retaining, or publishing data, editing `foundation/views/`, or adding a cache, read [workbench-guides/data.md](workbench-guides/data.md).
 - **Analysis**: before adding or changing a result, recording a finding, or rerunning flagged findings, read [workbench-guides/analysis.md](workbench-guides/analysis.md).
 
-Read each guide once per session. Existing project conventions win; surface conflicts for a decision.
+Existing project conventions win; surface conflicts for a decision.
 
 ## Commands
 
 When the host offers the `awb` MCP server, use its tools for `awb.py` commands, and the CLI otherwise: `read` for reads; `records`, `data`, `package`, and `release` for writes. Route `investigations/<name>/run.py` through `run`; `collect_status.py` through `read` command `status`; `eda_scan.py` through `data` command `eda-scan`, or `--show` through `read` command `eda-show`; `scan_dataset.py` through `data` command `clean-scan`; `record_cleaning.py` through `records` command `clean-record`; and `install_helpers.py` through `setup`. Each tool's description lists its commands. Pass the absolute project root as `project` on every call.
 
-If a write tool is refused or unavailable, run its CLI command, keep using the tools that work, and say so once. Skill scripts run by path, never as `awb.py` commands.
+If a write tool is refused or unavailable, run its CLI command, keep using the tools that work, and say so once. On the command line, `python3` means README's `Project interpreter`; skill scripts run by path with it, never as `awb.py` commands.
 
-In every workbench command, `python3` means README's `Project interpreter`. Run helpers as black boxes through the `awb` tools, else as `python3 src/awb.py <command>`: open one's source only to adapt or debug it, and change shipped helpers or `package-format/` templates only once the user, asked plainly, agrees. Compute with `awb.py sql`; counts, nulls, and distinct values with `awb.py profile`; save a query run twice as `investigations/<name>/exploration/<topic>.sql`; rerun it by path. `awb-init` repairs missing helpers or packages.
+Run helpers as black boxes through the `awb` tools, else as `python3 src/awb.py <command>`: open one's source only to adapt or debug it, and change shipped helpers or `package-format/` templates only once the user, asked plainly, agrees. Compute with `awb.py sql`; counts, nulls, and distinct values with `awb.py profile`; save a query run twice as `investigations/<name>/exploration/<topic>.sql`; rerun it by path.
 
 ## Conversation
 
@@ -43,10 +43,10 @@ Only a result from the investigation's `run.py`, run with its settings, can beco
 
 ## Record maintenance
 
-Settle ambiguous terms with concrete examples and the data. Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and dataset, view, and cache descriptions in `foundation/catalog.md`; never in context maps or ADRs.
+Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and dataset, view, and cache descriptions in `foundation/catalog.md`; never in context maps or ADRs.
 
 Change findings, issues, and next steps with `awb.py state finding`, `state issues`, and `state next`; record a question the work raises with `questions add --parent <question it serves>`, and the user's answer with `questions answer`. Write history by hand only when a scope, method, caveat, or data limitation changes understanding. Rerun flagged findings and revise conclusions only on request. Record readers the user names in the brief's Audience section.
 
-Commit when asked; when README's `Commits:` line says `as I go`, which you set when asked, commit analytical code as you go. Otherwise suggest one at most once a session while it is uncommitted. While README's `Code history:` line says `none`, make and suggest no commits.
+Commit when asked; when README's `Commits:` line says `as I go`, which you set when asked, commit analytical code as you go. While README's `Code history:` line says `none`, make and suggest no commits.
 
-Package files come only from `awb-package` and `awb-release`, on the user's request; numbered releases are frozen. Take a user's correction to a package draft through `awb-package`, which offers to keep one later drafts could repeat in `foundation/review-rules.md`.
+Package files come only from `awb-package` and `awb-release`, on the user's request; Take a user's correction to a package draft through `awb-package`, which offers to keep one later drafts could repeat in `foundation/review-rules.md`.

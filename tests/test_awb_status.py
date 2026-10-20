@@ -1459,7 +1459,7 @@ def test_unreadable_findings_leave_the_counts_by_question_unknown(workbench):
     active = status.collect(workbench)["active"]
     assert active["questions"]["by_question"][0]["findings"] is None
     assert active["questions"]["findings_without_question"] is None
-    assert active["caveats"] is None
+    assert active["findings"] is None
 
 
 def test_every_findings_caveat_is_reported(workbench):
@@ -1470,10 +1470,11 @@ def test_every_findings_caveat_is_reported(workbench):
         "| supported | causal (experiment: randomized price test) | Excludes December 2011 |\n"
         "| Steady base | [r3](evidence/r3.json) | provisional | descriptive | not assessed: joins |\n"
         "| Plain | [r4](evidence/r4.json) | provisional | descriptive | |"))
-    assert status.collect(workbench)["active"]["caveats"] == [
-        {"finding": "Renewal lag", "status": "revalidation-needed", "caveat": "Q-004 correction"},
-        {"finding": "Pricing", "status": "supported", "caveat": "Excludes December 2011"},
-        {"finding": "Steady base", "status": "provisional", "caveat": "not assessed: joins"}]
+    findings = status.collect(workbench)["active"]["findings"]
+    assert [(f["finding"], f["status"], f["reason"]) for f in findings if f["reason"]] == [
+        ("Renewal lag", "revalidation-needed", "Q-004 correction"),
+        ("Pricing", "supported", "Excludes December 2011"),
+        ("Steady base", "provisional", "not assessed: joins")]
 
 
 @pytest.mark.parametrize("field", ["parent", "priority"])

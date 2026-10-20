@@ -4,6 +4,14 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ## [Unreleased]
 
+### Changed
+
+- Simple questions take fewer tool calls and carry less fixed text. The project `AGENTS.md` no longer asks the agent to read both guides in every session, to settle terms with data before answering, to read the README for the active investigation or interpreter (the `awb` tools resolve both), to read history unless the ask turns on an earlier decision, or to suggest a commit once a session; `awb-explore` triggers only on "explore this dataset" or "profile this view", not on "look at this data".
+- The `awb` MCP tool definitions, which hosts send with every request, are about a sixth shorter (7,653 characters, down from about 9,100); a test keeps them at or under 7,700.
+- The status collector no longer repeats each finding's caveat under `active.caveats`; `awb-status` reports every finding's `reason` from `active.findings`. Its body drops rare-case detail about upstream probes, source-reference syntax, and timezones.
+- The investigation `state.md` template drops its three explanatory paragraphs, which every `state` call printed; the promotion rule they held is in `workbench-guides/analysis.md`.
+- `scripts/measure-instruction-load.py` also reports the current size of the MCP tool definitions, and the README's admin section adds a short note on cost per request.
+
 ## [0.4.0] - 2026-10-19
 
 ### Added
