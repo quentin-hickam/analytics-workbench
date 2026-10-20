@@ -1013,6 +1013,10 @@ def _check_caveat(checks):
                      if names)
 
 
+def _placeholder(result_id):
+    return f"<state the finding from {result_id}>"
+
+
 def finding_row(project_root, investigation: str, result_id: str, checks: list[dict], *,
                 finding: str | None = None, status: str = "provisional", claim: str = "association") -> str:
     """Return the state.md Current findings row for a recorded result, without writing it.
@@ -1026,7 +1030,7 @@ def finding_row(project_root, investigation: str, result_id: str, checks: list[d
     if len(cells) == len(_COLUMNS):  # cells keep their escapes
         text, claim = cells[0], cells[3]
     else:
-        text, claim = _cell(finding or f"<state the finding from {result_id}>"), _cell(claim)
+        text, claim = _cell(finding or _placeholder(result_id)), _cell(claim)
     return (f"| {text} | [{result_id}](evidence/{result_id}.json) | {_cell(status)} | {claim} | "
             f"{_cell(_check_caveat(checks))} |")
 
@@ -1548,7 +1552,7 @@ def record_finding(project_root, investigation: str, result_id: str, checks: lis
         history = None
         old = _finding_cells(entry) if entry else None
         if entry is None:
-            entry = {"result": result_id, "text": f"<state the finding from {result_id}>",
+            entry = {"result": result_id, "text": _placeholder(result_id),
                      "status": "provisional", "prior_status": None, "flag_reason": "", "notes": [],
                      "checks_caveat": _check_caveat(checks), "notes_checks": _check_caveat(checks),
                      "claim": _DEFAULT_CLAIM, "claim_basis": ""}
@@ -1775,6 +1779,9 @@ def update_findings(project_root, investigation: str, result_ids: list[str], *, 
                 warnings.append(f"warning: {result_id} is flagged; package dispositions recorded against its old "
                                 "text reopen")
             if cells[2] == "supported":
+                if cells[0] == _cell(_placeholder(result_id)):
+                    raise StateError(f"{result_id} still has its placeholder text; state the finding with --text "
+                                     "before promoting it")
                 failed = [c["name"] for c in compare_evidence(root, evidence_path) if c["outcome"] == "fail"]
                 if failed:
                     raise StateError(f"{result_id} is stale ({', '.join(failed)}); rerun it before promoting it")

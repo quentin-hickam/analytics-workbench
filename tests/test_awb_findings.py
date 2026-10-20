@@ -351,7 +351,8 @@ def test_declared_answer_is_provisional_until_a_finding_is_promoted(tmp_path):
     assert "Q-001 answered (provisional, awaiting recheck)" in provenance.state_view(tmp_path, "inv")
     assert produce("r1")["action"] == "flag cleared" and shown()[0] == "Q-001 answered (provisional)"
     # Promotion makes it answered; a second, still provisional finding leaves it answered.
-    provenance.update_findings(tmp_path, "inv", ["r1"], status="supported", reason="Checked against the source.")
+    provenance.update_findings(tmp_path, "inv", ["r1"], text="Orders closed", status="supported",
+                               reason="Checked against the source.")
     produce("r2")
     line, rendered, roots = shown()
     assert line == "Q-001 answered" and "| answered | [r1](evidence/r1.json); [r2](evidence/r2.json) |" in rendered

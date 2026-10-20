@@ -17,6 +17,7 @@ All notable changes to this project are recorded in this file. The format is bas
 ### Fixed
 
 - The draft review's record also keeps the SHA-256 of each file in the project that a `reference:` link in `foundation/sources.md` names, so replacing a linked copy under `foundation/references/` in place, without editing the register, makes the review stale and `release` refuses it until a new review passes.
+- `awb.py state finding --status supported` refuses a finding still holding its `<state the finding from <result-id>>` placeholder text, naming `--text`, which can replace it in the same call.
 
 ## [0.4.0] - 2026-10-19
 

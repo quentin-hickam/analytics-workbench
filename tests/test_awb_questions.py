@@ -420,7 +420,7 @@ def test_resume_and_list_show_finding_status(project, capsys):
                          "Q-002 open [stakeholder, context, should; parent: root] Which churn definition does finance use?\n"
                          "Q-001 answered (provisional) [data, analytical, should; parent: root] Does churn differ by region? "
                          "-> r1 (provisional)\n")
-    provenance.update_findings(project, "churn", ["r1"], status="supported", reason="checked")
+    provenance.update_findings(project, "churn", ["r1"], text="Churn differs", status="supported", reason="checked")
     assert "Q-001" not in provenance.state_view(project, "churn").split("==> open ledger questions <==")[1]
     provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "region view corrected"}])
     assert "Q-001 answered (awaiting recheck)" in provenance.state_view(project, "churn")
@@ -659,7 +659,7 @@ def test_cli_derives_awaiting_recheck_and_refreshes_render(project, capsys, find
     produce(project, "r1", table="n\n2\n")
     # The rerun leaves r1 provisional (flagged) or superseded, and r2 was never promoted.
     assert "Q-001 answered (" in cli(project, capsys, "list", "--all")[1]
-    provenance.update_findings(project, "churn", ["r1"], status="supported", reason="rechecked")
+    provenance.update_findings(project, "churn", ["r1"], text="Churn differs", status="supported", reason="rechecked")
     assert "Q-001 answered [" in cli(project, capsys, "list", "--all")[1]
     assert "awaiting recheck" not in (project / INV / "questions.md").read_text()
     assert "provisional)" not in (project / INV / "questions.md").read_text()
