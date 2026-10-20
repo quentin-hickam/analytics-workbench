@@ -164,7 +164,7 @@ TOOLS = [
         "issues, next steps, or the active investigation (`state flag` reads JSON from stdin); questions: "
         "add, answer, status, edit, render; review-rules: add a rule; clean-record: record a cleaning pass "
         "for a scan name, decisions JSON on stdin (issues the scan did not report under `new`); friction: add a "
-        "workflow-friction entry.",
+        "generic workflow-friction entry.",
         ("state", "questions", "review-rules", "clean-record", "friction"), stdin=True),
     _write_tool(
         "data", "Prepare workbench data",

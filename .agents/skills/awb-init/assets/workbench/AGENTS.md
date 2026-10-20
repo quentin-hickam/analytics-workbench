@@ -43,11 +43,11 @@ Only a result from the investigation's `run.py`, run with its settings, can beco
 
 ## Record maintenance
 
-Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, and data descriptions in `foundation/catalog.md`; never in context maps or ADRs.
+Record shared meanings in `foundation/glossary.md`, local departures in the brief, population and period choices in settings, readers the user names in the brief's Audience, and data descriptions in `foundation/catalog.md`; never in context maps or ADRs.
 
 Change findings, issues, and next steps with `awb.py state finding`, `state issues`, and `state next`; record a question the work raises with `questions add --parent <question it serves>`, and the user's answer with `questions answer`. Write history by hand only when scope, method, caveats, or data limits change understanding. Rerun flagged findings and revise conclusions only on request.
 
-Log friction (failed tools, workarounds, manual or repeated steps, wrong instructions) promptly, never data lessons: `friction add --skill --what --workaround --cost blocked|slowed|cosmetic --kind product|host`.
+Log each distinct workflow problem once, generically, without data values or names (a tool failing on valid input, a workaround, a manual or user-approved step, a forced rerun, a missing, wrong, or conflicting instruction), never data lessons: `friction add --skill --what --workaround --cost blocked|slowed|cosmetic --kind product|host`.
 
 Commit when asked; when README's `Commits:` line says `as I go`, which you set when asked, commit analytical code as you go. While README's `Code history:` line says `none`, make and suggest no commits.
 
