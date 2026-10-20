@@ -7,7 +7,7 @@ The manifest is `manifest.json`. Record times in ISO 8601 with a UTC offset, suc
 - `investigation`, `package`, and `status` (`draft` or `release`): written by `export` when it creates the manifest;
 - `revised_at`: stamped by `check-draft` when the inventory changes; a release keeps the draft's value;
 - `release_number` (such as `002`), `released_at`, and `prior_release` (the latest numbered release before this one, such as `released/001`, or `none`): written by `release` on the release copy;
-- `review`: the passed review the release rests on, its `kind` (`full` or `scoped`), `recorded_at`, and `accepted`, each problem the user accepted with their reason, written by `release` on the release copy from the draft's review receipt; and
+- `review`: the passed review the release rests on, its `kind` (`full` or `scoped`), `recorded_at`, `accepted`, each problem the user accepted with their reason, and `repaired`, each small repair no review read, written by `release` on the release copy from the draft's review receipt; and
 - `inventory`: every file in the package directory, each with its path relative to the package directory using `/` separators, byte size, and SHA-256; directories are not listed. The manifest lists itself by path only, with no size or checksum, since writing them would change them. `python3 src/awb.py check-draft` writes it.
 
 ## Producing state

@@ -102,7 +102,7 @@
 # test_storyline_orders_main_and_appendix_findings_each_by_the_ledger: main and appendix finding slides are ranked separately, the appendix numbering on.
 # test_open_questions_follows_how_we_know_when_limitations_is_in_the_appendix: with Limitations under ## Appendix, Open questions passes after How we know and fails before it.
 # test_manifest_questions_scope_the_open_questions_slide: without the manifest's questions every root's unanswered must questions are required; listing Q-001 requires only it and the questions under it; an ID the ledger lacks, a bare string, or an empty list is an open_questions row.
-# test_release_requires_a_current_review_receipt: check-draft reports the review's status and changed in both modes without changing passed; release refuses, creating nothing, with no receipt, a failed one, or a stale one, naming the status and changed inputs; a passed scoped review with an accepted problem releases, and the released manifest alone records its kind, time, and acceptances.
+# test_release_requires_a_current_review_receipt: check-draft reports the review's status and changed in both modes without changing passed; release refuses, creating nothing, with no receipt, a failed one, or a stale one, naming the status and changed inputs; a passed scoped review with an accepted problem releases, and the released manifest alone records its kind, time, acceptances, and small repairs (none here).
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage at <location>/<investigation>/<package>/<n>/; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
 
 import hashlib
@@ -2287,7 +2287,7 @@ def test_release_requires_a_current_review_receipt(project, capsys):
     assert draft.record_review(project, "inv", "pkg", "scoped", scoped, accepted)["passed"]
     assert run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")[1]["review"]["status"] == "current"
     code, report = run(project, capsys, "release", "inv", "pkg")
-    review = {"kind": "scoped", "recorded_at": "2026-10-16T12:00:00+00:00", "accepted": accepted}
+    review = {"kind": "scoped", "recorded_at": "2026-10-16T12:00:00+00:00", "accepted": accepted, "repaired": []}
     assert code == 0 and report["released"] and report["review"] == review
     assert manifest(project, "released/001")["review"] == review and "review" not in manifest(project)
     # The record sits beside the draft, so the release does not copy it.
