@@ -569,8 +569,8 @@ def test_cross_part_copies_need_the_user_or_source_to_call_them_reextracts():
     correction = (ROOT / '.agents/skills/awb-clean/references/correction-views.md').read_text(encoding='utf-8')
     assert '**Cross-part copies (`duplicate-rows:across-parts`):**' in correction
     assert '**Exact repeats (`duplicate-rows`):**' in correction
-    # With lineage, DISTINCT keeps rows differing only in sheet_row, so the pattern partitions without it.
-    assert 'PARTITION BY <every non-lineage column> ORDER BY <lineage columns>) = 1' in correction
+    # With lineage, DISTINCT keeps rows differing only in sheet_row; the pattern removes repeats within a part only.
+    assert 'PARTITION BY <part columns>, <every non-lineage column> ORDER BY <row column>) = 1' in correction
 
 
 def test_footer_counts_a_provisional_answer_as_provisional():

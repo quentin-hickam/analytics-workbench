@@ -4,7 +4,7 @@ Corrections live in the Git-managed canonical view definitions under `foundation
 
 ## Where the correction goes
 
-Keep one definition per dataset while it stays readable. When corrections grow, split it into a source view and a corrected view under the canonical name, for example `01_orders_source.sql` reading the publication and `02_orders.sql` applying the rules. Keep the canonical name; findings and the catalog cite it.
+Keep one definition per dataset while it stays readable. When corrections grow, split it into a source view and a corrected view under the canonical name, for example `01_orders_source.sql` reading the publication and `02_orders.sql` applying the rules.
 
 The originals stay readable in the publication and the landed files, so add a `_raw` copy of a corrected column only when an investigation needs both. Write fixed date bounds rather than `current_date`, so a rule gives the same result on any day.
 
@@ -32,7 +32,7 @@ LEFT JOIN labels ON lower(trim(source.dept)) = labels.variant;
 - **Text placeholders:** `CASE WHEN lower(trim(note)) IN ('', 'n/a', 'unknown') THEN NULL ELSE note END`. Map a placeholder to a value, such as `0`, only when the user said it means that value.
 - **Typing text:** map the decided bad values first, then `CAST`. A strict `CAST` makes a new unparseable value fail the query, which is the signal to rescan; `TRY_CAST` would turn it silently into null. Use `TRY_CAST` only when the user decided that unparseable values mean missing.
 - **Mixed date formats:** `coalesce(TRY_CAST(d AS DATE), CAST(try_strptime(d, '%d/%m/%Y') AS DATE))`, listing formats in the decided order of precedence.
-- **Exact repeats (`duplicate-rows`):** `SELECT DISTINCT * FROM source`; with lineage, `QUALIFY row_number() OVER (PARTITION BY <every non-lineage column> ORDER BY <lineage columns>) = 1`, which drops cross-part copies too.
+- **Exact repeats (`duplicate-rows`):** `SELECT DISTINCT * FROM source`; with lineage, `QUALIFY row_number() OVER (PARTITION BY <part columns>, <every non-lineage column> ORDER BY <row column>) = 1`.
 - **Cross-part copies (`duplicate-rows:across-parts`):** `QUALIFY sheet IS NOT DISTINCT FROM min(sheet) OVER (PARTITION BY <every non-lineage column>)` keeps the first part's copy, with its own repeats, and drops the other parts' copies.
 - **Repeated keys:** `QUALIFY row_number() OVER (PARTITION BY order_id ORDER BY updated_at DESC, <tie-breaker>) = 1`, with the winning-row rule the user chose and a deterministic tie-breaker.
 - **Out-of-range values:** null the value, not the row: `CASE WHEN amount < 0 THEN NULL ELSE amount END`, with the bound the user decided.

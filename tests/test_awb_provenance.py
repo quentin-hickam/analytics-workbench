@@ -1089,7 +1089,8 @@ def test_run_template_refuses_shared_sql_reading_a_glob_or_folder_outside_a_publ
     write(project, "investigations/inv/views/01_screen.sql", screen.format(f"'{outside}/'").encode())
     done = subprocess.run(run, capture_output=True, text=True)
     assert done.returncode == 2 and done.stderr == (f"investigations/inv/views/01_screen.sql reads {outside}/, "
-                                                    "outside the project; copy it into the project\n")
+                                                    "outside the project; publish it, or copy each file in and list "
+                                                    "it in code\n")
     # Each file by its own path runs; a word without "/" naming no file, such as a regex, is not a path,
     # and a folder outside the project, such as a separator, is not walked.
     write(project, "investigations/inv/views/01_screen.sql",

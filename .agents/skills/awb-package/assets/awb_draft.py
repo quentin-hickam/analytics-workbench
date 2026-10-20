@@ -5073,8 +5073,8 @@ def provenance_gaps(record: dict) -> list[dict]:
     versions went unrecorded. A string is never a gap, so a settings value or a column name such as
     unknown_pickup is not one. Neither is packaging_commit or packaging_uncommitted_changes unknown for
     exactly a reason packaging_state gives for a project without Git or without a commit yet, nor
-    producing_commit unknown for exactly the reason evidence gives without Git; any other reason there is
-    a gap."""
+    producing_commit unknown for exactly the reason evidence gives without Git while the project still has
+    none; any other reason there is a gap, Git added since included."""
     gaps = []
 
     def walk(value, path):
@@ -5097,7 +5097,8 @@ def provenance_gaps(record: dict) -> list[dict]:
         if key in {"packaging_commit", "packaging_uncommitted_changes"} and _is_unknown(value) \
                 and isinstance(value["unknown"], str) and value["unknown"] in _NO_HISTORY:
             continue
-        if key == "producing_commit" and value == {"unknown": _NO_PRODUCING_GIT}:
+        if key == "producing_commit" and value == {"unknown": _NO_PRODUCING_GIT} \
+                and record.get("packaging_commit") == {"unknown": NO_GIT}:
             continue
         if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers", "presentation_order"}:
             walk(value, key)

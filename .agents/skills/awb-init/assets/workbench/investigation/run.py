@@ -176,7 +176,8 @@ def unrecorded_reads(results, wanted):
             # DuckDB reads every file in a folder it is given; '/' alone is a separator, such as string_split's.
             folder = os.path.isdir(target) and Path(target).is_relative_to(ROOT)
             if os.path.isdir(target) and not folder and literal != "/":
-                problems.add(f"{view} reads {literal}, outside the project; copy it into the project")
+                problems.add(f"{view} reads {literal}, outside the project; publish it, or copy each file in and list it "
+                             "in code")
                 continue
             unpublished = []
             for path in glob.glob(os.path.join(target, "**") if folder else target, recursive=True):

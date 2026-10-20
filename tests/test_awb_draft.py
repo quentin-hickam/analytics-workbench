@@ -31,7 +31,7 @@
 # test_provenance_gaps_are_unknown_objects_and_unread_requirements: an {"unknown": reason} object and an unread requirements line are gaps; a settings value or column name such as unknown_pickup, or a string starting with unknown, is not.
 # test_check_numbers_reads_ordinary_notation: the issue's probes: 54.8/57.6 traces when both values are recorded, each half traced alone; 18:00 and December 2011 is give no row; an untraced figure still does.
 # test_numbers_rows_name_the_rule_that_applied: each numbers row's problem names why its number did not trace (no recorded value, joined digits, a recorded value on its rounding's upper edge, or a year-like count) and points to allowed_numbers.
-# test_packaging_commit_without_history_is_no_gap: a repository with no commit, or a project without Git, records its packaging commit as unknown with packaging_state's reason, and provenance_gaps lists neither packaging field, nor a producing commit evidence recorded without Git; another reason, or a non-text reason, is still a gap.
+# test_packaging_commit_without_history_is_no_gap: a repository with no commit, or a project without Git, records its packaging commit as unknown with packaging_state's reason, and provenance_gaps lists neither packaging field, nor a producing commit evidence recorded without Git while the project has none, which Git arriving later makes a gap; another reason, or a non-text reason, is still a gap.
 # test_check_numbers_allowed_phrases_and_precision: an allowed phrase covers only the number it is written around, a bare allowed text every occurrence; a row's text copied exactly covers its number after a line wrap or extra spaces; a number traces at every written digit beyond 28 significant digits and not one unit of a further place outside its rounding.
 # test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's or a path's digits add nothing; evidence text and parsed settings content add scaled and scientific values a narrative can write in full, without dates, booleans, or the settings file's size.
 # test_recorded_values_keep_every_json_digit: profile and evidence fractions keep every written digit, so the exact narrative value traces and a value one digit off does not.
@@ -989,8 +989,14 @@ def test_packaging_commit_without_history_is_no_gap(tmp_path):
         {"field": "packaging_commit", "reason": "git timed out"},
         {"field": "packaging_uncommitted_changes", "reason": ["the checkout has no commit yet"]},
         {"field": "producing_commit", "reason": "the checkout has no commit yet"}]
-    # A producing commit evidence recorded without Git is no gap either.
-    assert draft.provenance_gaps({"producing_commit": {"unknown": "not a git repository"}}) == []
+    # A producing commit evidence recorded without Git is no gap while the project still has none; once Git
+    # arrives, as an awb-init repair may add it, the old result's missing commit is a gap again.
+    no_git = {"unknown": "not a git repository"}
+    assert draft.provenance_gaps({"producing_commit": no_git, "packaging_commit": unknown,
+                                  "packaging_uncommitted_changes": unknown}) == []
+    assert draft.provenance_gaps({"producing_commit": no_git, "packaging_commit": "abc123",
+                                  "packaging_uncommitted_changes": "none"}) == [
+        {"field": "producing_commit", "reason": "not a git repository"}]
 
 
 def test_check_numbers_allowed_phrases_and_precision(tmp_path):
@@ -2045,7 +2051,8 @@ def test_release_reports_fields_for_the_report(project, capsys):
                                        "disposition": "release_with_caveat", "new": True}]
     # The open caveats the release carries, new or carried forward, so the report never calls it clean.
     assert report["open_caveats"] == slide + [{**FLAG, "represented_in": ["chart 1"]}]
-    assert report["provenance_gaps"] == []  # without Git, no commit could have been recorded
+    # The evidence was recorded without Git and the project has Git now, so the missing commit is a gap.
+    assert report["provenance_gaps"] == [{"field": "producing_commit", "reason": "not a git repository"}]
     assert report["checkout_only_acquisitions"] == [
         {"acquisition": "data/raw/crm/a1", "retained_copy": "this checkout only"},
         {"acquisition": "data/raw/crm/a3", "retained_copy": "no Acquisitions row"}]

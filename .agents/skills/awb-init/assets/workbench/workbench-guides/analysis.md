@@ -4,7 +4,7 @@ Paths below that begin with `references/` or `assets/` are in the `awb-init` ski
 
 ## Structure
 
-Put reusable operations in `src/`: `src/preparation/` for acquisition, landing, conversion, session loading, normalization, and corrections; `src/exploration/` for neutral measurements, comparisons, profiles, and graph operations; `src/packaging/` for shared package assembly. Reuse existing operations first. Tell the user when the analysis does cleaning or exploration itself. Each investigation's `run.py` selects shared operations and its `settings.toml` supplies scope and settings. Intermediate computation stays in views and in-process results, never in CSV files handed between steps. An investigation without `run.py` gets one adapted from `assets/workbench/investigation/run.py` and `settings.toml` before its next rerun.
+Put reusable operations in `src/`: `src/preparation/` for acquisition, landing, conversion, session loading, normalization, and corrections; `src/exploration/` for neutral measurements, comparisons, profiles, and graph operations; `src/packaging/` for shared package assembly. Reuse existing operations first. Each investigation's `run.py` selects shared operations and its `settings.toml` supplies scope and settings. Intermediate computation stays in views and in-process results, never in CSV files handed between steps. An investigation without `run.py` gets one adapted from `assets/workbench/investigation/run.py` and `settings.toml` before its next rerun.
 
 ## Add a result
 
