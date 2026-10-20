@@ -34,7 +34,8 @@
 # test_only_a_disposition_to_or_from_omit_makes_a_review_stale: release_with_caveat or revalidate leaves the review current, omit makes it stale, and an inventory rewrite leaves it current.
 # test_failed_review_is_recorded_and_shows_failed: a report with an error violation is recorded with passed false and shows failed with the prior report; a repair makes it stale, and a scoped review that passes makes it current.
 # test_small_repairs_at_the_cap_are_recorded_without_a_third_review: --repaired is refused after a full review, with no change, or, writing nothing, for a changed number, sign, unit, or word beside one, an added or blanked line, a repair naming no line, one line twice, or an unchanged line, a changed line no repair names, a change outside the narratives, an error violation whose cited line no repair changed or whose rule still matches there, or another report, while a legitimate match elsewhere blocks nothing; otherwise each repair settles one problem, an error violation included, the review's copy stays so show's diff holds the repairs, and the review is failed, then current once repairs settle every problem; another edit makes it stale, and a review recorded next starts the list again; a clean report takes no repair.
-# test_a_slide_rules_repair_lands_in_its_slide: an error violation of a slide rule, cited at its heading, is settled only by a changed line in that slide, and is refused while the rule still matches that slide.
+# test_a_slide_rules_repair_lands_in_its_slide: an error violation of a slide rule, cited at its heading or a line in its slide, is settled only by a changed line in that slide, and is refused while the rule still matches that slide.
+# test_a_repair_needs_each_error_row_to_cite_one_line: --repaired is refused when an error row cites no line or a range, or the last line counts an error no row lists, and when the rule still matches a cited line past the 20 matches check lists.
 # test_accepted_narrative_problem_is_recorded_with_its_reason: a warning violation and a narrative problem, each accepted with the user's reason, pass and are recorded verbatim; fewer or more acceptances do not pass.
 # test_acceptance_amends_the_recorded_review_and_refuses_after_a_change: --accept amends the recorded report, keeping its snapshot and time, and refuses, writing nothing, after an edit to what it read or for another report.
 # test_scoped_start_needs_a_prior_record: start --kind scoped with no record to scope against, or with no draft, is refused, writing nothing.
@@ -970,10 +971,12 @@ def test_small_repairs_at_the_cap_are_recorded_without_a_third_review(project, c
         "a clean review has nothing to accept or repair")
 
 
-def test_a_slide_rules_repair_lands_in_its_slide(project, capsys):
+@pytest.mark.parametrize("cited", [3, 5])
+def test_a_slide_rules_repair_lands_in_its_slide(project, capsys, cited):
     findings, methodology = project / DRAFT / "findings.md", project / DRAFT / "methodology.md"
     add(project, capsys, area="wording", pattern=r"September", scope="slide")
-    report = ('R-wording-001 violation error findings.md:3 "Up on September"\n'
+    # Cited at its slide's heading or at a line inside it, the violation covers the slide.
+    report = (f'R-wording-001 violation error findings.md:{cited} "Up on September"\n'
               "review (scoped): 1 violations (1 error), 0 narrative problems, 0 command problems\n")
     record(project, capsys, report.replace("review (scoped):", "review:"))
     record(project, capsys, report, kind="scoped")
@@ -982,14 +985,38 @@ def test_a_slide_rules_repair_lands_in_its_slide(project, capsys):
     methodology.write_text(METHODOLOGY.replace("October to the 12th.", "October, to the 12th."))
     code, out = record(project, capsys, report, kind="scoped", repaired=['methodology.md:5 "12th": comma'],
                        first=False)
-    assert code == 1 and "violation at findings.md:3 is not among the changed lines" in out["refused"]
+    assert code == 1 and f"violation at findings.md:{cited} is not among the changed lines" in out["refused"]
     methodology.write_text(METHODOLOGY)
     findings.write_text(FINDINGS.replace("September.", "September, the prior month."))
     code, out = record(project, capsys, report, kind="scoped", repaired=[entry], first=False)
-    assert code == 1 and out["refused"].startswith("error rule R-wording-001 still matches at findings.md:3")
+    assert code == 1 and out["refused"].startswith(f"error rule R-wording-001 still matches at findings.md:{cited}")
     findings.write_text(FINDINGS.replace("September.", "the prior month."))
     code, out = record(project, capsys, report, kind="scoped", repaired=[entry], first=False)
     assert code == 0 and out["passed"] and show(project, capsys)[1]["status"] == "current"
+
+
+def test_a_repair_needs_each_error_row_to_cite_one_line(project, capsys):
+    findings = project / DRAFT / "findings.md"
+    # 25 lines match, more than check lists, and the cited one past the 20th still matches after its edit.
+    deck = "# Orders\n\n### Partial weeks\n\n" + "".join(f"- The {word} partial week.\n" for word in [
+        "first", "second", "third", "fourth", "fifth"] * 5)
+    findings.write_text(deck)
+    add(project, capsys, pattern=r"partial week")
+    cite = "R-periods-001 violation error findings.md{} \"partial week\"\n"
+    last = "review (scoped): 1 violations (1 error), 0 narrative problems, 0 command problems\n"
+    entry = 'findings.md:29 "partial week": named the week'
+    for row, refusal in ((cite.format(":29"), "error rule R-periods-001 still matches at findings.md:29"),
+                         (cite.format(""), "a repair needs each error row to cite one <file>:<line>"),
+                         (cite.format(":29-30"), "a repair needs each error row to cite one <file>:<line>"),
+                         ("", "a repair needs each error row to cite one <file>:<line>")):
+        findings.write_text(deck)
+        record(project, capsys, (row + last).replace("review (scoped):", "review:"))
+        assert record(project, capsys, row + last, kind="scoped")[0] == 0
+        lines = deck.split("\n")
+        lines[28] += " so far"
+        findings.write_text("\n".join(lines))
+        code, out = record(project, capsys, row + last, kind="scoped", repaired=[entry], first=False)
+        assert code == 1 and out["refused"].startswith(refusal), (row, out)
 
 
 def test_accepted_narrative_problem_is_recorded_with_its_reason(project, capsys):

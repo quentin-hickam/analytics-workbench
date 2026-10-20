@@ -4930,27 +4930,39 @@ def _repair_problem(root, investigation, package, receipt, repaired, current):
         return f"{unnamed[0][0]}:{unnamed[0][1]} changed and no repair names it"
     if unchanged := sorted(set(named) - lines_changed):
         return f"a repair names {unchanged[0][0]}:{unchanged[0][1]}, which has not changed since the review"
-    body = [_ROW_MARKER.sub("", re.sub(r"[*_`]", "", line)) for line in _report_lines(receipt.get("report") or "")]
+    report = _report_lines(receipt.get("report") or "")
+    body = [_ROW_MARKER.sub("", re.sub(r"[*_`]", "", line)) for line in report[:-1]]
     cited = [(row[1], row[2], int(row[3])) for row in map(_ERROR_ROW.match, body) if row]
-    if not cited:
-        return None
-    rules = {row["id"]: row for row in check_review_rules(root, investigation, package)["rules"]}
-    for rule, name, number in cited:
-        row = rules.get(rule, {})
-        scope = row.get("scope", "line")
-        if scope == "line":
-            inside = {number}
-        else:
-            lines = current[name].decode("utf-8", "replace").split("\n") if current.get(name) is not None else []
-            starts = [first for first, _ in _sections(lines)] + [len(lines) + 1] if scope == "slide" else []
-            end = next((start for start in starts if start > number), len(lines) + 1)
-            inside = set(range(number, end)) if scope == "slide" else set(range(1, len(lines) + 1))
-        if not {line for file, line in named if file == name} & inside:
-            return (f"error rule {rule}'s violation at {name}:{number} is not among the changed lines the repairs "
+    summary = _SUMMARY.fullmatch(report[-1]) if report else None
+    if len(cited) != (int(summary[4]) if summary and not summary[2] else 0):
+        return ("a repair needs each error row to cite one <file>:<line>, and this report's error rows do not "
+                "match the errors its last line counts")
+    try:
+        rules = {rule["id"]: rule for rule in (_read_rules(root) or ([], []))[0]}
+    except (OSError, UnicodeError):
+        rules = {}
+    for rule_id, name, number in cited:
+        rule = rules.get(rule_id, {})
+        lines = [line.removesuffix("\r") for line in current[name].decode("utf-8", "replace").split("\n")] \
+            if current.get(name) is not None else []
+        # The cited place: the line, the slide holding it as the review read it, or the file.
+        inside = range(number, number + 1)
+        if rule.get("scope") == "document":
+            inside = range(1, len(lines) + 1)
+        elif rule.get("scope") == "slide":
+            try:
+                reviewed = (directory / "snapshot" / _stored(name)).read_bytes().decode("utf-8", "replace")
+            except OSError:
+                reviewed = ""
+            starts = [first for first, _ in _sections([line.removesuffix("\r") for line in reviewed.split("\n")])]
+            first = starts[bisect.bisect_right(starts, number) - 1]
+            inside = range(first, next((start for start in starts if start > first), len(lines) + 1))
+        if not any((name, line) in named for line in inside):
+            return (f"error rule {rule_id}'s violation at {name}:{number} is not among the changed lines the repairs "
                     "name")
-        for match in row.get("matches", []):
-            if match["file"] == name and (scope == "document" or match.get("line") == number):
-                return f"error rule {rule} still matches at {name}:{number}, where the review found it violated"
+        if rule.get("pattern") and rule.get("usable") and any(
+                re.search(rule["pattern"], lines[line - 1]) for line in inside if line <= len(lines)):
+            return f"error rule {rule_id} still matches at {name}:{number}, where the review found it violated"
     return None
 
 
