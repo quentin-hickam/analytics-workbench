@@ -33,7 +33,7 @@
 # test_receipt_after_a_clean_review_matches_until_what_it_read_changes: show is none before any record; a clean full review records a receipt (fingerprint, report verbatim, passed) and shows current, writing nothing; an edit to either narrative, the rule file, an added methodology note, or a flag's represented_in shows stale with that input alone in changed and a labelled diff whose hunks carry the current file's line numbers; undoing the edit shows current again.
 # test_only_a_disposition_to_or_from_omit_makes_a_review_stale: release_with_caveat or revalidate leaves the review current, omit makes it stale, and an inventory rewrite leaves it current.
 # test_failed_review_is_recorded_and_shows_failed: a report with an error violation is recorded with passed false and shows failed with the prior report; a repair makes it stale, and a scoped review that passes makes it current.
-# test_small_repairs_at_the_cap_are_recorded_without_a_third_review: --repaired is refused after a full review, with no change, or, writing nothing, for a changed number, sign, unit, or word beside one, an added or blanked line, a repair naming no line, one line twice, or an unchanged line, a changed line no repair names, a change outside the narratives, an error violation whose cited line no repair changed or whose rule still matches there, or another report, while a legitimate match elsewhere blocks nothing; otherwise each repair settles one problem, an error violation included, the review's copy stays so show's diff holds the repairs, and the review is failed, then current once repairs settle every problem; another edit makes it stale, and a review recorded next starts the list again; a clean report takes no repair.
+# test_small_repairs_at_the_cap_are_recorded_without_a_third_review: --repaired is refused after a full review, with no change, or, writing nothing, for a changed number, sign, unit, or word beside one, an added or blanked line, a repair naming no line, an unchanged line, or a line more often than report rows cite it, a changed line no repair names, a change outside the narratives, an error violation whose cited line no repair changed or whose rule still matches there, or another report, while a legitimate match elsewhere blocks nothing; otherwise each repair settles one problem, an error violation included, the review's copy stays so show's diff holds the repairs, and the review is failed, then current once repairs settle every problem; another edit makes it stale, and a review recorded next starts the list again; a headline holding an error violation and a narrative problem takes a repair for each; a clean report takes no repair.
 # test_a_slide_rules_repair_lands_in_its_slide: an error violation of a slide rule, cited at its heading or a line in its slide, is settled only by a changed line in that slide, and is refused while the rule still matches that slide.
 # test_a_repair_needs_each_error_row_to_cite_one_line: --repaired is refused when an error row cites no line or a range, or the last line counts an error no row lists, and when the rule still matches a cited line past the 20 matches check lists.
 # test_accepted_narrative_problem_is_recorded_with_its_reason: a warning violation and a narrative problem, each accepted with the user's reason, pass and are recorded verbatim; fewer or more acceptances do not pass.
@@ -915,7 +915,7 @@ def test_small_repairs_at_the_cap_are_recorded_without_a_third_review(project, c
             (FINDINGS + "- In every store.\n", [fixed], "findings.md has +1 lines since the review"),
             (FINDINGS.replace(heading, fixed_line), ["a"], "a repair names no <file>:<line> first"),
             (FINDINGS.replace(heading, fixed_line), [fixed, 'findings.md:3 "month": again'],
-             "two repairs name findings.md:3"),
+             "2 repairs name findings.md:3, which 1 report rows cite"),
             (FINDINGS.replace(heading, fixed_line).replace("September.", "September, a little."), [fixed],
              "findings.md:5 changed and no repair names it"),
             (FINDINGS.replace(heading, fixed_line), [fixed, 'findings.md:5 "Up": said by how much'],
@@ -966,6 +966,15 @@ def test_small_repairs_at_the_cap_are_recorded_without_a_third_review(project, c
     methodology.write_text(repaired)
     code, out = record(project, capsys, "R-periods-001 pass\nreview (scoped): clean\n", kind="scoped")
     assert code == 0 and out["passed"] and out["repaired"] == [] and snap.read_text() == findings.read_text()
+    # A headline holding an error violation and a narrative problem takes a repair for each.
+    edit(FINDINGS)
+    both = ('R-periods-001 violation error findings.md:3 "partial month"\n'
+            'narrative findings.md:3 "rose 4%" does not say against what\n' + SCOPED_ERROR_AND_NARRATIVE.splitlines()[-1])
+    assert record(project, capsys, both, kind="scoped")[1]["passed"] is False
+    edit(FINDINGS.replace(heading, fixed_line))
+    code, out = record(project, capsys, both, kind="scoped", first=False,
+                       repaired=[fixed, 'findings.md:3 "rose 4%": said against September'])
+    assert code == 0 and out["passed"] and show(project, capsys)[1]["status"] == "current", out
     # A clean report has nothing to repair.
     assert record(project, capsys, CLEAN, repaired=[fixed])[1]["refused"].startswith(
         "a clean review has nothing to accept or repair")

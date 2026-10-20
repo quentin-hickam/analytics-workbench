@@ -4869,6 +4869,8 @@ def _repair_lines(entry):
 
 # An error violation row's rule and cited place, which a repair must change.
 _ERROR_ROW = re.compile(r"(R-\S+) violation error (\S+?):([0-9]+)(?=\s|$)")
+# Any violation or narrative row's cited place.
+_CITED_ROW = re.compile(r"(?:R-\S+ violation (?:error|warning)|narrative) (\S+?):([0-9]+)(?=\s|$)")
 # What a word holding a number is compared by in a repaired line: itself, sign, %, and currency included, and
 # the words beside it, each without the punctuation around it, so "fell 4%" to "rose 4%", "$3 million" to
 # "$3 billion", or a swap of two figures is refused.
@@ -4884,8 +4886,8 @@ def _number_words(line):
 def _repair_problem(root, investigation, package, receipt, repaired, current):
     """Why the changes since the review are not the small repairs named, or None. The review's snapshot stays
     as it read the files, so the next review's diff shows every repair. Each change must be to a narrative,
-    adding or removing no line; each repair names, first, the <file>:<line> places it changed, no line named
-    twice, and every changed line is named, so one edit settles one problem at most; each changed line keeps
+    adding or removing no line; each repair names, first, the <file>:<line> places it changed, a line no
+    more often than report rows cite it, or once, and every changed line is named, so one edit settles one problem at most; each changed line keeps
     every word holding a number and the words beside it, and blanks no line. Each error violation's cited line
     is among them, or, for a slide or document rule, a line in that slide or file; and a rule with a pattern no
     longer matches there, though it may match elsewhere, since a match is only a candidate. A tool cannot tell
@@ -4917,21 +4919,25 @@ def _repair_problem(root, investigation, package, receipt, repaired, current):
                     return (f"{name}:{number} changes a number or the words beside one, which no small repair "
                             "does")
                 lines_changed.add((name, number))
-    named = set()
+    report = _report_lines(receipt.get("report") or "")
+    body = [_ROW_MARKER.sub("", re.sub(r"[*_`]", "", line)) for line in report[:-1]]
+    # A line may be named by as many repairs as the report has rows citing it, such as a headline holding an
+    # error violation and a narrative problem; any other changed line, once.
+    rows = Counter((row[1], int(row[2])) for row in map(_CITED_ROW.match, body) if row)
+    named = Counter()
     for entry in repaired:
         places = _repair_lines(entry)
         if places is None:
             return f"a repair names no <file>:<line> first: {entry[:80]!r}"
         for place in places:
-            if place in named:
-                return f"two repairs name {place[0]}:{place[1]}; name each changed line once"
-            named.add(place)
+            named[place] += 1
+            if named[place] > max(rows[place], 1):
+                return (f"{named[place]} repairs name {place[0]}:{place[1]}, which {max(rows[place], 1)} report "
+                        "rows cite; name each changed line once per problem it holds")
     if unnamed := sorted(lines_changed - set(named)):
         return f"{unnamed[0][0]}:{unnamed[0][1]} changed and no repair names it"
     if unchanged := sorted(set(named) - lines_changed):
         return f"a repair names {unchanged[0][0]}:{unchanged[0][1]}, which has not changed since the review"
-    report = _report_lines(receipt.get("report") or "")
-    body = [_ROW_MARKER.sub("", re.sub(r"[*_`]", "", line)) for line in report[:-1]]
     cited = [(row[1], row[2], int(row[3])) for row in map(_ERROR_ROW.match, body) if row]
     summary = _SUMMARY.fullmatch(report[-1]) if report else None
     if len(cited) != (int(summary[4]) if summary and not summary[2] else 0):
@@ -4985,9 +4991,9 @@ def record_review(root, investigation, package, kind, text, accepted=(), repaire
 
     With repaired, the small repairs made at the review cap, the report must be the recorded one too, of a
     scoped review, and every change since the review must be one of the repairs named (_repair_problem). They
-    join the repairs recorded before, one per line, a later one naming a line replacing the earlier; passed
-    counts them, and repaired_inputs records the repaired files' digests, so show reports current while they
-    stand, with no third review. The snapshot stays the one the review read, so the next review's diff shows
+    join the repairs recorded before, a later one naming a line replacing the earlier ones, so a line's repairs
+    are recorded together; passed counts them, and repaired_inputs records the repaired files' digests, so show
+    reports current while they stand, with no third review. The snapshot stays the one the review read, so the next review's diff shows
     the repairs, and repaired lists them until a new record, whose review read them."""
     root = Path(root)
     package_dir = _package_dir(root, investigation, package)
@@ -5213,10 +5219,13 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
                "only accepted and passed change, and the snapshot stays the one the review read.\n"
                "With --repaired, small repairs made at the review cap instead of a third review, the report must "
                "be the recorded one, of a scoped review. Every change since the review must be to a narrative's "
-               "lines, adding or removing none, each changed line named by exactly one repair, which opens with "
+               "lines, adding or removing none, each changed line named by one repair per report row citing it, "
+               "or one, each repair opening with "
                "the <file>:<line> places it changed, joined by commas, each keeping every word holding a number "
                "and the words beside it and blanking none. Each error violation's cited line, or a line in a slide "
-               "or document rule's slide or file, must be among them, its rule's pattern no longer matching there. The repairs join those recorded before, one per line; "
+               "or document rule's slide or file, must be among them, its rule's pattern no longer matching there. "
+               "The repairs join those recorded before, a later repair naming a line replacing the earlier ones, "
+               "so a line's repairs are recorded together; "
                "passed counts each as settling one violation or narrative problem, an error violation included, "
                "and show reports current while the repaired files stand. The snapshot stays the one the review "
                "read, so the next review's diff shows the repairs, and repaired lists them until a new record. "
