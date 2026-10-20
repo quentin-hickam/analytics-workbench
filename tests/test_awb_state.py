@@ -67,6 +67,13 @@ GAPS = [{"name": "columns", "outcome": "fail", "detail": "Missing x."},
         {"name": "joins", "outcome": "not-applicable", "detail": "not assessed"}]
 
 
+@pytest.fixture(autouse=True)
+def pinned_today(monkeypatch):
+    """History entries take their date from _today(); pinned to TODAY, a full run crossing midnight after
+    collection compares one day, not two. Last updated is a real stamp, so tests match any date in it."""
+    monkeypatch.setattr(provenance, "_today", lambda: TODAY)
+
+
 def git(root, *args):
     return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
 
@@ -187,7 +194,7 @@ def test_show_prints_each_findings_question(project, capsys):
 def test_run_rows_are_added_kept_and_refreshed(project):
     assert produce(project, "r1") == {"action": "added", "status": "provisional", "claim": "association", "history": False}
     row = "| <state the finding from r1> | [r1](evidence/r1.json) | provisional | association | |"
-    assert row in text(project, STATE) and re.search(rf"\nLast updated: {TODAY}T\d\d:\d\d:\d\d[+-]\d\d:\d\d\n", text(project, STATE))
+    assert row in text(project, STATE) and re.search(r"\nLast updated: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d\n", text(project, STATE))
     assert produce(project, "r2", checks=GAPS)["action"] == "added"
     assert "| provisional | association | failed checks: columns; not assessed: joins |" in text(project, STATE)
 
@@ -460,7 +467,7 @@ def test_parsers_read_written_files(project, capsys):
     result = status.collect(project)
     assert not [u for u in result["uncertainties"] if u["path"] == STATE]
     active = result["active"]
-    assert re.fullmatch(rf"{TODAY}T\d\d:\d\d:\d\d[+-]\d\d:\d\d", active["last_updated"])
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d", active["last_updated"])
     # Every record these writes left uncommitted predates the state's Last updated.
     assert result["git"]["state_status"] == "up to date"
     assert active["counts"] == {"supported": 1, "provisional": 2}

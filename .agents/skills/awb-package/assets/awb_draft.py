@@ -3305,6 +3305,8 @@ def _git(root, *args):
 # a project without Git, or a repository before its first commit, has no version to name.
 NO_GIT, NO_COMMIT = "the project is not a git repository", "the checkout has no commit yet"
 _NO_HISTORY = {NO_GIT, NO_COMMIT}
+# awb_provenance.py's reason for a producing commit recorded without Git, no gap either; keep the two equal.
+_NO_PRODUCING_GIT = "not a git repository"
 
 
 def packaging_state(root, paths=("src", "package-format")) -> tuple:
@@ -3951,6 +3953,11 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     report["packaging_commit"] = fields["packaging_commit"]
     report["packaging_uncommitted_changes"] = fields["packaging_uncommitted_changes"]
     report["flags_pending"] = pending_flags(record.get("revalidation_flags"))
+    # A new package beside others may be a mistyped name, which created alone does not say.
+    others = sorted(p.name for p in draft.parent.parent.iterdir() if p.is_dir() and p != draft.parent)
+    if report["created"] and others:
+        report["new_package"] = (f"created {_rel(root, draft)} beside {', '.join(others)}; if {package} is a "
+                                 "mistyped name, remove its folder and export to the intended package")
     if (draft / "findings.md").is_file():
         report["check_charts"] = check_charts(draft / "findings.md", draft / "charts")
     return report
@@ -4015,7 +4022,8 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "each represented result to the question its evidence records, for methodology.md to repeat "
                "verbatim; the manifest's results entries record it.\nslide_slugs lists each finding slide's slug and "
                "heading, which the manifest's slide_slugs records with its primary result, once findings.md and "
-               "methodology.md exist; presentation_order lists these slugs.\nExit 0 only "
+               "methodology.md exist; presentation_order lists these slugs.\nnew_package names the investigation's other "
+               "packages when export creates a draft beside them.\nExit 0 only "
                "when written and check_charts is empty; 2 for unusable arguments.")
     _package_arguments(parser)
     parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS][@SELECTION]",
@@ -5064,8 +5072,9 @@ def provenance_gaps(record: dict) -> list[dict]:
     with the reason, and each requirements line a result's runtime could not read, whose packages'
     versions went unrecorded. A string is never a gap, so a settings value or a column name such as
     unknown_pickup is not one. Neither is packaging_commit or packaging_uncommitted_changes unknown for
-    exactly a reason packaging_state gives for a project without Git or without a commit yet; any other
-    reason there is a gap."""
+    exactly a reason packaging_state gives for a project without Git or without a commit yet, nor
+    producing_commit unknown for exactly the reason evidence gives without Git; any other reason there is
+    a gap."""
     gaps = []
 
     def walk(value, path):
@@ -5087,6 +5096,8 @@ def provenance_gaps(record: dict) -> list[dict]:
     for key, value in record.items():
         if key in {"packaging_commit", "packaging_uncommitted_changes"} and _is_unknown(value) \
                 and isinstance(value["unknown"], str) and value["unknown"] in _NO_HISTORY:
+            continue
+        if key == "producing_commit" and value == {"unknown": _NO_PRODUCING_GIT}:
             continue
         if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers", "presentation_order"}:
             walk(value, key)

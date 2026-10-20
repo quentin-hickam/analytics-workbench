@@ -13,6 +13,10 @@ All notable changes to this project are recorded in this file. The format is bas
 - `scripts/measure-instruction-load.py` also reports the current size of the MCP tool definitions, and the README's admin section adds a short note on cost per request.
 - Python 3.12 is the default interpreter when installed; 3.10 or later still works. `awb-init` builds a new project's `.venv` with Python 3.12, else with the system's default Python 3 when it is 3.10 or later, and the README and `awb-init` say to run the MCP server registration with Python 3.12 (`python3.12`, or `py -3.12` on Windows) when it is installed. The registered interpreter is still the one that runs `install_helpers.py --mcp-config`.
 
+### Fixed
+
+- Follow-ups to the simulation fixes: `review-receipt record` refuses a failing report re-sent with only blank lines, whitespace, or backticks changed, counts rows in bold, task lists, block quotes, or under two markers, and names the way out when a new reviewer repeats a refused report; `show` cuts its diff to `AWB_MCP_MAX_CHARS`. `run.py` refuses shared SQL reading a folder outside the project and accepts a publication folder without its trailing slash. The exploration scan counts duplicate rows without lineage columns, and a settings date column of non-year integers is one not-applied line whose bound no longer filters; awb-clean's examples show the repeated row before its lineage, and `correction-views.md` gives a pattern for repeats within a part. Chart headers that repeat once normalized, such as `CO₂` and `CO2`, are refused. A producing commit recorded without Git is no provenance gap, as the 0.4.0 note said. `export` names the investigation's other packages when it creates a new one, and `state render --help` says it sets Last updated. The agent says when landing or analysis does cleaning or exploration itself.
+
 ## [0.4.0] - 2026-10-19
 
 ### Added

@@ -10,7 +10,7 @@
 # test_evidence_older_than_scoped_3_is_reported_for_rerun: check-draft and export --result refuse awb-evidence/1 and unscoped /3 with a rerun instruction.
 # test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
 # test_check_draft_reports_outline_and_chart_spec_rows: a headline over 15 words, a chart form outside the seven, a Data column the chart file lacks, and a file column no Data role names fail check-draft with outline and charts rows in both modes, and release refuses on them.
-# test_export_creates_a_missing_draft_folder: export with no draft folder creates it on a write, and not when missing evidence writes nothing; with no findings.md it records no slides; check-draft refuses a missing draft by naming the step that creates it.
+# test_export_creates_a_missing_draft_folder: export with no draft folder creates it on a write, and not when missing evidence writes nothing, naming the investigation's other packages in new_package; with no findings.md it records no slides; check-draft refuses a missing draft by naming the step that creates it.
 # test_a_headline_preview_is_no_package_file: a file under the draft's top-level .preview/ is not inventoried, and rewriting or removing it leaves the inventory verifying; a .preview/ deeper in the draft is a foreign file.
 # test_check_draft_requires_each_question_in_methodology: export's questions pass once methodology repeats them; a question methodology lacks or rewords, a results entry without a question, and a manifest without results fail check-draft's questions, and release refuses on the check.
 # test_questions_check_reads_methodology_as_it_renders: a question wrapped, emphasized, linked, escaped, in a code span, heading, or list item, or after a comment block on its line matches; one only in a comment, inline or a block, in fenced code, split over two paragraphs, or reworded does not.
@@ -31,7 +31,7 @@
 # test_provenance_gaps_are_unknown_objects_and_unread_requirements: an {"unknown": reason} object and an unread requirements line are gaps; a settings value or column name such as unknown_pickup, or a string starting with unknown, is not.
 # test_check_numbers_reads_ordinary_notation: the issue's probes: 54.8/57.6 traces when both values are recorded, each half traced alone; 18:00 and December 2011 is give no row; an untraced figure still does.
 # test_numbers_rows_name_the_rule_that_applied: each numbers row's problem names why its number did not trace (no recorded value, joined digits, a recorded value on its rounding's upper edge, or a year-like count) and points to allowed_numbers.
-# test_packaging_commit_without_history_is_no_gap: a repository with no commit, or a project without Git, records its packaging commit as unknown with packaging_state's reason, and provenance_gaps lists neither packaging field; another reason, a non-text reason, or a producing commit is still a gap.
+# test_packaging_commit_without_history_is_no_gap: a repository with no commit, or a project without Git, records its packaging commit as unknown with packaging_state's reason, and provenance_gaps lists neither packaging field, nor a producing commit evidence recorded without Git; another reason, or a non-text reason, is still a gap.
 # test_check_numbers_allowed_phrases_and_precision: an allowed phrase covers only the number it is written around, a bare allowed text every occurrence; a row's text copied exactly covers its number after a line wrap or extra spaces; a number traces at every written digit beyond 28 significant digits and not one unit of a further place outside its rounding.
 # test_recorded_values_reads_whole_cells_and_quantities: a table cell is a number whole (an exponent too large to round does not crash) or read as narrative text, so an ID's or a path's digits add nothing; evidence text and parsed settings content add scaled and scientific values a narrative can write in full, without dates, booleans, or the settings file's size.
 # test_recorded_values_keep_every_json_digit: profile and evidence fractions keep every written digit, so the exact narrative value traces and a value one digit off does not.
@@ -401,8 +401,14 @@ def test_export_creates_a_missing_draft_folder(project, capsys):
     code, report = run(project, capsys, "export", "inv", "pkg", "--result", "r-404")
     assert code == 1 and not report["written"] and not (package / "draft").exists()
     code, report = run(project, capsys, "export", "inv", "pkg", "--chart", "r-001:region,late_rate", "--no-datasets")
-    assert code == 0 and report["written"] and report["created"], report
+    assert code == 0 and report["written"] and report["created"] and "new_package" not in report, report
     assert (package / "draft/manifest.json").is_file() and (package / "draft/charts/chart-1.csv").is_file()
+    # A draft created beside another package names it, as a mistyped name would be.
+    code, report = run(project, capsys, "export", "inv", "pgk", "--result", "r-001")
+    assert code == 0 and report["created"] and report["new_package"] == (
+        "created deliveries/inv/pgk/draft beside pkg; if pgk is a mistyped name, remove its folder and export to "
+        "the intended package")
+    shutil.rmtree(project / "deliveries/inv/pgk")
     # With no findings.md yet, export records no slides and prints none.
     assert report["slide_slugs"] == [] and "slide_slugs" not in manifest(project)
     # check-draft and review-receipt record refuse a missing draft by naming the step that creates it.
@@ -935,12 +941,12 @@ def test_provenance_gaps_are_unknown_objects_and_unread_requirements():
             "parameters": {"pickup": "unknown_pickup", "label": "Unknown region"},
             "results": {"r-001": {"question": "Unknown pickups?",
                                   "validation": {"required_columns": ["unknown_pickup"]}}}}},
-        "producing_commit": {"unknown": "not a git repository"},
+        "producing_commit": {"unknown": "evidence lacks producing_commit"},
         "results": [{"result_id": "r-001", "runtime": {"packages": {"duckdb": "unknown"},
                                                        "unread_requirements": ["requirements.txt:2: -e ."]}}],
         "inventory": [{"unknown": "skipped field"}]}
     assert draft.provenance_gaps(record) == [
-        {"field": "producing_commit", "reason": "not a git repository"},
+        {"field": "producing_commit", "reason": "evidence lacks producing_commit"},
         {"field": "results[0].runtime.unread_requirements[0]",
          "reason": "requirements not read, packages unrecorded: requirements.txt:2: -e ."}]
 
@@ -983,6 +989,8 @@ def test_packaging_commit_without_history_is_no_gap(tmp_path):
         {"field": "packaging_commit", "reason": "git timed out"},
         {"field": "packaging_uncommitted_changes", "reason": ["the checkout has no commit yet"]},
         {"field": "producing_commit", "reason": "the checkout has no commit yet"}]
+    # A producing commit evidence recorded without Git is no gap either.
+    assert draft.provenance_gaps({"producing_commit": {"unknown": "not a git repository"}}) == []
 
 
 def test_check_numbers_allowed_phrases_and_precision(tmp_path):
@@ -2037,7 +2045,7 @@ def test_release_reports_fields_for_the_report(project, capsys):
                                        "disposition": "release_with_caveat", "new": True}]
     # The open caveats the release carries, new or carried forward, so the report never calls it clean.
     assert report["open_caveats"] == slide + [{**FLAG, "represented_in": ["chart 1"]}]
-    assert report["provenance_gaps"] == [{"field": "producing_commit", "reason": "not a git repository"}]
+    assert report["provenance_gaps"] == []  # without Git, no commit could have been recorded
     assert report["checkout_only_acquisitions"] == [
         {"acquisition": "data/raw/crm/a1", "retained_copy": "this checkout only"},
         {"acquisition": "data/raw/crm/a3", "retained_copy": "no Acquisitions row"}]

@@ -40,7 +40,7 @@ python3 src/awb.py publish <dataset> <publication-id> --from <acquisition-dir> -
 
 Sessions load `foundation/views/*.sql` in filename order, so a dependent view's file sorts after its inputs; result sessions then load the investigation's `views/*.sql` the same way.
 
-Preparation owns reusable parsing, normalization, checks, and corrections; their rationale goes in `foundation/quality.md`. EDA consumes canonical data, with population, periods, filters, exclusions, and assumptions local to the investigation; preparation and EDA may iterate before cleaning finishes. Promote a generally valid exploratory rule into preparation, or a saved query into `foundation/views/`, deliberately.
+Preparation owns reusable parsing, normalization, checks, and corrections; their rationale goes in `foundation/quality.md`. EDA consumes canonical data, with population, periods, filters, exclusions, and assumptions local to the investigation; preparation and EDA may iterate before cleaning finishes. Tell the user when landing does cleaning or exploration itself. Promote a generally valid exploratory rule into preparation, or a saved query into `foundation/views/`, deliberately.
 
 ## Storage
 
