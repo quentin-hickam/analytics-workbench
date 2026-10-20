@@ -25,6 +25,7 @@
 # test_scope_field_accepted_and_refused_forms: Scope line, slide, or document is accepted; any other value, a blank one included, is a problem, the rule is unchecked, and add refuses until it is repaired.
 # test_repeated_scope_line_is_reported: a second Scope line in a rule is a problem at its line.
 # test_add_refuses_without_the_users_yes: add without --confirmed refuses, exit 1, writing nothing, naming the question to ask; with it the rule is added.
+# test_audience_rule_reads_findings_and_the_note_alone: add --files audience writes a Files field after Pattern and Scope; check marks the row with files and lists matches in findings.md and the note, not methodology.md; --files all is written and reads every narrative; any other Files value is a problem, the rule unchecked, and add exits 2 on it.
 # test_package_rule_holds_for_its_package_alone: add --package <investigation>/<package> writes a Package field after Scope; check lists the rule, with package, for that package only, and a rule without one for every package; --package naming no package is refused and a malformed one exits 2, writing nothing; a malformed Package field is a problem and the rule holds for every package.
 # test_add_warns_on_a_number_a_draft_states: add still adds, warning once per number in the rule or fix that a draft narrative states, compared by value (1,240 and 1240.0), naming the first place; --package reads only that package's draft; a number no draft states, or an unreadable narrative's numbers, give no number warning, the latter a read warning instead.
 # test_another_packages_rule_leaves_a_review_current: adding or editing a rule kept for another package leaves a package's review current and its snapshot without that rule; a rule for this package or every package makes it stale; a rule file with problems counts whole.
@@ -32,6 +33,8 @@
 # test_receipt_after_a_clean_review_matches_until_what_it_read_changes: show is none before any record; a clean full review records a receipt (fingerprint, report verbatim, passed) and shows current, writing nothing; an edit to either narrative, the rule file, an added methodology note, or a flag's represented_in shows stale with that input alone in changed and a labelled diff whose hunks carry the current file's line numbers; undoing the edit shows current again.
 # test_only_a_disposition_to_or_from_omit_makes_a_review_stale: release_with_caveat or revalidate leaves the review current, omit makes it stale, and an inventory rewrite leaves it current.
 # test_failed_review_is_recorded_and_shows_failed: a report with an error violation is recorded with passed false and shows failed with the prior report; a repair makes it stale, and a scoped review that passes makes it current.
+# test_small_repairs_at_the_cap_are_recorded_without_a_third_review: --repaired is refused after a full review, with no change, or, writing nothing, for a changed number, sign, unit, or word beside one, an added or blanked line, a repair naming no line, one line twice, or an unchanged line, a changed line no repair names, a change outside the narratives, an error violation whose cited line no repair changed or whose rule still matches there, or another report, while a legitimate match elsewhere blocks nothing; otherwise each repair settles one problem, an error violation included, the review's copy stays so show's diff holds the repairs, and the review is failed, then current once repairs settle every problem; another edit makes it stale, and a review recorded next starts the list again; a clean report takes no repair.
+# test_a_slide_rules_repair_lands_in_its_slide: an error violation of a slide rule, cited at its heading, is settled only by a changed line in that slide, and is refused while the rule still matches that slide.
 # test_accepted_narrative_problem_is_recorded_with_its_reason: a warning violation and a narrative problem, each accepted with the user's reason, pass and are recorded verbatim; fewer or more acceptances do not pass.
 # test_acceptance_amends_the_recorded_review_and_refuses_after_a_change: --accept amends the recorded report, keeping its snapshot and time, and refuses, writing nothing, after an edit to what it read or for another report.
 # test_scoped_start_needs_a_prior_record: start --kind scoped with no record to scope against, or with no draft, is refused, writing nothing.
@@ -104,11 +107,12 @@ def run(project, capsys, *argv):
 
 
 def add(project, capsys, area="periods", severity="error", rule="Compare only complete months.",
-        fix="Drop the partial month.", pattern=None, scope=None, package=None, confirmed=True):
+        fix="Drop the partial month.", pattern=None, scope=None, package=None, confirmed=True, files=None):
     argv = ["review-rules", "add", "--area", area, "--severity", severity, "--rule", rule, "--fix", fix]
     return run(project, capsys, *argv, *(["--pattern", pattern] if pattern is not None else []),
                *(["--scope", scope] if scope is not None else []),
-               *(["--package", package] if package is not None else []), *(["--confirmed"] * confirmed))
+               *(["--package", package] if package is not None else []), *(["--confirmed"] * confirmed),
+               *(["--files", files] if files is not None else []))
 
 
 def snapshot(root, *, caches=False):
@@ -271,12 +275,12 @@ def test_wrapped_field_line_is_reported(project, capsys):
                     "  partial months.\n- Pattern: none\n- Fix: Drop it.\n")
     code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
     assert code == 1 and out["problems"] == [
-        {"rule": "R-periods-001", "line": 7, "problem": "line is not a - Severity, Rule, Pattern, Scope, Package, Fix, or Added field"}]
+        {"rule": "R-periods-001", "line": 7, "problem": "line is not a - Severity, Rule, Pattern, Scope, Files, Package, Fix, or Added field"}]
 
 
 @pytest.mark.parametrize("tail, expected", [
     ("- Fix: Replace\n#hashtags with plain words.\n",
-     [{"rule": "R-wording-001", "line": 8, "problem": "line is not a - Severity, Rule, Pattern, Scope, Package, Fix, or Added field"}]),
+     [{"rule": "R-wording-001", "line": 8, "problem": "line is not a - Severity, Rule, Pattern, Scope, Files, Package, Fix, or Added field"}]),
     ("- Fix: Count\n# of customers, not users.\n",
      [{"line": 8, "problem": "heading after the first rule is not a ## R-<area>-NNN rule heading"}]),
     ("- Fix: Rename.\n\n## Notes\n\nSee the style guide.\n",
@@ -581,6 +585,29 @@ def other_package(project):
     return draft
 
 
+def test_audience_rule_reads_findings_and_the_note_alone(project, capsys):
+    note = project / DRAFT / "methodology-note.md"
+    note.write_text("# How we worked\n\nThe partial month of October is left out.\n")
+    assert add(project, capsys, pattern=r"partial month", files="audience")[0] == 0
+    assert "- Pattern: `partial month`\n- Files: audience\n- Fix:" in (project / RULES).read_text()
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 0 and out["rules"][0]["files"] == "audience"
+    assert [match["file"] for match in out["rules"][0]["matches"]] == ["findings.md", "methodology-note.md"]
+    # all is written when given and reads every narrative, as a rule without Files does.
+    assert add(project, capsys, pattern=r"partial month", files="all")[0] == 0
+    assert "- Files: all\n" in (project / RULES).read_text()
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert "files" not in out["rules"][1]
+    assert [m["file"] for m in out["rules"][1]["matches"]] == ["findings.md", "methodology.md", "methodology-note.md"]
+    # Any other value is a problem, and the rule is unchecked.
+    path = project / RULES
+    path.write_text(path.read_text().replace("- Files: all", "- Files: findings"))
+    code, out = run(project, capsys, "review-rules", "check", "inv", "pkg")
+    assert code == 1 and out["rules"][1]["status"] == "unchecked"
+    assert out["problems"] == [{"rule": "R-periods-002", "problem": "unknown files 'findings'; use all or audience"}]
+    assert add(project, capsys, files="findings")[0] == 2
+
+
 def test_package_rule_holds_for_its_package_alone(project, capsys):
     other_package(project)
     add(project, capsys)
@@ -702,7 +729,9 @@ def test_package_and_release_invoke_the_read_only_review():
     # The last line counts every kind of problem, so it never says clean while one blocks.
     assert "`review: clean` when there is no violation, no narrative problem, and the command exited 0" in brief
     assert "`review: <v> violations (<e> error), <n> narrative problems, <c> command problems`" in brief
-    assert "reports no `error` violation and no command problem" in brief
+    # An error violation is never accepted: only a small repair recorded with --repaired settles one unreviewed.
+    assert "A review is passed when its last line reports no command problem" in brief
+    assert "is a `warning` violation or narrative problem the user accepted with a reason" in brief
     assert "releasing only once a review is passed" in release
     assert "its `review` row is `current`" in package and "`stale`" in brief and "`stale`" in release
     # The brief says a review goes stale once anything it read changes; helpers.md lists what it reads.
@@ -732,7 +761,7 @@ def draft_module(project):
     return load(project / "src/packaging/draft.py", "draft_receipt")
 
 
-def record(project, capsys, report, kind="full", accept=(), first=True):
+def record(project, capsys, report, kind="full", accept=(), first=True, repaired=()):
     """Record a report as review.md says: start the review, record its report as it returns, then, with
     acceptances, again with --accept. With first false, only the last of those runs."""
     path = project.parent / f"report-{project.name}.txt"
@@ -742,7 +771,8 @@ def record(project, capsys, report, kind="full", accept=(), first=True):
         assert run(project, capsys, "review-receipt", "start", "inv", "pkg", "--kind", kind)[0] == 0
     if accept and first:
         assert run(project, capsys, *argv)[0] == 0
-    return run(project, capsys, *argv, *[f"--accept={text}" for text in accept])
+    return run(project, capsys, *argv, *[f"--accept={text}" for text in accept],
+               *[f"--repaired={text}" for text in repaired])
 
 
 def show(project, capsys):
@@ -755,12 +785,12 @@ def with_manifest(project, flags=FLAGS):
 
 def test_receipt_after_a_clean_review_matches_until_what_it_read_changes(project, capsys):
     assert show(project, capsys) == (0, {"status": "none", "kind": None, "recorded_at": None, "accepted": [],
-                                         "report": None, "changed": [], "diff": "", "diff_cut": 0, "errors": []})
+                                         "repaired": [], "report": None, "changed": [], "diff": "", "diff_cut": 0, "errors": []})
     with_manifest(project)
     add(project, capsys)
     code, out = record(project, capsys, CLEAN)
     assert code == 0 and out == {"recorded": True, "receipt": RECEIPT, "kind": "full", "passed": True,
-                                 "accepted": []}
+                                 "accepted": [], "repaired": []}
     receipt = json.loads((project / RECEIPT).read_text())
     assert receipt["report"] == CLEAN and receipt["passed"] is True and receipt["accepted"] == []
     assert re.fullmatch(r"[0-9a-f]{64}", receipt["fingerprint"]) and receipt["kind"] == "full"
@@ -833,8 +863,133 @@ def test_failed_review_is_recorded_and_shows_failed(project, capsys):
     assert show(project, capsys)[1]["status"] == "stale"
     code, out = record(project, capsys, "R-periods-001 pass\nreview (scoped): clean\n", kind="scoped")
     assert code == 0 and out["passed"] and show(project, capsys)[1] | {"recorded_at": None, "report": None} == {
-        "status": "current", "kind": "scoped", "recorded_at": None, "accepted": [], "report": None,
-        "changed": [], "diff": "", "diff_cut": 0, "errors": []}
+        "status": "current", "kind": "scoped", "recorded_at": None, "accepted": [], "repaired": [],
+        "report": None, "changed": [], "diff": "", "diff_cut": 0, "errors": []}
+
+
+ERROR_AND_NARRATIVE = (
+    'R-periods-001 violation error findings.md:3 "partial month"\n'
+    'narrative findings.md:5 "Up on September" does not say by how much\n'
+    "review: 1 violations (1 error), 1 narrative problems, 0 command problems\n")
+SCOPED_ERROR_AND_NARRATIVE = ERROR_AND_NARRATIVE.replace("review:", "review (scoped):")
+
+
+def test_small_repairs_at_the_cap_are_recorded_without_a_third_review(project, capsys):
+    findings = project / DRAFT / "findings.md"
+    snap = project / "deliveries/inv/pkg/review/snapshot/findings.md"
+    add(project, capsys, pattern=r"partial month")
+    heading = "### Sales rose 4% in the partial month of October"
+    fixed, fixed_line = 'findings.md:3, methodology.md:3 "partial month": named the month to date', \
+        "### Sales rose 4% in October to date"
+    methodology = project / DRAFT / "methodology.md"
+    # A legitimate match elsewhere is only a candidate, so it never blocks a repair.
+    excluded = METHODOLOGY + "The partial month of October is excluded.\n"
+
+    def edit(text):
+        findings.write_text(text)
+        methodology.write_text(excluded.replace(heading, fixed_line) if fixed_line in text else excluded)
+
+    edit(FINDINGS)
+    # Only at the cap: a full review takes no repairs.
+    record(project, capsys, ERROR_AND_NARRATIVE)
+    edit(FINDINGS.replace(heading, fixed_line))
+    code, out = record(project, capsys, ERROR_AND_NARRATIVE, repaired=[fixed], first=False)
+    assert code == 1 and out["refused"].startswith("small repairs are recorded only at the review cap")
+    edit(FINDINGS)
+    assert record(project, capsys, SCOPED_ERROR_AND_NARRATIVE, kind="scoped")[1]["passed"] is False
+
+    def repair(*texts, report=SCOPED_ERROR_AND_NARRATIVE):
+        return record(project, capsys, report, kind="scoped", repaired=texts, first=False)
+
+    code, out = repair(fixed)
+    assert code == 1 and out["refused"].startswith("nothing the review read has changed")
+    # A changed number, sign, unit, or the word beside one; an added or blanked line; an unnamed, unchanged,
+    # unparsed, or twice-named line; an error violation whose cited line no repair changed, or whose rule still
+    # matches there, are each refused, writing nothing.
+    before = {k: v for k, v in snapshot(project).items() if "/review/" in k}
+    for text, entries, refusal in (
+            (FINDINGS.replace("rose 4%", "rose 5%"), [fixed], "findings.md:3 changes a number"),
+            (FINDINGS.replace("rose 4%", "fell 4%"), [fixed], "findings.md:3 changes a number"),
+            (FINDINGS.replace("4% in", "-4 pp in"), [fixed], "findings.md:3 changes a number"),
+            (FINDINGS + "- In every store.\n", [fixed], "findings.md has +1 lines since the review"),
+            (FINDINGS.replace(heading, fixed_line), ["a"], "a repair names no <file>:<line> first"),
+            (FINDINGS.replace(heading, fixed_line), [fixed, 'findings.md:3 "month": again'],
+             "two repairs name findings.md:3"),
+            (FINDINGS.replace(heading, fixed_line).replace("September.", "September, a little."), [fixed],
+             "findings.md:5 changed and no repair names it"),
+            (FINDINGS.replace(heading, fixed_line), [fixed, 'findings.md:5 "Up": said by how much'],
+             "a repair names findings.md:5, which has not changed"),
+            (FINDINGS.replace(heading, heading + " so far"), ['findings.md:3 "partial month": so far'],
+             "error rule R-periods-001 still matches at findings.md:3"),
+            (FINDINGS.replace("September.", "September, a little."), ['findings.md:5 "Up": by how much'],
+             "error rule R-periods-001's violation at findings.md:3 is not among the changed lines"),
+            (FINDINGS.replace("- Up on September.", ""), ['findings.md:5 "Up": dropped'], "findings.md:5 is blanked"),
+    ):
+        edit(text)
+        code, out = repair(*entries)
+        assert code == 1 and out["refused"].startswith(refusal), (refusal, out)
+        assert {k: v for k, v in snapshot(project).items() if "/review/" in k} == before
+    words = draft_module(project)._number_words
+    for old, new in (("cost $3 million.", "cost $3 billion."), ("12 stores, 40 regions", "40 stores, 12 regions"),
+                     ("fell 4% here", "rose -4 pp here")):
+        assert words(old) != words(new), (old, new)
+    assert words("to the 12th.") == words("to the (12th),") and words("Sales rose") == []
+    glossary = project / "foundation/glossary.md"
+    glossary.parent.mkdir(parents=True, exist_ok=True)
+    glossary.write_text("# Glossary\n")
+    edit(FINDINGS.replace(heading, fixed_line))
+    assert "foundation/glossary.md changed since the review" in repair(fixed)[1]["refused"]
+    glossary.unlink()
+    assert repair(fixed, report=SCOPED_ERROR_AND_NARRATIVE.replace("by how much", "by what"))[1][
+        "refused"].startswith("--repaired amends the report already recorded")
+    # One repair settles one of two problems: recorded, still failed, the review's copy kept.
+    code, out = repair(fixed)
+    assert code == 0 and out["passed"] is False and out["repaired"] == [fixed]
+    assert snap.read_text() == FINDINGS
+    out = show(project, capsys)[1]
+    assert out["status"] == "failed" and out["changed"] == ["findings.md", "methodology.md"]
+    assert f"+{fixed_line}" in out["diff"]
+    # The second, on its own line, passes the review with no third run; the next review's diff shows both.
+    findings.write_text(findings.read_text().replace("September.", "September, a little."))
+    second = 'findings.md:5 "Up on September": said by how much'
+    code, out = repair(second)
+    assert code == 0 and out["passed"] is True and out["repaired"] == [fixed, second]
+    out = show(project, capsys)[1]
+    assert out["status"] == "current" and out["repaired"] == [fixed, second]
+    assert out["report"] == SCOPED_ERROR_AND_NARRATIVE and "+- Up on September, a little." in out["diff"]
+    # Any other edit makes it stale; a review recorded next read the repairs, and the list starts again.
+    repaired = methodology.read_text()
+    methodology.write_text(repaired.replace("12th", "13th"))
+    assert "partial month" in repaired
+    assert show(project, capsys)[1]["status"] == "stale"
+    methodology.write_text(repaired)
+    code, out = record(project, capsys, "R-periods-001 pass\nreview (scoped): clean\n", kind="scoped")
+    assert code == 0 and out["passed"] and out["repaired"] == [] and snap.read_text() == findings.read_text()
+    # A clean report has nothing to repair.
+    assert record(project, capsys, CLEAN, repaired=[fixed])[1]["refused"].startswith(
+        "a clean review has nothing to accept or repair")
+
+
+def test_a_slide_rules_repair_lands_in_its_slide(project, capsys):
+    findings, methodology = project / DRAFT / "findings.md", project / DRAFT / "methodology.md"
+    add(project, capsys, area="wording", pattern=r"September", scope="slide")
+    report = ('R-wording-001 violation error findings.md:3 "Up on September"\n'
+              "review (scoped): 1 violations (1 error), 0 narrative problems, 0 command problems\n")
+    record(project, capsys, report.replace("review (scoped):", "review:"))
+    record(project, capsys, report, kind="scoped")
+    entry = 'findings.md:5 "Up on September": named the prior month'
+    # Cited at its slide's heading, the violation is settled by a changed line in that slide, not elsewhere.
+    methodology.write_text(METHODOLOGY.replace("October to the 12th.", "October, to the 12th."))
+    code, out = record(project, capsys, report, kind="scoped", repaired=['methodology.md:5 "12th": comma'],
+                       first=False)
+    assert code == 1 and "violation at findings.md:3 is not among the changed lines" in out["refused"]
+    methodology.write_text(METHODOLOGY)
+    findings.write_text(FINDINGS.replace("September.", "September, the prior month."))
+    code, out = record(project, capsys, report, kind="scoped", repaired=[entry], first=False)
+    assert code == 1 and out["refused"].startswith("error rule R-wording-001 still matches at findings.md:3")
+    findings.write_text(FINDINGS.replace("September.", "the prior month."))
+    code, out = record(project, capsys, report, kind="scoped", repaired=[entry], first=False)
+    assert code == 0 and out["passed"] and show(project, capsys)[1]["status"] == "current"
 
 
 def test_accepted_narrative_problem_is_recorded_with_its_reason(project, capsys):
@@ -1181,7 +1336,8 @@ def test_acceptance_amends_the_recorded_review_and_refuses_after_a_change(projec
     receipt = json.loads((project / RECEIPT).read_text())
     code, out = record(project, capsys, WARNING_AND_NARRATIVE, accept=ACCEPTED, first=False)
     assert code == 0 and out["passed"] is True
-    assert json.loads((project / RECEIPT).read_text()) == {**receipt, "passed": True, "accepted": ACCEPTED}
+    assert json.loads((project / RECEIPT).read_text()) == {**receipt, "passed": True, "accepted": ACCEPTED,
+                                                          "repaired": []}
     assert {k: v for k, v in snapshot(project).items() if "/review/snapshot/" in k} == \
         {k: v for k, v in before.items() if "/review/snapshot/" in k}
     assert show(project, capsys)[1]["status"] == "current"

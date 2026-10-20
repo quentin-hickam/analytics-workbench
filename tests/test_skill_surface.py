@@ -887,19 +887,21 @@ def test_review_checks_reconciliation_claims_and_scopes_re_reviews():
     assert ('The first review of a draft, or any while `show` reports `none`, is full; every later one is scoped '
             'against the receipt, unless the user asks for a full one') in review
     # The user may accept a narrative problem with a reason, as a warning; the rounds are capped.
-    assert ('the user accepted, with a reason, every `warning` violation and narrative problem it reports') in review
+    assert ('each violation and narrative problem it reports is a `warning` violation or narrative problem the user '
+            'accepted with a reason, or settled by a small repair recorded with `--repaired`') in review
     assert '--accept "<file>:<line> <quote>: <the user\'s reason>"' in review
     assert ('When a second review in one request still reports problems, start no third review unless the user '
             'asks') in review
     # Routine repairs are reported at the cap; decisions and rule conflicts still go to the user.
     assert '(unchanged since the prior review)' not in review and 'why the earlier pass missed it' not in review
     assert 'Take a conflict between two rules to the user rather than repairing it' in review
-    assert ('At that stop, list the small repairs, those changing no number, no finding beyond narrowing to its '
-            'evidence, and no user-written or approved wording, in one plain note') in review
-    assert ("in one plain note saying the next request's scoped review checks them") in review
-    assert 'show the user each other problem in plain words with a recommended repair' in review
-    assert ("Make the small repairs now when no problem needs the user; otherwise make them with the user's answer, "
-            'after recording any acceptances with `--accept`') in review
+    # At the cap, small repairs are recorded against the receipt, check-draft verifying them, not a third review.
+    assert 'show the user each problem no small repair settles in plain words with a recommended repair' in review
+    assert ('Make the small repairs, those changing no number, no finding beyond narrowing to its evidence, and no '
+            "user-written or approved wording, with the user's answer when one needs it") in review
+    assert ("rerun `check-draft`, the repairs' verifier, then record that report again with `--repaired") in review
+    assert 'list the repairs in one plain note' in review
+    assert "the next request's scoped review checks them" not in review
     # Package is done on a passed review of the final files, full or scoped.
     assert 'its `review` row is `current`' in package
     assert 'the last review before the final `check-draft` is a full one' not in package
@@ -1351,7 +1353,8 @@ def test_readme_says_what_the_analyst_gets_and_is_asked():
     assert 'each later one reads only what changed since' in quick and 'When a second review' in quick
     assert 'line unchanged since the last review' not in quick
     assert 'makes small repairs that change no number' in quick and 'lists them in one note' in quick
-    assert 'any acceptances are recorded before repairs' in quick
+    assert 'so the request can finish without a third review' in quick
+    assert 'your acceptances are recorded with the repairs' in quick
     assert 'The draft is stable once' in quick
     assert 'about 500 to a page' in quick and 'more than 10% over it' in quick
     assert quick.count('unless you say to release without seeing them') == 2
