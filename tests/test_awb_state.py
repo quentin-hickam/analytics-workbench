@@ -6,7 +6,7 @@
 # test_failed_state_write_removes_new_evidence: evidence is removed only before findings.json is replaced; a failed state replacement names render, and failed history names missing prior rows.
 # test_signals_wait_for_the_replacements: SIGINT during the replacements reaches the previous handler only after it is restored.
 # test_evidence_commit_cites_verified_commits: HEAD's full SHA for committed unchanged evidence; otherwise the last commit holding a version, verified, or uncommitted.
-# test_finding_guards_and_history: missing rows or evidence, stale or unexplained promotion, flagged promotion or caveat, and reserved caveat prefixes are refused; --reason is required exactly when history is due; one entry per call; provisional rewording is silent; no-ops write nothing.
+# test_finding_guards_and_history: missing rows or evidence, stale, unexplained, or placeholder-text promotion (unless --text in the same call replaces it), flagged promotion or caveat, and reserved caveat prefixes are refused; --reason is required exactly when history is due; one entry per call; provisional rewording is silent; no-ops write nothing.
 # test_issues_and_next_edit_lists_in_one_call: adds and drops resolve against the original list, ambiguous or missing drops exit 2 listing candidates, only list lines change, numbering continues.
 # test_switch_keeps_the_pointer_form: switch rewrites only the pointer in its link, path, backticked or slug form, which collect_status accepts, and prints the view; a missing state.md exits 1 and a customized pointer is refused.
 # test_malformed_records_write_nothing: a missing or repeated Last updated or section, a wrong header, a short row, two rows for one result, or a missing history file exit 1 and leave every file byte for byte.
@@ -318,7 +318,9 @@ def test_finding_guards_and_history(project, capsys):
     refusals = [
         (["finding", "r1", "--status", "supported"], 2, "--reason is required"),
         (["finding", "r9", "--status", "superseded", "--reason", "x"], 1, "no findings row links r9"),
-        (["finding", "r3", "--status", "supported", "--reason", "x"], 1, "explain them with --caveat"),
+        (["finding", "r2", "--status", "supported", "--reason", "x"], 1, "placeholder text; state the finding with --text"),
+        (["finding", "r3", "--text", "Churn held", "--status", "supported", "--reason", "x"], 1,
+         "explain them with --caveat"),
         (["finding", "r4", "--status", "supported", "--reason", "x"], 1, "only a rerun clears the flag"),
         (["finding", "r4", "--caveat", "fine"], 1, "only a rerun clears the flag"),
         (["finding", "r3", "--caveat", "not assessed: none"], 2, "reserved prefixes"),
@@ -338,7 +340,7 @@ def test_finding_guards_and_history(project, capsys):
     assert code == 1 and "is stale" in err and snapshot(project) == {**before, "src/ops.py": b"x = 2\n"}
     (project / "src/ops.py").write_text("x = 1\n")
 
-    assert run(project, capsys, "finding", "r3", "--caveat", "joins: single table")[0] == 0
+    assert run(project, capsys, "finding", "r3", "--text", "Churn held", "--caveat", "joins: single table")[0] == 0
     head = git(project, "rev-parse", "HEAD")
     code, out, _ = run(project, capsys, "finding", "r1", "r3", "--status", "supported",
                        "--reason", "Checked against the Q3 renewals.")
@@ -658,7 +660,7 @@ def test_kept_notes_explain_only_the_checks_they_were_written_for(project):
     totals = [{"name": "totals", "outcome": "fail", "detail": "Totals differ."}]
     for result_id in ("r1", "r2"):
         produce(project, result_id, checks=GAPS)
-        provenance.update_findings(project, "churn", [result_id], caveat="Agency workers excluded")
+        provenance.update_findings(project, "churn", [result_id], text="Churn held", caveat="Agency workers excluded")
         provenance.update_findings(project, "churn", [result_id], status="supported", reason="checked")
     provenance.flag_findings(project, "churn", [{"result": "r1", "reason": "Q-004"}, {"result": "r2", "reason": "Q-004"}])
     produce(project, "r1", checks=totals)  # the correction changed r1's checks
@@ -858,6 +860,7 @@ def test_caveat_splits_notes_outside_brackets(project, capsys, caveat, notes):
 
 def test_package_promotion_command_runs(project, capsys):
     produce(project, "r1")
+    set_row(project, "r1", "Churn held")
     skill = " ".join((ROOT / ".agents/skills/awb-package/SKILL.md").read_text(encoding="utf-8").split())
     command = re.search(r"behind an approved headline with `python3 src/awb\.py state ([^`]+)`", skill)[1]
     argv = [{"<result-id>": "r1", "<why>": "The user approved its headline."}.get(word, word)
@@ -865,6 +868,7 @@ def test_package_promotion_command_runs(project, capsys):
     code, out, _ = run(project, capsys, *argv)
     assert code == 0 and "| supported |" in out
     produce(project, "r2")
+    set_row(project, "r2", "Churn fell")
     bare = [{"r1": "r2"}.get(word, word) for word in argv if word not in ("--reason", "The user approved its headline.")]
     code, _, err = run(project, capsys, *bare)
     assert code == 2 and "--reason is required" in err
