@@ -45,6 +45,7 @@ Say the provenance locates the producing state; never call a package reproducibl
 
 ## Storyline
 
+- `questions`: absent or `none`, covering every root question, or the ledger question IDs the package answers. Its **Open questions** slide and review then cover only those and the questions under them, not the brief's **Business question**. You record it and `export` keeps it.
 - `slide_slugs`: each finding slide in deck order as `slug`, `heading`, and `primary`, the first result its methodology section cites, or `none`. `export` writes it once `findings.md` and `methodology.md` exist, and `check-draft` updates each `heading`; both leave it as it is while `check-draft`'s `headings` lists a row.
   - A slug is taken from the slide's heading the first time it is recorded: its first six words, lowercased ASCII letters and digits joined by hyphens, such as `late-orders-rose-in-the-west`.
   - A slide keeps its slug while its heading stays, or, reworded, while its primary result stays, so a reworded heading keeps its place in `presentation_order`. A slide reworded while citing no result, or both reworded and given another primary result, takes a new slug.

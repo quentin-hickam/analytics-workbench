@@ -6,7 +6,7 @@ This file is the internal reference for the analysis this package represents. It
 
 - **Investigation:**
 - **Package:**
-- **Business question:**
+- **Business question:** the manifest's `questions`, else the brief's
 - **Decision or exploratory purpose:**
 - **Population and period:**
 - **Audience:**

@@ -101,6 +101,7 @@
 # test_presentation_order_is_no_provenance_gap: a presentation_order heading that starts with Unknown is no release provenance gap, as allowed_numbers is not.
 # test_storyline_orders_main_and_appendix_findings_each_by_the_ledger: main and appendix finding slides are ranked separately, the appendix numbering on.
 # test_open_questions_follows_how_we_know_when_limitations_is_in_the_appendix: with Limitations under ## Appendix, Open questions passes after How we know and fails before it.
+# test_manifest_questions_scope_the_open_questions_slide: without the manifest's questions every root's unanswered must questions are required; listing Q-001 requires only it and the questions under it; an ID the ledger lacks, a bare string, or an empty list is an open_questions row.
 # test_release_requires_a_current_review_receipt: check-draft reports the review's status and changed in both modes without changing passed; release refuses, creating nothing, with no receipt, a failed one, or a stale one, naming the status and changed inputs; a passed scoped review with an accepted problem releases, and the released manifest alone records its kind, time, and acceptances.
 # test_copy_releases_copies_compares_and_never_overwrites: existing releases copy to newly recorded storage at <location>/<investigation>/<package>/<n>/; a rerun reports already copied; a differing copy is a conflict; an unknown package fails; no audit directory is written.
 
@@ -3400,8 +3401,39 @@ def test_open_questions_includes_parked_and_recheck_without_truncation(project, 
     assert entry["status"] == "answered"
     write(draft, "findings.md", before_open + opened.replace("- Which regions need review?\n", ""))
     _, report = run(project, capsys, "check-draft", "inv", "pkg")
-    assert any(row.get("question") == "Which regions need review?" and row["problem"] == "missing question"
+    assert any(row.get("question") == "Which regions need review?" and row["problem"].startswith("missing question")
                for row in report["open_questions"])
+
+
+def test_manifest_questions_scope_the_open_questions_slide(project, capsys):
+    provenance = load(project / "src/provenance.py", "ledger_scope_fixture")
+    for text, parent in (("Which regions close late?", ""), ("Which carriers close late?", ""),
+                         ("Which region definition applies?", "Q-001")):
+        provenance.add_question(project, "inv", text, kind="context", answerer="user", origin="scope",
+                                priority="must", parent=parent)
+    draft = project / "deliveries/inv/pkg/draft"
+    limitations = "\n## Limitations and open caveats\n\n**Headline:** Coverage remains limited\n\n**Notes:** N.\n"
+    write(draft, "findings.md", BASE + limitations + "\n## Open questions\n\n**Headline:** Two questions remain\n\n"
+          "- Which regions close late?\n- Which region definition applies?\n\n**Notes:** N.\n")
+    record = manifest(project)
+
+    def check(questions):
+        write(draft, "manifest.json", json.dumps({**record, "questions": questions}))
+        return run(project, capsys, "check-draft", "inv", "pkg")
+
+    # Every root question counts until the manifest names the package's questions.
+    code, report = check("none")
+    assert code == 1 and [(row["problem"], row.get("question")) for row in report["open_questions"]] == [
+        ("missing question; for a question from other work, list the package's own in the manifest's questions "
+         "instead", "Which carriers close late?")]
+    # Listed, Q-001 and the question under it are the package's; Q-002 belongs to other work.
+    code, report = check(["Q-001"])
+    assert code == 0 and report["open_questions"] == [] and report["open_questions_count"] == 2, report
+    for questions, problem in ((["Q-009"], "the manifest's questions names Q-009, which the ledger lacks"),
+                               ("Q-001", "the manifest's questions is not none or a list of ledger question IDs"),
+                               ([], "the manifest's questions is not none or a list of ledger question IDs")):
+        code, report = check(questions)
+        assert code == 1 and problem in [row["problem"] for row in report["open_questions"]], report
 
 
 # A result ID cites only as a whole code span or in an evidence path; the bare ID in prose cites nothing.

@@ -921,7 +921,9 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
     steps = review[review.index('1. Run that command.'):review.index('4. Report exactly this')]
     step3 = steps[steps.index('3. Check what no command checks'):]
     assert '`brief.md`' in steps[:steps.index('2. Judge')]
-    assert 'against `brief.md`: every part of its **Business question**' in step3
+    # The package's questions, when the manifest lists them, stand in for the brief's Business question.
+    assert ("every part of each question the command's `questions` lists, else of `brief.md`'s **Business "
+            "question**") in step3
     assert ('is answered in a slide\'s headline, bullets, or chart, or listed as unanswered on the **Open questions** '
             'or **Limitations and open caveats** slide, not only in a slide\'s **Notes:** or nowhere') in step3
     assert 'how a source builds a series' in step3 and '`foundation/sources.md`' in step3
@@ -969,12 +971,10 @@ def test_review_reads_the_brief_and_keeps_tolerances_and_rules_in_bounds():
     contract = read('awb-package/references/package-contract.md')
     assert 'check-citation item' not in contract and 'A tolerance number' in rules
     # The glossary and source register the step 3 checks read make a review stale and scope a later one.
-    assert ('the checks against `brief.md`, `foundation/glossary.md`, or `foundation/sources.md` when the diff '
-            'changes it') in review
-    assert ('once the narratives, `brief.md`, `foundation/glossary.md`, `foundation/sources.md`, '
-            '`foundation/quality.md`, or `foundation/review-rules.md` change') in review
+    assert ('the checks against `brief.md`, `questions`, `foundation/glossary.md`, or `foundation/sources.md` when '
+            'the diff changes it') in review
+    assert 'once anything it read changes, which `changed` names' in review
     # So does the quality record and each scan methodology.md cites by its path, which scope a later one.
-    assert 'or a scan or saved query `methodology.md` names by its path changes' in review
     assert 'every sentence citing a quality ID whose row the diff of `foundation/quality.md` changes' in review
     # Templates point to the list instead of repeating its tolerance rule.
     for path in ('awb-package/assets/package-format/findings-template.md',
