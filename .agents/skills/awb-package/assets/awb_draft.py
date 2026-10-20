@@ -2290,8 +2290,8 @@ def _check_chart(number, headers, rows):
         raise ValueError(f"Chart {number} has no rows")
     if not all(isinstance(header, str) and header.strip() for header in headers):
         raise ValueError(f"Chart {number} has a blank or non-text header")
-    if len(set(headers)) != len(headers):
-        raise ValueError(f"Chart {number} repeats a header")
+    if len(set(map(_header_text, headers))) != len(headers):
+        raise ValueError(f"Chart {number} repeats a header, as a **Data:** line renders it")
     for header in headers:
         if _IDENTIFIER.search(header):
             raise ValueError(f"Chart {number} header is not a display name: {header}")
@@ -2371,6 +2371,9 @@ def check_charts(findings_path: str | os.PathLike, directory: str | os.PathLike)
             # CO₂ in the file matches CO₂ on the line, which renders as CO2.
             named = dict.fromkeys(header for _, header in pairs)
             shown = {_header_text(header) for header in headers[chart["number"]]}
+            if len(shown) != len(headers[chart["number"]]):
+                rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv repeats a header as a "
+                                                        "**Data:** line renders it, such as CO₂ and CO2; rename one"})
             for header in named:
                 if header not in shown:
                     rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv has no column "
@@ -3323,6 +3326,8 @@ def _git(root, *args):
 # a project without Git, or a repository before its first commit, has no version to name.
 NO_GIT, NO_COMMIT = "the project is not a git repository", "the checkout has no commit yet"
 _NO_HISTORY = {NO_GIT, NO_COMMIT}
+# awb_provenance.py's reason for a producing commit recorded without Git, no gap either; keep the two equal.
+_NO_PRODUCING_GIT = "not a git repository"
 
 
 def packaging_state(root, paths=("src", "package-format")) -> tuple:
@@ -3964,6 +3969,11 @@ def export(root, investigation, package, charts=(), datasets=(), results=(), *, 
     report["packaging_commit"] = fields["packaging_commit"]
     report["packaging_uncommitted_changes"] = fields["packaging_uncommitted_changes"]
     report["flags_pending"] = pending_flags(record.get("revalidation_flags"))
+    # A new package beside others may be a mistyped name, which created alone does not say.
+    others = sorted(p.name for p in draft.parent.parent.iterdir() if p.is_dir() and p != draft.parent)
+    if report["created"] and others:
+        report["new_package"] = (f"created {_rel(root, draft)} beside {', '.join(others)}; if {package} is a "
+                                 "mistyped name, remove its folder and export to the intended package")
     if (draft / "findings.md").is_file():
         report["check_charts"] = check_charts(draft / "findings.md", draft)
     return report
@@ -4029,7 +4039,8 @@ def cli_export(root: Path, argv: list[str]) -> int:
                "each represented result to the question its evidence records, for methodology.md to repeat "
                "verbatim; the manifest's results entries record it.\nslide_slugs lists each finding slide's slug and "
                "heading, which the manifest's slide_slugs records with its primary result, once findings.md and "
-               "methodology.md exist; presentation_order lists these slugs.\nExit 0 only "
+               "methodology.md exist; presentation_order lists these slugs.\nnew_package names the investigation's other "
+               "packages when export creates a draft beside them.\nExit 0 only "
                "when written and check_charts is empty; 2 for unusable arguments.")
     _package_arguments(parser)
     parser.add_argument("--chart", action="append", default=[], metavar="RESULT[:COLUMNS][@SELECTION]",
@@ -4539,13 +4550,17 @@ _REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.m
                   METHODOLOGY_NOTE: METHODOLOGY_NOTE, BRIEF: BRIEF, REVIEW_RULES: "review-rules.md",
                   GLOSSARY: "glossary.md", SOURCES: "sources.md", QUALITY: "quality.md",
                   "revalidation_flags": "revalidation_flags.json"}
-# show's whole JSON line, as printed, stays within one read tool result (16,000 characters by default).
-_READ_LIMIT = 16000
+# show's whole JSON line, as printed, stays within one read tool result: awb_mcp.py's MAX_CHARS, read alike.
+try:
+    _READ_LIMIT = max(1000, int(os.environ.get("AWB_MCP_MAX_CHARS") or 16000))
+except ValueError:
+    _READ_LIMIT = 16000
 _SUMMARY = re.compile(r"review( \(scoped\))?: (?:(clean)|([0-9]+) violations? \(([0-9]+) errors?\), "
                       r"([0-9]+) narrative problems?, ([0-9]+) command problems?)\.?")
-# A row may be bulleted or numbered, with backticks around it inside or outside the marker; review_summary
-# strips both before matching, as it strips backticks around the last line.
-_ROW_MARKER = re.compile(r"^(?:[-*+]|[0-9]+[.)])\s+")
+# A row may be bulleted, numbered, a task-list item, or quoted, under more than one marker, in bold or
+# backticks inside or outside them; review_summary drops emphasis and backticks and strips every marker
+# before matching, as it strips backticks around the last line.
+_ROW_MARKER = re.compile(r"^\s*(?:(?:[-+>]|[0-9]+[.)]|\[[ xX]\])\s*)*")
 _VIOLATION_ROW = re.compile(r"R-\S+ violation (error|warning)(?=\s)")
 _NARRATIVE_ROW = re.compile(r"narrative\s")
 _SUMMARY_FORM = ("`review: clean`, or `review: <v> violations (<e> error), <n> narrative problems, <c> command "
@@ -4668,6 +4683,12 @@ def _fingerprint(digests):
     return hashlib.sha256("".join(f"{name}\0{digest}\n" for name, digest in digests.items()).encode()).hexdigest()
 
 
+def _report_lines(text):
+    """The report's lines as record reads them: each stripped of whitespace and backticks, blank ones dropped.
+    The replay guard compares these, so a copy differing only there is the same report."""
+    return [line.strip().strip("`").strip() for line in text.splitlines() if line.strip().strip("`").strip()]
+
+
 def review_summary(text, kind, accepted) -> tuple:
     """(passed, refusal) from a review report: its last non-blank line, as review.md's Brief step 4 writes it.
 
@@ -4676,7 +4697,7 @@ def review_summary(text, kind, accepted) -> tuple:
     report no record may rest on: a last line that does not parse, a kind it does not open with, more error
     than violations, a clean line given acceptances, or a body listing more violation or narrative rows of a
     kind than the last line counts, so a report that undercounts its own rows never passes."""
-    lines = [line.strip().strip("`").strip() for line in text.splitlines() if line.strip().strip("`").strip()]
+    lines = _report_lines(text)
     if not lines:
         return None, "the report is empty"
     last = lines[-1]
@@ -4691,7 +4712,7 @@ def review_summary(text, kind, accepted) -> tuple:
         return None, "the report's last line counts more error violations than violations"
     if match[2] and accepted:
         return None, "a clean review has nothing to accept; record it without --accept"
-    body = [_ROW_MARKER.sub("", line, count=1).strip("`").strip() for line in lines[:-1]]
+    body = [_ROW_MARKER.sub("", re.sub(r"[*_`]", "", line)) for line in lines[:-1]]
     rows = Counter(row[1] for row in map(_VIOLATION_ROW.match, body) if row)
     narrative_rows = sum(1 for line in body if _NARRATIVE_ROW.match(line))
     if rows["error"] > errors or rows["warning"] > violations - errors or narrative_rows > narrative:
@@ -4741,7 +4762,7 @@ def record_review(root, investigation, package, kind, text, accepted=(), *, now=
 
     A report that does not pass is also refused when it is the one recorded, accepted or not, and an input
     has changed since (show reports stale), or when it was refused for a change under an earlier
-    start: a report in hand never covers an edit. A new reviewer returning the same words is refused too; a
+    start: a report in hand never covers an edit. A new reviewer returning it is refused too (_report_lines); a
     report that passes, such as a clean one, is not checked, since the Brief fixes its words.
 
     With accepted, the report must be the one already recorded, of the same kind, with nothing it read
@@ -4786,7 +4807,7 @@ def record_review(root, investigation, package, kind, text, accepted=(), *, now=
     except OSError as error:
         return {"recorded": False, "refused": f"the draft cannot be read: {error}"}
     digests = _digests(inputs)
-    report_digest = hashlib.sha256(text.encode()).hexdigest()
+    report_digest = hashlib.sha256("\n".join(_report_lines(text)).encode()).hexdigest()
     if digests != started.get("inputs"):
         if not passed and report_digest not in started.get("refused", []):
             try:
@@ -4799,10 +4820,13 @@ def record_review(root, investigation, package, kind, text, accepted=(), *, now=
         prior = _read_json(directory / RECEIPT)
     except (OSError, ValueError):
         prior = {}
-    if not passed and (report_digest in started.get("earlier", []) or isinstance(prior, dict) and prior.get(
-            "report") == text and prior.get("inputs") != digests):
+    if not passed and (report_digest in started.get("earlier", []) or isinstance(prior, dict) and isinstance(
+            prior.get("report"), str) and _report_lines(prior["report"]) == _report_lines(text)
+            and prior.get("inputs") != digests):
         return {"recorded": False, "refused": "this report was read against an earlier draft, refused or recorded "
-                                              f"before a change, so it cannot be recorded: {_NEW_REVIEW}"}
+                                              f"before a change, so it cannot be recorded: {_NEW_REVIEW}; if a new "
+                                              "reviewer returned it, repair a problem it lists, or run the other "
+                                              "kind of review"}
     snapshot = directory / "snapshot"
     try:
         # The old receipt goes first, so an interrupted record leaves none, and the next review is full.
@@ -4942,14 +4966,15 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
                "a new reviewer, and record the report it returns.\n"
                "With --accept, the report must be the one already recorded, with nothing it read changed since: "
                "only accepted and passed change, and the snapshot stays the one the review read.\n"
-               "Prints one JSON line: recorded, receipt, kind, passed, and accepted.\nRefuses, writing nothing, "
-               "when the last line does not parse, --kind disagrees with its opening, it counts more errors than "
+               "Prints one JSON line: recorded, receipt, kind, passed, and accepted.\nRefuses, leaving the record "
+               "as it was, when the last line does not parse, --kind disagrees with its opening, it counts more errors than "
                "violations, a clean report is given --accept, the report lists more violation or narrative "
                "rows than its last line counts, no review of this --kind was started, the draft changed after "
                "start, --accept comes with another report or after a change, or a report that does not pass is "
                "the recorded one after a change, or one refused for a change under an "
                "earlier start. A report that does not pass refused for a change after start is noted in "
-               "started.json, all that refusal writes; a new reviewer returning the same words is refused too.\n"
+               "started.json, all a refusal writes; a new reviewer returning it, blank lines, whitespace, and "
+               "backticks aside, is refused too.\n"
                "Exit 0 recorded; 1 refused; "
                "2 unusable arguments.")
     _package_arguments(record)
@@ -5080,8 +5105,9 @@ def provenance_gaps(record: dict) -> list[dict]:
     with the reason, and each requirements line a result's runtime could not read, whose packages'
     versions went unrecorded. A string is never a gap, so a settings value or a column name such as
     unknown_pickup is not one. Neither is packaging_commit or packaging_uncommitted_changes unknown for
-    exactly a reason packaging_state gives for a project without Git or without a commit yet; any other
-    reason there is a gap."""
+    exactly a reason packaging_state gives for a project without Git or without a commit yet, nor
+    producing_commit unknown for exactly the reason evidence gives without Git while the project still has
+    none; any other reason there is a gap, Git added since included."""
     gaps = []
 
     def walk(value, path):
@@ -5103,6 +5129,9 @@ def provenance_gaps(record: dict) -> list[dict]:
     for key, value in record.items():
         if key in {"packaging_commit", "packaging_uncommitted_changes"} and _is_unknown(value) \
                 and isinstance(value["unknown"], str) and value["unknown"] in _NO_HISTORY:
+            continue
+        if key == "producing_commit" and value == {"unknown": _NO_PRODUCING_GIT} \
+                and record.get("packaging_commit") == {"unknown": NO_GIT}:
             continue
         if key not in {"inventory", "export_checks", "revalidation_flags", "allowed_numbers", "presentation_order"}:
             walk(value, key)

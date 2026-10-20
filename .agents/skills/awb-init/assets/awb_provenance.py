@@ -137,9 +137,12 @@ def _expand(root, paths):
 
 
 def _view_publications(root, path):
+    """The publications a view names: data/parquet/<dataset>/<publication>/, or that folder without its
+    trailing slash when it is one."""
     try:
-        return sorted({f"data/parquet/{dataset}/{publication}" for dataset, publication in
-                       re.findall(r"data/parquet/([^/\s'\"]+)/([^/\s'\"*]+)/", (root / path).read_text())})
+        found = re.findall(r"data/parquet/([^/\s'\"]+)/([^/\s'\"*]+)(/|(?=['\"]))", (root / path).read_text())
+        return sorted({f"data/parquet/{dataset}/{publication}" for dataset, publication, slash in found
+                       if slash or (root / "data/parquet" / dataset / publication).is_dir()})
     except (OSError, ValueError) as error:
         return {"unknown": f"{path}: {error}"}
 
@@ -2718,7 +2721,7 @@ def cli_state(root: Path, argv: list[str]) -> int:
                    "detail records with wording of the same kind: sum wording for a sum, reconciliation wording for a "
                    "reconciliation, checked or verified wording for a completed check. A values or metrics judgment in [results.<id>.validation] whose detail states "
                    "the check records it. Warnings print first.\n",
-        "render": "Prints discarded disk rows; without findings.json the table renders empty.\n",
+        "render": "Prints discarded disk rows; without findings.json the table renders empty. Sets Last updated.\n",
         "flag": "Validates every flag before writing. --check writes nothing. Only a rerun clears a flag.\n",
         "issues": "--drop takes the item's number in the list or text only one item contains (case-sensitive), "
                   "resolved before any change. Only list-item lines change. Sets Last updated.\n",

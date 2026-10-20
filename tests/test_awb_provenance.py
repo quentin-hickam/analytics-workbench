@@ -56,7 +56,8 @@
 # test_result_problems_accepts_view_files_and_refuses_a_non_list: a foundation view file, written with ./ or not, and a file in the investigation's views/ pass; views that is not a list of non-empty strings is refused with or without the folder.
 # test_run_template_refuses_a_views_entry_that_is_not_a_file: run.py exits 2 naming a views entry that is a view's logical name, before opening a session or writing anything; without duckdb.
 # test_run_template_loads_shared_views_on_one_thread: run.py's session loads investigations/<name>/views/*.sql after the foundation views, in name order, on one thread; a producer imports a helper module from the investigation folder by name; evidence records the shared SQL as producing code and as views, with the foundation view it reads; an edit to the shared SQL stales the result.
-# test_run_template_records_shared_views_whatever_views_says: each shared SQL file, the foundation views it reads, and a publication it reads directly are recorded as views and inputs even when the result's settings set views, which replaces only detection from its queries; a change to that foundation view or that publication stales the result.
+# test_run_template_refuses_shared_sql_reading_a_glob_or_folder_outside_a_publication: a glob or project folder matching files outside a publication, or a folder outside the project, is refused before anything runs; files by their own paths and a '/' separator run.
+# test_run_template_records_shared_views_whatever_views_says: each shared SQL file, the foundation views it reads, and a publication it reads directly, by a glob or its folder without the trailing slash, are recorded as views and inputs even when the result's settings set views, which replaces only detection from its queries; a change to that foundation view or that publication stales the result.
 # test_run_template_records_evidence_and_drops_it_before_rewriting_the_table: prior_result checks the state before unlink; the run.py template records a result and writes its state.md row, keeps it on an identical rerun, and refuses before touching evidence when state.md is missing or drifts; a run failing after the table is rewritten leaves no evidence.
 
 import hashlib
@@ -992,6 +993,9 @@ def test_run_template_records_shared_views_whatever_views_says(project):
     write(project, "investigations/inv/views/01_screen.sql", b"create view screened as select n from orders where n > 0;\n")
     write(project, "investigations/inv/views/02_raw.sql",
           b"create view raw as select n from read_parquet('data/parquet/orders/p1/*.parquet');\n")
+    # A publication's folder without its trailing slash is that publication.
+    write(project, "investigations/inv/views/03_folder.sql",
+          b"create view folder as select n from read_parquet('data/parquet/orders/p1');\n")
     write(project, "investigations/inv/queries/r1.sql", b"select n from screened order by n\n")
     # An explicit views setting replaces detection from the queries, never the shared SQL's views.
     write(project, "investigations/inv/settings.toml",
@@ -1003,7 +1007,8 @@ def test_run_template_records_shared_views_whatever_views_says(project):
     views = {view["path"]: view["publications"] for view in evidence["views"]}
     assert views == {"foundation/views/customers.sql": [], "foundation/views/orders.sql": [],
                      "investigations/inv/views/01_screen.sql": [],
-                     "investigations/inv/views/02_raw.sql": ["data/parquet/orders/p1"]}
+                     "investigations/inv/views/02_raw.sql": ["data/parquet/orders/p1"],
+                     "investigations/inv/views/03_folder.sql": ["data/parquet/orders/p1"]}
     assert [p["path"] for p in evidence["publications"]] == ["data/parquet/orders/p1"]
     assert outcomes(project) == ["pass"] * 5
     original = (project / "foundation/views/orders.sql").read_bytes()
@@ -1054,7 +1059,7 @@ def test_run_template_refuses_shared_sql_reading_an_undeclared_file(project, tmp
     assert done.stderr == f"investigations/inv/views/01_screen.sql reads {outside}, outside the project; copy it into the project\n"
 
 
-def test_run_template_refuses_shared_sql_reading_a_glob_or_folder_outside_a_publication(project):
+def test_run_template_refuses_shared_sql_reading_a_glob_or_folder_outside_a_publication(project, tmp_path_factory):
     pytest.importorskip("duckdb")
     pytest.importorskip("pandas")
     install_run_template(project)
@@ -1078,6 +1083,14 @@ def test_run_template_refuses_shared_sql_reading_a_glob_or_folder_outside_a_publ
             f"folder '{literal}', outside a publication: evidence would miss a file added to it later, so read each "
             f"file by its own path, listed in every result's code, or publish them\n")
         assert not (project / "investigations/inv/evidence").exists()
+    # A folder outside the project is refused, as a file there is.
+    outside = tmp_path_factory.mktemp("outside")
+    (outside / "a.csv").write_bytes(b"n\n1\n")
+    write(project, "investigations/inv/views/01_screen.sql", screen.format(f"'{outside}/'").encode())
+    done = subprocess.run(run, capture_output=True, text=True)
+    assert done.returncode == 2 and done.stderr == (f"investigations/inv/views/01_screen.sql reads {outside}/, "
+                                                    "outside the project; publish it, or copy each file in and list "
+                                                    "it in code\n")
     # Each file by its own path runs; a word without "/" naming no file, such as a regex, is not a path,
     # and a folder outside the project, such as a separator, is not walked.
     write(project, "investigations/inv/views/01_screen.sql",

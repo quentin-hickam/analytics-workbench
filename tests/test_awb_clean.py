@@ -3,7 +3,7 @@
 # test_scan_reads_views_through_session_and_changes_no_data: a view loads through the project's session(); landed and view files keep their bytes and only the scan file is written.
 # test_text_dates_and_codes_are_typed_conservatively: a day-first text date column is typed by its one covering format, an all-ambiguous one is reported, and leading-zero codes stay text.
 # test_rescan_reports_delta_with_stable_ids_and_inherited_options: a rescan after a correction view reports before and after counts by issue, keeps ids, and reuses the baseline's options.
-# test_duplicate_rows_leave_lineage_columns_out_of_the_match: two sheets' copies split into across-part rows and remaining repeats when --lineage leaves their sheet and sheet_row values out of the match; examples keep lineage first, and explicit, declared and inherited lineage, tomli fallback and invalid-column refusals retain their behavior.
+# test_duplicate_rows_leave_lineage_columns_out_of_the_match: two sheets' copies split into across-part rows and remaining repeats when --lineage leaves their sheet and sheet_row values out of the match; examples show the repeated row before its lineage, and explicit, declared and inherited lineage, tomli fallback and invalid-column refusals retain their behavior.
 # test_declared_lineage_keeps_the_scanned_datasets_own_order: a dataset's own lineage declaration keeps its order, so its part column comes first, for a scan of its publication too; a dataset with none falls back to every declared column.
 # test_duplicate_rows_split_follows_cross_part_correction: repeats within the first part and copies in later parts split as the correction view keeps and drops them, their counts sum to the former combined count, separate quality rows and hashed links retain independent statuses, missing links rebuild from their full markers, and a corrected-view rescan resolves only the across-part issue.
 # test_duplicate_rows_without_lineage_keep_one_issue: exact repeats with no lineage produce only duplicate-rows.
@@ -247,7 +247,8 @@ def test_duplicate_rows_leave_lineage_columns_out_of_the_match(tmp_path, capsys)
     out = json.loads(capsys.readouterr().out)
     issue = next(i for i in out["issues"] if i["key"] == "duplicate-rows:across-parts")
     assert issue["count"] == 2 and issue["lineage"] == ["sheet", "sheet_row"]
-    assert issue["examples"][0].startswith('{"sheet": ["2009-2010", "2010-2011"], "sheet_row": ["1", "2"')
+    # The repeated row comes first, so stdout's cut example shows it rather than the lineage alone.
+    assert issue["examples"][0].startswith('{"invoice": "101", "amount": "6", "sheet": ["2009-2010", "20')
     record = json.loads((tmp_path / "foundation/scans/lines.json").read_text())
     across, full = keys(record)["duplicate-rows:across-parts"], keys(record)["duplicate-rows"]
     assert across["count"] + full["count"] == 3
@@ -258,8 +259,8 @@ def test_duplicate_rows_leave_lineage_columns_out_of_the_match(tmp_path, capsys)
     assert across["check"] == full["check"] == "duplicate-rows"
     assert across["detail"] == full["detail"] == {"lineage": ["sheet", "sheet_row"]}
     within = next(e for e in full["examples"] if e["value"]["invoice"] == "103")
-    assert within == {"value": {"sheet": ["2010-2011"], "sheet_row": ["3", "4"], "invoice": "103", "amount": "8"}, "count": 2}
-    assert list(full["examples"][0]["value"])[:2] == ["sheet", "sheet_row"]
+    assert within == {"value": {"invoice": "103", "amount": "8", "sheet": ["2010-2011"], "sheet_row": ["3", "4"]}, "count": 2}
+    assert list(full["examples"][0]["value"])[2:] == ["sheet", "sheet_row"]
     # A rescan keeps the baseline's lineage; the datasets.toml declaration is the default for a new scan.
     record, _ = scanner.scan(tmp_path, "data/lines.csv", rescan=True, today=TODAY)
     assert record["options"]["lineage"] == ["sheet", "sheet_row"]
