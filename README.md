@@ -107,7 +107,7 @@ The [UX simulation synthesis](docs/ux-simulation-2026-10-15/README.md) has each 
 
 - A turn that changed the project's records ends with one plain line: what changed for your questions, if anything, and the next step.
 - A commit saves the project's code and records, such as its queries and findings, as a point in its history on this computer that you can go back to. It uploads nothing. Data files and packages stay out of it, but results and the example values exploration and cleaning record are saved. The agent commits only when you ask; say "commit as you go" to switch.
-- Your host may ask you to approve a command or tool call; that prompt is the host's, not the workbench's. Setup may suggest, in one line, registering the workbench's `awb` tool server with your host, which cuts those approvals; the work runs without it.
+- Your host may ask you to approve a command or tool call; that prompt is the host's, not the workbench's. Setup registers the workbench's `awb` tool server for VS Code, and for other hosts suggests in one line how to register it; the server cuts those approvals, and the work runs without it.
 - The checks have limits. The package check confirms that every number in the deck outline, the methodology reference, and any methods note traces to a recorded result or is listed, with its reason, as coming from elsewhere, such as a fact you gave or a figure from an earlier release. The reviewer reads the wording against your brief, your review rules, and the evidence. Neither redoes the analysis, so read the headlines and caveats yourself.
 
 ## Included skills
@@ -153,7 +153,7 @@ Repair installs missing helpers and guides and replaces only the unmodified copi
 
 #### MCP server
 
-After installing the skills, run this with a stable Python 3.10+ interpreter outside any project virtual environment, replacing `<host>` with `copilot`, `claude`, or `codex`:
+In VS Code, setup registers `awb` for each workbench in its `.vscode/mcp.json`, which `.gitignore` keeps local; skip to [VS Code Local and package reviewer](#vs-code-local-and-package-reviewer). For other hosts, after installing the skills, run this with a stable Python 3.10+ interpreter outside any project virtual environment, replacing `<host>` with `claude`, `codex`, or `copilot` (Copilot CLI):
 
 ```sh
 python3 ~/.agents/skills/awb-init/scripts/install_helpers.py --mcp-config <host>
@@ -165,11 +165,11 @@ Prefer the host's command: it adds the entry to the host's user-level configurat
 
 | Host | Registration command | File | Printed format |
 | --- | --- | --- | --- |
-| VS Code Copilot | `copilot mcp add awb -- <python> <server>` (Copilot CLI) | `$COPILOT_HOME/mcp-config.json`, falling back to `~/.copilot/mcp-config.json` | JSON, top-level `mcpServers.awb`, `type: "stdio"` |
+| Copilot CLI | `copilot mcp add awb -- <python> <server>` (Copilot CLI) | `$COPILOT_HOME/mcp-config.json`, falling back to `~/.copilot/mcp-config.json` | JSON, top-level `mcpServers.awb`, `type: "stdio"` |
 | Claude Code | `claude mcp add-json --scope user awb '<entry>'` | `$CLAUDE_CONFIG_DIR/.claude.json`, falling back to `~/.claude.json` | JSON, top-level `mcpServers.awb` (user scope, outside `projects`) |
 | Codex | `codex mcp add awb -- <python> <server>` | `$CODEX_HOME/config.toml`, falling back to `~/.codex/config.toml` | TOML, `[mcp_servers.awb]` |
 
-VS Code Local reads the same `mcp-config.json` as Copilot CLI, so `copilot mcp add` registers `awb` for both; without Copilot CLI, merge the printed entry. Do not use `code --add-mcp`: it writes the VS Code profile `mcp.json`, which VS Code lists as deprecated and Copilot CLI does not read. Sources, checked 2026-10-15: `claude mcp add-json --help` in Claude Code 2.1.300, the Codex CLI source ([`mcp_cmd.rs`](https://github.com/openai/codex/blob/0003732489a514748e61a0f76a652ac992a5f4f5/codex-rs/cli/src/mcp_cmd.rs)), [adding MCP servers to Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers#using-the-copilot-mcp-add-subcommand), and [VS Code's command-line install](https://code.visualstudio.com/docs/agent-customization/mcp-servers).
+Sources, checked 2026-10-15: `claude mcp add-json --help` in Claude Code 2.1.300, the Codex CLI source ([`mcp_cmd.rs`](https://github.com/openai/codex/blob/0003732489a514748e61a0f76a652ac992a5f4f5/codex-rs/cli/src/mcp_cmd.rs)), and [adding MCP servers to Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers#using-the-copilot-mcp-add-subcommand).
 
 <!-- dist:exclude -->
 [GitHub Copilot compatibility](docs/copilot-compat.md#3-server-configuration) has the details.
@@ -185,8 +185,8 @@ Restart or reconnect the host's `awb` server after registration. The skills then
 
 1. In a new Copilot chat, choose **Local** in **Session Target**. A policy can limit targets, server access, or approval scopes; use the controls the host offers.
 2. Open the workbench folder itself as the workspace root: VS Code reads root `AGENTS.md` by default, and nested or parent instructions need separate opt-ins.
-3. Start the `awb` server and accept its trust prompt. For its write tools, choose **Allow in this Workspace** when offered. Read-only tools need no approval in Local, though `awb/read` declares `openWorldHint`, so result review can still appear.
-4. Install the [package reviewer definition](.agents/skills/awb-package/assets/awb-package-reviewer.agent.md) at user level: with **Local** selected, run **Chat: New Custom Agent**, choose the user/profile location, name it `awb-package-reviewer`, and replace the created file's contents with the shipped definition. Local reads user agents from VS Code profile storage, not `~/.copilot/agents/`. Keep it out of generated workbenches and update it on upgrades. See [custom agent locations](https://code.visualstudio.com/docs/agent-customization/custom-agents#custom-agent-file-locations).
+3. Start the `awb` server that setup wrote to `.vscode/mcp.json` and accept its trust prompt; keep no user-level `awb` registration beside it. For its write tools, choose **Allow in this Workspace** when offered. Read-only tools need no approval in Local, though `awb/read` declares `openWorldHint`, so result review can still appear.
+4. Setup installs the [package reviewer definition](.agents/skills/awb-package/assets/awb-package-reviewer.agent.md) at `.github/agents/awb-package-reviewer.agent.md`, where VS Code reads workspace agents, and repair updates it. See [custom agent locations](https://code.visualstudio.com/docs/agent-customization/custom-agents#custom-agent-file-locations).
 5. Confirm that a reviewer subagent gets its four file read/search tools and `awb/read`, calls its review-rules check, and has no edit, terminal, or write tool. VS Code names an MCP tool `<registration key>/<tool>` and silently ignores unknown names, so keep the server registered as `awb`, and never broaden the definition to `awb/*`; without `awb/read`, the review reports failure and the draft cannot finish. See the [VS Code tools reference](https://code.visualstudio.com/docs/agents/reference/tools-reference) and [custom agent tools](https://docs.github.com/en/copilot/reference/custom-agents-configuration#tools). Copilot end-to-end behavior remains a field test.
 
 #### Cost per request

@@ -5,6 +5,8 @@
 .venv/
 venv/
 __pycache__/
+# The awb MCP entry names this machine's interpreter and skills paths
+.vscode/mcp.json
 .ipynb_checkpoints/
 .DS_Store
 

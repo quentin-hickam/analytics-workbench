@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Install the workbench helpers, guides, and references README; declare their packages; upgrade shipped copies;
-print a host's registration command and user-level awb MCP server entry.
+"""Install the workbench helpers, guides, references README, and package reviewer agent; register the awb MCP
+server for VS Code in the workspace; declare their packages; upgrade shipped copies; print a host's registration
+command and user-level awb MCP server entry.
 
 Run with the interpreter that will run the project's analysis, which it records as README's
 `Project interpreter`:
@@ -39,6 +40,9 @@ Install/check modes print one line of JSON:
                      or customized (differs from the asset and has no matching receipt entry; kept unless
                      named by --replace)
   customized         each customized file -> the installed asset to compare it with
+  vscode_mcp         the awb server in .vscode/mcp.json, run by this interpreter: written (new file), added
+                     (to an existing file's servers), current, missing (--check), different (an awb entry
+                     with another command or args, kept), or unreadable (not a JSON object, kept)
   retired            (--upgrade) files the skills no longer ship: unmodified, removed, or customized (kept)
   requirements, python, packages, install   the third-party packages the helpers and the run.py
                      template need, where they are declared, and whether this interpreter imports them;
@@ -96,6 +100,7 @@ COPIED = {
     "workbench-guides/data.md": "awb-init/assets/workbench/workbench-guides/data.md",
     "workbench-guides/analysis.md": "awb-init/assets/workbench/workbench-guides/analysis.md",
     "foundation/references/README.md": "awb-init/assets/workbench/foundation/references/README.md",
+    ".github/agents/awb-package-reviewer.agent.md": "awb-package/assets/awb-package-reviewer.agent.md",
     "package-format/findings-template.md": "awb-package/assets/package-format/findings-template.md",
     "package-format/methodology-template.md": "awb-package/assets/package-format/methodology-template.md",
     "package-format/methodology-note-template.md": "awb-package/assets/package-format/methodology-note-template.md",
@@ -301,6 +306,35 @@ def _pip_install(python, prefix):
     return f"uv pip install --python {python}" if _uses_uv(prefix) else f"{python} -m pip install"
 
 
+# VS Code reads workspace servers from here; the entry holds this machine's paths, so .gitignore keeps it local.
+VSCODE_MCP = ".vscode/mcp.json"
+
+
+def _vscode_server(root, check):
+    """Register the awb server in the workspace's VS Code configuration, keeping any other server; an existing
+    awb entry or a file that is not plain JSON is reported and left as it is."""
+    path = root / VSCODE_MCP
+    entry = {"type": "stdio", "command": str(Path(sys.executable).absolute()),
+             "args": [str(SKILLS / "awb-init/assets/awb_mcp.py")]}
+    config = {"servers": {}}
+    if path.is_file():
+        try:
+            config = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(config, dict) or not isinstance(config.setdefault("servers", {}), dict):
+                raise ValueError
+        except ValueError:
+            return "unreadable"
+        if "awb" in config["servers"]:
+            return "current" if config["servers"]["awb"] == entry else "different"
+    if check:
+        return "missing"
+    status = "added" if path.is_file() else "written"
+    config["servers"]["awb"] = entry
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    return status
+
+
 def _copy(asset, target):
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(asset, target)
@@ -399,6 +433,7 @@ def install(root, *, check=False, upgrade=False, package_formats=False, replace=
     if readme is not None:
         (root / "README.md").write_bytes(readme.encode("utf-8"))
     result["interpreter"] = interpreter
+    result["vscode_mcp"] = _vscode_server(root, check)
 
     requirements = sorted(REQUIREMENTS.values(), key=str.lower)
     declared_in, declared, unread = _declared(root)
