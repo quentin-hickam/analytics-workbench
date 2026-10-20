@@ -7,7 +7,7 @@
 # test_setup_runs_under_and_records_the_interpreter_it_is_given: setup with interpreter runs the installer under it and records it, project-relative inside the project, so later calls find it; a relative, absent, or empty interpreter is refused.
 # test_read_commands_round_trip_and_write_nothing: every read command without DuckDB (state, questions, stale, review-rules, check-draft, status, help) runs its helper and leaves the project, .git included, unchanged.
 # test_read_check_draft_reports_helper_drift: read check-draft reports no helper_drift on a fresh setup, and a helper_drift row naming src/packaging/draft.py once it is edited.
-# test_records_round_trip: records adds a question, edits next steps, refuses a review rule without --confirmed, adds one with it and one with --scope and --package, flags through stdin, and runs clean-record, each writing its record.
+# test_records_round_trip: records adds a question, edits next steps, refuses a review rule without --confirmed, adds one with it and one with --scope and --package, flags through stdin, runs clean-record, and adds a friction entry, each writing its record.
 # test_review_receipt_round_trip: read review-receipt shows none, package review-receipt refuses a record with no start, starts a review, and records a report passed on stdin, and read then shows it stale with the diff and the prior report after an edit, writing nothing; its help topic resolves, and read requires the package.
 # test_question_tree_metadata_round_trip: records sets parent and priority on add and on an answered question's edit, and sets and clears an open question's show flag; read returns each change while keeping its answer, and attempts to change answered question content or replace its answer are refused.
 # test_concurrent_write_calls_keep_every_update: write calls sent without waiting run one at a time, so every next step each one adds is kept.
@@ -325,7 +325,8 @@ def test_read_commands_round_trip_and_write_nothing(workbench, connect):
     # Every finding and the state's freshness reach the read tool with the rest of the collector's facts.
     assert "findings" in active and "state_status" in json.loads(text.split("\n\n")[0])["git"]
     for topic, expected in ((None, "usage: python3 src/awb.py"), ("questions add", "--answerer"),
-                            ("state finding", "--claim"), ("eda-scan", "--show"), ("install", "--upgrade")):
+                            ("state finding", "--claim"), ("friction add", "--kind"), ("eda-scan", "--show"),
+                            ("install", "--upgrade")):
         text, error = client.call("read", command="help", **({"topic": topic} if topic else {}))
         assert not error and expected in text, topic
     assert snapshot(workbench) == before
@@ -365,7 +366,12 @@ def test_records_round_trip(workbench, connect):
     assert not error and text.startswith("{")
     text, error = client.call("records", command="clean-record", args=["absent", "--dry-run"], stdin="{}")
     assert error and "absent" in text
-    assert client.roots_asked == 8
+    text, error = client.call("records", command="friction", args=[
+        "add", "--skill", "awb-clean", "--what", "scan refused a path", "--cost", "slowed", "--kind", "product"])
+    assert not error and "open product entries: 1" in text
+    assert "| awb-clean | scan refused a path | none | slowed | product | open |" in \
+        (workbench / "foundation/friction.md").read_text()
+    assert client.roots_asked == 9
 
 
 def test_review_receipt_round_trip(workbench, connect):

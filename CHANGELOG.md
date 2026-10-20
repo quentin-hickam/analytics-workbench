@@ -4,11 +4,15 @@ All notable changes to this project are recorded in this file. The format is bas
 
 ## [Unreleased]
 
+### Added
+
+- A workbench friction log: the project `AGENTS.md` has the agent log each problem with the workbench workflow itself as it happens (a tool that failed or needed a workaround, a step the user did by hand, approved, or repeated, an instruction missing, wrong, or conflicting) with `awb.py friction add`, also the `records` tool's `friction` command, as one generic row in `foundation/friction.md`: date, skill or command, what happened, workaround, cost (`blocked`, `slowed`, `cosmetic`), kind (`product` or `host`), and status. The log is committed with the project, and `awb-status` reports how many `product` entries are open.
+
 ### Changed
 
 - VS Code needs no manual setup. `awb-init` setup writes the `awb` server entry to the workbench's `.vscode/mcp.json`, run by the project interpreter, and installs the package reviewer at `.github/agents/awb-package-reviewer.agent.md`; repair updates it like any shipped file. The ignore rules keep `.vscode/mcp.json` local, since it names this machine's paths. A field test found no Copilot CLI to run `copilot mcp add` and a missed user-level reviewer install that blocked packaging. `--mcp-config` stays for Copilot CLI, Claude Code, and Codex. If you set up VS Code earlier, run `copilot mcp remove awb` (or delete `awb` from `~/.copilot/mcp-config.json`) and delete the `awb-package-reviewer` agent from your VS Code profile, so only the workspace copies remain. Setup replaces an `awb` entry in `.vscode/mcp.json` that runs an `awb_mcp.py`, such as one naming a moved interpreter, and leaves the file alone when Git tracks it.
 - Simple questions take fewer tool calls and carry less fixed text. The project `AGENTS.md` no longer asks the agent to read both guides in every session, to settle terms with data before answering, to read the README for the active investigation or interpreter (the `awb` tools resolve both), to read history unless the ask turns on an earlier decision, to suggest a commit once a session, or to repeat that numbered releases are frozen (the release skills say so); `awb-explore` triggers only on "explore this dataset" or "profile this view", not on "look at this data".
-- The `awb` MCP tool definitions, which hosts send with every request, are about a sixth shorter (7,691 characters, down from about 9,100); a test keeps them at or under 7,700.
+- The `awb` MCP tool definitions, which hosts send with every request, are about a sixth shorter (7,665 characters, down from about 9,100); a test keeps them at or under 7,700.
 - The status collector no longer repeats each finding's caveat under `active.caveats`; `awb-status` reports every `active.findings` `reason`. Its body drops rare-case detail about upstream probes, source-reference syntax, and timezones.
 - The investigation `state.md` template drops its three explanatory paragraphs, which every `state` call printed; the promotion rule they held is in `workbench-guides/analysis.md`.
 - `scripts/measure-instruction-load.py` also reports the current size of the MCP tool definitions, and the README's admin section adds a short note on cost per request.
