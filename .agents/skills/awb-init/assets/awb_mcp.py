@@ -123,7 +123,7 @@ TOOLS = [
          "query file or SQL text in query, against the foundation views, binding $name from params or "
          "settings), profile (per-column summary of a "
          "view, query file, or SELECT in query), stale (findings whose evidence no longer matches), "
-         "review-rules, review-receipt, check-draft (package drafts), status (project status facts), eda-show (one section of a saved EDA scan of "
+         "review-rules, review-receipt, check-draft (package drafts; check-draft verifies without writing), status (project status facts), eda-show (one section of a saved EDA scan of "
          "dataset), help (a command's arguments; topic names it, such as `questions add` or `eda-scan`)."),
      "inputSchema": {"type": "object", "additionalProperties": False, "required": ["command"], "properties": {
          "project": PROJECT,

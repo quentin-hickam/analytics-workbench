@@ -26,7 +26,7 @@ Describe what would make the answer useful to its intended audience.
 
 ## Material unknowns
 
-Open questions live in the question ledger, `questions.md`; list none here.
+Open questions live in the question ledger, `questions.md`; list none here. An open question need not block useful exploration.
 
 ## Starting method, settings, and package format
 

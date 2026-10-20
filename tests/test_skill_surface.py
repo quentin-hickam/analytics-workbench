@@ -353,7 +353,7 @@ def test_status_reports_findings_by_question_every_caveat_and_plain_freshness():
     assert 'labelling one whose `origin` is `brainstorm`, `eda`, or `analysis`' in status
     # Every caveat, not only flagged findings', as awb-release lists open caveats.
     assert 'every flagged finding in `active.findings`' not in status
-    assert "Then every finding's `reason`, flagged findings first; while one remains, never say nothing is open." in status
+    assert "Then every `active.findings` `reason`, flagged findings first; while one remains, never say nothing is open." in status
     # A freshness order the records cannot settle is said plainly beside the evidence check.
     assert 'indeterminate' not in status
     assert ('run `read` command `stale` for the investigation (`python3 <project-root>/src/awb.py stale '
