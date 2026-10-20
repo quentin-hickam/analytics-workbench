@@ -1,4 +1,4 @@
-"""Reference renderer: build a .pptx from a package draft's findings.md and charts/, deterministically.
+"""Reference renderer: build a .pptx from a package draft's findings.md and chart files, deterministically.
 
 A test fixture, kept out of the distributed archive. It proves the deck contract in
 package-format/deck-rules.md is complete enough to build a deck from without Microsoft 365: everything it
@@ -145,7 +145,7 @@ def non_zero_baseline(chart):
 
 def _place_chart(slide, chart, draft_dir):
     """Draw a chart specification from its file; return the graphic frame."""
-    headers, rows = read_chart(Path(draft_dir) / "charts" / f"chart-{chart['number']}.csv")
+    headers, rows = read_chart(Path(draft_dir) / f"chart-{chart['number']}.csv")
     pairs, _ = draft.chart_data(chart)
     where, form = f"Chart {chart['number']}", chart["form"]
     if form == "Table":
@@ -245,7 +245,7 @@ def render(draft_dir, output):
     """Build the deck for the draft at draft_dir into output; refuse a draft that breaks the contract."""
     draft_dir, output = Path(draft_dir), Path(output)
     findings = draft_dir / "findings.md"
-    rows = draft.outline_problems(findings) + draft.check_charts(findings, draft_dir / "charts")
+    rows = draft.outline_problems(findings) + draft.check_charts(findings, draft_dir)
     if rows:
         raise ContractError(rows)
     outline = draft.read_outline(findings)

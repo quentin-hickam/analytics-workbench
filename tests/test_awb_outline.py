@@ -97,9 +97,8 @@ CSV = {1: "Region,Closed late (%),Lower (%),Upper (%)\nWest,21,18,24\nEast,5,4,6
 def package(tmp_path, text=DECK, files=CSV):
     path = tmp_path / "findings.md"
     path.write_text(text, encoding="utf-8")
-    (tmp_path / "charts").mkdir(exist_ok=True)
     for number, content in files.items():
-        (tmp_path / "charts" / f"chart-{number}.csv").write_text(content, encoding="utf-8")
+        (tmp_path / f"chart-{number}.csv").write_text(content, encoding="utf-8")
     return path
 
 
@@ -482,7 +481,7 @@ def chart_package(tmp_path, specs):
 
 def test_check_charts_every_form_passes(tmp_path):
     path = chart_package(tmp_path, [(form, *spec) for form, spec in SPECS.items()])
-    assert draft.check_charts(path, tmp_path / "charts") == []
+    assert draft.check_charts(path, tmp_path) == []
     assert [c["form"] for c in draft.read_outline(path)["charts"]] == list(draft.CHART_FORMS)
 
 
@@ -526,11 +525,11 @@ def test_check_charts_every_form_passes(tmp_path):
 def test_check_charts_spec_rows(tmp_path, form, data, content, problem):
     text = f"### Slide\n\n**Chart 1.** {form}: a comparison\n" + (f"- **Data:** {data}\n" if data else "")
     path = package(tmp_path, text, {1: content})
-    assert draft.check_charts(path, tmp_path / "charts") == [
+    assert draft.check_charts(path, tmp_path) == [
         {"chart": "Chart 1", "problem": text} for text in (problem if isinstance(problem, list) else [problem])]
     if form == "Pie":
         package(tmp_path, text.replace("Pie: a comparison", "a comparison"), {1: content})
-        assert draft.check_charts(path, tmp_path / "charts")[0]["problem"].startswith("names no chart form (a "
+        assert draft.check_charts(path, tmp_path)[0]["problem"].startswith("names no chart form (a "
                                                                                       "comparison)")
 
 
@@ -546,7 +545,7 @@ def test_chart_fields_read_past_a_nested_item(tmp_path):
     assert chart["inside"] == [{"line": 7, "field": "Data", "kind": "item"},
                                {"line": 11, "field": "Alt text", "kind": "paragraph"}]
     assert [b["text"] for b in slide["bullets"]] == ["West."] and slide["extra"] == []
-    assert draft.check_charts(path, tmp_path / "charts") == [
+    assert draft.check_charts(path, tmp_path) == [
         {"chart": "Chart 1", "problem": "an item at line 7 is nested under the **Data:** field; a field is one "
                                         "paragraph, so join it to the field or move it below the specification as a "
                                         "slide bullet, after a blank line"},

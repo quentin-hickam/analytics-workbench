@@ -201,7 +201,7 @@ project-root/
 │   ├── findings-template.md
 │   ├── methodology-template.md
 │   ├── methodology-note-template.md
-│   ├── deck-rules.md             # How any builder builds the deck from findings.md and charts/
+│   ├── deck-rules.md             # How any builder builds the deck from findings.md and chart files
 │   ├── assembly/
 │   │   └── m365.md               # Microsoft 365 Copilot specifics
 │   └── manifest-template.md      # Shared manifest field list; serialization is project-specific
@@ -215,10 +215,10 @@ project-root/
 │           │   ├── methodology.md       # Internal reference; never shown in the deck
 │           │   ├── methodology-note.md  # Optional audience-facing account of method; delivered beside the deck
 │           │   ├── deck-rules.md
-│           │   ├── assembly/m365.md
+│           │   ├── m365-assembly.md     # Copy of package-format/assembly/m365.md
 │           │   ├── manifest.<format>
-│           │   ├── charts/              # Only when findings.md specifies charts: one CSV per chart
-│           │   └── datasets/            # Only when datasets were selected
+│           │   ├── chart-N.csv          # One per chart findings.md specifies
+│           │   └── dataset-<name>.csv   # One per selected dataset
 │           └── released/
 │               ├── 001/
 │               └── 002/

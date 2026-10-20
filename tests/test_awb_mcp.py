@@ -548,12 +548,12 @@ def test_package_export_passes_the_chart_selection_through(workbench, connect):
     text, error = client.call("package", command="export",
                               args=["churn", "pkg", "--chart", "by-region:region,orders@first=1", "--no-datasets"])
     assert not error, text
-    assert (draft / "charts/chart-1.csv").read_text() == "Region,Orders\neast,1\n"
+    assert (draft / "chart-1.csv").read_text() == "Region,Orders\neast,1\n"
     assert json.loads((draft / "manifest.json").read_text())["charts"][0]["selection"] == {"first": 1}
     text, error = client.call("package", command="export",
                               args=["churn", "pkg", "--chart", "by-region@last=1", "--no-datasets"])
     assert error and "the row selection is not @first=<n>" in text and "exit status 2" in text
-    assert (draft / "charts/chart-1.csv").read_text() == "Region,Orders\neast,1\n"
+    assert (draft / "chart-1.csv").read_text() == "Region,Orders\neast,1\n"
 
 
 @needs_duckdb
@@ -567,7 +567,7 @@ def test_package_export_returns_display_warnings(workbench, connect):
         '[columns]\nregion = "Region"\norders = "Orders (tens)"\n\n[values.region]\nnorth = "North"\n\n'
         '[scale]\norders = { divide = 10 }\n')
     text, error = client.call("package", command="export", args=["churn", "pkg", "--chart", "by-region", "--no-datasets"])
-    assert (draft / "charts/chart-1.csv").read_text() == "Region,Orders (tens)\neast,0.1\nwest,0.2\n", text
+    assert (draft / "chart-1.csv").read_text() == "Region,Orders (tens)\neast,0.1\nwest,0.2\n", text
     report = json.loads(text[text.index("{"):text.rindex("}") + 1])
     assert report["value_warnings"][0]["code"] == "north" and report["precision_warnings"] == []
     assert json.loads((draft / "manifest.json").read_text())["charts"][0]["scale"] == {"orders": 10}
@@ -585,7 +585,7 @@ def test_package_export_prose_scale_matches_cli(workbench, connect):
     text, error = client.call("package", command="export", args=args)
     assert not error, text
     draft = workbench / "deliveries/churn/pkg/draft"
-    for file in ("charts/chart-1.csv", "datasets/orders.csv"):
+    for file in ("chart-1.csv", "dataset-orders.csv"):
         assert (draft / file).read_text() == "Region,Orders\neast,1\nwest,2\n"
     mcp_manifest = json.loads((draft / "manifest.json").read_text())
     for field in ("charts", "dataset_selection"):
