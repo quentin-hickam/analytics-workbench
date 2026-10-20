@@ -1,6 +1,6 @@
 # Deck rules
 
-`findings.md` is the slide-by-slide outline of the deck and the authoritative source of every word and number on it; the `chart-N.csv` files hold every plotted value. Both are already written for the deck's audience, in their terms. Whoever builds the deck from them, a person, an agent, or a script, follows these rules and preserves every slide, claim, value, qualification, and caveat. A builder's own steps, such as how to attach the files or which chart objects to use, are in its file under `assembly/`; where that file and these rules differ on content, these rules govern.
+`findings.md` is the slide-by-slide outline of the deck and the authoritative source of every word and number on it; the `chart-N.csv` files hold every plotted value. Both are already written for the deck's audience, in their terms. Whoever builds the deck from them, a person, an agent, or a script, follows these rules and preserves every slide, claim, value, qualification, and caveat. A builder's own steps, such as how to attach the files or which chart objects to use, are in its assembly file, such as `m365-assembly.md`; where that file and these rules differ on content, these rules govern.
 
 ## Before you start
 

@@ -2836,6 +2836,8 @@ M365_PROMPT = ("Build a PowerPoint deck from findings.md and the chart files, fo
                "m365-assembly.md.")
 # Export writes each selected dataset beside findings.md as dataset-<name>.csv.
 DATASET_PREFIX = "dataset-"
+# The folders an earlier, nested layout held; check-draft names how each comes back flat.
+_EARLIER_FOLDERS = ("charts", "datasets", "assembly")
 
 
 def start_here(draft, investigation, package) -> str:
@@ -3012,10 +3014,13 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
 
     # One flat folder attaches in one go; a folder, such as an earlier layout's charts/, would be missed.
     for folder in sorted(path.name for path in draft.iterdir() if path.is_dir() and path.name != PREVIEW):
-        report["errors"].append(f"{folder}/: a package is one flat folder; delete the folder. An earlier layout's "
-                                "charts/ and datasets/ files come back beside findings.md as chart-N.csv and "
-                                "dataset-<name>.csv when export reruns, and its assembly/m365.md as "
-                                f"{M365_ASSEMBLY}, copied from package-format/assembly/m365.md")
+        report["errors"].append(
+            f"{folder}/: an earlier layout's folder, but a package is one flat folder. Rerun the full export, every "
+            "--chart and --dataset the manifest records, which writes chart-N.csv and dataset-<name>.csv beside "
+            f"findings.md, copy package-format/assembly/m365.md to {M365_ASSEMBLY}, then delete {folder}/"
+            if folder in _EARLIER_FOLDERS else
+            f"{folder}/: a package is one flat folder; move the folder out of the draft, or put the files the "
+            "package needs beside findings.md")
     recorded, report["names_problems"] = _recorded_names(root, investigation, package)
     names = sorted(name for name in recorded if not _PLAIN_WORD.fullmatch(name))
     report["names"] = len(names)
@@ -3086,6 +3091,14 @@ def check_draft(root, investigation, package, *, verify_only=False) -> dict:
             raise ValueError(f"no manifest at {_rel(root, path)}; run export first")
         record = _read_json(path)
         report["flag_entries"] = flag_entry_problems(record)
+        # A selected dataset missing beside findings.md, such as an earlier layout's datasets/x.csv, would
+        # release without it.
+        selection = record.get("dataset_selection")
+        for entry in selection if isinstance(selection, list) else []:
+            name = entry.get("path") if isinstance(entry, dict) else entry
+            if not isinstance(name, str) or "/" in name or not (draft / name).is_file():
+                report["errors"].append(f"dataset_selection lists {name}, which is no file beside findings.md; "
+                                        "rerun export with every --dataset")
         if report["charts"] is not None:
             try:
                 report["charts"] += chart_file_problems(root, investigation, draft, record)
@@ -3183,8 +3196,8 @@ def cli_check_draft(root: Path, argv: list[str]) -> int:
                     "manifest inventory, and state.md's current flags), write START-HERE.md, and rewrite the "
                     "manifest inventory, stamping revised_at when it changes; --verify-only checks a release "
                     "candidate and writes nothing. The inventory leaves out the draft's .preview/ folder, the "
-                    "headline preview; any other folder in the draft is an errors row, since a package is one flat "
-                    "folder.",
+                    "headline preview; any other folder in the draft, and a dataset_selection path that is no file "
+                    "beside findings.md, is an errors row, since a package is one flat folder.",
         epilog="Prints one JSON line.\nmethodology-note.md, when the draft holds it, is read by the findings, "
                "claims, markdown, and numbers checks too; its rows carry file.\n"
                "outline lists, as slide, line, and problem, each break of the slide "

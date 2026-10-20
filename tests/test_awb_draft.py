@@ -11,8 +11,8 @@
 # test_check_draft_reports_each_helper_problem: an internal name, a path under the plain investigation name, a chart without a file, a finding heading methodology lacks, and a missing settings file each fail with the helper's rows unchanged.
 # test_check_draft_reports_outline_and_chart_spec_rows: a headline over 15 words, a chart form outside the seven, a Data column the chart file lacks, and a file column no Data role names fail check-draft with outline and charts rows in both modes, and release refuses on them.
 # test_export_creates_a_missing_draft_folder: export with no draft folder creates it on a write, and not when missing evidence writes nothing; with no findings.md it records no slides; check-draft refuses a missing draft by naming the step that creates it.
-# test_a_headline_preview_is_no_package_file: a file under the draft's top-level .preview/ is not inventoried, and rewriting or removing it leaves the inventory verifying; a .preview/ deeper in the draft is a foreign file, in a folder that is an errors row.
-# test_an_earlier_layouts_folders_fail_check_draft_and_release: a draft holding charts/ or assembly/ from the nested layout gets one errors row per folder, naming the flat names, and release refuses until they are deleted.
+# test_a_headline_preview_is_no_package_file: a file under the draft's top-level .preview/ is not inventoried, and rewriting or removing it leaves the inventory verifying; a .preview/ deeper in the draft is a foreign file, in a folder that is an errors row saying to move it.
+# test_an_earlier_layouts_folders_fail_check_draft_and_release: a draft holding charts/, datasets/, or assembly/ from the nested layout gets one errors row per folder saying to rerun the full export, then delete it, and release refuses until then; a dataset_selection path the draft root lacks, such as datasets/late.csv, is an errors row even once the folder is gone.
 # test_check_draft_requires_each_question_in_methodology: export's questions pass once methodology repeats them; a question methodology lacks or rewords, a results entry without a question, and a manifest without results fail check-draft's questions, and release refuses on the check.
 # test_questions_check_reads_methodology_as_it_renders: a question wrapped, emphasized, linked, escaped, in a code span, heading, or list item, or after a comment block on its line matches; one only in a comment, inline or a block, in fenced code, split over two paragraphs, or reworded does not.
 # test_questions_check_matches_a_code_span_as_written: a question holding brackets, a tilde, an edge underscore, an asterisk, a character reference, or a backslash matches when a code span shows it exactly as written.
@@ -431,13 +431,15 @@ def test_a_headline_preview_is_no_package_file(project, capsys):
     write(draft, "notes/.preview/headlines.md", "stray\n")
     code, report = run(project, capsys, "check-draft", "inv", "pkg", "--verify-only")
     assert [(row["path"], row["kind"]) for row in report["verify"]] == [("notes/.preview/headlines.md", "extra")]
-    assert code == 1 and report["errors"] == [folder_row("notes")]
+    assert code == 1 and report["errors"] == [
+        "notes/: a package is one flat folder; move the folder out of the draft, or put the files the package "
+        "needs beside findings.md"]
 
 
 def folder_row(folder):
-    return (f"{folder}/: a package is one flat folder; delete the folder. An earlier layout's charts/ and datasets/ "
-            "files come back beside findings.md as chart-N.csv and dataset-<name>.csv when export reruns, and its "
-            "assembly/m365.md as m365-assembly.md, copied from package-format/assembly/m365.md")
+    return (f"{folder}/: an earlier layout's folder, but a package is one flat folder. Rerun the full export, every "
+            "--chart and --dataset the manifest records, which writes chart-N.csv and dataset-<name>.csv beside "
+            f"findings.md, copy package-format/assembly/m365.md to m365-assembly.md, then delete {folder}/")
 
 
 def test_an_earlier_layouts_folders_fail_check_draft_and_release(project, capsys):
@@ -450,6 +452,20 @@ def test_an_earlier_layouts_folders_fail_check_draft_and_release(project, capsys
     assert code == 1 and report["refused"] == "check-draft --verify-only does not pass"
     shutil.rmtree(draft / "charts")
     shutil.rmtree(draft / "assembly")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 0 and report["passed"], report
+    # A selected dataset the draft root lacks fails, so deleting datasets/ before export reruns loses nothing.
+    write(draft, "datasets/late.csv", "Region\nWest\n")
+    set_manifest(project, dataset_selection=[{"path": "datasets/late.csv", "result_id": "r-001"}])
+    missing = ("dataset_selection lists datasets/late.csv, which is no file beside findings.md; rerun export with "
+               "every --dataset")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["errors"] == [folder_row("datasets"), missing]
+    shutil.rmtree(draft / "datasets")
+    code, report = run(project, capsys, "check-draft", "inv", "pkg")
+    assert code == 1 and report["errors"] == [missing]
+    write(draft, "dataset-late.csv", "Region\nWest\n")
+    set_manifest(project, dataset_selection=[{"path": "dataset-late.csv", "result_id": "r-001"}])
     code, report = run(project, capsys, "check-draft", "inv", "pkg")
     assert code == 0 and report["passed"], report
 
