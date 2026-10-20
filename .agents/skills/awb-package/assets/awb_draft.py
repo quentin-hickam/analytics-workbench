@@ -2289,8 +2289,8 @@ def _check_chart(number, headers, rows):
         raise ValueError(f"Chart {number} has no rows")
     if not all(isinstance(header, str) and header.strip() for header in headers):
         raise ValueError(f"Chart {number} has a blank or non-text header")
-    if len(set(headers)) != len(headers):
-        raise ValueError(f"Chart {number} repeats a header")
+    if len(set(map(_header_text, headers))) != len(headers):
+        raise ValueError(f"Chart {number} repeats a header, as a **Data:** line renders it")
     for header in headers:
         if _IDENTIFIER.search(header):
             raise ValueError(f"Chart {number} header is not a display name: {header}")
@@ -2371,6 +2371,9 @@ def check_charts(findings_path: str | os.PathLike, charts_dir: str | os.PathLike
             # CO₂ in the file matches CO₂ on the line, which renders as CO2.
             named = dict.fromkeys(header for _, header in pairs)
             shown = {_header_text(header) for header in headers[chart["number"]]}
+            if len(shown) != len(headers[chart["number"]]):
+                rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv repeats a header as a "
+                                                        "**Data:** line renders it, such as CO₂ and CO2; rename one"})
             for header in named:
                 if header not in shown:
                     rows.append({"chart": label, "problem": f"chart-{chart['number']}.csv has no column "

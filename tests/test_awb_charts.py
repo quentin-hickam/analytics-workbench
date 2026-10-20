@@ -2,13 +2,13 @@
 # test_write_charts_numbers_files_in_order_and_writes_values: files are chart-1..N.csv in list order; headers and values land as given, an empty value as an empty field.
 # test_write_charts_replaces_stale_chart_files: a rewrite with fewer charts removes the extra chart file and leaves other files alone.
 # test_write_charts_without_charts_removes_them: an empty list removes every chart file, then the directory when nothing else is in it.
-# test_write_charts_rejects_bad_input: a chart without rows, an identifier header, a blank header, or a repeated header raises and writes nothing.
+# test_write_charts_rejects_bad_input: a chart without rows, an identifier header, a blank header, or a header repeated as the **Data:** line renders it raises and writes nothing.
 # test_check_charts_clean_package_returns_no_rows: specifications and chart files match one to one.
 # test_check_charts_reports_each_mismatch: misnumbered, missing, unspecified, foreign, and empty files are one row each.
 # test_check_charts_spec_continuing_a_block: a specification directly under a bullet or paragraph line renders inside that block; the row says to leave a blank line.
 # test_check_charts_without_directory: specifications with no charts directory each report it; no specifications and no directory is clean.
 # test_charts_without_pandas: the module loads, writes, and checks charts when pandas cannot be imported.
-# test_check_charts_compares_headers_as_the_data_line_renders: a header holding CO₂ matches a **Data:** role naming CO₂, both NFKC-normalized as the line renders; a header no role names, or a role no header holds, is still a row.
+# test_check_charts_compares_headers_as_the_data_line_renders: a header holding CO₂ matches a **Data:** role naming CO₂, both NFKC-normalized as the line renders; a header no role names, a role no header holds, or headers that repeat once normalized, such as CO₂ and CO2, is still a row.
 # test_a_blank_line_inside_a_chart_spec_names_the_chart: field-named bullets after a blank line ended a chart's fields count as slide bullets, each but Caveat is an outline row naming the chart, and the bullet-count row counts them; the same fields kept together give no row.
 # test_a_blank_line_inside_a_short_slide_spec_names_the_chart: on a slide within five bullets, each field-named bullet but Caveat after a blank line ended the fields is still a row naming the chart.
 
@@ -70,6 +70,7 @@ def test_write_charts_without_charts_removes_them(tmp_path):
     ([(["region_code"], [["W"]])], "not a display name: region_code"),
     ([([" "], [["W"]])], "blank or non-text header"),
     ([(["Cases", "Cases"], [["1", "2"]])], "repeats a header"),
+    ([(["CO₂", "CO2"], [["1", "2"]])], "repeats a header"),
 ])
 def test_write_charts_rejects_bad_input(tmp_path, frames, message):
     with pytest.raises(ValueError, match=message):
@@ -146,6 +147,13 @@ def test_check_charts_compares_headers_as_the_data_line_renders(tmp_path):
                                         "name it by a role a Horizontal bar takes (category, value, series), or "
                                         "export the chart without it; if it holds interval bounds, a Horizontal bar "
                                         "draws none, so use a Bar with intervals"}]
+    # A file holding CO₂ and CO2 repeats a header as the line renders it, so one role names both.
+    (tmp_path / "charts/chart-1.csv").write_text("Country,CO₂,CO2\nChina,1,2\n", encoding="utf-8")
+    path.write_text("### H\n\n**Chart 1.** Horizontal bar: change by country\n- **Data:** category: Country; value: CO2\n",
+                    encoding="utf-8")
+    assert charts.check_charts(path, tmp_path / "charts") == [
+        {"chart": "Chart 1", "problem": "chart-1.csv repeats a header as a **Data:** line renders it, such as CO₂ "
+                                        "and CO2; rename one"}]
 
 
 FIELDS = ("- **Highlight:** West\n- **Axis:** percent, zero baseline\n- **Source:** claims extract, 2026\n"
