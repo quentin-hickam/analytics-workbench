@@ -13,6 +13,10 @@ All notable changes to this project are recorded in this file. The format is bas
 - `scripts/measure-instruction-load.py` also reports the current size of the MCP tool definitions, and the README's admin section adds a short note on cost per request.
 - Python 3.12 is the default interpreter when installed; 3.10 or later still works. `awb-init` builds a new project's `.venv` with Python 3.12, else with the system's default Python 3 when it is 3.10 or later, and the README and `awb-init` say to run the MCP server registration with Python 3.12 (`python3.12`, or `py -3.12` on Windows) when it is installed. The registered interpreter is still the one that runs `install_helpers.py --mcp-config`.
 
+### Fixed
+
+- The draft review's record also keeps the SHA-256 of each file in the project that a `reference:` link in `foundation/sources.md` names, so replacing a linked copy under `foundation/references/` in place, without editing the register, makes the review stale and `release` refuses it until a new review passes.
+
 ## [0.4.0] - 2026-10-19
 
 ### Added

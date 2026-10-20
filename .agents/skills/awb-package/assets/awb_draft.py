@@ -4509,13 +4509,15 @@ _KINDS = ("full", "scoped")
 # path, which step 3 reads beside a cited quality ID, by its path, in sorted order.
 # The brief is keyed brief.md and read from the investigation; its questions and Audience set what a review checks.
 # The glossary, source register, and quality record are read whole, as the contract's writing rules and step 3's source-series
-# and cited-check checks read them.
+# and cited-check checks read them, and each document in the project a register `reference:` links to by its digest.
 BRIEF = "brief.md"
 GLOSSARY = "foundation/glossary.md"
 SOURCES = "foundation/sources.md"
 QUALITY = "foundation/quality.md"
 _SCAN_PATH = re.compile(r"foundation/scans/[A-Za-z0-9][A-Za-z0-9._@-]*\.json")
 _QUERY_PATH = re.compile(r"(?:[A-Za-z0-9][A-Za-z0-9._@-]*/)*[A-Za-z0-9][A-Za-z0-9._@-]*\.sql\b", re.IGNORECASE)
+# A Sources row's `reference:` link, as foundation/sources.md gives it: its destination in angle brackets or bare.
+_REFERENCE_LINK = re.compile(r"reference:\s*\[[^\[\]\\<`]+\]\((?:<([^<>\\\n]+)>|([^\s<\\]+))\)", re.IGNORECASE)
 _REVIEW_INPUTS = {"findings.md": "findings.md", "methodology.md": "methodology.md",
                   METHODOLOGY_NOTE: METHODOLOGY_NOTE, BRIEF: BRIEF, REVIEW_RULES: "review-rules.md",
                   GLOSSARY: "glossary.md", SOURCES: "sources.md", QUALITY: "quality.md",
@@ -4581,10 +4583,11 @@ def _package_rules(data, investigation, package):
 def review_inputs(root, investigation, package) -> dict:
     """{input: bytes, or None when absent} for exactly what a review reads: the three narratives, the
     investigation's brief.md, the rule file without rules kept for another package (_package_rules), the
-    glossary, source register, and quality record whole, the reduced revalidation_flags as indented JSON, and
+    glossary, source register, and quality record whole, the reduced revalidation_flags as indented JSON,
     each evidence file the manifest's results name or scan or saved query methodology.md names by its
-    path, which step 3 reads to confirm a cited check. Raises OSError on a path that cannot be read, a
-    directory included."""
+    path, which step 3 reads to confirm a cited check, and the SHA-256 of each file in the project a Sources
+    row's `reference:` links to, which step 3 reads for a claim about how a source builds a series. Raises
+    OSError on a path that cannot be read, a directory included."""
     root = Path(root)
     draft = _package_dir(root, investigation, package) / "draft"
     paths = {name: draft / name for name in NARRATIVES + (METHODOLOGY_NOTE,)}
@@ -4619,6 +4622,17 @@ def review_inputs(root, investigation, package) -> dict:
             inputs[name] = (root / name).read_bytes()
         except FileNotFoundError:
             inputs[name] = None
+    # A link resolves from foundation/, where the register is. Only the digest is kept, since a reference may
+    # be a PDF; a reference kept out of the project is recorded with its SHA-256 in the register itself.
+    table = _section_table((inputs[SOURCES] or b"").decode("utf-8", "replace"), "Sources")
+    linked = set()
+    for row in table[1] if table else []:
+        for angled, bare in _REFERENCE_LINK.findall(row.get("Notes", "")):
+            path = (root / "foundation" / (angled or bare)).resolve()
+            if path.is_relative_to(root.resolve()) and path.is_file():
+                linked.add(path.relative_to(root.resolve()).as_posix())
+    for name in sorted(linked - set(inputs)):
+        inputs[name] = f"sha256 {hashlib.sha256((root / name).read_bytes()).hexdigest()}\n".encode()
     return inputs
 
 
@@ -4897,8 +4911,9 @@ def cli_review_receipt(root: Path, argv: list[str]) -> int:
                     "foundation/glossary.md, foundation/sources.md, and foundation/quality.md when present, "
                     "foundation/review-rules.md when present without rules kept for another package, and the "
                     "manifest's revalidation_flags (finding, reason, represented_in, and whether the "
-                    "disposition is omit), each evidence file its results name, and each scan or saved query "
-                    "methodology.md names by its path, and write receipt.json with "
+                    "disposition is omit), each evidence file its results name, each scan or saved query "
+                    "methodology.md names by its path, and the SHA-256 of each file in the project a Sources row's "
+                    "reference: in foundation/sources.md links to, and write receipt.json with "
                     "a SHA-256 fingerprint of them, the report verbatim, passed, and accepted. Each record "
                     "replaces the previous one and consumes the start.",
         epilog=f"The report's last line is {_SUMMARY_FORM}. passed is true when it is clean, or when it counts no "
